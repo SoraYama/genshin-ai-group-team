@@ -1,0 +1,20 @@
+{
+  "name": "genshin-ai-group-team",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:api": "npm run dev -w @genshin-ai/api",
+    "dev:web": "npm run dev -w @genshin-ai/web",
+    "test": "npm run test -w @genshin-ai/api",
+    "test:e2e": "npm run test:e2e -w @genshin-ai/api && npm run test:e2e -w @genshin-ai/web",
+    "typecheck": "npm run typecheck -w @genshin-ai/api && npm run typecheck -w @genshin-ai/web",
+    "build": "npm run build -w @genshin-ai/api && npm run build -w @genshin-ai/web"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
