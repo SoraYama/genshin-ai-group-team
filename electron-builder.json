@@ -1,0 +1,30 @@
+{
+  "appId": "moe.sorayama.genshin-team-advisor",
+  "productName": "Genshin Team Advisor",
+  "directories": {
+    "output": "release",
+    "buildResources": "resources"
+  },
+  "files": [
+    "dist/**/*",
+    "node_modules/**/*",
+    "package.json"
+  ],
+  "asarUnpack": [
+    "node_modules/@anthropic-ai/claude-agent-sdk/**/*"
+  ],
+  "mac": {
+    "target": ["dmg"],
+    "category": "public.app-category.utilities",
+    "hardenedRuntime": true,
+    "gatekeeperAssess": false
+  },
+  "win": {
+    "target": ["nsis"]
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDir": true,
+    "deleteAppDataOnUninstall": true
+  }
+}

@@ -1,12 +1,12 @@
 node_modules/
 dist/
+release/
 .DS_Store
 .env
 .env.*
 coverage/
 npm-debug.log*
-apps/api/.cache/
-apps/api/test-results/
-apps/api/playwright-report/
-apps/web/test-results/
-apps/web/playwright-report/
+test-results/
+playwright-report/
+*.log
+.cache/

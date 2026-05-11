@@ -1,20 +1,59 @@
 {
-  "name": "genshin-ai-group-team",
+  "name": "genshin-team-advisor",
   "version": "0.1.0",
   "private": true,
-  "workspaces": [
-    "apps/*"
-  ],
+  "description": "原神 AI 配队助手 — 本地优先的开源桌面应用",
+  "license": "GPL-3.0-or-later",
+  "main": "dist/main/index.mjs",
+  "type": "module",
   "scripts": {
-    "dev": "concurrently \"npm run dev:api\" \"npm run dev:web\"",
-    "dev:api": "npm run dev -w @genshin-ai/api",
-    "dev:web": "npm run dev -w @genshin-ai/web",
-    "test": "npm run test -w @genshin-ai/api",
-    "test:e2e": "npm run test:e2e -w @genshin-ai/api && npm run test:e2e -w @genshin-ai/web",
-    "typecheck": "npm run typecheck -w @genshin-ai/api && npm run typecheck -w @genshin-ai/web",
-    "build": "npm run build -w @genshin-ai/api && npm run build -w @genshin-ai/web"
+    "dev": "concurrently -k -n vite,tsup,electron -c blue,magenta,yellow \"npm:dev:renderer\" \"npm:dev:main\" \"npm:dev:electron\"",
+    "dev:renderer": "vite",
+    "dev:main": "tsup --watch",
+    "dev:electron": "wait-on tcp:5294 dist/main/index.mjs && cross-env NODE_ENV=development electron .",
+    "build": "npm run build:renderer && npm run build:main",
+    "build:renderer": "vite build",
+    "build:main": "tsup",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
+    "lint": "eslint \"src/**/*.{ts,tsx}\"",
+    "format": "prettier --write \"src/**/*.{ts,tsx,css,json,md}\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "pack": "npm run build && electron-builder",
+    "pack:mac": "npm run build && electron-builder --mac",
+    "pack:win": "npm run build && electron-builder --win",
+    "pack:dir": "npm run build && electron-builder --dir"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.1.10",
+    "electron-store": "^10.0.1",
+    "undici": "^7.4.0",
+    "zod": "^3.24.2",
+    "zustand": "^5.0.3"
   },
   "devDependencies": {
-    "concurrently": "^9.2.1"
+    "@playwright/test": "^1.51.1",
+    "@types/node": "^22.13.10",
+    "@types/react": "^19.0.10",
+    "@types/react-dom": "^19.0.4",
+    "@typescript-eslint/eslint-plugin": "^8.26.0",
+    "@typescript-eslint/parser": "^8.26.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.2.1",
+    "cross-env": "^7.0.3",
+    "electron": "^39.0.0",
+    "electron-builder": "^26.0.12",
+    "eslint": "^9.21.0",
+    "eslint-plugin-react": "^7.37.4",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "prettier": "^3.5.3",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tsup": "^8.4.0",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.1",
+    "vitest": "^3.0.8",
+    "wait-on": "^8.0.2"
   }
 }
