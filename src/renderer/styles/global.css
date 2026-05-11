@@ -1,788 +1,819 @@
+/* =============================================================
+   genshin-team-advisor — global styles
+   References:
+   - docs/design/roster-mockup.html  (visual spec)
+   - Mantan21/Genshin-Impact-Wish-Simulator/src/app.css  (real GI tokens)
+   ============================================================= */
+
 :root {
-  color-scheme: dark;
-  --bg-base: #16191f;
-  --bg-panel: #1f242c;
-  --border: #2d343f;
-  --text: #e7ecf2;
-  --muted: #98a2b3;
-  --accent: #d8b46a;
-  --ok: #6dd99a;
-  --error: #ef8a8a;
+  /* — Panels: cream + slate + soft cream stroke — */
+  --gta-panel: #fbf6ee;
+  --gta-panel-2: #ece5d8;
+  --gta-panel-3: #e0ddd4;
+  --gta-panel-dark: #4a5265;
+  --gta-panel-dark-2: #333947;
+  --gta-stroke: #ddd5c8;
+  --gta-stroke-soft: #ebe3d3;
+
+  /* — Text — */
+  --gta-text-on-light: #383b40;
+  --gta-text-on-light-soft: #5a6068;
+  --gta-text-on-light-faint: #8a8b8f;
+  --gta-text-on-dark: #ffffff;
+  --gta-text-on-dark-soft: #d0d4dc;
+
+  /* — Gold accent (subtle, scrollbar/icon only) — */
+  --gta-gold: #c3b8a1;
+  --gta-gold-soft: rgba(210, 198, 156, 0.5);
+  --gta-gold-icon: #ffc107;
+
+  /* — Element accents (matched against app.css of Mantan21) — */
+  --gta-el-pyro: #fe6606;
+  --gta-el-pyro-end: #fea76b;
+  --gta-el-pyro-flat: #ee6c4c;
+  --gta-el-hydro: #06bbff;
+  --gta-el-hydro-end: #10e2ff;
+  --gta-el-hydro-flat: #3f8ed1;
+  --gta-el-electro: #ca82fc;
+  --gta-el-electro-end: #deb5fe;
+  --gta-el-electro-flat: #7d67c5;
+  --gta-el-anemo: #32d9a1;
+  --gta-el-anemo-end: #aef2cd;
+  --gta-el-anemo-flat: #359697;
+  --gta-el-geo: #f9aa02;
+  --gta-el-geo-end: #fcd260;
+  --gta-el-geo-flat: #cb8f46;
+  --gta-el-cryo: #7cfeff;
+  --gta-el-cryo-end: #c6fffd;
+  --gta-el-cryo-flat: #46c2d8;
+  --gta-el-dendro: #a6d138;
+  --gta-el-dendro-end: #aaef3a;
+  --gta-el-dendro-flat: #64ad15;
+
+  /* — Type — */
+  --gta-font-body: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'PingFang SC',
+    'Microsoft YaHei', sans-serif;
+  --gta-font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+
+  --gta-text-xs: 11px;
+  --gta-text-sm: 12px;
+  --gta-text-base: 13px;
+  --gta-text-md: 14px;
+  --gta-text-lg: 16px;
+  --gta-text-xl: 20px;
+  --gta-text-2xl: 24px;
+
+  /* — Spacing (4px grid) — */
+  --gta-s1: 4px;
+  --gta-s2: 8px;
+  --gta-s3: 12px;
+  --gta-s4: 16px;
+  --gta-s5: 20px;
+  --gta-s6: 24px;
+  --gta-s8: 32px;
+  --gta-s10: 40px;
+  --gta-s12: 48px;
+
+  --gta-radius-sm: 4px;
+  --gta-radius-md: 8px;
+  --gta-radius-lg: 12px;
+  --gta-radius-pill: 999px;
+
+  --gta-shadow-panel: 0 4px 12px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.08);
+  --gta-shadow-card: 0 2px 8px rgba(70, 60, 40, 0.1), 0 1px 2px rgba(70, 60, 40, 0.08);
+  --gta-shadow-card-hover: 0 8px 20px rgba(70, 60, 40, 0.18),
+    0 2px 6px rgba(70, 60, 40, 0.12);
+  --gta-shadow-btn-press: 0 0 7px 5px rgba(160, 175, 190, 0.6);
+
+  --gta-dur-fast: 120ms;
+  --gta-dur-base: 200ms;
+  --gta-dur-slow: 400ms;
+  --gta-ease: cubic-bezier(0.4, 0, 0.2, 1);
+
+  --gta-letter: -0.02rem;
 }
 
+/* ===== Reset ===== */
 *,
 *::before,
 *::after {
   box-sizing: border-box;
+  letter-spacing: var(--gta-letter);
 }
 
 html,
 body,
 #root {
   margin: 0;
+  padding: 0;
   height: 100%;
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  background: var(--bg-base);
-  color: var(--text);
+  font-family: var(--gta-font-body);
+  font-size: var(--gta-text-base);
+  color: var(--gta-text-on-light);
   -webkit-font-smoothing: antialiased;
-}
-
-.app-shell {
-  max-width: 880px;
-  margin: 0 auto;
-  padding: 32px 28px 64px;
-}
-
-.app-header {
-  margin-bottom: 28px;
-}
-
-.app-header h1 {
-  margin: 0;
-  font-size: 24px;
-  letter-spacing: 1px;
-}
-
-.app-subtitle {
-  margin: 6px 0 0;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.app-nav {
-  margin-top: 14px;
-  display: flex;
-  gap: 8px;
-}
-
-.app-nav button {
-  background: transparent;
-  color: var(--muted);
-  border: 1px solid var(--border);
-  padding: 6px 14px;
-  font-weight: 500;
-}
-
-.app-nav button.nav-active {
-  background: var(--accent);
-  color: #1a1c20;
-  border-color: var(--accent);
-}
-
-.muted {
-  color: var(--muted);
-}
-
-/* Onboarding */
-
-.onboarding-page {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.onboarding-page h2 {
-  margin: 0;
-  font-size: 18px;
-}
-
-.primary-action {
-  padding: 18px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.primary-action button {
-  font-size: 14px;
-  padding: 10px 18px;
-  align-self: flex-start;
-}
-
-.advanced-option {
-  padding: 14px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-
-.advanced-option summary {
-  cursor: pointer;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.advanced-option ol {
-  margin: 12px 0 8px;
-  padding-left: 22px;
-  font-size: 13px;
-  line-height: 1.7;
-}
-
-code,
-.advanced-option code,
-.hint code {
-  font-family: 'SF Mono', monospace;
-  background: var(--bg-base);
-  padding: 1px 6px;
-  border-radius: 4px;
-  font-size: 12px;
-}
-
-.hint.small {
-  font-size: 11px;
-  margin: 0;
-}
-
-.cookie-field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 13px;
-  color: var(--muted);
-}
-
-.cookie-field textarea {
-  min-height: 100px;
-  padding: 10px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text);
-  font-family: 'SF Mono', monospace;
-  font-size: 12px;
-  resize: vertical;
-}
-
-.role-picker ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.role-picker label {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  padding: 8px 10px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 13px;
-}
-
-/* Roster */
-
-.roster-page {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.roster-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 18px;
-}
-
-.roster-header h2 {
-  margin: 0;
-  font-size: 18px;
-}
-
-.profile-tabs {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.profile-tabs .tab {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  padding: 8px 12px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text);
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.profile-tabs .tab-active {
-  border-color: var(--accent);
-  outline: 1px solid var(--accent);
-  outline-offset: -1px;
-}
-
-.profile-tabs .tab .muted {
-  font-size: 11px;
-}
-
-.profile-meta {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 10px;
-  margin: 0;
-  padding: 12px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-
-.profile-meta > div {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.profile-meta dt {
-  font-size: 11px;
-  color: var(--muted);
-}
-
-.profile-meta dd {
-  margin: 0;
-  font-size: 13px;
-  word-break: break-all;
-}
-
-.character-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 12px;
-}
-
-.character-card {
-  display: grid;
-  grid-template-columns: 96px 1fr;
-  gap: 12px;
-  padding: 12px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-
-.character-card img {
-  width: 96px;
-  height: 96px;
-  object-fit: cover;
-  border-radius: 6px;
-  background: var(--bg-base);
-}
-
-.character-card h3 {
-  margin: 0 0 4px;
-  font-size: 15px;
-}
-
-.character-card p {
-  margin: 0 0 8px;
-  font-size: 12px;
-}
-
-.stat-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 2px 10px;
-  margin: 0;
-}
-
-.stat-grid > div {
-  display: flex;
-  justify-content: space-between;
-  font-size: 11px;
-}
-
-.stat-grid dt {
-  color: var(--muted);
-}
-
-.stat-grid dd {
-  margin: 0;
-  font-variant-numeric: tabular-nums;
-}
-
-@media (max-width: 720px) {
-  .profile-meta {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .character-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* Advisor */
-
-.advisor-page {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.advisor-header h2 {
-  margin: 0;
-  font-size: 18px;
-}
-
-.advisor-form {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 16px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-
-.advisor-form label {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 13px;
-  color: var(--muted);
-}
-
-.advisor-form textarea {
-  min-height: 64px;
-  padding: 8px 10px;
-  background: var(--bg-base);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text);
-  font-family: 'SF Mono', monospace;
-  font-size: 13px;
-  resize: vertical;
-}
-
-.advisor-form input {
-  padding: 8px 10px;
-  background: var(--bg-base);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text);
-  font-size: 13px;
-}
-
-.advisor-progress {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 12px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-
-.advisor-progress code {
-  font-family: 'SF Mono', monospace;
-  background: var(--bg-base);
-  padding: 1px 6px;
-  border-radius: 4px;
-  font-size: 12px;
-  color: var(--accent);
-}
-
-.advisor-stream {
-  max-height: 260px;
-  overflow: auto;
-  margin: 0;
-  padding: 10px;
-  background: var(--bg-base);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font-family: 'SF Mono', monospace;
-  font-size: 12px;
-  line-height: 1.55;
-  white-space: pre-wrap;
-  word-break: break-all;
-  color: #cdd8e4;
-}
-
-.advisor-result {
-  padding: 14px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.advisor-result h3 {
-  margin: 0;
-  font-size: 15px;
-}
-
-.team-card {
-  padding: 12px;
-  background: var(--bg-base);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-}
-
-.team-card h4 {
-  margin: 0 0 6px;
-  font-size: 14px;
-  color: var(--accent);
-}
-
-.team-card p {
-  margin: 4px 0;
-  font-size: 13px;
-  line-height: 1.55;
-}
-
-/* Advisor compare */
-
-.advisor-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.mode-switch {
-  display: flex;
-  gap: 6px;
-}
-
-.mode-switch button {
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--muted);
-  padding: 6px 14px;
-  font-weight: 500;
-}
-
-.mode-switch button.nav-active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #1a1c20;
-}
-
-.compare-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.compare-grid .advisor-form h3 {
-  margin: 0 0 4px;
-  font-size: 14px;
-  color: var(--accent);
-}
-
-.side-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 14px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-
-.side-panel-title {
-  margin: 0;
-  font-size: 14px;
-  color: var(--accent);
-}
-
-.side-panel .advisor-result {
-  background: transparent;
-  border: none;
-  padding: 0;
-}
-
-.diff-summary {
-  padding: 10px 14px;
-  background: var(--bg-panel);
-  border: 1px dashed var(--accent);
-  border-radius: 8px;
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-/* History */
-
-.history-page {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.history-header h2 {
-  margin: 0;
-  font-size: 18px;
-}
-
-.history-filters {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  padding: 14px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-
-.history-filters label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.history-filters input,
-.history-filters select {
-  padding: 6px 8px;
-  background: var(--bg-base);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text);
-  font-size: 13px;
-}
-
-.history-stats {
-  display: flex;
-  gap: 16px;
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.history-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.history-entry {
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  text-rendering: optimizeLegibility;
   overflow: hidden;
 }
 
-.history-entry-expanded {
-  border-color: var(--accent);
+::selection {
+  background: var(--gta-gold);
+  color: var(--gta-text-on-light);
 }
 
-.history-entry-summary {
-  display: grid;
-  grid-template-columns: 160px 56px 56px 110px 1fr;
-  gap: 10px;
-  align-items: center;
-  width: 100%;
-  padding: 10px 14px;
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--gta-gold-soft);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--gta-gold);
+}
+
+::-webkit-scrollbar-track {
   background: transparent;
-  border: none;
-  color: var(--text);
-  text-align: left;
+}
+
+button {
+  font-family: inherit;
+  letter-spacing: var(--gta-letter);
+}
+
+input,
+textarea,
+select {
+  font-family: inherit;
+  letter-spacing: var(--gta-letter);
+}
+
+a {
+  color: var(--gta-el-hydro-flat);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* ===== Background layer (blurred-landscape feel) ===== */
+.app-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 80% 60% at 50% 100%, #6b7a8e 0%, transparent 65%),
+    radial-gradient(ellipse 100% 50% at 50% 60%, #e8d8a8 0%, transparent 70%),
+    radial-gradient(ellipse 60% 40% at 30% 20%, #ffc788 0%, transparent 65%),
+    radial-gradient(ellipse 80% 50% at 80% 10%, #ffe9c0 0%, transparent 70%),
+    linear-gradient(180deg, #d4c8a8 0%, #b0a890 60%, #6b7a8e 100%);
+  filter: blur(20px) saturate(1.1);
+  transform: scale(1.05);
+}
+
+.app-bg::after {
+  content: '';
+  position: absolute;
+  inset: -10%;
+  background: radial-gradient(
+    ellipse 80% 60% at 50% 50%,
+    transparent 50%,
+    rgba(0, 0, 0, 0.32) 100%
+  );
+}
+
+/* ===== Shell ===== */
+.app-shell {
+  position: relative;
+  z-index: 1;
+  height: 100vh;
+  overflow-y: auto;
+  padding: var(--gta-s6) var(--gta-s6) var(--gta-s12);
+}
+
+.app-shell > main {
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
+/* ===== Topbar ===== */
+.gta-topbar {
+  max-width: 1280px;
+  margin: 0 auto var(--gta-s6);
+  display: flex;
+  align-items: center;
+  gap: var(--gta-s4);
+  animation: gta-fade-down 480ms var(--gta-ease) both;
+}
+
+.gta-brand {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gta-s2);
+  padding: 10px var(--gta-s5);
+  background: var(--gta-panel);
+  border: 1px solid var(--gta-stroke);
+  border-radius: var(--gta-radius-pill);
+  box-shadow: var(--gta-shadow-card);
+}
+
+.gta-brand-mark {
+  font-size: var(--gta-text-md);
+  font-weight: 700;
+  color: var(--gta-text-on-light);
+}
+
+.gta-brand-sub {
+  font-family: var(--gta-font-mono);
+  font-size: 10px;
+  color: var(--gta-text-on-light-faint);
+}
+
+.gta-nav {
+  flex: 1;
+  display: flex;
+  gap: var(--gta-s1);
+  justify-content: center;
+  padding: 5px;
+  background: var(--gta-panel);
+  border: 1px solid var(--gta-stroke);
+  border-radius: var(--gta-radius-pill);
+  box-shadow: var(--gta-shadow-card);
+}
+
+.gta-nav button {
+  position: relative;
+  padding: 7px var(--gta-s5);
+  background: transparent;
+  border: 2.5px solid transparent;
+  border-radius: var(--gta-radius-pill);
+  color: var(--gta-text-on-light-soft);
+  font-size: var(--gta-text-md);
+  font-weight: 500;
   cursor: pointer;
-  font-size: 13px;
+  transition: all var(--gta-dur-base) var(--gta-ease);
 }
 
-.history-entry-time {
-  color: var(--muted);
-  font-family: 'SF Mono', monospace;
-  font-size: 12px;
+.gta-nav button:hover:not(.is-active) {
+  color: var(--gta-text-on-light);
+  background: var(--gta-panel-2);
 }
 
-.history-entry-tag {
-  padding: 2px 6px;
-  background: var(--bg-base);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  font-size: 11px;
-  text-align: center;
+.gta-nav button.is-active {
+  background: var(--gta-panel-dark);
+  color: var(--gta-text-on-dark);
+  border-color: #fff;
 }
 
-.history-entry-tag.tag-compare {
-  border-color: var(--accent);
-  color: var(--accent);
+/* ===== Buttons (capsule with embedded icon slot) ===== */
+.gta-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px var(--gta-s4) 6px 38px;
+  background: var(--gta-panel-dark);
+  color: var(--gta-text-on-dark);
+  border: 2.5px solid transparent;
+  border-radius: var(--gta-radius-pill);
+  font-size: var(--gta-text-md);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--gta-dur-base) var(--gta-ease);
+  box-shadow: var(--gta-shadow-card);
+  min-height: 36px;
 }
 
-.history-entry-meta {
-  font-size: 12px;
-  color: var(--muted);
+.gta-btn:hover:not(:disabled) {
+  background: var(--gta-panel-dark-2);
+  border-color: #fff;
 }
 
-.history-entry-enemies {
-  font-size: 13px;
+.gta-btn:active:not(:disabled) {
+  transform: scale(0.95);
+  box-shadow: var(--gta-shadow-btn-press);
+}
+
+.gta-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.gta-btn--light {
+  background: var(--gta-panel-2);
+  color: var(--gta-text-on-light);
+}
+
+.gta-btn--light:hover:not(:disabled) {
+  background: var(--gta-gold);
+}
+
+.gta-btn--danger {
+  background: var(--gta-panel-2);
+  color: var(--gta-el-pyro-flat);
+}
+
+.gta-btn--danger:hover:not(:disabled) {
+  background: var(--gta-el-pyro-end);
+  color: #fff;
+}
+
+.gta-btn--ghost {
+  background: transparent;
+  color: var(--gta-text-on-light);
+  border: 1px solid var(--gta-stroke);
+  padding-left: var(--gta-s4);
+}
+
+.gta-btn--ghost:hover:not(:disabled) {
+  background: var(--gta-panel-2);
+  border-color: var(--gta-gold);
+}
+
+.gta-btn-icon {
+  position: absolute;
+  left: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #353533;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--gta-gold-icon);
+}
+
+.gta-btn--danger .gta-btn-icon {
+  color: var(--gta-el-hydro-flat);
+}
+
+/* ===== Generic Panel ===== */
+.gta-panel {
+  position: relative;
+  padding: var(--gta-s3);
+  background: var(--gta-panel);
+  border: 1px solid var(--gta-stroke);
+  border-radius: var(--gta-radius-lg);
+  box-shadow: var(--gta-shadow-panel);
+}
+
+.gta-panel-inner-stroke::before {
+  content: '';
+  position: absolute;
+  inset: 4px;
+  border: 1px solid var(--gta-stroke-soft);
+  border-radius: calc(var(--gta-radius-lg) - 4px);
+  pointer-events: none;
+}
+
+.gta-panel-body {
+  position: relative;
+  z-index: 1;
+  padding: var(--gta-s3) var(--gta-s4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gta-s4);
+}
+
+/* ===== Section title ===== */
+.gta-section-title {
+  display: flex;
+  align-items: center;
+  gap: var(--gta-s3);
+  margin: 0 0 var(--gta-s4);
+  font-size: var(--gta-text-2xl);
+  font-weight: 900;
+  color: #fff;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  animation: gta-fade-up 540ms var(--gta-ease) both;
+  animation-delay: 100ms;
+}
+
+.gta-section-title::before {
+  content: '';
+  width: 4px;
+  height: 24px;
+  background: linear-gradient(180deg, var(--gta-gold-icon), var(--gta-gold));
+  border-radius: 2px;
+}
+
+.gta-section-sub {
+  font-family: var(--gta-font-mono);
+  font-size: var(--gta-text-xs);
+  color: rgba(255, 255, 255, 0.75);
+  font-weight: 400;
+  margin-left: auto;
+  text-transform: uppercase;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+/* ===== Roster: UID tabs ===== */
+.gta-uid-tabs {
+  display: flex;
+  gap: var(--gta-s2);
+  flex-wrap: wrap;
+}
+
+.gta-uid-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px var(--gta-s4);
+  background: var(--gta-panel-2);
+  border: 2px solid transparent;
+  border-radius: var(--gta-radius-md);
+  cursor: pointer;
+  color: var(--gta-text-on-light-soft);
+  transition: all var(--gta-dur-base);
+}
+
+.gta-uid-tab:hover {
+  background: var(--gta-panel-3);
+}
+
+.gta-uid-tab.is-active {
+  background: var(--gta-panel-dark);
+  color: var(--gta-text-on-dark);
+  border-color: #fff;
+  box-shadow: 0 0 0 1px var(--gta-gold);
+}
+
+.gta-uid-tab .uid {
+  font-family: var(--gta-font-mono);
+  font-size: var(--gta-text-xs);
+  opacity: 0.85;
+}
+
+.gta-uid-tab .nickname {
+  font-size: var(--gta-text-md);
+  font-weight: 700;
+}
+
+.gta-uid-tab .count {
+  font-family: var(--gta-font-mono);
+  font-size: 10px;
+  opacity: 0.75;
+}
+
+/* ===== Roster: meta strip ===== */
+.gta-profile-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--gta-s4);
+  align-items: center;
+}
+
+.gta-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--gta-s4);
+}
+
+.gta-meta-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-right: var(--gta-s3);
+  border-right: 1px solid var(--gta-stroke);
+  min-width: 0;
+}
+
+.gta-meta-cell:last-child {
+  border-right: none;
+}
+
+.gta-meta-label {
+  font-family: var(--gta-font-mono);
+  font-size: 10px;
+  color: var(--gta-text-on-light-faint);
+  text-transform: uppercase;
+}
+
+.gta-meta-value {
+  font-size: var(--gta-text-md);
+  font-weight: 700;
+  color: var(--gta-text-on-light);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gta-meta-value.is-mono {
+  font-family: var(--gta-font-mono);
+  font-weight: 500;
+}
+
+.gta-actions {
+  display: flex;
+  gap: var(--gta-s2);
+  flex-wrap: wrap;
+}
+
+/* ===== Roster: character grid + card ===== */
+.gta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: var(--gta-s4);
+}
+
+.gta-card {
+  position: relative;
+  padding: var(--gta-s4);
+  background: var(--gta-panel);
+  border: 1px solid var(--gta-stroke);
+  border-radius: var(--gta-radius-lg);
+  box-shadow: var(--gta-shadow-card);
+  transition: all var(--gta-dur-base) var(--gta-ease);
+  animation: gta-fade-up 600ms var(--gta-ease) both;
+}
+
+.gta-card::before {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border: 1px solid var(--gta-stroke-soft);
+  border-radius: calc(var(--gta-radius-lg) - 3px);
+  pointer-events: none;
+}
+
+.gta-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--gta-shadow-card-hover);
+  border-color: var(--gta-gold);
+}
+
+.gta-card-head {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  gap: var(--gta-s3);
+  margin-bottom: var(--gta-s3);
+}
+
+.gta-portrait {
+  position: relative;
+  width: 88px;
+  height: 88px;
+}
+
+.gta-portrait-frame {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 3px solid #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.gta-portrait-frame img,
+.gta-portrait-frame svg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.gta-portrait-element {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: 30px;
+  height: 30px;
+  background: #fff;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+}
+
+.gta-identity {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.gta-name {
+  font-size: var(--gta-text-lg);
+  font-weight: 700;
+  color: var(--gta-text-on-light);
+  margin: 0;
+  line-height: 1.2;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.history-entry-body {
-  padding: 12px 14px;
+.gta-rank-row {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
-  background: var(--bg-base);
 }
 
-@media (max-width: 720px) {
-  .compare-grid {
-    grid-template-columns: 1fr;
-  }
-  .history-filters {
-    grid-template-columns: 1fr;
-  }
-  .history-entry-summary {
-    grid-template-columns: 1fr;
-    gap: 4px;
-  }
+.gta-rank-stars {
+  display: inline-flex;
+  gap: 1px;
+  padding: 2px 6px;
+  background: linear-gradient(135deg, #f7f3d8 0%, #f9d77c 100%);
+  border-radius: var(--gta-radius-pill);
+  align-items: center;
 }
 
-.settings-page {
+.gta-rank-stars.r5 {
+  background: linear-gradient(135deg, #fde9c2 0%, #f0b25a 100%);
+}
+
+.gta-rank-stars svg {
+  color: #b78340;
+}
+
+.gta-level {
+  font-family: var(--gta-font-mono);
+  font-size: var(--gta-text-xs);
+  color: var(--gta-text-on-light-soft);
+  font-weight: 500;
+}
+
+.gta-level .num {
+  color: var(--gta-text-on-light);
+  font-weight: 700;
+  font-size: var(--gta-text-sm);
+}
+
+.gta-card-divider {
+  position: relative;
+  z-index: 1;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--gta-stroke) 20%,
+    var(--gta-stroke) 80%,
+    transparent
+  );
+  margin: var(--gta-s3) 0;
+}
+
+.gta-stats {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: var(--gta-s4);
+  row-gap: 5px;
+}
+
+.gta-stat {
   display: flex;
-  flex-direction: column;
-  gap: 18px;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: var(--gta-text-xs);
 }
 
-.settings-page h2 {
-  margin: 0;
-  font-size: 18px;
-  letter-spacing: 0.5px;
+.gta-stat-label {
+  color: var(--gta-text-on-light-faint);
 }
 
-.hint {
+.gta-stat-value {
+  font-family: var(--gta-font-mono);
+  color: var(--gta-text-on-light);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.gta-stat-value .pct {
+  color: var(--gta-text-on-light-faint);
+  font-weight: 400;
+}
+
+/* ===== Empty / status helpers ===== */
+.gta-empty {
+  text-align: center;
+  padding: var(--gta-s8);
+  color: var(--gta-text-on-light-soft);
+}
+
+.gta-error {
   margin: 0;
-  color: var(--muted);
-  font-size: 13px;
+  padding: var(--gta-s3) var(--gta-s4);
+  background: rgba(196, 91, 49, 0.1);
+  border-left: 3px solid var(--gta-el-pyro-flat);
+  color: var(--gta-el-pyro-flat);
+  border-radius: var(--gta-radius-sm);
+  font-size: var(--gta-text-base);
+}
+
+.gta-ok {
+  margin: 0;
+  padding: var(--gta-s3) var(--gta-s4);
+  background: rgba(100, 173, 21, 0.1);
+  border-left: 3px solid var(--gta-el-dendro-flat);
+  color: var(--gta-el-dendro-flat);
+  border-radius: var(--gta-radius-sm);
+  font-size: var(--gta-text-base);
+}
+
+.gta-muted {
+  color: var(--gta-text-on-light-faint);
+}
+
+.gta-hint {
+  margin: 0;
+  color: var(--gta-text-on-light-soft);
+  font-size: var(--gta-text-sm);
   line-height: 1.6;
 }
 
-.status-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px 24px;
-  margin: 0;
-  padding: 16px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+.gta-hint.gta-on-bg {
+  color: rgba(255, 255, 255, 0.8);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
 }
 
-.status-grid > div {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+/* ===== animations ===== */
+@keyframes gta-fade-down {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
-.status-grid dt {
-  font-size: 12px;
-  color: var(--muted);
+@keyframes gta-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
-.status-grid dd {
-  margin: 0;
-  font-size: 14px;
-  word-break: break-all;
+.gta-grid > .gta-card:nth-child(1) {
+  animation-delay: 220ms;
+}
+.gta-grid > .gta-card:nth-child(2) {
+  animation-delay: 270ms;
+}
+.gta-grid > .gta-card:nth-child(3) {
+  animation-delay: 320ms;
+}
+.gta-grid > .gta-card:nth-child(4) {
+  animation-delay: 370ms;
+}
+.gta-grid > .gta-card:nth-child(5) {
+  animation-delay: 420ms;
+}
+.gta-grid > .gta-card:nth-child(6) {
+  animation-delay: 470ms;
+}
+.gta-grid > .gta-card:nth-child(7) {
+  animation-delay: 520ms;
+}
+.gta-grid > .gta-card:nth-child(8) {
+  animation-delay: 570ms;
 }
 
-.settings-form {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 18px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+/* ===== responsive ===== */
+@media (max-width: 920px) {
+  .app-shell {
+    padding: var(--gta-s4);
+  }
+  .gta-profile-row {
+    grid-template-columns: 1fr;
+  }
+  .gta-meta-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
-.settings-form label {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 13px;
-  color: var(--muted);
-}
-
-.settings-form input {
-  padding: 8px 10px;
-  background: var(--bg-base);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text);
-  font-family: 'SF Mono', 'JetBrains Mono', monospace;
-  font-size: 13px;
-}
-
-.settings-form input:focus {
-  outline: 1px solid var(--accent);
-  outline-offset: 1px;
-}
-
-.button-row {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-top: 4px;
-}
-
-button {
-  padding: 8px 16px;
-  background: var(--accent);
-  color: #1a1c20;
-  border: none;
-  border-radius: 6px;
-  font-weight: 600;
-  cursor: pointer;
-  font-size: 13px;
-}
-
-button:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-button.danger {
-  background: transparent;
-  color: var(--error);
-  border: 1px solid var(--error);
-}
-
-.ok {
-  color: var(--ok);
-  font-size: 13px;
-  margin: 0;
-}
-
-.error {
-  color: var(--error);
-  font-size: 13px;
-  margin: 0;
-}
-
-pre {
-  margin: 6px 0 0;
-  padding: 10px;
-  background: var(--bg-base);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font-size: 12px;
-  white-space: pre-wrap;
-  word-break: break-all;
+@media (max-width: 560px) {
+  .gta-topbar {
+    flex-direction: column;
+    gap: var(--gta-s2);
+  }
+  .gta-nav {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
 }

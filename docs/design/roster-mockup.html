@@ -1,0 +1,1317 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>genshin-team-advisor · Roster Mockup v2</title>
+
+    <!-- 圆润无衬线（原神 GI_*_Web 的合规替代）+ 数据用等宽 -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;900&family=JetBrains+Mono:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <style>
+      /* =============================================================
+         Design tokens — 从 Mantan21/Genshin-Impact-Wish-Simulator 的
+         app.css 抽取真实值，与原神官方 web UI 对齐
+         ============================================================= */
+      :root {
+        /* — Panel：奶白米色（主）+ 蓝灰（暗态）+ 浅米色描边 — */
+        --gta-panel: #fbf6ee;
+        --gta-panel-2: #ece5d8;
+        --gta-panel-3: #e0ddd4;
+        --gta-panel-dark: #4a5265;
+        --gta-panel-dark-2: #333947;
+        --gta-stroke: #ddd5c8;
+        --gta-stroke-soft: #ebe3d3;
+
+        /* — 文字：米色 panel 上深蓝灰；暗 panel 上白 — */
+        --gta-text-on-light: #383b40;
+        --gta-text-on-light-soft: #5a6068;
+        --gta-text-on-light-faint: #8a8b8f;
+        --gta-text-on-dark: #ffffff;
+        --gta-text-on-dark-soft: #d0d4dc;
+
+        /* — 金色细节（不是主色！只在滚动条 / icon / 描边出现）— */
+        --gta-gold: #c3b8a1;
+        --gta-gold-soft: rgba(210, 198, 156, 0.5);
+        --gta-gold-icon: #ffc107;
+        --gta-amber: #c45b31;
+
+        /* — 链接/重点蓝（按钮 icon 用）— */
+        --gta-blue: #3f9ad1;
+        --gta-blue-soft: #4a5265;
+
+        /* — 元素色（取自 app.css 真实值）— */
+        --gta-el-dendro: #a6d138;
+        --gta-el-dendro-end: #aaef3a;
+        --gta-el-dendro-flat: #64ad15;
+        --gta-el-hydro: #06bbff;
+        --gta-el-hydro-end: #10e2ff;
+        --gta-el-hydro-flat: #3f8ed1;
+        --gta-el-geo: #f9aa02;
+        --gta-el-geo-end: #fcd260;
+        --gta-el-geo-flat: #cb8f46;
+        --gta-el-pyro: #fe6606;
+        --gta-el-pyro-end: #fea76b;
+        --gta-el-pyro-flat: #ee6c4c;
+        --gta-el-anemo: #32d9a1;
+        --gta-el-anemo-end: #aef2cd;
+        --gta-el-anemo-flat: #359697;
+        --gta-el-electro: #ca82fc;
+        --gta-el-electro-end: #deb5fe;
+        --gta-el-electro-flat: #7d67c5;
+        --gta-el-cryo: #7cfeff;
+        --gta-el-cryo-end: #c6fffd;
+        --gta-el-cryo-flat: #46c2d8;
+
+        /* — 字体 — */
+        --gta-font-body: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'PingFang SC',
+          'Microsoft YaHei', sans-serif;
+        --gta-font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+
+        /* — 字号 — */
+        --gta-text-xs: 11px;
+        --gta-text-sm: 12px;
+        --gta-text-base: 13px;
+        --gta-text-md: 14px;
+        --gta-text-lg: 16px;
+        --gta-text-xl: 20px;
+        --gta-text-2xl: 24px;
+        --gta-text-display: 32px;
+
+        /* — 间距 — */
+        --gta-space-1: 4px;
+        --gta-space-2: 8px;
+        --gta-space-3: 12px;
+        --gta-space-4: 16px;
+        --gta-space-5: 20px;
+        --gta-space-6: 24px;
+        --gta-space-8: 32px;
+        --gta-space-10: 40px;
+        --gta-space-12: 48px;
+
+        /* — 圆角（原神风偏温和）— */
+        --gta-radius-sm: 4px;
+        --gta-radius-md: 8px;
+        --gta-radius-lg: 12px;
+        --gta-radius-pill: 999px;
+
+        /* — 阴影（柔光，模拟原神按钮）— */
+        --gta-shadow-panel: 0 4px 12px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.08);
+        --gta-shadow-card: 0 2px 8px rgba(70, 60, 40, 0.1), 0 1px 2px rgba(70, 60, 40, 0.08);
+        --gta-shadow-card-hover: 0 8px 20px rgba(70, 60, 40, 0.18),
+          0 2px 6px rgba(70, 60, 40, 0.12);
+        --gta-shadow-btn-press: 0 0 7px 5px rgba(160, 175, 190, 0.6);
+
+        --gta-dur-fast: 120ms;
+        --gta-dur-base: 200ms;
+        --gta-dur-slow: 400ms;
+        --gta-ease: cubic-bezier(0.4, 0, 0.2, 1);
+        --gta-letter: -0.02rem;
+      }
+
+      /* ===== base ===== */
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        letter-spacing: var(--gta-letter);
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        min-height: 100vh;
+        font-family: var(--gta-font-body);
+        font-size: var(--gta-text-base);
+        color: var(--gta-text-on-light);
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+      }
+
+      /* ===== 背景层：模拟原神官网"模糊风景图"做底
+         真实原神用 webp 场景图 + blur(10px)；我们这里合规替代为
+         多层 radial gradient 模拟模糊远景（暖橙天空 + 冷蓝山脉），
+         实际项目里可以换成自摄风景照或社区授权图。 ===== */
+      .gta-bg-layer {
+        position: fixed;
+        inset: 0;
+        z-index: 0;
+        pointer-events: none;
+        background:
+          /* 远山冷蓝 */
+          radial-gradient(ellipse 80% 60% at 50% 100%, #6b7a8e 0%, transparent 65%),
+          /* 中景米黄 */
+          radial-gradient(ellipse 100% 50% at 50% 60%, #e8d8a8 0%, transparent 70%),
+          /* 天空暖光 */
+          radial-gradient(ellipse 60% 40% at 30% 20%, #ffc788 0%, transparent 65%),
+          radial-gradient(ellipse 80% 50% at 80% 10%, #ffe9c0 0%, transparent 70%),
+          /* 底色 */
+          linear-gradient(180deg, #d4c8a8 0%, #b0a890 60%, #6b7a8e 100%);
+        filter: blur(20px) saturate(1.1);
+        transform: scale(1.05);
+      }
+
+      /* 暖光叠加 + 暗角 */
+      .gta-bg-layer::after {
+        content: '';
+        position: absolute;
+        inset: -10%;
+        background:
+          radial-gradient(ellipse 80% 60% at 50% 50%, transparent 50%, rgba(0, 0, 0, 0.35) 100%);
+      }
+
+      /* ===== layout ===== */
+      .gta-shell {
+        position: relative;
+        z-index: 1;
+        max-width: 1280px;
+        margin: 0 auto;
+        padding: var(--gta-space-6) var(--gta-space-6) var(--gta-space-12);
+      }
+
+      /* ===== top header / nav ===== */
+      .gta-topbar {
+        display: flex;
+        align-items: center;
+        gap: var(--gta-space-4);
+        margin-bottom: var(--gta-space-6);
+        animation: gta-fade-down 480ms var(--gta-ease) both;
+      }
+
+      .gta-brand {
+        display: flex;
+        align-items: baseline;
+        gap: var(--gta-space-2);
+        padding: 10px var(--gta-space-5);
+        background: var(--gta-panel);
+        border: 1px solid var(--gta-stroke);
+        border-radius: var(--gta-radius-pill);
+        box-shadow: var(--gta-shadow-card);
+      }
+
+      .gta-brand-mark {
+        font-size: var(--gta-text-md);
+        font-weight: 700;
+        color: var(--gta-text-on-light);
+      }
+
+      .gta-brand-sub {
+        font-family: var(--gta-font-mono);
+        font-size: 10px;
+        color: var(--gta-text-on-light-faint);
+      }
+
+      .gta-nav {
+        flex: 1;
+        display: flex;
+        gap: var(--gta-space-1);
+        justify-content: center;
+        padding: 5px;
+        background: var(--gta-panel);
+        border: 1px solid var(--gta-stroke);
+        border-radius: var(--gta-radius-pill);
+        box-shadow: var(--gta-shadow-card);
+      }
+
+      .gta-nav-item {
+        position: relative;
+        padding: 7px var(--gta-space-5);
+        background: transparent;
+        border: 2.5px solid transparent;
+        border-radius: var(--gta-radius-pill);
+        color: var(--gta-text-on-light-soft);
+        font-family: inherit;
+        font-size: var(--gta-text-md);
+        font-weight: 500;
+        cursor: pointer;
+        transition: all var(--gta-dur-base) var(--gta-ease);
+      }
+
+      .gta-nav-item:hover {
+        color: var(--gta-text-on-light);
+        background: var(--gta-panel-2);
+      }
+
+      .gta-nav-item.is-active {
+        background: var(--gta-panel-dark);
+        color: var(--gta-text-on-dark);
+        border-color: #fff;
+      }
+
+      /* ===== Section: profile cluster (合并 UID tabs + meta strip + actions) ===== */
+      .gta-profile-cluster {
+        position: relative;
+        background: var(--gta-panel);
+        border: 1px solid var(--gta-stroke);
+        border-radius: var(--gta-radius-lg);
+        padding: var(--gta-space-3);
+        margin-bottom: var(--gta-space-6);
+        box-shadow: var(--gta-shadow-panel);
+        animation: gta-fade-up 540ms var(--gta-ease) both;
+        animation-delay: 80ms;
+      }
+
+      .gta-profile-cluster::before {
+        /* 内描边米色细线 */
+        content: '';
+        position: absolute;
+        inset: 4px;
+        border: 1px solid var(--gta-stroke-soft);
+        border-radius: calc(var(--gta-radius-lg) - 4px);
+        pointer-events: none;
+      }
+
+      .gta-profile-cluster-inner {
+        position: relative;
+        z-index: 1;
+        padding: var(--gta-space-3) var(--gta-space-4);
+        display: flex;
+        flex-direction: column;
+        gap: var(--gta-space-4);
+      }
+
+      /* 4 角铜色构件 */
+      .gta-corner-piece {
+        position: absolute;
+        width: 22px;
+        height: 22px;
+        z-index: 2;
+        pointer-events: none;
+      }
+
+      .gta-corner-piece svg {
+        width: 100%;
+        height: 100%;
+      }
+
+      .gta-corner-piece.tl {
+        top: -2px;
+        left: -2px;
+      }
+      .gta-corner-piece.tr {
+        top: -2px;
+        right: -2px;
+        transform: scaleX(-1);
+      }
+      .gta-corner-piece.bl {
+        bottom: -2px;
+        left: -2px;
+        transform: scaleY(-1);
+      }
+      .gta-corner-piece.br {
+        bottom: -2px;
+        right: -2px;
+        transform: scale(-1, -1);
+      }
+
+      /* === UID 切换栏 === */
+      .gta-uid-tabs {
+        display: flex;
+        gap: var(--gta-space-2);
+        flex-wrap: wrap;
+      }
+
+      .gta-uid-tab {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 2px;
+        padding: 8px var(--gta-space-4);
+        background: var(--gta-panel-2);
+        border: 2px solid transparent;
+        border-radius: var(--gta-radius-md);
+        cursor: pointer;
+        transition: all var(--gta-dur-base);
+        font-family: inherit;
+        color: var(--gta-text-on-light-soft);
+      }
+
+      .gta-uid-tab:hover {
+        background: var(--gta-panel-3);
+      }
+
+      .gta-uid-tab.is-active {
+        background: var(--gta-panel-dark);
+        color: var(--gta-text-on-dark);
+        border-color: #fff;
+        box-shadow: 0 0 0 1px var(--gta-gold);
+      }
+
+      .gta-uid-tab .uid {
+        font-family: var(--gta-font-mono);
+        font-size: var(--gta-text-xs);
+        opacity: 0.8;
+      }
+
+      .gta-uid-tab .nickname {
+        font-size: var(--gta-text-md);
+        font-weight: 700;
+      }
+
+      .gta-uid-tab .count {
+        font-family: var(--gta-font-mono);
+        font-size: 10px;
+        opacity: 0.75;
+      }
+
+      /* === meta + actions === */
+      .gta-profile-row {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: var(--gta-space-4);
+        align-items: center;
+      }
+
+      .gta-meta-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: var(--gta-space-4);
+      }
+
+      .gta-meta-cell {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        padding-right: var(--gta-space-3);
+        border-right: 1px solid var(--gta-stroke);
+      }
+
+      .gta-meta-cell:last-child {
+        border-right: none;
+      }
+
+      .gta-meta-label {
+        font-family: var(--gta-font-mono);
+        font-size: 10px;
+        color: var(--gta-text-on-light-faint);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+
+      .gta-meta-value {
+        font-size: var(--gta-text-md);
+        font-weight: 700;
+        color: var(--gta-text-on-light);
+      }
+
+      .gta-meta-value.is-mono {
+        font-family: var(--gta-font-mono);
+        font-weight: 500;
+      }
+
+      .gta-actions {
+        display: flex;
+        gap: var(--gta-space-2);
+      }
+
+      /* ===== Buttons（圆角胶囊 + 内嵌 icon，原神原版样式） ===== */
+      .gta-btn {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px var(--gta-space-4) 6px 38px;
+        background: var(--gta-panel-dark);
+        color: var(--gta-text-on-dark);
+        border: 2.5px solid transparent;
+        border-radius: var(--gta-radius-pill);
+        font-family: inherit;
+        font-size: var(--gta-text-md);
+        font-weight: 500;
+        cursor: pointer;
+        transition: all var(--gta-dur-base) var(--gta-ease);
+        box-shadow: var(--gta-shadow-card);
+        min-height: 36px;
+      }
+
+      .gta-btn:hover {
+        background: var(--gta-panel-dark-2);
+        border-color: #fff;
+      }
+
+      .gta-btn:active {
+        transform: scale(0.95);
+        box-shadow: var(--gta-shadow-btn-press);
+      }
+
+      .gta-btn--light {
+        background: var(--gta-panel-2);
+        color: var(--gta-text-on-light);
+      }
+
+      .gta-btn--light:hover {
+        background: var(--gta-gold);
+      }
+
+      .gta-btn-icon {
+        position: absolute;
+        left: 4px;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        background: #353533;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--gta-gold-icon);
+      }
+
+      .gta-btn-icon svg {
+        width: 16px;
+        height: 16px;
+      }
+
+      .gta-btn--danger .gta-btn-icon {
+        color: var(--gta-blue);
+      }
+
+      /* ===== Section title ===== */
+      .gta-section-title {
+        display: flex;
+        align-items: center;
+        gap: var(--gta-space-3);
+        margin: 0 0 var(--gta-space-4);
+        font-size: var(--gta-text-2xl);
+        font-weight: 900;
+        color: #fff;
+        text-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+        animation: gta-fade-up 540ms var(--gta-ease) both;
+        animation-delay: 140ms;
+      }
+
+      .gta-section-title::before {
+        content: '';
+        width: 4px;
+        height: 24px;
+        background: linear-gradient(180deg, var(--gta-gold-icon), var(--gta-gold));
+        border-radius: 2px;
+      }
+
+      .gta-section-sub {
+        font-family: var(--gta-font-mono);
+        font-size: var(--gta-text-xs);
+        color: rgba(255, 255, 255, 0.7);
+        font-weight: 400;
+        margin-left: auto;
+        text-transform: uppercase;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+      }
+
+      /* ===== Character grid ===== */
+      .gta-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+        gap: var(--gta-space-4);
+      }
+
+      /* ===== Character card ===== */
+      .gta-card {
+        position: relative;
+        padding: var(--gta-space-4);
+        background: var(--gta-panel);
+        border: 1px solid var(--gta-stroke);
+        border-radius: var(--gta-radius-lg);
+        box-shadow: var(--gta-shadow-card);
+        transition: all var(--gta-dur-base) var(--gta-ease);
+        animation: gta-fade-up 600ms var(--gta-ease) both;
+      }
+
+      .gta-card::before {
+        /* 内米色细线 */
+        content: '';
+        position: absolute;
+        inset: 3px;
+        border: 1px solid var(--gta-stroke-soft);
+        border-radius: calc(var(--gta-radius-lg) - 3px);
+        pointer-events: none;
+      }
+
+      .gta-card:hover {
+        transform: translateY(-3px);
+        box-shadow: var(--gta-shadow-card-hover);
+        border-color: var(--gta-gold);
+      }
+
+      .gta-card-head {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        grid-template-columns: 88px 1fr;
+        gap: var(--gta-space-3);
+        margin-bottom: var(--gta-space-3);
+      }
+
+      /* === Portrait === */
+      .gta-portrait {
+        position: relative;
+        width: 88px;
+        height: 88px;
+      }
+
+      .gta-portrait-frame {
+        position: absolute;
+        inset: 0;
+        border-radius: 50%;
+        overflow: hidden;
+        background: var(--ec-bg, linear-gradient(135deg, #c9c2b0, #948c78));
+        border: 3px solid #fff;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .gta-portrait-frame svg {
+        width: 70%;
+        height: 70%;
+        opacity: 0.95;
+      }
+
+      .gta-portrait-element {
+        position: absolute;
+        bottom: -2px;
+        right: -2px;
+        width: 30px;
+        height: 30px;
+        background: #fff;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+      }
+
+      .gta-portrait-element svg {
+        width: 18px;
+        height: 18px;
+      }
+
+      /* === Identity === */
+      .gta-identity {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 4px;
+        min-width: 0;
+      }
+
+      .gta-name {
+        font-size: var(--gta-text-lg);
+        font-weight: 700;
+        color: var(--gta-text-on-light);
+        margin: 0;
+        line-height: 1.2;
+      }
+
+      .gta-rank-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .gta-rank-stars {
+        display: inline-flex;
+        gap: 1px;
+        padding: 2px 6px;
+        background: linear-gradient(135deg, #f7f3d8 0%, #f9d77c 100%);
+        border-radius: var(--gta-radius-pill);
+        align-items: center;
+      }
+
+      .gta-rank-stars svg {
+        width: 9px;
+        height: 9px;
+        fill: #b78340;
+      }
+
+      .gta-rank-stars.r5 {
+        background: linear-gradient(135deg, #fde9c2 0%, #f0b25a 100%);
+      }
+
+      .gta-level {
+        font-family: var(--gta-font-mono);
+        font-size: var(--gta-text-xs);
+        color: var(--gta-text-on-light-soft);
+        font-weight: 500;
+      }
+
+      .gta-level .num {
+        color: var(--gta-text-on-light);
+        font-weight: 700;
+        font-size: var(--gta-text-sm);
+      }
+
+      /* === Divider === */
+      .gta-card-divider {
+        position: relative;
+        height: 1px;
+        background: linear-gradient(
+          90deg,
+          transparent,
+          var(--gta-stroke) 20%,
+          var(--gta-stroke) 80%,
+          transparent
+        );
+        margin: var(--gta-space-3) 0;
+      }
+
+      /* === Stats === */
+      .gta-stats {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        column-gap: var(--gta-space-4);
+        row-gap: 5px;
+      }
+
+      .gta-stat {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        font-size: var(--gta-text-xs);
+      }
+
+      .gta-stat-label {
+        color: var(--gta-text-on-light-faint);
+      }
+
+      .gta-stat-value {
+        font-family: var(--gta-font-mono);
+        color: var(--gta-text-on-light);
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .gta-stat-value .pct {
+        color: var(--gta-text-on-light-faint);
+        font-weight: 400;
+      }
+
+      /* ===== Element palette mapping ===== */
+      [data-element='pyro'] {
+        --ec: var(--gta-el-pyro);
+        --ec-end: var(--gta-el-pyro-end);
+        --ec-flat: var(--gta-el-pyro-flat);
+        --ec-bg: radial-gradient(circle at 30% 30%, var(--gta-el-pyro-end), var(--gta-el-pyro-flat));
+      }
+      [data-element='hydro'] {
+        --ec: var(--gta-el-hydro);
+        --ec-end: var(--gta-el-hydro-end);
+        --ec-flat: var(--gta-el-hydro-flat);
+        --ec-bg: radial-gradient(circle at 30% 30%, var(--gta-el-hydro-end), var(--gta-el-hydro-flat));
+      }
+      [data-element='electro'] {
+        --ec: var(--gta-el-electro);
+        --ec-end: var(--gta-el-electro-end);
+        --ec-flat: var(--gta-el-electro-flat);
+        --ec-bg: radial-gradient(circle at 30% 30%, var(--gta-el-electro-end), var(--gta-el-electro-flat));
+      }
+      [data-element='anemo'] {
+        --ec: var(--gta-el-anemo);
+        --ec-end: var(--gta-el-anemo-end);
+        --ec-flat: var(--gta-el-anemo-flat);
+        --ec-bg: radial-gradient(circle at 30% 30%, var(--gta-el-anemo-end), var(--gta-el-anemo-flat));
+      }
+      [data-element='geo'] {
+        --ec: var(--gta-el-geo);
+        --ec-end: var(--gta-el-geo-end);
+        --ec-flat: var(--gta-el-geo-flat);
+        --ec-bg: radial-gradient(circle at 30% 30%, var(--gta-el-geo-end), var(--gta-el-geo-flat));
+      }
+      [data-element='cryo'] {
+        --ec: var(--gta-el-cryo);
+        --ec-end: var(--gta-el-cryo-end);
+        --ec-flat: var(--gta-el-cryo-flat);
+        --ec-bg: radial-gradient(circle at 30% 30%, var(--gta-el-cryo-end), var(--gta-el-cryo-flat));
+      }
+      [data-element='dendro'] {
+        --ec: var(--gta-el-dendro);
+        --ec-end: var(--gta-el-dendro-end);
+        --ec-flat: var(--gta-el-dendro-flat);
+        --ec-bg: radial-gradient(circle at 30% 30%, var(--gta-el-dendro-end), var(--gta-el-dendro-flat));
+      }
+
+      .gta-el-icon {
+        background-clip: text;
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+      }
+
+      /* ===== reveal animations ===== */
+      @keyframes gta-fade-down {
+        from {
+          opacity: 0;
+          transform: translateY(-8px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @keyframes gta-fade-up {
+        from {
+          opacity: 0;
+          transform: translateY(10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      .gta-card:nth-child(1) {
+        animation-delay: 220ms;
+      }
+      .gta-card:nth-child(2) {
+        animation-delay: 270ms;
+      }
+      .gta-card:nth-child(3) {
+        animation-delay: 320ms;
+      }
+      .gta-card:nth-child(4) {
+        animation-delay: 370ms;
+      }
+      .gta-card:nth-child(5) {
+        animation-delay: 420ms;
+      }
+      .gta-card:nth-child(6) {
+        animation-delay: 470ms;
+      }
+      .gta-card:nth-child(7) {
+        animation-delay: 520ms;
+      }
+      .gta-card:nth-child(8) {
+        animation-delay: 570ms;
+      }
+
+      /* ===== responsive ===== */
+      @media (max-width: 920px) {
+        .gta-shell {
+          padding: var(--gta-space-4);
+        }
+        .gta-profile-row {
+          grid-template-columns: 1fr;
+        }
+        .gta-meta-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .gta-actions {
+          flex-wrap: wrap;
+        }
+      }
+
+      @media (max-width: 560px) {
+        .gta-topbar {
+          flex-direction: column;
+          gap: var(--gta-space-2);
+        }
+        .gta-nav {
+          width: 100%;
+          flex-wrap: wrap;
+          justify-content: center;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- ===== SVG symbol library ===== -->
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <defs>
+        <!-- 4 角金属构件（铜色 L 型卷云） -->
+        <symbol id="corner-piece" viewBox="0 0 22 22">
+          <path
+            d="M 0 22 L 0 6 Q 0 0 6 0 L 22 0"
+            stroke="#c3b8a1"
+            stroke-width="1.5"
+            fill="none"
+          />
+          <path
+            d="M 3 18 L 3 8 Q 3 5 6 5 L 16 5"
+            stroke="#c3b8a1"
+            stroke-width="1"
+            fill="none"
+            opacity="0.65"
+          />
+          <circle cx="6" cy="6" r="1.8" fill="#c3b8a1" />
+        </symbol>
+
+        <!-- 元素图标（高饱和 gradient 填充版本，对照 app.css 真实方案） -->
+        <linearGradient id="grad-pyro" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#fe6606" />
+          <stop offset="100%" stop-color="#fea76b" />
+        </linearGradient>
+        <linearGradient id="grad-hydro" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#06bbff" />
+          <stop offset="100%" stop-color="#10e2ff" />
+        </linearGradient>
+        <linearGradient id="grad-electro" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#ca82fc" />
+          <stop offset="100%" stop-color="#deb5fe" />
+        </linearGradient>
+        <linearGradient id="grad-anemo" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#32d9a1" />
+          <stop offset="100%" stop-color="#aef2cd" />
+        </linearGradient>
+        <linearGradient id="grad-geo" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#f9aa02" />
+          <stop offset="100%" stop-color="#fcd260" />
+        </linearGradient>
+        <linearGradient id="grad-cryo" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#7cfeff" />
+          <stop offset="100%" stop-color="#c6fffd" />
+        </linearGradient>
+        <linearGradient id="grad-dendro" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#a6d138" />
+          <stop offset="100%" stop-color="#aaef3a" />
+        </linearGradient>
+
+        <symbol id="el-pyro" viewBox="0 0 24 24">
+          <path
+            d="M12 2.5 C 14 6.5 18 8.5 18 13 a 6 6 0 0 1 -12 0 C 6 9 9 8.5 12 2.5 Z"
+            fill="url(#grad-pyro)"
+          />
+        </symbol>
+        <symbol id="el-hydro" viewBox="0 0 24 24">
+          <path
+            d="M12 3 C 7 11 6.5 15 6.5 17 a 5.5 5.5 0 0 0 11 0 C 17.5 15 17 11 12 3 Z"
+            fill="url(#grad-hydro)"
+          />
+        </symbol>
+        <symbol id="el-electro" viewBox="0 0 24 24">
+          <path
+            d="M13.5 2 L 5 13.5 L 11 13.5 L 9.5 22 L 19 9 L 13.5 9 L 15 2 Z"
+            fill="url(#grad-electro)"
+          />
+        </symbol>
+        <symbol id="el-anemo" viewBox="0 0 24 24">
+          <path
+            d="M 5 12 Q 5 5 12 5 Q 19 5 19 12 Q 19 19 12 19 Q 5 19 5 12 Z M 10 9 Q 13 9 13 12 Q 13 15 10 15"
+            fill="url(#grad-anemo)"
+          />
+        </symbol>
+        <symbol id="el-geo" viewBox="0 0 24 24">
+          <path d="M12 3 L 21 9 L 18 20 L 6 20 L 3 9 Z" fill="url(#grad-geo)" />
+        </symbol>
+        <symbol id="el-cryo" viewBox="0 0 24 24">
+          <g fill="url(#grad-cryo)" stroke="url(#grad-cryo)" stroke-width="1.5" stroke-linecap="round">
+            <path d="M 12 2 L 12 22" />
+            <path d="M 4 7 L 20 17" />
+            <path d="M 4 17 L 20 7" />
+          </g>
+        </symbol>
+        <symbol id="el-dendro" viewBox="0 0 24 24">
+          <path
+            d="M 12 22 C 6 17 6 9 12 3 C 18 9 18 17 12 22 Z"
+            fill="url(#grad-dendro)"
+          />
+        </symbol>
+
+        <!-- 4 点星（亮金墨点，圆角胶囊里那种小印章） -->
+        <symbol id="star" viewBox="0 0 12 12">
+          <path d="M 6 0.5 L 7.3 4.7 L 11.5 6 L 7.3 7.3 L 6 11.5 L 4.7 7.3 L 0.5 6 L 4.7 4.7 Z" />
+        </symbol>
+
+        <!-- 按钮 icon: 圆圈勾（确认） -->
+        <symbol id="ico-check" viewBox="0 0 16 16">
+          <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5" />
+          <path
+            d="M 5.5 8.2 L 7.2 9.8 L 10.5 6.2"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </symbol>
+        <!-- 按钮 icon: 刷新 -->
+        <symbol id="ico-refresh" viewBox="0 0 16 16">
+          <path
+            d="M 13 4 A 6 6 0 1 0 14 9.5"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+          />
+          <path
+            d="M 13 1 L 13 5 L 9 5"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </symbol>
+        <!-- 按钮 icon: 加号 -->
+        <symbol id="ico-plus" viewBox="0 0 16 16">
+          <path
+            d="M 8 3 L 8 13 M 3 8 L 13 8"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+          />
+        </symbol>
+        <!-- 按钮 icon: 删除 X -->
+        <symbol id="ico-x" viewBox="0 0 16 16">
+          <path
+            d="M 4 4 L 12 12 M 12 4 L 4 12"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+          />
+        </symbol>
+
+        <!-- 占位剪影头像 -->
+        <symbol id="portrait" viewBox="0 0 64 64">
+          <circle cx="32" cy="24" r="11" fill="#fff" opacity="0.95" />
+          <path
+            d="M 8 60 Q 8 38 32 38 Q 56 38 56 60 Z"
+            fill="#fff"
+            opacity="0.92"
+          />
+        </symbol>
+      </defs>
+    </svg>
+
+    <div class="gta-bg-layer" aria-hidden="true"></div>
+
+    <div class="gta-shell">
+      <!-- ===== 顶部 nav ===== -->
+      <header class="gta-topbar">
+        <div class="gta-brand">
+          <span class="gta-brand-mark">原神配队助手</span>
+          <span class="gta-brand-sub">v0.5</span>
+        </div>
+
+        <nav class="gta-nav" aria-label="primary">
+          <button class="gta-nav-item is-active" type="button">角色</button>
+          <button class="gta-nav-item" type="button">推荐</button>
+          <button class="gta-nav-item" type="button">历史</button>
+          <button class="gta-nav-item" type="button">绑定</button>
+          <button class="gta-nav-item" type="button">设置</button>
+        </nav>
+      </header>
+
+      <!-- ===== profile cluster ===== -->
+      <section class="gta-profile-cluster">
+        <div class="gta-corner-piece tl"><svg><use href="#corner-piece" /></svg></div>
+        <div class="gta-corner-piece tr"><svg><use href="#corner-piece" /></svg></div>
+        <div class="gta-corner-piece bl"><svg><use href="#corner-piece" /></svg></div>
+        <div class="gta-corner-piece br"><svg><use href="#corner-piece" /></svg></div>
+
+        <div class="gta-profile-cluster-inner">
+          <!-- UID tabs -->
+          <div class="gta-uid-tabs">
+            <button class="gta-uid-tab is-active" type="button">
+              <span class="uid">UID · 102468135</span>
+              <span class="nickname">星轨拾光</span>
+              <span class="count">12 个角色</span>
+            </button>
+            <button class="gta-uid-tab" type="button">
+              <span class="uid">UID · 178239465</span>
+              <span class="nickname">月下闲庭</span>
+              <span class="count">8 个角色</span>
+            </button>
+            <button class="gta-uid-tab" type="button">
+              <span class="uid">UID · 600842713</span>
+              <span class="nickname">夜泊枫桥</span>
+              <span class="count">5 个角色</span>
+            </button>
+          </div>
+
+          <!-- meta + actions -->
+          <div class="gta-profile-row">
+            <div class="gta-meta-grid">
+              <div class="gta-meta-cell">
+                <span class="gta-meta-label">UID</span>
+                <span class="gta-meta-value is-mono">102468135</span>
+              </div>
+              <div class="gta-meta-cell">
+                <span class="gta-meta-label">昵称</span>
+                <span class="gta-meta-value">星轨拾光</span>
+              </div>
+              <div class="gta-meta-cell">
+                <span class="gta-meta-label">世界等级</span>
+                <span class="gta-meta-value is-mono">8</span>
+              </div>
+              <div class="gta-meta-cell">
+                <span class="gta-meta-label">已同步</span>
+                <span class="gta-meta-value is-mono">2026-05-11 14:32</span>
+              </div>
+            </div>
+
+            <div class="gta-actions">
+              <button class="gta-btn" type="button">
+                <span class="gta-btn-icon"><svg><use href="#ico-refresh" /></svg></span>
+                刷新数据
+              </button>
+              <button class="gta-btn gta-btn--light" type="button">
+                <span class="gta-btn-icon"><svg><use href="#ico-plus" /></svg></span>
+                绑定新账号
+              </button>
+              <button class="gta-btn gta-btn--light gta-btn--danger" type="button">
+                <span class="gta-btn-icon"><svg><use href="#ico-x" /></svg></span>
+                删除缓存
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== Section title ===== -->
+      <h1 class="gta-section-title">
+        我的角色
+        <span class="gta-section-sub">roster · enka.network</span>
+      </h1>
+
+      <!-- ===== Character grid ===== -->
+      <div class="gta-grid">
+        <!-- 1 Pyro -->
+        <article class="gta-card" data-element="pyro">
+          <div class="gta-card-head">
+            <div class="gta-portrait">
+              <div class="gta-portrait-frame"><svg><use href="#portrait" /></svg></div>
+              <div class="gta-portrait-element"><svg><use href="#el-pyro" /></svg></div>
+            </div>
+            <div class="gta-identity">
+              <h3 class="gta-name">朝霞拂晓</h3>
+              <div class="gta-rank-row">
+                <span class="gta-rank-stars r5">
+                  <svg><use href="#star" /></svg>
+                  <svg><use href="#star" /></svg>
+                  <svg><use href="#star" /></svg>
+                  <svg><use href="#star" /></svg>
+                  <svg><use href="#star" /></svg>
+                </span>
+                <span class="gta-level">LV <span class="num">90</span> / 90</span>
+              </div>
+            </div>
+          </div>
+          <div class="gta-card-divider"></div>
+          <div class="gta-stats">
+            <div class="gta-stat"><span class="gta-stat-label">攻击</span><span class="gta-stat-value">2,184</span></div>
+            <div class="gta-stat"><span class="gta-stat-label">生命</span><span class="gta-stat-value">19,420</span></div>
+            <div class="gta-stat"><span class="gta-stat-label">防御</span><span class="gta-stat-value">812</span></div>
+            <div class="gta-stat"><span class="gta-stat-label">暴击率</span><span class="gta-stat-value">76.4<span class="pct">%</span></span></div>
+            <div class="gta-stat"><span class="gta-stat-label">暴击伤害</span><span class="gta-stat-value">238.2<span class="pct">%</span></span></div>
+            <div class="gta-stat"><span class="gta-stat-label">充能效率</span><span class="gta-stat-value">126.7<span class="pct">%</span></span></div>
+            <div class="gta-stat"><span class="gta-stat-label">元素精通</span><span class="gta-stat-value">128</span></div>
+          </div>
+        </article>
+
+        <!-- 2 Hydro -->
+        <article class="gta-card" data-element="hydro">
+          <div class="gta-card-head">
+            <div class="gta-portrait">
+              <div class="gta-portrait-frame"><svg><use href="#portrait" /></svg></div>
+              <div class="gta-portrait-element"><svg><use href="#el-hydro" /></svg></div>
+            </div>
+            <div class="gta-identity">
+              <h3 class="gta-name">晚水观潮</h3>
+              <div class="gta-rank-row">
+                <span class="gta-rank-stars r5">
+                  <svg><use href="#star" /></svg><svg><use href="#star" /></svg><svg><use href="#star" /></svg><svg><use href="#star" /></svg><svg><use href="#star" /></svg>
+                </span>
+                <span class="gta-level">LV <span class="num">90</span> / 90</span>
+              </div>
+            </div>
+          </div>
+          <div class="gta-card-divider"></div>
+          <div class="gta-stats">
+            <div class="gta-stat"><span class="gta-stat-label">攻击</span><span class="gta-stat-value">1,612</span></div>
+            <div class="gta-stat"><span class="gta-stat-label">生命</span><span class="gta-stat-value">42,180</span></div>
+            <div class="gta-stat"><span class="gta-stat-label">防御</span><span class="gta-stat-value">784</span></div>
+            <div class="gta-stat"><span class="gta-stat-label">暴击率</span><span class="gta-stat-value">71.2<span class="pct">%</span></span></div>
+            <div class="gta-stat"><span class="gta-stat-label">暴击伤害</span><span class="gta-stat-value">214.8<span class="pct">%</span></span></div>
+            <div class="gta-stat"><span class="gta-stat-label">充能效率</span><span class="gta-stat-value">182.4<span class="pct">%</span></span></div>
+            <div class="gta-stat"><span class="gta-stat-label">元素精通</span><span class="gta-stat-value">86</span></div>
+          </div>
+        </article>
+
+        <!-- 3 Cryo -->
+        <article class="gta-card" data-element="cryo">
+          <div class="gta-card-head">
+            <div class="gta-portrait">
+              <div class="gta-portrait-frame"><svg><use href="#portrait" /></svg></div>
+              <div class="gta-portrait-element"><svg><use href="#el-cryo" /></svg></div>
+            </div>
+            <div class="gta-identity">
+              <h3 class="gta-name">林霜未央</h3>
+              <div class="gta-rank-row">
+                <span class="gta-rank-stars">
+                  <svg><use href="#star" /></svg><svg><use href="#star" /></svg><svg><use href="#star" /></svg><svg><use href="#star" /></svg>
+                </span>
+                <span class="gta-level">LV <span class="num">80</span> / 80</span>
+              </div>
+            </div>
+          </div>
+          <div class="gta-card-divider"></div>
+          <div class="gta-stats">
+            <div class="gta-stat"><span class="gta-stat-label">攻击</span><span class="gta-stat-value">1,948</span></div>
+            <div class="gta-stat"><span class="gta-stat-label">生命</span><span class="gta-stat-value">14,256</span></div>
+            <div class="gta-stat"><span class="gta-stat-label">防御</span><span class="gta-stat-value">766</span></div>
+            <div class="gta-stat"><span class="gta-stat-label">暴击率</span><span class="gta-stat-value">64.8<span class="pct">%</span></span></div>
+            <div class="gta-stat"><span class="gta-stat-label">暴击伤害</span><span class="gta-stat-value">172.6<span class="pct">%</span></span></div>
+            <div class="gta-stat"><span class="gta-stat-label">充能效率</span><span class="gta-stat-value">158.2<span class="pct">%</span></span></div>
+            <div class="gta-stat"><span class="gta-stat-label">元素精通</span><span class="gta-stat-value">62</span></div>
+          </div>
+        </article>
+
+        <!-- 4 Electro -->
+        <article class="gta-card" data-element="electro">
+          <div class="gta-card-head">
+            <div class="gta-portrait">
+              <div class="gta-portrait-frame"><svg><use href="#portrait" /></svg></div>
+              <div class="gta-portrait-element"><svg><use href="#el-electro" /></svg></div>
+            </div>
+            <div class="gta-identity">
+              <h3 class="gta-name">鸣雷骤起</h3>
+              <div class="gta-rank-row">
+                <span class="gta-rank-stars r5">
+                  <svg><use href="#star" /></svg><svg><use href="#star" /></svg><svg><use href="#star" /></svg><svg><use href="#star" /></svg><svg><use href="#star" /></svg>
+                </span>
+                <span class="gta-level">LV <span class="num">87</span> / 90</span>
+              </div>
+            </div>
+          </div>
+          <div class="gta-card-divider"></div>
+          <div class="gta-stats">
+            <div class="gta-stat"><span class="gta-stat-label">攻击</span><span class="gta-stat-value">2,322</span></div>
+            <div class="gta-stat"><span class="gta-stat-label">生命</span><span class="gta-stat-value">22,818</span></div>
+            <div class="gta-stat"><span class="gta-stat-label">防御</span><span class="gta-stat-value">920</span></div>
+            <div class="gta-stat"><span class="gta-stat-label">暴击率</span><span class="gta-stat-value">68.4<span class="pct">%</span></span></div>
+            <div class="gta-stat"><span class="gta-stat-label">暴击伤害</span><span class="gta-stat-value">242.6<span class="pct">%</span></span></div>
+            <div class="gta-stat"><span class="gta-stat-label">充能效率</span><span class="gta-stat-value">144.0<span class="pct">%</span></span></div>
+            <div class="gta-stat"><span class="gta-stat-label">元素精通</span><span class="gta-stat-value">106</span></div>
+          </div>
+        </article>
+
+        <!-- 5 Geo -->
+        <article class="gta-card" data-element="geo">
+          <div class="gta-card-head">
+            <div class="gta-portrait">
+              <div class="gta-portrait-frame"><svg><use href="#portrait" /></svg></div>
+              <div class="gta-portrait-element"><svg><use href="#el-geo" /></svg></div>
+            </div>
+            <div class="gta-identity">
+              <h3 class="gta-name">守岩立柱</h3>
+              <div class="gta-rank-row">
+                <span class="gta-rank-stars r5">
+                  <svg><use href="#star" /></svg><svg><use href="#star" /></svg><svg><use href="#star" /></svg><svg><use href="#star" /></svg><svg><use href="#star" /></svg>
+                </span>
+                <span class="gta-level">LV <span class="num">90</span> / 90</span>
+              </div>
+            </div>
+          </div>
+          <div class="gta-card-divider"></div>
+          <div class="gta-stats">
+            <div class="gta-stat"><span class="gta-stat-label">攻击</span><span class="gta-stat-value">1,308</span></div>
+            <div class="gta-stat"><span class="gta-stat-label">生命</span><span class="gta-stat-value">48,560</span></div>
+            <div class="gta-stat"><span class="gta-stat-label">防御</span><span class="gta-stat-value">1,012</span></div>
+            <div class="gta-stat"><span class="gta-stat-label">暴击率</span><span class="gta-stat-value">54.8<span class="pct">%</span></span></div>
+            <div class="gta-stat"><span class="gta-stat-label">暴击伤害</span><span class="gta-stat-value">152.4<span class="pct">%</span></span></div>
+            <div class="gta-stat"><span class="gta-stat-label">充能效率</span><span class="gta-stat-value">132.6<span class="pct">%</span></span></div>
+            <div class="gta-stat"><span class="gta-stat-label">元素精通</span><span class="gta-stat-value">42</span></div>
+          </div>
+        </article>
+
+        <!-- 6 Anemo -->
+        <article class="gta-card" data-element="anemo">
+          <div class="gta-card-head">
+            <div class="gta-portrait">
+              <div class="gta-portrait-frame"><svg><use href="#portrait" /></svg></div>
+              <div class="gta-portrait-element"><svg><use href="#el-anemo" /></svg></div>
+            </div>
+            <div class="gta-identity">
+              <h3 class="gta-name">抚风听竹</h3>
+              <div class="gta-rank-row">
+                <span class="gta-rank-stars">
+                  <svg><use href="#star" /></svg><svg><use href="#star" /></svg><svg><use href="#star" /></svg><svg><use href="#star" /></svg>
+                </span>
+                <span class="gta-level">LV <span class="num">84</span> / 90</span>
+              </div>
+            </div>
+          </div>
+          <div class="gta-card-divider"></div>
+          <div class="gta-stats">
+            <div class="gta-stat"><span class="gta-stat-label">攻击</span><span class="gta-stat-value">1,762</span></div>
+            <div class="gta-stat"><span class="gta-stat-label">生命</span><span class="gta-stat-value">17,608</span></div>
+            <div class="gta-stat"><span class="gta-stat-label">防御</span><span class="gta-stat-value">682</span></div>
+            <div class="gta-stat"><span class="gta-stat-label">暴击率</span><span class="gta-stat-value">62.2<span class="pct">%</span></span></div>
+            <div class="gta-stat"><span class="gta-stat-label">暴击伤害</span><span class="gta-stat-value">186.4<span class="pct">%</span></span></div>
+            <div class="gta-stat"><span class="gta-stat-label">充能效率</span><span class="gta-stat-value">216.8<span class="pct">%</span></span></div>
+            <div class="gta-stat"><span class="gta-stat-label">元素精通</span><span class="gta-stat-value">148</span></div>
+          </div>
+        </article>
+
+        <!-- 7 Dendro -->
+        <article class="gta-card" data-element="dendro">
+          <div class="gta-card-head">
+            <div class="gta-portrait">
+              <div class="gta-portrait-frame"><svg><use href="#portrait" /></svg></div>
+              <div class="gta-portrait-element"><svg><use href="#el-dendro" /></svg></div>
+            </div>
+            <div class="gta-identity">
+              <h3 class="gta-name">林芽新生</h3>
+              <div class="gta-rank-row">
+                <span class="gta-rank-stars r5">
+                  <svg><use href="#star" /></svg><svg><use href="#star" /></svg><svg><use href="#star" /></svg><svg><use href="#star" /></svg><svg><use href="#star" /></svg>
+                </span>
+                <span class="gta-level">LV <span class="num">90</span> / 90</span>
+              </div>
+            </div>
+          </div>
+          <div class="gta-card-divider"></div>
+          <div class="gta-stats">
+            <div class="gta-stat"><span class="gta-stat-label">攻击</span><span class="gta-stat-value">1,484</span></div>
+            <div class="gta-stat"><span class="gta-stat-label">生命</span><span class="gta-stat-value">21,124</span></div>
+            <div class="gta-stat"><span class="gta-stat-label">防御</span><span class="gta-stat-value">724</span></div>
+            <div class="gta-stat"><span class="gta-stat-label">暴击率</span><span class="gta-stat-value">58.6<span class="pct">%</span></span></div>
+            <div class="gta-stat"><span class="gta-stat-label">暴击伤害</span><span class="gta-stat-value">168.2<span class="pct">%</span></span></div>
+            <div class="gta-stat"><span class="gta-stat-label">充能效率</span><span class="gta-stat-value">142.4<span class="pct">%</span></span></div>
+            <div class="gta-stat"><span class="gta-stat-label">元素精通</span><span class="gta-stat-value">232</span></div>
+          </div>
+        </article>
+
+        <!-- 8 Cryo -->
+        <article class="gta-card" data-element="cryo">
+          <div class="gta-card-head">
+            <div class="gta-portrait">
+              <div class="gta-portrait-frame"><svg><use href="#portrait" /></svg></div>
+              <div class="gta-portrait-element"><svg><use href="#el-cryo" /></svg></div>
+            </div>
+            <div class="gta-identity">
+              <h3 class="gta-name">月华映雪</h3>
+              <div class="gta-rank-row">
+                <span class="gta-rank-stars">
+                  <svg><use href="#star" /></svg><svg><use href="#star" /></svg><svg><use href="#star" /></svg><svg><use href="#star" /></svg>
+                </span>
+                <span class="gta-level">LV <span class="num">76</span> / 80</span>
+              </div>
+            </div>
+          </div>
+          <div class="gta-card-divider"></div>
+          <div class="gta-stats">
+            <div class="gta-stat"><span class="gta-stat-label">攻击</span><span class="gta-stat-value">1,366</span></div>
+            <div class="gta-stat"><span class="gta-stat-label">生命</span><span class="gta-stat-value">11,884</span></div>
+            <div class="gta-stat"><span class="gta-stat-label">防御</span><span class="gta-stat-value">628</span></div>
+            <div class="gta-stat"><span class="gta-stat-label">暴击率</span><span class="gta-stat-value">48.2<span class="pct">%</span></span></div>
+            <div class="gta-stat"><span class="gta-stat-label">暴击伤害</span><span class="gta-stat-value">154.8<span class="pct">%</span></span></div>
+            <div class="gta-stat"><span class="gta-stat-label">充能效率</span><span class="gta-stat-value">188.6<span class="pct">%</span></span></div>
+            <div class="gta-stat"><span class="gta-stat-label">元素精通</span><span class="gta-stat-value">54</span></div>
+          </div>
+        </article>
+      </div>
+    </div>
+  </body>
+</html>
