@@ -6,6 +6,7 @@ import type {
   ProfileStateView,
   RecommendationResult
 } from '../../../shared/domain';
+import { ButtonGlyph } from '../../design/Icons';
 
 interface AdvisorPageProps {
   state: ProfileStateView;
@@ -75,12 +76,9 @@ export function AdvisorPage({ state, onGotoOnboarding }: AdvisorPageProps) {
       case 'started':
         setRun({ kind: 'running' });
         setter(() => ({ stage: 'starting', message: '', streamText: '', result: null }));
-        if (event.side === 'left' || event.side === 'right') {
-          // 对比开始时清空对面侧（防止上一次残留）
-          if (event.side === 'left') {
-            setDiffSummary('');
-            setRight(emptySideState());
-          }
+        if (event.side === 'left') {
+          setDiffSummary('');
+          setRight(emptySideState());
         }
         break;
       case 'progress':
@@ -172,141 +170,203 @@ export function AdvisorPage({ state, onGotoOnboarding }: AdvisorPageProps) {
 
   if (!activeUid) {
     return (
-      <section className="advisor-page">
-        <p className="hint">还没有绑定 UID。先去绑定一个账号再来生成推荐。</p>
-        <button type="button" onClick={onGotoOnboarding}>
-          去绑定
-        </button>
+      <section>
+        <h2 className="gta-section-title">
+          AI 配队推荐
+          <span className="gta-section-sub">ADVISOR</span>
+        </h2>
+        <div className="gta-panel">
+          <div className="gta-panel-body">
+            <p className="gta-hint">还没有绑定 UID。先去绑定一个账号再来生成推荐。</p>
+            <div className="gta-actions">
+              <button type="button" className="gta-btn" onClick={onGotoOnboarding}>
+                <span className="gta-btn-icon">
+                  <ButtonGlyph name="plus" />
+                </span>
+                去绑定
+              </button>
+            </div>
+          </div>
+        </div>
       </section>
     );
   }
 
   return (
-    <section className="advisor-page">
-      <header className="advisor-header">
-        <div>
-          <h2>AI 配队推荐</h2>
-          <p className="hint">基于当前 UID {activeUid} 的角色面板，调用你配置的 LLM 生成推荐。</p>
-        </div>
-        <div className="mode-switch">
+    <section>
+      <div className="gta-page-head">
+        <h2 className="gta-section-title">
+          AI 配队推荐
+          <span className="gta-section-sub">UID {activeUid}</span>
+        </h2>
+        <div className="gta-segment">
           <button
             type="button"
-            className={mode === 'single' ? 'nav-active' : ''}
+            className={mode === 'single' ? 'is-active' : ''}
             onClick={() => setMode('single')}
           >
             单环境
           </button>
           <button
             type="button"
-            className={mode === 'compare' ? 'nav-active' : ''}
+            className={mode === 'compare' ? 'is-active' : ''}
             onClick={() => setMode('compare')}
           >
             双环境对比
           </button>
         </div>
-      </header>
+      </div>
 
       {mode === 'single' && (
         <>
-          <div className="advisor-form">
-            <label>
-              本期敌人
-              <textarea
-                value={singleEnemies}
-                onChange={(event) => setSingleEnemies(event.target.value)}
-                spellCheck={false}
-              />
-            </label>
-            <label>
-              偏好（可选）
-              <input
-                type="text"
-                value={singlePref}
-                onChange={(event) => setSinglePref(event.target.value)}
-              />
-            </label>
-            <div className="button-row">
-              <button type="button" onClick={() => void handleSingleRun()} disabled={isRunning}>
-                {isRunning ? '推荐生成中…' : 'AI 推荐'}
-              </button>
-              {isRunning && (
-                <button type="button" className="danger" onClick={() => void handleCancel()}>
-                  取消
-                </button>
-              )}
+          <div className="gta-panel" style={{ marginBottom: 'var(--gta-s4)' }}>
+            <div className="gta-panel-body">
+              <div className="gta-form">
+                <label className="gta-field">
+                  <span className="gta-field-label">本期敌人</span>
+                  <textarea
+                    className="gta-textarea"
+                    value={singleEnemies}
+                    onChange={(event) => setSingleEnemies(event.target.value)}
+                    spellCheck={false}
+                    placeholder="多个敌人用逗号或换行分隔"
+                  />
+                </label>
+                <label className="gta-field">
+                  <span className="gta-field-label">偏好（可选）</span>
+                  <input
+                    type="text"
+                    className="gta-input"
+                    value={singlePref}
+                    onChange={(event) => setSinglePref(event.target.value)}
+                  />
+                </label>
+                <div className="gta-actions">
+                  <button
+                    type="button"
+                    className="gta-btn"
+                    onClick={() => void handleSingleRun()}
+                    disabled={isRunning}
+                  >
+                    <span className="gta-btn-icon">
+                      <ButtonGlyph name="check" />
+                    </span>
+                    {isRunning ? '推荐生成中…' : 'AI 推荐'}
+                  </button>
+                  {isRunning && (
+                    <button
+                      type="button"
+                      className="gta-btn gta-btn--danger"
+                      onClick={() => void handleCancel()}
+                    >
+                      <span className="gta-btn-icon">
+                        <ButtonGlyph name="x" />
+                      </span>
+                      取消
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
 
-          <SidePanel
-            title="单环境结果"
-            sideState={single}
-            scrollRef={singleScrollRef}
-          />
+          <SidePanel title="单环境结果" sideState={single} scrollRef={singleScrollRef} />
         </>
       )}
 
       {mode === 'compare' && (
         <>
-          <div className="compare-grid">
-            <div className="advisor-form">
-              <h3>环境 A</h3>
-              <label>
-                敌人
-                <textarea
-                  value={leftEnemies}
-                  onChange={(event) => setLeftEnemies(event.target.value)}
-                  spellCheck={false}
-                />
-              </label>
-              <label>
-                偏好
-                <input
-                  type="text"
-                  value={leftPref}
-                  onChange={(event) => setLeftPref(event.target.value)}
-                />
-              </label>
+          <div className="gta-compare-grid" style={{ marginBottom: 'var(--gta-s4)' }}>
+            <div className="gta-panel">
+              <div className="gta-panel-body">
+                <h3 className="gta-name" style={{ fontSize: 'var(--gta-text-lg)' }}>
+                  环境 A
+                </h3>
+                <div className="gta-form">
+                  <label className="gta-field">
+                    <span className="gta-field-label">敌人</span>
+                    <textarea
+                      className="gta-textarea"
+                      value={leftEnemies}
+                      onChange={(event) => setLeftEnemies(event.target.value)}
+                      spellCheck={false}
+                    />
+                  </label>
+                  <label className="gta-field">
+                    <span className="gta-field-label">偏好</span>
+                    <input
+                      type="text"
+                      className="gta-input"
+                      value={leftPref}
+                      onChange={(event) => setLeftPref(event.target.value)}
+                    />
+                  </label>
+                </div>
+              </div>
             </div>
-            <div className="advisor-form">
-              <h3>环境 B</h3>
-              <label>
-                敌人
-                <textarea
-                  value={rightEnemies}
-                  onChange={(event) => setRightEnemies(event.target.value)}
-                  spellCheck={false}
-                />
-              </label>
-              <label>
-                偏好
-                <input
-                  type="text"
-                  value={rightPref}
-                  onChange={(event) => setRightPref(event.target.value)}
-                />
-              </label>
+            <div className="gta-panel">
+              <div className="gta-panel-body">
+                <h3 className="gta-name" style={{ fontSize: 'var(--gta-text-lg)' }}>
+                  环境 B
+                </h3>
+                <div className="gta-form">
+                  <label className="gta-field">
+                    <span className="gta-field-label">敌人</span>
+                    <textarea
+                      className="gta-textarea"
+                      value={rightEnemies}
+                      onChange={(event) => setRightEnemies(event.target.value)}
+                      spellCheck={false}
+                    />
+                  </label>
+                  <label className="gta-field">
+                    <span className="gta-field-label">偏好</span>
+                    <input
+                      type="text"
+                      className="gta-input"
+                      value={rightPref}
+                      onChange={(event) => setRightPref(event.target.value)}
+                    />
+                  </label>
+                </div>
+              </div>
             </div>
           </div>
 
-          <div className="button-row">
-            <button type="button" onClick={() => void handleCompareRun()} disabled={isRunning}>
+          <div className="gta-actions" style={{ marginBottom: 'var(--gta-s4)' }}>
+            <button
+              type="button"
+              className="gta-btn"
+              onClick={() => void handleCompareRun()}
+              disabled={isRunning}
+            >
+              <span className="gta-btn-icon">
+                <ButtonGlyph name="check" />
+              </span>
               {isRunning ? '对比生成中…' : '生成双环境对比'}
             </button>
             {isRunning && (
-              <button type="button" className="danger" onClick={() => void handleCancel()}>
+              <button
+                type="button"
+                className="gta-btn gta-btn--danger"
+                onClick={() => void handleCancel()}
+              >
+                <span className="gta-btn-icon">
+                  <ButtonGlyph name="x" />
+                </span>
                 取消
               </button>
             )}
           </div>
 
           {diffSummary && (
-            <div className="diff-summary">
-              <span className="muted">差异：</span>
+            <div className="gta-diff-summary" style={{ marginBottom: 'var(--gta-s4)' }}>
+              <span className="gta-team-line-label">差异</span>
               {diffSummary}
             </div>
           )}
 
-          <div className="compare-grid">
+          <div className="gta-compare-grid">
             <SidePanel title="环境 A" sideState={left} scrollRef={leftScrollRef} />
             <SidePanel title="环境 B" sideState={right} scrollRef={rightScrollRef} />
           </div>
@@ -314,7 +374,9 @@ export function AdvisorPage({ state, onGotoOnboarding }: AdvisorPageProps) {
       )}
 
       {run.kind === 'error' && run.message && (
-        <p className="error">推荐请求失败：{run.message}</p>
+        <p className="gta-error" style={{ marginTop: 'var(--gta-s4)' }}>
+          推荐请求失败：{run.message}
+        </p>
       )}
     </section>
   );
@@ -327,47 +389,70 @@ interface SidePanelProps {
 }
 
 function SidePanel({ title, sideState, scrollRef }: SidePanelProps) {
+  if (!sideState.stage && !sideState.result) {
+    return null;
+  }
+  const isLlm = sideState.result?.source === 'llm';
   return (
-    <div className="side-panel">
-      <h3 className="side-panel-title">{title}</h3>
-      {sideState.stage && (
-        <div className="advisor-progress">
-          <p>
-            <span className="muted">阶段：</span>
-            <code>{sideState.stage}</code>
-            {sideState.message && <span className="muted"> · {sideState.message}</span>}
-          </p>
-          {sideState.streamText && (
-            <pre ref={scrollRef} className="advisor-stream">
-              {sideState.streamText}
-            </pre>
+    <div className="gta-panel">
+      <div className="gta-panel-body">
+        <div className="gta-page-head" style={{ marginBottom: 0 }}>
+          <h3
+            className="gta-name"
+            style={{ fontSize: 'var(--gta-text-lg)', margin: 0 }}
+          >
+            {title}
+          </h3>
+          {sideState.result && (
+            <span className={isLlm ? 'gta-tag is-llm' : 'gta-tag is-fallback'}>
+              {isLlm ? 'LLM' : '本地启发式'} · {sideState.result.teams.length} 套
+            </span>
           )}
         </div>
-      )}
-      {sideState.result && (
-        <div className="advisor-result">
-          <h4>
-            {sideState.result.source === 'llm' ? 'LLM 推荐' : '本地启发式'} · {sideState.result.teams.length} 套
-          </h4>
-          <p>{sideState.result.summary}</p>
-          {sideState.result.teams.map((team, index) => (
-            <article key={`${team.name}-${index}`} className="team-card">
-              <h4>{team.name}</h4>
-              <p className="muted">
-                {team.characters.map((character) => `${character.name}(${character.element})`).join(' · ')}
-              </p>
-              <p>
-                <span className="muted">思路：</span>
-                {team.reasoning}
-              </p>
-              <p>
-                <span className="muted">手法：</span>
-                {team.rotationTip}
-              </p>
-            </article>
-          ))}
-        </div>
-      )}
+
+        {sideState.stage && (
+          <div className="gta-stream-wrap">
+            <p className="gta-progress-line">
+              <span className="gta-team-line-label">阶段</span>
+              <code>{sideState.stage}</code>
+              {sideState.message && (
+                <span style={{ color: 'var(--gta-text-on-light-faint)' }}>
+                  · {sideState.message}
+                </span>
+              )}
+            </p>
+            {sideState.streamText && (
+              <pre ref={scrollRef} className="gta-stream">
+                {sideState.streamText}
+              </pre>
+            )}
+          </div>
+        )}
+
+        {sideState.result && (
+          <div className="gta-form">
+            <p style={{ margin: 0 }}>{sideState.result.summary}</p>
+            {sideState.result.teams.map((team, index) => (
+              <article key={`${team.name}-${index}`} className="gta-team-card">
+                <h4>{team.name}</h4>
+                <p className="gta-team-roster">
+                  {team.characters
+                    .map((character) => `${character.name}(${character.element})`)
+                    .join(' · ')}
+                </p>
+                <p>
+                  <span className="gta-team-line-label">思路</span>
+                  {team.reasoning}
+                </p>
+                <p>
+                  <span className="gta-team-line-label">手法</span>
+                  {team.rotationTip}
+                </p>
+              </article>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

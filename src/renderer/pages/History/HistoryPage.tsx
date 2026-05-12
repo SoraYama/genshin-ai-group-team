@@ -5,6 +5,7 @@ import type {
   ProfileStateView,
   RecommendationHistoryEntry
 } from '../../../shared/domain';
+import { ButtonGlyph } from '../../design/Icons';
 
 interface HistoryPageProps {
   state: ProfileStateView;
@@ -112,96 +113,128 @@ export function HistoryPage({ state }: HistoryPageProps) {
   }
 
   return (
-    <section className="history-page">
-      <header className="history-header">
-        <h2>推荐历史</h2>
-        <p className="hint">最多保留最近 200 条；删除后无法恢复。</p>
-      </header>
+    <section>
+      <h2 className="gta-section-title">
+        推荐历史
+        <span className="gta-section-sub">HISTORY · MAX 200</span>
+      </h2>
 
-      <div className="history-filters">
-        <label>
-          范围
-          <select
-            value={filters.scope}
-            onChange={(event) =>
-              setFilters((prev) => ({
-                ...prev,
-                scope: event.target.value as Filters['scope']
-              }))
-            }
-          >
-            <option value="active">当前 UID</option>
-            <option value="all">全部 UID</option>
-          </select>
-        </label>
-        <label>
-          来源
-          <select
-            value={filters.source}
-            onChange={(event) =>
-              setFilters((prev) => ({
-                ...prev,
-                source: event.target.value as SourceFilter
-              }))
-            }
-          >
-            <option value="all">全部</option>
-            <option value="llm">LLM</option>
-            <option value="fallback">本地启发式</option>
-          </select>
-        </label>
-        <label>
-          敌人关键词
-          <input
-            type="text"
-            value={filters.enemyKeyword}
-            onChange={(event) =>
-              setFilters((prev) => ({ ...prev, enemyKeyword: event.target.value }))
-            }
-          />
-        </label>
-        <label>
-          起始日期
-          <input
-            type="date"
-            value={filters.fromDate}
-            onChange={(event) => setFilters((prev) => ({ ...prev, fromDate: event.target.value }))}
-          />
-        </label>
-        <label>
-          结束日期
-          <input
-            type="date"
-            value={filters.toDate}
-            onChange={(event) => setFilters((prev) => ({ ...prev, toDate: event.target.value }))}
-          />
-        </label>
-        <label>
-          每页
-          <input
-            type="number"
-            min={1}
-            max={100}
-            value={filters.limit}
-            onChange={(event) =>
-              setFilters((prev) => ({ ...prev, limit: Math.max(1, Number(event.target.value) || 20) }))
-            }
-          />
-        </label>
+      <div className="gta-panel" style={{ marginBottom: 'var(--gta-s4)' }}>
+        <div className="gta-panel-body">
+          <div className="gta-form-grid">
+            <label className="gta-field">
+              <span className="gta-field-label">范围</span>
+              <select
+                className="gta-select"
+                value={filters.scope}
+                onChange={(event) =>
+                  setFilters((prev) => ({
+                    ...prev,
+                    scope: event.target.value as Filters['scope']
+                  }))
+                }
+              >
+                <option value="active">当前 UID</option>
+                <option value="all">全部 UID</option>
+              </select>
+            </label>
+            <label className="gta-field">
+              <span className="gta-field-label">来源</span>
+              <select
+                className="gta-select"
+                value={filters.source}
+                onChange={(event) =>
+                  setFilters((prev) => ({
+                    ...prev,
+                    source: event.target.value as SourceFilter
+                  }))
+                }
+              >
+                <option value="all">全部</option>
+                <option value="llm">LLM</option>
+                <option value="fallback">本地启发式</option>
+              </select>
+            </label>
+            <label className="gta-field">
+              <span className="gta-field-label">敌人关键词</span>
+              <input
+                type="text"
+                className="gta-input"
+                value={filters.enemyKeyword}
+                onChange={(event) =>
+                  setFilters((prev) => ({ ...prev, enemyKeyword: event.target.value }))
+                }
+              />
+            </label>
+            <label className="gta-field">
+              <span className="gta-field-label">起始日期</span>
+              <input
+                type="date"
+                className="gta-input is-mono"
+                value={filters.fromDate}
+                onChange={(event) =>
+                  setFilters((prev) => ({ ...prev, fromDate: event.target.value }))
+                }
+              />
+            </label>
+            <label className="gta-field">
+              <span className="gta-field-label">结束日期</span>
+              <input
+                type="date"
+                className="gta-input is-mono"
+                value={filters.toDate}
+                onChange={(event) =>
+                  setFilters((prev) => ({ ...prev, toDate: event.target.value }))
+                }
+              />
+            </label>
+            <label className="gta-field">
+              <span className="gta-field-label">每页</span>
+              <input
+                type="number"
+                className="gta-input is-mono"
+                min={1}
+                max={100}
+                value={filters.limit}
+                onChange={(event) =>
+                  setFilters((prev) => ({
+                    ...prev,
+                    limit: Math.max(1, Number(event.target.value) || 20)
+                  }))
+                }
+              />
+            </label>
+          </div>
+
+          <div className="gta-actions" style={{ marginTop: 'var(--gta-s4)' }}>
+            <button
+              type="button"
+              className="gta-btn"
+              onClick={() => void applyFilters()}
+              disabled={loading}
+            >
+              <span className="gta-btn-icon">
+                <ButtonGlyph name="refresh" />
+              </span>
+              {loading ? '加载中…' : '应用筛选'}
+            </button>
+            <button
+              type="button"
+              className="gta-btn gta-btn--danger"
+              onClick={() => void clearMatching()}
+            >
+              <span className="gta-btn-icon">
+                <ButtonGlyph name="trash" />
+              </span>
+              删除匹配项
+            </button>
+          </div>
+        </div>
       </div>
 
-      <div className="button-row">
-        <button type="button" onClick={() => void applyFilters()} disabled={loading}>
-          {loading ? '加载中…' : '应用筛选'}
-        </button>
-        <button type="button" className="danger" onClick={() => void clearMatching()}>
-          删除匹配项
-        </button>
-      </div>
+      {error && <p className="gta-error">{error}</p>}
 
-      {error && <p className="error">{error}</p>}
-
-      <div className="history-stats">
+      <p className="gta-history-stats">
         <span>共 {query.total} 条</span>
         <span>
           当前页：
@@ -209,12 +242,16 @@ export function HistoryPage({ state }: HistoryPageProps) {
             ? '0-0'
             : `${query.offset + 1}-${Math.min(query.offset + query.limit, query.total)}`}
         </span>
-      </div>
+      </p>
 
       {query.items.length === 0 ? (
-        <p className="hint">暂无匹配的历史记录。</p>
+        <div className="gta-panel">
+          <div className="gta-panel-body">
+            <p className="gta-hint">暂无匹配的历史记录。</p>
+          </div>
+        </div>
       ) : (
-        <ul className="history-list">
+        <ul className="gta-history-list">
           {query.items.map((item) => (
             <HistoryListItem
               key={item.id}
@@ -227,11 +264,21 @@ export function HistoryPage({ state }: HistoryPageProps) {
         </ul>
       )}
 
-      <div className="button-row">
-        <button type="button" onClick={() => void gotoPrev()} disabled={query.offset === 0}>
+      <div className="gta-actions" style={{ marginTop: 'var(--gta-s4)' }}>
+        <button
+          type="button"
+          className="gta-btn gta-btn--ghost"
+          onClick={() => void gotoPrev()}
+          disabled={query.offset === 0}
+        >
           上一页
         </button>
-        <button type="button" onClick={() => void gotoNext()} disabled={!query.hasMore}>
+        <button
+          type="button"
+          className="gta-btn gta-btn--ghost"
+          onClick={() => void gotoNext()}
+          disabled={!query.hasMore}
+        >
           下一页
         </button>
       </div>
@@ -247,47 +294,58 @@ interface HistoryListItemProps {
 }
 
 function HistoryListItem({ item, expanded, onToggle, onDelete }: HistoryListItemProps) {
+  const isLlm = item.result.source === 'llm';
   return (
-    <li className={`history-entry ${expanded ? 'history-entry-expanded' : ''}`}>
-      <button type="button" className="history-entry-summary" onClick={onToggle}>
-        <span className="history-entry-time">{new Date(item.createdAt).toLocaleString()}</span>
-        <span className="history-entry-tag">{labelForSource(item.result.source)}</span>
+    <li className={expanded ? 'gta-history-entry is-expanded' : 'gta-history-entry'}>
+      <button type="button" className="gta-history-summary" onClick={onToggle}>
+        <span className="gta-history-time">{formatTime(item.createdAt)}</span>
+        <span className={isLlm ? 'gta-tag is-llm' : 'gta-tag is-fallback'}>
+          {isLlm ? 'LLM' : '本地'}
+        </span>
         {item.side !== 'single' && (
-          <span className="history-entry-tag tag-compare">{item.side === 'left' ? '对比·左' : '对比·右'}</span>
+          <span className="gta-tag is-accent">
+            对比·{item.side === 'left' ? '左' : '右'}
+          </span>
         )}
-        <span className="history-entry-meta">UID {item.uid}</span>
-        <span className="history-entry-enemies">
+        <span className="gta-history-uid">UID {item.uid}</span>
+        <span className="gta-history-enemies">
           {item.enemyNames.length > 0 ? item.enemyNames.join('、') : '未指定敌人'}
         </span>
       </button>
 
       {expanded && (
-        <div className="history-entry-body">
-          <p>{item.result.summary}</p>
+        <div className="gta-history-body">
+          <p style={{ margin: 0 }}>{item.result.summary}</p>
           {item.preference && (
-            <p className="muted">
-              <span>偏好：</span>
+            <p
+              className="gta-hint"
+              style={{ margin: 0, fontSize: 'var(--gta-text-sm)' }}
+            >
+              <span className="gta-team-line-label">偏好</span>
               {item.preference}
             </p>
           )}
           {item.result.teams.map((team, index) => (
-            <article key={`${team.name}-${index}`} className="team-card">
+            <article key={`${team.name}-${index}`} className="gta-team-card">
               <h4>{team.name}</h4>
-              <p className="muted">
+              <p className="gta-team-roster">
                 {team.characters.map((c) => `${c.name}(${c.element})`).join(' · ')}
               </p>
               <p>
-                <span className="muted">思路：</span>
+                <span className="gta-team-line-label">思路</span>
                 {team.reasoning}
               </p>
               <p>
-                <span className="muted">手法：</span>
+                <span className="gta-team-line-label">手法</span>
                 {team.rotationTip}
               </p>
             </article>
           ))}
-          <div className="button-row">
-            <button type="button" className="danger" onClick={onDelete}>
+          <div className="gta-actions">
+            <button type="button" className="gta-btn gta-btn--danger" onClick={onDelete}>
+              <span className="gta-btn-icon">
+                <ButtonGlyph name="trash" />
+              </span>
               删除此条
             </button>
           </div>
@@ -297,6 +355,12 @@ function HistoryListItem({ item, expanded, onToggle, onDelete }: HistoryListItem
   );
 }
 
-function labelForSource(source: 'llm' | 'fallback'): string {
-  return source === 'llm' ? 'LLM' : '本地';
+function formatTime(iso: string): string {
+  const d = new Date(iso);
+  const yy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mi = String(d.getMinutes()).padStart(2, '0');
+  return `${yy}-${mm}-${dd} ${hh}:${mi}`;
 }

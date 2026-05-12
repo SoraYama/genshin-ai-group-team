@@ -793,6 +793,512 @@ a:hover {
   animation-delay: 570ms;
 }
 
+/* ===== Forms ===== */
+.gta-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gta-s4);
+}
+
+.gta-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--gta-s3) var(--gta-s4);
+}
+
+.gta-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.gta-field-label {
+  font-family: var(--gta-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--gta-text-on-light-faint);
+  font-weight: 600;
+}
+
+.gta-input,
+.gta-textarea,
+.gta-select {
+  width: 100%;
+  padding: 8px var(--gta-s3);
+  background: var(--gta-panel-2);
+  border: 1px solid var(--gta-stroke);
+  border-radius: var(--gta-radius-md);
+  color: var(--gta-text-on-light);
+  font-size: var(--gta-text-base);
+  transition: border-color var(--gta-dur-base), background var(--gta-dur-base),
+    box-shadow var(--gta-dur-base);
+  font-family: var(--gta-font-body);
+}
+
+.gta-input.is-mono,
+.gta-textarea.is-mono {
+  font-family: var(--gta-font-mono);
+}
+
+.gta-textarea {
+  resize: vertical;
+  min-height: 72px;
+  line-height: 1.5;
+}
+
+.gta-input:focus,
+.gta-textarea:focus,
+.gta-select:focus {
+  outline: none;
+  background: #fff;
+  border-color: var(--gta-gold);
+  box-shadow: 0 0 0 3px var(--gta-gold-soft);
+}
+
+.gta-input::placeholder,
+.gta-textarea::placeholder {
+  color: var(--gta-text-on-light-faint);
+}
+
+.gta-select {
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--gta-text-on-light-soft) 50%),
+    linear-gradient(135deg, var(--gta-text-on-light-soft) 50%, transparent 50%);
+  background-position: calc(100% - 14px) 14px, calc(100% - 9px) 14px;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: var(--gta-s8);
+  cursor: pointer;
+}
+
+/* ===== Status grid (settings status snapshot) ===== */
+.gta-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--gta-s3) var(--gta-s4);
+  margin: 0;
+}
+
+.gta-status-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--gta-s2) var(--gta-s3);
+  background: var(--gta-panel-2);
+  border-radius: var(--gta-radius-md);
+  border-left: 3px solid var(--gta-gold);
+}
+
+.gta-status-grid dt {
+  font-family: var(--gta-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--gta-text-on-light-faint);
+  margin: 0;
+}
+
+.gta-status-grid dd {
+  margin: 0;
+  font-size: var(--gta-text-md);
+  font-weight: 700;
+  color: var(--gta-text-on-light);
+  word-break: break-all;
+}
+
+/* ===== Segment control (single / compare, etc.) ===== */
+.gta-segment {
+  display: inline-flex;
+  gap: 2px;
+  padding: 4px;
+  background: var(--gta-panel-2);
+  border: 1px solid var(--gta-stroke);
+  border-radius: var(--gta-radius-pill);
+}
+
+.gta-segment button {
+  position: relative;
+  padding: 6px var(--gta-s4);
+  background: transparent;
+  border: 2px solid transparent;
+  border-radius: var(--gta-radius-pill);
+  color: var(--gta-text-on-light-soft);
+  font-size: var(--gta-text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--gta-dur-base) var(--gta-ease);
+}
+
+.gta-segment button:hover:not(.is-active) {
+  color: var(--gta-text-on-light);
+}
+
+.gta-segment button.is-active {
+  background: var(--gta-panel-dark);
+  color: var(--gta-text-on-dark);
+  border-color: #fff;
+  box-shadow: 0 0 0 1px var(--gta-gold);
+}
+
+/* ===== Page header (h2 title + meta row right) ===== */
+.gta-page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--gta-s3);
+  margin-bottom: var(--gta-s4);
+}
+
+.gta-page-head > .gta-section-title {
+  margin-bottom: 0;
+}
+
+/* ===== Tag chip ===== */
+.gta-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  background: var(--gta-panel-2);
+  border: 1px solid var(--gta-stroke);
+  border-radius: var(--gta-radius-pill);
+  font-family: var(--gta-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--gta-text-on-light-soft);
+}
+
+.gta-tag.is-accent {
+  background: var(--gta-panel-dark);
+  color: var(--gta-text-on-dark);
+  border-color: #fff;
+  box-shadow: 0 0 0 1px var(--gta-gold);
+}
+
+.gta-tag.is-llm {
+  color: var(--gta-el-hydro-flat);
+  border-color: var(--gta-el-hydro-flat);
+}
+
+.gta-tag.is-fallback {
+  color: var(--gta-el-pyro-flat);
+  border-color: var(--gta-el-pyro-flat);
+}
+
+/* ===== Advisor stream / result ===== */
+.gta-stream-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gta-s2);
+}
+
+.gta-progress-line {
+  display: flex;
+  align-items: center;
+  gap: var(--gta-s2);
+  font-size: var(--gta-text-sm);
+  color: var(--gta-text-on-light-soft);
+}
+
+.gta-progress-line code {
+  font-family: var(--gta-font-mono);
+  font-size: var(--gta-text-xs);
+  padding: 2px 8px;
+  background: var(--gta-panel-2);
+  border-radius: var(--gta-radius-sm);
+  color: var(--gta-text-on-light);
+  border: 1px solid var(--gta-stroke);
+}
+
+.gta-stream {
+  margin: 0;
+  padding: var(--gta-s3) var(--gta-s4);
+  background: var(--gta-panel-dark);
+  color: var(--gta-text-on-dark-soft);
+  border-radius: var(--gta-radius-md);
+  font-family: var(--gta-font-mono);
+  font-size: var(--gta-text-xs);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+/* ===== Team card (recommendation result) ===== */
+.gta-team-card {
+  position: relative;
+  padding: var(--gta-s3) var(--gta-s4);
+  background: var(--gta-panel-2);
+  border: 1px solid var(--gta-stroke);
+  border-left: 3px solid var(--gta-gold);
+  border-radius: var(--gta-radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.gta-team-card h4 {
+  margin: 0;
+  font-size: var(--gta-text-md);
+  font-weight: 700;
+  color: var(--gta-text-on-light);
+}
+
+.gta-team-card p {
+  margin: 0;
+  font-size: var(--gta-text-sm);
+  color: var(--gta-text-on-light);
+  line-height: 1.6;
+}
+
+.gta-team-card .gta-team-line-label {
+  font-family: var(--gta-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--gta-text-on-light-faint);
+  margin-right: 6px;
+}
+
+.gta-team-roster {
+  font-family: var(--gta-font-mono);
+  font-size: var(--gta-text-xs);
+  color: var(--gta-text-on-light-soft);
+}
+
+/* ===== Compare grid ===== */
+.gta-compare-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--gta-s4);
+}
+
+@media (max-width: 920px) {
+  .gta-compare-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.gta-diff-summary {
+  padding: var(--gta-s3) var(--gta-s4);
+  background: var(--gta-panel-2);
+  border-left: 3px solid var(--gta-gold);
+  border-radius: var(--gta-radius-sm);
+  color: var(--gta-text-on-light);
+  font-size: var(--gta-text-base);
+}
+
+/* ===== History list ===== */
+.gta-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gta-s2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gta-history-entry {
+  background: var(--gta-panel);
+  border: 1px solid var(--gta-stroke);
+  border-radius: var(--gta-radius-md);
+  overflow: hidden;
+  transition: border-color var(--gta-dur-base), box-shadow var(--gta-dur-base);
+}
+
+.gta-history-entry:hover {
+  border-color: var(--gta-gold);
+}
+
+.gta-history-entry.is-expanded {
+  border-color: var(--gta-gold);
+  box-shadow: var(--gta-shadow-card);
+}
+
+.gta-history-summary {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--gta-s3);
+  padding: var(--gta-s3) var(--gta-s4);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  color: var(--gta-text-on-light);
+  flex-wrap: wrap;
+}
+
+.gta-history-summary:hover {
+  background: var(--gta-panel-2);
+}
+
+.gta-history-time {
+  font-family: var(--gta-font-mono);
+  font-size: var(--gta-text-xs);
+  color: var(--gta-text-on-light-faint);
+  min-width: 130px;
+}
+
+.gta-history-uid {
+  font-family: var(--gta-font-mono);
+  font-size: var(--gta-text-xs);
+  color: var(--gta-text-on-light-soft);
+}
+
+.gta-history-enemies {
+  flex: 1;
+  font-size: var(--gta-text-sm);
+  color: var(--gta-text-on-light);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 160px;
+}
+
+.gta-history-body {
+  padding: 0 var(--gta-s4) var(--gta-s4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gta-s3);
+  border-top: 1px solid var(--gta-stroke);
+}
+
+.gta-history-stats {
+  display: flex;
+  align-items: center;
+  gap: var(--gta-s4);
+  font-family: var(--gta-font-mono);
+  font-size: var(--gta-text-xs);
+  color: rgba(255, 255, 255, 0.85);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+  margin: 0 0 var(--gta-s2);
+}
+
+/* ===== Role picker (onboarding) ===== */
+.gta-role-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gta-s2);
+}
+
+.gta-role-list label {
+  display: flex;
+  align-items: center;
+  gap: var(--gta-s3);
+  padding: 10px var(--gta-s4);
+  background: var(--gta-panel-2);
+  border: 1px solid var(--gta-stroke);
+  border-radius: var(--gta-radius-md);
+  cursor: pointer;
+  transition: all var(--gta-dur-base);
+}
+
+.gta-role-list label:hover {
+  border-color: var(--gta-gold);
+  background: var(--gta-panel-3);
+}
+
+.gta-role-list label:has(input:checked) {
+  border-color: var(--gta-gold);
+  background: var(--gta-panel);
+  box-shadow: 0 0 0 1px var(--gta-gold);
+}
+
+.gta-role-list input[type='radio'] {
+  accent-color: var(--gta-panel-dark);
+}
+
+.gta-role-line {
+  display: flex;
+  align-items: baseline;
+  gap: var(--gta-s2);
+  flex-wrap: wrap;
+}
+
+.gta-role-line .uid {
+  font-family: var(--gta-font-mono);
+  font-size: var(--gta-text-sm);
+  color: var(--gta-text-on-light);
+  font-weight: 700;
+}
+
+.gta-role-line .meta {
+  font-size: var(--gta-text-xs);
+  color: var(--gta-text-on-light-soft);
+}
+
+/* ===== Onboarding details collapsible ===== */
+.gta-disclosure {
+  border: 1px dashed var(--gta-stroke);
+  border-radius: var(--gta-radius-md);
+  padding: 0;
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.gta-disclosure[open] {
+  background: var(--gta-panel);
+  border-style: solid;
+}
+
+.gta-disclosure > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: var(--gta-s3) var(--gta-s4);
+  font-size: var(--gta-text-sm);
+  font-weight: 600;
+  color: var(--gta-text-on-light-soft);
+  user-select: none;
+}
+
+.gta-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.gta-disclosure > summary::before {
+  content: '▸';
+  display: inline-block;
+  margin-right: var(--gta-s2);
+  font-size: 10px;
+  transition: transform var(--gta-dur-base);
+}
+
+.gta-disclosure[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.gta-disclosure-body {
+  padding: 0 var(--gta-s4) var(--gta-s4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gta-s3);
+}
+
+.gta-disclosure-body ol {
+  margin: 0;
+  padding-left: var(--gta-s5);
+  color: var(--gta-text-on-light-soft);
+  font-size: var(--gta-text-sm);
+  line-height: 1.7;
+}
+
+.gta-disclosure-body code {
+  font-family: var(--gta-font-mono);
+  font-size: var(--gta-text-xs);
+  padding: 1px 6px;
+  background: var(--gta-panel-2);
+  border-radius: 3px;
+}
+
 /* ===== responsive ===== */
 @media (max-width: 920px) {
   .app-shell {
