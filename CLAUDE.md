@@ -230,7 +230,7 @@ export type IpcContract = {
 |---|---|---|
 | 普通设置 | `electron-store` 明文 JSON | 主题、是否自动更新元数据 |
 | LLM API Key | `safeStorage.encryptString` 后存到 userData/secrets.bin | Anthropic key、自定义 base URL token |
-| 米游社 Cookie | **不持久化**，仅 main 进程内存，App 退出即丢 | `ltoken=...; ltuid=...` |
+| 米游社 Cookie | Electron 持久化 partition `persist:miyoushe-login`（默认 cookie DB），由 Chromium OSCrypt 加密；可通过 `miyoushe:logout` 一键清除 | `ltoken_v2=...; ltuid_v2=...; ltmid_v2=...` |
 | 已绑定 UID | `electron-store` | 玩家可绑多个 UID |
 
 **Provider 策略：仅 Anthropic 直连 + 兼容 baseUrl**（决策已锁定）。Settings → LLM 配置仅有四个字段：
@@ -285,10 +285,13 @@ export type IpcContract = {
 ## 10. 安全边界
 
 - **CSP**：Renderer 进程默认 CSP `default-src 'self'`；外链图标走主进程代理（避免 enka.network 直连导致渲染端持有任何远端关联）。
-- **Cookie 处理**：永不跨进程边界。
-  - 推荐路径：弹独立 `BrowserWindow`（非持久化 session partition）让用户在内置 Chromium 里登录米游社，主进程轮询 `session.cookies` 直到三个关键 cookie (`ltoken_v2` / `ltuid_v2` / `ltmid_v2`) 都出现，立即提取拼装、关窗、清空 session 存储。
-  - 提取的 cookie 写入 `LoginSessionStore`（main 进程内存 Map，5 分钟过期 + 单次消费），渲染端拿到的只是 sessionId，**永远见不到 cookie 字面值**。
-  - 手动粘贴路径作为退路保留，整条链路仍在 IPC handler 作用域，走完即弃。
+- **Cookie 处理**：永不跨进程边界，但**允许由 Electron 自己持久化**到加密的 session partition。
+  - 推荐路径：弹独立 `BrowserWindow`（`persist:miyoushe-login` 持久化 session partition）让用户在内置 Chromium 里登录米游社，主进程轮询 `session.cookies` 直到三个关键 cookie (`ltoken_v2` / `ltuid_v2` / `ltmid_v2`) 都出现，立即提取拼装、关窗。**不再 `clearStorageData`** —— cookie 留在分区的加密 SQLite 里。
+  - 加密层：Chromium `OSCrypt` —— macOS 用 Keychain 派生密钥 + AES-128-CBC；Windows 用 DPAPI；Linux 用 kwallet/gnome-keyring。与 `safeStorage` 同一套底层。
+  - App 启动时 `seedRosterSessionsFromPersistedCookie` 从分区读 cookie、调一次 `miyoushe.fetchRoles` 校验，然后把 cookie 注入 `RosterSessionStore`（24h 内存 TTL，按 UID 索引，供刷新使用）。
+  - 提取的 cookie 仍**经由 main 进程内的 `LoginSessionStore`**（5 分钟、单次消费）传给 `profile:import-from-session`，渲染端拿到的只是 sessionId，**永远见不到 cookie 字面值**。
+  - 用户可通过 `miyoushe:logout` IPC 一键清除 partition（Roster 页 "退出米游社登录" 按钮即此通道），相当于 Chromium 自带的退出登录功能。Cookie 自然过期时 Chromium 也会按 `expirationDate` 自动驱逐。
+  - 手动粘贴路径作为退路保留，整条链路仍在 IPC handler 作用域。
   - 日志强制 redact `cookie` / `apiKey` / `Authorization` 字段。
 - **沙箱**：`sandbox: true`、`contextIsolation: true`、`nodeIntegration: false`、`webSecurity: true`。登录用 `BrowserWindow` 同样开启沙箱，且使用独立 partition 隔离主窗口。
 - **依赖审计**：CI 跑 `npm audit --production`，高危依赖阻塞合并。

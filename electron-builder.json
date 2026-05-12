@@ -13,6 +13,13 @@
   "asarUnpack": [
     "node_modules/@anthropic-ai/claude-agent-sdk/**/*"
   ],
+  "extraResources": [
+    {
+      "from": "resources/scenarios",
+      "to": "scenarios",
+      "filter": ["**/*.json"]
+    }
+  ],
   "mac": {
     "target": ["dmg"],
     "category": "public.app-category.utilities",

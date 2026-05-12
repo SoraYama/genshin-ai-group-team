@@ -1,0 +1,63 @@
+{
+  "mode": "imaginarium-theater",
+  "meta": {
+    "fetchedAt": "2026-05-12T00:00:00.000Z",
+    "sourceVersion": "bundled-2026-05-12",
+    "expiresAt": "2026-06-01T00:00:00.000Z",
+    "source": "bundled"
+  },
+  "scenario": {
+    "seasonId": "2026-05",
+    "themeElements": ["Hydro", "Pyro", "Dendro"],
+    "requiredCharacters": [],
+    "trialCharacters": [],
+    "acts": [
+      {
+        "act": 1,
+        "enemies": {
+          "primary": [
+            { "name": "镀金旅团·裂石巨锤", "element": "Pyro" },
+            { "name": "镀金旅团·拘乡水手", "element": "Hydro" }
+          ]
+        },
+        "specialEffects": [
+          "全队伍角色元素战技/元素爆发的冷却时间缩短 20%。"
+        ]
+      },
+      {
+        "act": 2,
+        "enemies": {
+          "primary": [
+            { "name": "黄金王兽", "element": "Dendro" }
+          ]
+        },
+        "specialEffects": [
+          "玩家在场角色每秒回复 5% 元素能量，但所受伤害提升 15%。"
+        ]
+      },
+      {
+        "act": 3,
+        "enemies": {
+          "primary": [
+            { "name": "深渊咏者·渊月", "element": "Hydro" },
+            { "name": "深渊使徒·激流", "element": "Hydro" }
+          ]
+        },
+        "specialEffects": [
+          "每触发一次蒸发反应，全队伍获得 30 点元素精通，最多叠加 5 层。"
+        ]
+      },
+      {
+        "act": 4,
+        "enemies": {
+          "primary": [
+            { "name": "净海守望", "element": "Hydro" }
+          ]
+        },
+        "specialEffects": [
+          "队伍中所有角色满血时暴击伤害提升 30%。"
+        ]
+      }
+    ]
+  }
+}

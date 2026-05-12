@@ -47,6 +47,49 @@ export interface CharacterProfile {
   rarity: number;
   imageUrl: string;
   stats: CharacterStats;
+  weapon?: CharacterWeapon;
+  artifacts?: ArtifactPiece[];
+  constellation?: number;
+  talents?: CharacterTalents;
+  friendship?: number;
+  source?: CharacterSource;
+}
+
+export type CharacterSource = 'enka' | 'miyoushe' | 'merged';
+
+export interface CharacterWeapon {
+  id: number;
+  name: string;
+  iconUrl: string;
+  level: number;
+  refinement: number;
+  rarity: number;
+  mainStat?: StatPair;
+  subStat?: StatPair;
+}
+
+export interface CharacterTalents {
+  normalAttack: number;
+  elementalSkill: number;
+  elementalBurst: number;
+}
+
+export interface StatPair {
+  key: string;
+  value: number;
+}
+
+export type ArtifactSlot = 'flower' | 'plume' | 'sands' | 'goblet' | 'circlet';
+
+export interface ArtifactPiece {
+  slot: ArtifactSlot;
+  setId: number;
+  setName: string;
+  level: number;
+  rarity: number;
+  mainStat: StatPair;
+  subStats: StatPair[];
+  iconUrl?: string;
 }
 
 export interface MiyousheRole {
@@ -64,7 +107,7 @@ export interface BindCookieResult {
   roles: MiyousheRole[];
 }
 
-export type ProfileSource = 'miyoushe' | 'miyoushe+enka' | 'enka';
+export type ProfileSource = 'miyoushe' | 'miyoushe+enka' | 'enka' | 'merged' | 'miyoushe-stale';
 
 export interface PersistedProfile {
   uid: string;
@@ -88,6 +131,30 @@ export interface ProfileListItem {
 export interface ProfileStateView {
   activeUid?: string;
   profiles: ProfileListItem[];
+}
+
+export type RefreshSourceStatus =
+  | 'ok'
+  | 'failed'
+  | 'skipped'
+  | 'no-cookie'
+  | 'auth-expired'
+  | 'captcha-required'
+  | 'rate-limited';
+
+export interface RefreshSummary {
+  enka: RefreshSourceStatus;
+  enkaCharacterCount: number;
+  enkaError?: string;
+  miyoushe: RefreshSourceStatus;
+  miyousheCharacterCount: number;
+  miyousheError?: string;
+  totalCharacterCount: number;
+}
+
+export interface RefreshOutcome {
+  profile: PersistedProfile;
+  summary: RefreshSummary;
 }
 
 export interface AdvisorRequest {
@@ -159,4 +226,92 @@ export interface AdvisorCompareResult {
   left: RecommendationResult;
   right: RecommendationResult;
   diffSummary: string;
+}
+
+// ---------- Scenario data (v0.6) ----------
+
+export type ScenarioMode =
+  | 'spiral-abyss'
+  | 'stygian-onslaught'
+  | 'imaginarium-theater';
+
+export const ALL_SCENARIO_MODES: ScenarioMode[] = [
+  'spiral-abyss',
+  'stygian-onslaught',
+  'imaginarium-theater'
+];
+
+export type ScenarioSourceTag = 'bundled' | 'remote' | 'web-fallback';
+
+export interface ScenarioMeta {
+  fetchedAt: string;
+  sourceVersion: string;
+  expiresAt: string;
+  source: ScenarioSourceTag;
+  stale?: boolean;
+}
+
+export interface ScenarioEnvelope<T> {
+  mode: ScenarioMode;
+  meta: ScenarioMeta;
+  scenario: T;
+}
+
+export interface EnemyRef {
+  id?: number;
+  name: string;
+  element?: string;
+  shield?: string;
+  resistances?: Record<string, number>;
+}
+
+export interface EnemyLineup {
+  primary: EnemyRef[];
+  reinforcement?: EnemyRef[];
+}
+
+export interface SpiralAbyssScenario {
+  cycleId: string;
+  startsAt: string;
+  endsAt: string;
+  blessingOfAbyssalMoon: { name: string; description: string };
+  floors: Array<{
+    floor: 9 | 10 | 11 | 12;
+    ley?: string;
+    chambers: Array<{
+      chamber: 1 | 2 | 3;
+      firstHalf: EnemyLineup;
+      secondHalf: EnemyLineup;
+      ley?: string;
+    }>;
+  }>;
+}
+
+export interface StygianOnslaughtScenario {
+  rotationId: string;
+  difficulty: 1 | 2 | 3 | 4 | 5 | 6;
+  enemies: EnemyLineup;
+  buffs: Array<{ name: string; description: string }>;
+}
+
+export interface ImaginariumTheaterScenario {
+  seasonId: string;
+  themeElements: string[];
+  requiredCharacters: number[];
+  trialCharacters: number[];
+  acts: Array<{
+    act: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+    enemies: EnemyLineup;
+    specialEffects: string[];
+  }>;
+}
+
+export type ScenarioPayload =
+  | SpiralAbyssScenario
+  | StygianOnslaughtScenario
+  | ImaginariumTheaterScenario;
+
+export interface ScenarioListItem {
+  mode: ScenarioMode;
+  meta: ScenarioMeta;
 }

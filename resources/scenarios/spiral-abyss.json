@@ -1,0 +1,157 @@
+{
+  "mode": "spiral-abyss",
+  "meta": {
+    "fetchedAt": "2026-05-12T00:00:00.000Z",
+    "sourceVersion": "bundled-2026-05-12",
+    "expiresAt": "2026-05-26T00:00:00.000Z",
+    "source": "bundled"
+  },
+  "scenario": {
+    "cycleId": "2026-05-12",
+    "startsAt": "2026-05-01T04:00:00.000Z",
+    "endsAt": "2026-05-15T20:00:00.000Z",
+    "blessingOfAbyssalMoon": {
+      "name": "残月之相·灼焰",
+      "description": "对处于燃烧状态的敌人造成的伤害提升 75%；持续 12 秒。"
+    },
+    "floors": [
+      {
+        "floor": 9,
+        "ley": "周期内角色的元素战技伤害提升 50%。",
+        "chambers": [
+          {
+            "chamber": 1,
+            "firstHalf": {
+              "primary": [
+                { "name": "镀金旅团·裂石巨锤", "element": "Pyro" },
+                { "name": "镀金旅团·拘乡水手", "element": "Hydro" }
+              ]
+            },
+            "secondHalf": {
+              "primary": [
+                { "name": "若陀龙王", "element": "Geo", "resistances": { "Geo": 70 } }
+              ]
+            }
+          },
+          {
+            "chamber": 2,
+            "firstHalf": {
+              "primary": [
+                { "name": "深渊咏者·渊月", "element": "Hydro" }
+              ]
+            },
+            "secondHalf": {
+              "primary": [
+                { "name": "深渊使徒·激流", "element": "Hydro" },
+                { "name": "深渊使徒·激流", "element": "Hydro" }
+              ]
+            }
+          },
+          {
+            "chamber": 3,
+            "firstHalf": {
+              "primary": [
+                { "name": "黑蛇骑士·破阵之刃", "element": "Geo" }
+              ]
+            },
+            "secondHalf": {
+              "primary": [
+                { "name": "永恒的守护者", "element": "Anemo" }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "floor": 10,
+        "ley": "周期内角色的元素爆发伤害提升 60%。",
+        "chambers": [
+          {
+            "chamber": 1,
+            "firstHalf": { "primary": [{ "name": "丘丘霜铠王", "element": "Cryo" }] },
+            "secondHalf": { "primary": [{ "name": "急冻树", "element": "Cryo" }] }
+          },
+          {
+            "chamber": 2,
+            "firstHalf": { "primary": [{ "name": "黄金王兽", "element": "Dendro" }] },
+            "secondHalf": { "primary": [{ "name": "净海守望", "element": "Hydro" }] }
+          },
+          {
+            "chamber": 3,
+            "firstHalf": { "primary": [{ "name": "公国大型机兵", "element": "Electro" }] },
+            "secondHalf": { "primary": [{ "name": "公国大型机兵", "element": "Electro" }] }
+          }
+        ]
+      },
+      {
+        "floor": 11,
+        "ley": "队伍角色的元素附着时长延长 25%。",
+        "chambers": [
+          {
+            "chamber": 1,
+            "firstHalf": {
+              "primary": [
+                { "name": "深渊海空之眼", "element": "Hydro" }
+              ]
+            },
+            "secondHalf": { "primary": [{ "name": "百年前的歌者", "element": "Anemo" }] }
+          },
+          {
+            "chamber": 2,
+            "firstHalf": { "primary": [{ "name": "草藻龙·捕食者", "element": "Dendro" }] },
+            "secondHalf": { "primary": [{ "name": "雷音权现", "element": "Electro" }] }
+          },
+          {
+            "chamber": 3,
+            "firstHalf": { "primary": [{ "name": "蛇骨弓射手", "element": "Cryo" }] },
+            "secondHalf": { "primary": [{ "name": "黑蛇骑士·破阵之刃", "element": "Geo" }] }
+          }
+        ]
+      },
+      {
+        "floor": 12,
+        "ley": "敌人造成伤害提升 25%，玩家角色受到的治疗效果降低 25%。",
+        "chambers": [
+          {
+            "chamber": 1,
+            "firstHalf": {
+              "primary": [
+                { "name": "深渊使徒·激流", "element": "Hydro" },
+                { "name": "深渊使徒·激流", "element": "Hydro" }
+              ]
+            },
+            "secondHalf": {
+              "primary": [
+                { "name": "炽热燃焰使徒", "element": "Pyro" },
+                { "name": "湍流冰晶使徒", "element": "Cryo" }
+              ]
+            }
+          },
+          {
+            "chamber": 2,
+            "firstHalf": {
+              "primary": [{ "name": "黄金王兽", "element": "Dendro" }]
+            },
+            "secondHalf": {
+              "primary": [
+                { "name": "深渊咏者·渊月", "element": "Hydro" },
+                { "name": "深渊咏者·渊月", "element": "Hydro" }
+              ]
+            }
+          },
+          {
+            "chamber": 3,
+            "firstHalf": {
+              "primary": [
+                { "name": "永恒的守护者", "element": "Anemo" }
+              ]
+            },
+            "secondHalf": {
+              "primary": [{ "name": "若陀龙王", "element": "Geo", "resistances": { "Geo": 70 } }]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

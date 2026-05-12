@@ -45,7 +45,10 @@ const api: RendererApi = {
   },
   miyoushe: {
     bind: (input) => invoke('miyoushe:bind', input),
-    loginViaBrowser: () => invoke('miyoushe:login-via-browser', undefined)
+    loginViaBrowser: () => invoke('miyoushe:login-via-browser', undefined),
+    logout: () => invoke('miyoushe:logout', undefined),
+    authState: () => invoke('miyoushe:auth-state', undefined),
+    ping: (input) => invoke('miyoushe:ping', input)
   },
   profile: {
     state: () => invoke('profile:state', undefined),
@@ -72,6 +75,11 @@ const api: RendererApi = {
     list: (input) => invoke('history:list', input),
     delete: (input) => invoke('history:delete', input),
     clear: (input) => invoke('history:clear', input)
+  },
+  scenario: {
+    list: () => invoke('scenario:list', undefined),
+    get: (input) => invoke('scenario:get', input),
+    refresh: (input) => invoke('scenario:refresh', input)
   }
 };
 

@@ -10,9 +10,12 @@ export interface MiyousheClientOptions {
 const DEFAULT_ROLES_URL =
   'https://api-takumi.mihoyo.com/binding/api/getUserGameRolesByCookie?game_biz=hk4e_cn';
 const DEFAULT_TIMEOUT_MS = 8_000;
-const DEFAULT_UA =
+
+export const MIYOUSHE_UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) miHoYoBBS/2.55.1';
+
+const DEFAULT_UA = MIYOUSHE_UA;
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;

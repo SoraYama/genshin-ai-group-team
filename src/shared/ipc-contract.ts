@@ -11,7 +11,12 @@ import type {
   PersistedProfile,
   ProfileStateView,
   PublicConfig,
-  RecommendationResult
+  RecommendationResult,
+  RefreshOutcome,
+  ScenarioEnvelope,
+  ScenarioListItem,
+  ScenarioMode,
+  ScenarioPayload
 } from './domain.js';
 
 export const ADVISOR_EVENT_CHANNEL = 'advisor:event' as const;
@@ -29,11 +34,22 @@ export interface IpcContract {
       | { ok: true; bind: BindCookieResult; sessionId: string }
       | { ok: false; reason: 'cancelled' | 'timeout' | 'load-failed' | 'bind-failed'; message?: string };
   };
+  'miyoushe:logout': { req: void; res: { ok: true } };
+  'miyoushe:auth-state': {
+    req: void;
+    res: { hasCookie: boolean; uids: string[] };
+  };
+  'miyoushe:ping': {
+    req: { uid: string };
+    res:
+      | { ok: true; nickname?: string; worldLevel?: number; totalCharacters?: number }
+      | { ok: false; reason: string; retcode?: number };
+  };
 
   'profile:state': { req: void; res: ProfileStateView };
   'profile:get': { req: { uid: string }; res: PersistedProfile | null };
   'profile:set-active': { req: { uid: string }; res: { ok: true } };
-  'profile:refresh': { req: { uid: string }; res: PersistedProfile };
+  'profile:refresh': { req: { uid: string }; res: RefreshOutcome };
   'profile:import-from-cookie': {
     req: { cookie: string; uid?: string };
     res: PersistedProfile;
@@ -47,6 +63,16 @@ export interface IpcContract {
   'advisor:recommend': { req: AdvisorRequest; res: RecommendationResult };
   'advisor:compare': { req: AdvisorCompareRequest; res: AdvisorCompareResult };
   'advisor:cancel': { req: void; res: { ok: boolean } };
+
+  'scenario:list': { req: void; res: ScenarioListItem[] };
+  'scenario:get': {
+    req: { mode: ScenarioMode };
+    res: ScenarioEnvelope<ScenarioPayload>;
+  };
+  'scenario:refresh': {
+    req: { mode?: ScenarioMode; force?: boolean };
+    res: { refreshed: ScenarioMode[] };
+  };
 
   'history:list': { req: HistoryQueryOptions; res: HistoryQueryResult };
   'history:delete': { req: { id: string }; res: { ok: boolean } };
@@ -68,6 +94,9 @@ export const ALL_IPC_CHANNELS: IpcChannel[] = [
   'config:clear-llm',
   'miyoushe:bind',
   'miyoushe:login-via-browser',
+  'miyoushe:logout',
+  'miyoushe:auth-state',
+  'miyoushe:ping',
   'profile:state',
   'profile:get',
   'profile:set-active',
@@ -78,6 +107,9 @@ export const ALL_IPC_CHANNELS: IpcChannel[] = [
   'advisor:recommend',
   'advisor:compare',
   'advisor:cancel',
+  'scenario:list',
+  'scenario:get',
+  'scenario:refresh',
   'history:list',
   'history:delete',
   'history:clear'
@@ -93,6 +125,9 @@ export interface RendererApi {
   miyoushe: {
     bind: (input: IpcRequest<'miyoushe:bind'>) => Promise<IpcResponse<'miyoushe:bind'>>;
     loginViaBrowser: () => Promise<IpcResponse<'miyoushe:login-via-browser'>>;
+    logout: () => Promise<IpcResponse<'miyoushe:logout'>>;
+    authState: () => Promise<IpcResponse<'miyoushe:auth-state'>>;
+    ping: (input: IpcRequest<'miyoushe:ping'>) => Promise<IpcResponse<'miyoushe:ping'>>;
   };
   profile: {
     state: () => Promise<IpcResponse<'profile:state'>>;
@@ -112,6 +147,11 @@ export interface RendererApi {
     compare: (input: IpcRequest<'advisor:compare'>) => Promise<IpcResponse<'advisor:compare'>>;
     cancel: () => Promise<IpcResponse<'advisor:cancel'>>;
     onEvent: (cb: (event: AdvisorEvent) => void) => () => void;
+  };
+  scenario: {
+    list: () => Promise<IpcResponse<'scenario:list'>>;
+    get: (input: IpcRequest<'scenario:get'>) => Promise<IpcResponse<'scenario:get'>>;
+    refresh: (input: IpcRequest<'scenario:refresh'>) => Promise<IpcResponse<'scenario:refresh'>>;
   };
   history: {
     list: (input: IpcRequest<'history:list'>) => Promise<IpcResponse<'history:list'>>;
