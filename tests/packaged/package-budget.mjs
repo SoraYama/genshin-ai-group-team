@@ -23,12 +23,20 @@ const result = {
   rendererFiles: renderer.files,
   unpackedAppMiB: Number((app.bytes / MIB).toFixed(1)),
   unpackedAppFiles: app.files,
-  appKind: appDir.includes('mac-universal') ? 'mac-universal' : 'single-arch'
+  appKind: appDir.includes('mac-universal')
+    ? 'mac-universal'
+    : appDir.includes('win-')
+      ? 'windows-single-arch'
+      : 'macos-single-arch'
 };
 
 if (renderer.bytes > 20 * MIB) throw new Error(`Renderer exceeds 20 MiB: ${result.rendererMiB}`);
 if (renderer.files > 30) throw new Error(`Renderer exceeds 30 files: ${renderer.files}`);
-const maxAppMiB = result.appKind === 'mac-universal' ? 1150 : 650;
+// Electron's Windows runtime and the packaged Agent SDK binary are larger than
+// their macOS arm64 counterparts. Keep separate ceilings so the gate catches
+// regressions without making a healthy Windows build fail by construction.
+const maxAppMiB =
+  result.appKind === 'mac-universal' ? 1150 : result.appKind === 'windows-single-arch' ? 725 : 650;
 if (app.bytes > maxAppMiB * MIB) {
   throw new Error(`${result.appKind} app exceeds ${maxAppMiB} MiB: ${result.unpackedAppMiB}`);
 }
