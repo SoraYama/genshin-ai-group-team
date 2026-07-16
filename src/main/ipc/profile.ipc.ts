@@ -103,14 +103,17 @@ export function registerProfileIpc({
           via: 'http'
         };
       }
-      if (direct.error.kind === 'auth-expired' || direct.error.kind === 'rate-limited') {
+      if (
+        direct.error.kind === 'auth-expired' ||
+        direct.error.kind === 'rate-limited' ||
+        direct.error.kind === 'captcha-required'
+      ) {
         return { ok: false, via: 'http', failure: direct.error };
       }
     }
 
-    // Hidden attempt — quick, no user-facing window if session is warm.
     const hidden = await miyousheBridge.fetchRoster({ visible: false });
-    if (hidden.ok && hidden.mode === 'data') {
+    if (hidden?.ok && hidden.mode === 'data') {
       if (hidden.uid && hidden.uid !== uid) {
         return {
           ok: false,
@@ -132,7 +135,11 @@ export function registerProfileIpc({
     // Hidden failed (or returned warmup-only, which it shouldn't). Escalate
     // to visible warmup so the user can solve captcha; then retry direct HTTP.
     const hiddenFailed =
-      !hidden.ok && (hidden.reason === 'timeout' || hidden.reason === 'upstream' || hidden.reason === 'navigation');
+      !hidden.ok &&
+      (hidden.reason === 'timeout' ||
+        hidden.reason === 'upstream' ||
+        hidden.reason === 'navigation' ||
+        hidden.reason === 'parse');
     if (hiddenFailed) {
       const visible = await miyousheBridge.fetchRoster({ visible: true });
       if (!visible.ok) {
@@ -143,10 +150,12 @@ export function registerProfileIpc({
         };
       }
       // Warmup completed (user closed window / we saw /index 200). Retry HTTP.
-      if (cookie) {
-        const index = await miyousheGameRecord.fetchPlayerIndex(uid, cookie);
+      const refreshedCookie = (await loginWindow.readPersistedCookie()) ?? cookie;
+      if (refreshedCookie) {
+        rosterSessions.put(uid, refreshedCookie);
+        const index = await miyousheGameRecord.fetchPlayerIndex(uid, refreshedCookie);
         const retry = index.ok
-          ? await miyousheGameRecord.fetchDetailedRoster(uid, cookie, {
+          ? await miyousheGameRecord.fetchDetailedRoster(uid, refreshedCookie, {
               expectedOwnedCount: index.data.totalCharacters
             })
           : index;
@@ -175,7 +184,11 @@ export function registerProfileIpc({
     return {
       ok: false,
       via: 'bridge',
-      failure: { kind: 'bridge', message: hidden.ok ? '内部错误：hidden 模式返回 warmup' : hidden.message }
+      failure: {
+        kind: 'bridge',
+        message:
+          hidden.ok ? '内部错误：hidden 模式返回 warmup' : hidden.message
+      }
     };
   }
 

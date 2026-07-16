@@ -61,6 +61,131 @@ describe('regionFromUid', () => {
   });
 });
 
+describe('deviceHeadersFromCookie', () => {
+  it('uses only a complete device id/fingerprint pair from the same cookie context', async () => {
+    const { deviceHeadersFromCookie } = await import(
+      '../../../src/main/services/miyoushe-game-record.js'
+    );
+    expect(
+      deviceHeadersFromCookie(
+        'ltoken_v2=token; _MHYUUID=device-id; DEVICEFP=device-fingerprint'
+      )
+    ).toEqual({
+      'x-rpc-device_id': 'device-id',
+      'x-rpc-device_fp': 'device-fingerprint'
+    });
+    expect(deviceHeadersFromCookie('ltoken_v2=token; _MHYUUID=device-id')).toEqual({});
+    expect(deviceHeadersFromCookie('ltoken_v2=token; DEVICEFP=device-fingerprint')).toEqual({});
+  });
+});
+
+describe('Chromium transport fallback', () => {
+  it('retries a captcha-classified response once through the browser session', async () => {
+    const { MiyousheGameRecordClient } = await import(
+      '../../../src/main/services/miyoushe-game-record.js'
+    );
+    requestMock.mockResolvedValueOnce(
+      mockJson(200, { retcode: 5003, message: '访问异常，请稍后重试' })
+    );
+    const browserTransport = vi.fn().mockResolvedValue({
+      statusCode: 200,
+      headers: {},
+      bodyText: JSON.stringify({
+        retcode: 0,
+        data: {
+          role: { nickname: 'Traveler' },
+          stats: { world_level: 9, avatar_number: 80 }
+        }
+      })
+    });
+    const client = new MiyousheGameRecordClient({ browserTransport });
+
+    await expect(client.ping('100000001', 'cookie=valid-enough')).resolves.toEqual({
+      ok: true,
+      data: {
+        nickname: 'Traveler',
+        worldLevel: 9,
+        activeDays: undefined,
+        totalCharacters: 80
+      }
+    });
+    expect(requestMock).toHaveBeenCalledTimes(1);
+    expect(browserTransport).toHaveBeenCalledTimes(1);
+    expect(browserTransport.mock.calls[0]?.[1].headers).toHaveProperty('DS');
+  });
+
+  it('retries with user verification headers after Chromium also returns 5003', async () => {
+    const { MiyousheGameRecordClient } = await import(
+      '../../../src/main/services/miyoushe-game-record.js'
+    );
+    requestMock.mockResolvedValueOnce(
+      mockJson(200, { retcode: 5003, message: '访问异常，请稍后重试' })
+    );
+    const browserTransport = vi
+      .fn()
+      .mockResolvedValueOnce({
+        statusCode: 200,
+        headers: {},
+        bodyText: JSON.stringify({ retcode: 5003, message: '访问异常，请稍后重试' })
+      })
+      .mockResolvedValueOnce({
+        statusCode: 200,
+        headers: {},
+        bodyText: JSON.stringify({ retcode: 0, data: { stats: { avatar_number: 80 } } })
+      });
+    const verificationProvider = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: { 'x-rpc-challenge': 'final-challenge' }
+    });
+    const client = new MiyousheGameRecordClient({
+      browserTransport,
+      verificationProvider
+    });
+
+    const result = await client.ping('100000001', 'cookie=valid-enough');
+    expect(result.ok).toBe(true);
+    expect(verificationProvider).toHaveBeenCalledWith(
+      'cookie=valid-enough',
+      '/game_record/app/genshin/api/index'
+    );
+    expect(browserTransport).toHaveBeenCalledTimes(2);
+    expect(browserTransport.mock.calls[1]?.[1].headers).toMatchObject({
+      'x-rpc-challenge': 'final-challenge'
+    });
+  });
+
+  it('surfaces a rejected interactive verification without hiding the cached-data fallback', async () => {
+    const { MiyousheGameRecordClient } = await import(
+      '../../../src/main/services/miyoushe-game-record.js'
+    );
+    requestMock.mockResolvedValueOnce(mockJson(200, { retcode: 5003 }));
+    const browserTransport = vi.fn().mockResolvedValueOnce({
+      statusCode: 200,
+      headers: {},
+      bodyText: JSON.stringify({ retcode: 5003 })
+    });
+    const client = new MiyousheGameRecordClient({
+      browserTransport,
+      verificationProvider: vi.fn().mockResolvedValue({
+        ok: false,
+        retcode: 10306,
+        message: '已保留本地角色缓存'
+      })
+    });
+
+    const result = await client.ping('100000001', 'cookie=valid-enough');
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        kind: 'captcha-required',
+        retcode: 10306,
+        message: '已保留本地角色缓存'
+      }
+    });
+  });
+});
+
 describe('browser bridge payload mappers', () => {
   it('uses the same list/detail mapping contract as direct HTTP', async () => {
     const { mapMiyousheCharacterDetailData, mapMiyousheCharacterListData } = await import(
@@ -213,6 +338,9 @@ describe('MiyousheGameRecordClient.fetchDetailedRoster', () => {
     expect(String(listCall[0])).toContain('/game_record/app/genshin/api/character/list');
     expect((listCall[1] as { body: string }).body).toBe(
       JSON.stringify({ role_id: '100000001', server: 'cn_gf01' })
+    );
+    expect((listCall[1] as { headers: Record<string, string> }).headers).not.toHaveProperty(
+      'x-rpc-device_id'
     );
     const detailCall = requestMock.mock.calls[1]!;
     expect((detailCall[1] as { body: string }).body).toBe(

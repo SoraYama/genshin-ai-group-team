@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { app } from 'electron';
 import { MiyousheClient } from '../services/miyoushe-client.js';
 import {
@@ -6,6 +7,15 @@ import {
   type MiyousheRosterCoverage
 } from '../services/miyoushe-game-record.js';
 import { MiyousheLoginWindow } from '../services/miyoushe-login-window.js';
+import { MiyousheBrowserBridge } from '../services/miyoushe/browser-bridge.js';
+
+// `electron dist/main/miyoushe-detail-gate.mjs` does not load package.json as
+// the application entry, so Electron otherwise uses the shared "Electron"
+// userData directory. Point the opt-in gate at the same dev profile as
+// `electron .`; this keeps it from reading unrelated apps' cookie partitions.
+if (!app.isPackaged && !process.env.GTA_E2E_USER_DATA_DIR) {
+  app.setPath('userData', path.join(app.getPath('appData'), 'genshin-team-advisor'));
+}
 
 interface SafeFailure {
   kind: MiyousheFetchError['kind'] | 'roles';
@@ -34,6 +44,17 @@ interface SafeRoleReport {
       }
     | { ok: false; failure: SafeFailure };
 }
+
+type SafeBridgeReport =
+  | {
+      attempted: true;
+      ok: true;
+      listedCount: number;
+      detailedCount: number;
+      partial: boolean;
+      uidSuffix: string;
+    }
+  | { attempted: true; ok: false; reason: string };
 
 function safeFailure(error: MiyousheFetchError): SafeFailure {
   return {
@@ -126,15 +147,42 @@ async function run(): Promise<number> {
     });
   }
 
-  const failed = reports.some((report) => !report.index.ok || !report.roster.ok);
-  const partial = reports.some((report) => report.roster.ok && report.roster.partial);
+  const directFailed = reports.some((report) => !report.index.ok || !report.roster.ok);
+  let bridge: SafeBridgeReport | undefined;
+  if (directFailed) {
+    const result = await new MiyousheBrowserBridge().fetchRoster({
+      visible: false,
+      timeoutMs: 30_000
+    });
+    bridge =
+      result.ok && result.mode === 'data'
+        ? {
+            attempted: true,
+            ok: true,
+            listedCount: result.coverage.listedCount,
+            detailedCount: result.coverage.detailedCount,
+            partial: result.coverage.partial,
+            uidSuffix: uidSuffix(result.uid)
+          }
+        : {
+            attempted: true,
+            ok: false,
+            reason: result.ok ? result.mode : result.reason
+          };
+  }
+
+  const failed = directFailed && bridge?.ok !== true;
+  const partial =
+    reports.some((report) => report.roster.ok && report.roster.partial) ||
+    (bridge?.ok === true && bridge.partial);
   console.log(
     JSON.stringify(
       {
         gate: 'miyoushe-detail',
         status: failed ? 'failed' : partial ? 'partial' : 'passed',
         accountCount: reports.length,
-        reports
+        reports,
+        bridge
       },
       null,
       2

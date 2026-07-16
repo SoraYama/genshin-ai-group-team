@@ -36,6 +36,7 @@
     "audit:all": "npm audit --audit-level=high",
     "gate:miyoushe-detail": "npm run build:main && electron dist/main/miyoushe-detail-gate.mjs",
     "gate:provider-contract": "node tests/external/provider-gate.mjs",
+    "gate:provider-saved": "npm run build:main && electron dist/main/provider-saved-gate.mjs",
     "gate:local": "npm run lint && npm run typecheck && npm run test && npm run build",
     "gate:all": "npm run gate:local && npm run test:e2e:run && npm run audit:all",
     "pack": "npm run build && electron-builder --publish never",

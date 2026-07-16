@@ -4,7 +4,8 @@ export default defineConfig([
   {
     entry: {
       index: 'src/main/index.ts',
-      'miyoushe-detail-gate': 'src/main/gates/miyoushe-detail-gate.ts'
+      'miyoushe-detail-gate': 'src/main/gates/miyoushe-detail-gate.ts',
+      'provider-saved-gate': 'src/main/gates/provider-saved-gate.ts'
     },
     outDir: 'dist/main',
     format: ['esm'],

@@ -70,7 +70,15 @@ const TARGET_INDEX_PATH = '/game_record/app/genshin/api/index';
 const TARGET_LIST_PATH = '/game_record/app/genshin/api/character/list';
 const TARGET_DETAIL_PATH = '/game_record/app/genshin/api/character/detail';
 
-const COOKIE_KEYS = ['ltoken_v2', 'ltuid_v2', 'ltmid_v2'] as const;
+const COOKIE_KEYS = [
+  'ltoken_v2',
+  'ltuid_v2',
+  'ltmid_v2',
+  '_MHYUUID',
+  'DEVICEFP',
+  'DEVICEFP_SEED_ID',
+  'DEVICEFP_SEED_TIME'
+] as const;
 
 const VERBOSE_LOG = process.env.MIYOUSHE_DEBUG === '1';
 function logInfo(message: string): void {
@@ -78,6 +86,34 @@ function logInfo(message: string): void {
 }
 function logWarn(message: string): void {
   if (VERBOSE_LOG) console.warn(`[miyoushe-bridge] ${message}`);
+}
+
+function isTrustedMiyousheUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === 'https:' &&
+      (url.hostname === 'miyoushe.com' ||
+        url.hostname.endsWith('.miyoushe.com') ||
+        url.hostname === 'mihoyo.com' ||
+        url.hostname.endsWith('.mihoyo.com'))
+    );
+  } catch {
+    return false;
+  }
+}
+
+function configureTrustedNavigation(win: BrowserWindow): void {
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    // The desktop site opens Battle Chronicle with target=_blank. Keep it in
+    // the isolated verification window instead of creating an unmanaged one.
+    if (isTrustedMiyousheUrl(url)) void win.loadURL(url);
+    return { action: 'deny' };
+  });
+  win.webContents.on('will-attach-webview', (event) => event.preventDefault());
+  win.webContents.on('will-navigate', (event, url) => {
+    if (!isTrustedMiyousheUrl(url)) event.preventDefault();
+  });
 }
 
 /**
@@ -308,6 +344,8 @@ export class MiyousheBrowserBridge {
         webSecurity: true
       }
     });
+    configureTrustedNavigation(win);
+    win.on('page-title-updated', (event) => event.preventDefault());
     win.webContents.setUserAgent(DESKTOP_CHROME_UA);
     win.webContents.on('dom-ready', () => {
       void win.webContents.executeJavaScript(STEALTH_SCRIPT, true).catch(() => {});
@@ -322,8 +360,9 @@ export class MiyousheBrowserBridge {
       logInfo(`[visible page L${level}] ${message.slice(0, 240)} (${source})`);
     });
 
-    // DevTools is safe in this mode because we never attach our own debugger.
-    win.webContents.openDevTools({ mode: 'detach' });
+    // Keep the verification surface identical to a normal browser unless the
+    // developer explicitly asks for diagnostics.
+    if (VERBOSE_LOG) win.webContents.openDevTools({ mode: 'detach' });
     logInfo(`opened VISIBLE window → ${url}`);
 
     return new Promise<BrowserBridgeResult>((resolve) => {
@@ -341,12 +380,9 @@ export class MiyousheBrowserBridge {
         logInfo(`[visible webRequest] ${details.method} ${details.url.slice(0, 100)} → HTTP ${details.statusCode}`);
         if (details.statusCode === 200) {
           indexCalled = true;
-          // Don't auto-close — user might still be solving captcha. Give them
-          // a moment and then auto-close once we're confident the session is
-          // warm.
-          setTimeout(() => {
-            finish({ ok: true, mode: 'warmup', indexCalled: true });
-          }, 1500);
+          // HTTP 200 does not mean business success: mihoyo returns retcode
+          // 5003 inside a 200 response. Keep the window open so the user can
+          // complete verification, then let an explicit close trigger retry.
         }
       };
       ses.webRequest.onCompleted(filter, requestHook);
@@ -404,6 +440,22 @@ export class MiyousheBrowserBridge {
         webSecurity: true
       }
     });
+    configureTrustedNavigation(win);
+
+    // Electron 43 can leave debugger commands pending when the initial
+    // renderer target has not been committed yet. Commit an isolated blank
+    // document first, then attach/enable CDP before navigating to the real
+    // Battle Chronicle URL so no target requests are missed.
+    try {
+      await win.loadURL('about:blank');
+    } catch (error) {
+      if (!win.isDestroyed()) win.close();
+      return {
+        ok: false,
+        reason: 'navigation',
+        message: `无法初始化 Battle Chronicle：${error instanceof Error ? error.message : error}`
+      };
+    }
 
     // Mobile webview UA — convinces Battle Chronicle JS to fire its /index
     // request even outside the actual mihoyo app shell.

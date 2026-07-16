@@ -19,6 +19,7 @@ interface RosterPageProps {
 type Status =
   | { kind: 'idle' }
   | { kind: 'loading'; label?: string }
+  | { kind: 'success'; message: string }
   | { kind: 'error'; message: string };
 
 function formatTime(iso: string): string {
@@ -170,7 +171,7 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
       const result = await api.miyoushe.ping({ uid: activeUid });
       if (result.ok) {
         setStatus({
-          kind: 'error',
+          kind: 'success',
           message: t('roster.ping.ok', {
             nickname: result.nickname ?? '?',
             level: result.worldLevel ?? '?',
@@ -255,6 +256,7 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
       </div>
 
       {status.kind === 'error' && <p className="gta-error">{status.message}</p>}
+      {status.kind === 'success' && <p className="gta-hint">{status.message}</p>}
       {status.kind === 'loading' && status.label && (
         <p className="gta-hint">{status.label}</p>
       )}

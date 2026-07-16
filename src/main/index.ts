@@ -16,7 +16,11 @@ import { AdvisorAgent } from './services/advisor-agent.js';
 import { MiyousheClient } from './services/miyoushe-client.js';
 import { MiyousheGameRecordClient } from './services/miyoushe-game-record.js';
 import { MiyousheBrowserBridge } from './services/miyoushe/browser-bridge.js';
-import { MiyousheLoginWindow } from './services/miyoushe-login-window.js';
+import { MiyousheVerificationService } from './services/miyoushe/verification.js';
+import {
+  MIYOUSHE_LOGIN_PARTITION,
+  MiyousheLoginWindow
+} from './services/miyoushe-login-window.js';
 import { LoginSessionStore, RosterSessionStore } from './services/login-session-store.js';
 import { AvatarMetadataService } from './services/avatar-metadata.js';
 import { EnkaClient } from './services/enka-client.js';
@@ -63,7 +67,32 @@ function resolveBundledScenarioDir(): string {
 async function bootstrapServices(): Promise<void> {
   const config = new ConfigService();
   const miyoushe = new MiyousheClient();
-  const miyousheGameRecord = new MiyousheGameRecordClient();
+  const miyousheSession = session.fromPartition(MIYOUSHE_LOGIN_PARTITION);
+  const miyousheVerification = new MiyousheVerificationService();
+  const miyousheGameRecord = new MiyousheGameRecordClient({
+    verificationProvider: (cookie, challengePath) =>
+      miyousheVerification.requestHeaders(cookie, challengePath),
+    browserTransport: async (url, request) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), request.timeoutMs);
+      try {
+        const response = await miyousheSession.fetch(url, {
+          method: request.method,
+          headers: request.headers,
+          body: request.body,
+          credentials: 'include',
+          signal: controller.signal
+        });
+        return {
+          statusCode: response.status,
+          headers: Object.fromEntries(response.headers.entries()),
+          bodyText: await response.text()
+        };
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+  });
   const miyousheBridge = new MiyousheBrowserBridge();
   const loginWindow = new MiyousheLoginWindow();
   const loginSessions = new LoginSessionStore();
@@ -304,13 +333,4 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
   }
-});
-
-app.on('web-contents-created', (_event, contents) => {
-  contents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  contents.on('will-navigate', (event, navigationUrl) => {
-    if (!isDev || !navigationUrl.startsWith('http://localhost:5294')) {
-      event.preventDefault();
-    }
-  });
 });

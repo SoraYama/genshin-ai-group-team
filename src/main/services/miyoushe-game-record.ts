@@ -42,12 +42,55 @@ function shortHash(value: string): string {
   return createHash('sha256').update(value).digest('hex').slice(0, 12);
 }
 
+export function deviceHeadersFromCookie(cookie: string): Record<string, string> {
+  const values = new Map<string, string>();
+  for (const part of cookie.split(';')) {
+    const separator = part.indexOf('=');
+    if (separator <= 0) continue;
+    const name = part.slice(0, separator).trim();
+    const value = part.slice(separator + 1).trim();
+    if (value) values.set(name, value);
+  }
+  const deviceId = values.get('_MHYUUID');
+  const deviceFp = values.get('DEVICEFP');
+  return deviceId && deviceFp
+    ? { 'x-rpc-device_id': deviceId, 'x-rpc-device_fp': deviceFp }
+    : {};
+}
+
 export interface MiyousheGameRecordClientOptions {
   baseUrlCn?: string;
   baseUrlGlobal?: string;
   timeoutMs?: number;
   userAgent?: string;
+  browserTransport?: MiyousheBrowserTransport;
+  verificationProvider?: (
+    cookie: string,
+    challengePath: string
+  ) => Promise<MiyousheVerificationProviderResult>;
 }
+
+export type MiyousheVerificationProviderResult =
+  | { ok: true; headers: Record<string, string> }
+  | { ok: false; message: string; retcode?: number };
+
+export interface MiyousheBrowserTransportRequest {
+  method: 'GET' | 'POST';
+  headers: Record<string, string>;
+  body?: string;
+  timeoutMs: number;
+}
+
+export interface MiyousheBrowserTransportResponse {
+  statusCode: number;
+  headers: Record<string, string>;
+  bodyText: string;
+}
+
+export type MiyousheBrowserTransport = (
+  url: string,
+  request: MiyousheBrowserTransportRequest
+) => Promise<MiyousheBrowserTransportResponse>;
 
 export interface MiyousheRegion {
   region: string;
@@ -510,12 +553,19 @@ export class MiyousheGameRecordClient {
   private readonly baseUrlGlobal: string;
   private readonly timeoutMs: number;
   private readonly userAgent: string;
+  private readonly browserTransport?: MiyousheBrowserTransport;
+  private readonly verificationProvider?: (
+    cookie: string,
+    challengePath: string
+  ) => Promise<MiyousheVerificationProviderResult>;
 
   constructor(options: MiyousheGameRecordClientOptions = {}) {
     this.baseUrlCn = options.baseUrlCn ?? DEFAULT_BASE_CN;
     this.baseUrlGlobal = options.baseUrlGlobal ?? DEFAULT_BASE_GLOBAL;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.userAgent = options.userAgent ?? MIYOUSHE_UA;
+    this.browserTransport = options.browserTransport;
+    this.verificationProvider = options.verificationProvider;
   }
 
   /**
@@ -758,13 +808,12 @@ export class MiyousheGameRecordClient {
   private buildHeaders(
     region: MiyousheRegion,
     cookie: string,
-    ds: string
+    ds: string,
+    extraHeaders: Record<string, string> = {}
   ): Record<string, string> {
-    // genshin.py's minimal working recipe. We deliberately do NOT send
-    // `x-rpc-device_id` / `x-rpc-device_fp` here: the two must be a matched
-    // pair (the fp is issued for a specific id), and sending mismatched ones
-    // triggers retcode 5003 on ALL endpoints — including the well-known
-    // `/index`. Better to send neither than send a mismatched pair.
+    // Only reuse the matched device pair produced by the same persisted
+    // browser session. Manual three-cookie imports continue without these
+    // optional headers; we never invent or persist a random pair.
     return {
       cookie,
       'user-agent': this.userAgent,
@@ -779,7 +828,9 @@ export class MiyousheGameRecordClient {
         : 'https://webstatic.mihoyo.com/',
       Origin: region.isGlobal
         ? 'https://act.hoyolab.com'
-        : 'https://webstatic.mihoyo.com'
+        : 'https://webstatic.mihoyo.com',
+      ...deviceHeadersFromCookie(cookie),
+      ...extraHeaders
     };
   }
 
@@ -826,28 +877,57 @@ export class MiyousheGameRecordClient {
     query: string;
     body: string;
     isRetry?: boolean;
+    useBrowserTransport?: boolean;
+    verificationAttempt?: boolean;
+    extraHeaders?: Record<string, string>;
   }): Promise<MiyousheFetchResult<T>> {
-    const { method, path, region, cookie, query, body, isRetry } = args;
+    const {
+      method,
+      path,
+      region,
+      cookie,
+      query,
+      body,
+      isRetry,
+      useBrowserTransport,
+      verificationAttempt,
+      extraHeaders
+    } = args;
     const token = signDsV2({ query, body, clientType: CLIENT_TYPE_WEB });
     const url = `${this.resolveBase(region)}${path}${query ? `?${query}` : ''}`;
-    const headers = this.buildHeaders(region, cookie, token.header);
+    const headers = this.buildHeaders(region, cookie, token.header, extraHeaders);
 
     const requestMaterial = `${query}\n${body}`;
     logInfo(
       `→ ${method} ${path} materialLength=${requestMaterial.length} ` +
         `materialHash=${shortHash(requestMaterial)}` +
-        (isRetry ? ' [retry]' : '')
+        (isRetry ? ' [retry]' : '') +
+        (useBrowserTransport ? ' [chromium]' : '')
     );
 
     try {
-      const response = await request(url, {
-        method,
-        headers,
-        body: method === 'POST' ? body : undefined,
-        bodyTimeout: this.timeoutMs,
-        headersTimeout: this.timeoutMs
-      });
-      const text = await response.body.text();
+      const response =
+        useBrowserTransport && this.browserTransport
+          ? await this.browserTransport(url, {
+              method,
+              headers,
+              body: method === 'POST' ? body : undefined,
+              timeoutMs: this.timeoutMs
+            })
+          : await request(url, {
+              method,
+              headers,
+              body: method === 'POST' ? body : undefined,
+              bodyTimeout: this.timeoutMs,
+              headersTimeout: this.timeoutMs
+            });
+      const text = 'bodyText' in response ? response.bodyText : await response.body.text();
+      const challengeHeaderNames = Object.keys(response.headers ?? {}).filter((name) =>
+        /aigis|challenge|geetest/i.test(name)
+      );
+      if (challengeHeaderNames.length > 0) {
+        logInfo(`challenge-headers=${challengeHeaderNames.join(',')}`);
+      }
       let parsed: RawEnvelope<T> | undefined;
       try {
         parsed = JSON.parse(text) as RawEnvelope<T>;
@@ -876,6 +956,42 @@ export class MiyousheGameRecordClient {
         message,
         httpStatus: response.statusCode
       });
+
+      // 5003/1034 can be tied to the Node HTTP/TLS fingerprint even when the
+      // cookie and DS are valid. Retry once through Electron's persisted
+      // Chromium session before escalating to interactive verification.
+      if (
+        classified.kind === 'captcha-required' &&
+        this.browserTransport &&
+        !useBrowserTransport
+      ) {
+        return this.doSignedRequest<T>({ ...args, isRetry: false, useBrowserTransport: true });
+      }
+
+      if (
+        classified.kind === 'captcha-required' &&
+        this.verificationProvider &&
+        !verificationAttempt
+      ) {
+        const verification = await this.verificationProvider(cookie, path);
+        if (verification.ok) {
+          return this.doSignedRequest<T>({
+            ...args,
+            isRetry: false,
+            useBrowserTransport: true,
+            verificationAttempt: true,
+            extraHeaders: verification.headers
+          });
+        }
+        return {
+          ok: false,
+          error: {
+            kind: 'captcha-required',
+            retcode: verification.retcode ?? classified.retcode,
+            message: verification.message
+          }
+        };
+      }
 
       // Retry once on transient 5xx with a fresh DS. Auth/captcha/signature
       // failures are not transient and retrying them only increases risk-control.

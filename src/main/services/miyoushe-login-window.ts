@@ -1,6 +1,26 @@
 import { BrowserWindow, session } from 'electron';
 
-const KEY_COOKIE_NAMES = ['ltoken_v2', 'ltuid_v2', 'ltmid_v2'] as const;
+const REQUIRED_COOKIE_NAMES = ['ltoken_v2', 'ltuid_v2', 'ltmid_v2'] as const;
+const AUTH_CONTEXT_COOKIE_NAMES = [
+  'account_id',
+  'account_id_v2',
+  'account_mid_v2',
+  'cookie_token',
+  'cookie_token_v2',
+  'ltoken',
+  'ltuid'
+] as const;
+const OPTIONAL_CONTEXT_COOKIE_NAMES = [
+  '_MHYUUID',
+  'DEVICEFP',
+  'DEVICEFP_SEED_ID',
+  'DEVICEFP_SEED_TIME'
+] as const;
+const SESSION_COOKIE_NAMES = [
+  ...REQUIRED_COOKIE_NAMES,
+  ...AUTH_CONTEXT_COOKIE_NAMES,
+  ...OPTIONAL_CONTEXT_COOKIE_NAMES
+] as const;
 const COOKIE_DOMAINS = ['.miyoushe.com', '.mihoyo.com'];
 const LOGIN_URL = 'https://www.miyoushe.com/ys/';
 const POLL_INTERVAL_MS = 800;
@@ -60,9 +80,9 @@ export class MiyousheLoginWindow {
    */
   async readPersistedCookie(): Promise<string | undefined> {
     const ses = session.fromPartition(this.partition);
-    const map = await collectKeyCookies(ses);
-    if (map.size !== KEY_COOKIE_NAMES.length) return undefined;
-    return KEY_COOKIE_NAMES.map((name) => `${name}=${map.get(name)}`).join('; ');
+    const map = await collectSessionCookies(ses);
+    if (!hasRequiredCookies(map)) return undefined;
+    return serializeSessionCookies(map);
   }
 
   /** User-initiated logout: drops every cookie on the persistent partition. */
@@ -132,9 +152,9 @@ export class MiyousheLoginWindow {
           if (win.isDestroyed()) {
             return;
           }
-          const cookieMap = await collectKeyCookies(ses);
-          if (cookieMap.size === KEY_COOKIE_NAMES.length) {
-            const cookieStr = KEY_COOKIE_NAMES.map((name) => `${name}=${cookieMap.get(name)}`).join('; ');
+          const cookieMap = await collectSessionCookies(ses);
+          if (hasRequiredCookies(cookieMap)) {
+            const cookieStr = serializeSessionCookies(cookieMap);
             settle({ ok: true, cookie: cookieStr });
           }
         })();
@@ -163,15 +183,29 @@ export class MiyousheLoginWindow {
   }
 }
 
-async function collectKeyCookies(ses: Electron.Session): Promise<Map<string, string>> {
+async function collectSessionCookies(ses: Electron.Session): Promise<Map<string, string>> {
   const found = new Map<string, string>();
   for (const domain of COOKIE_DOMAINS) {
     const cookies = await ses.cookies.get({ domain });
     for (const cookie of cookies) {
-      if ((KEY_COOKIE_NAMES as readonly string[]).includes(cookie.name) && !found.has(cookie.name)) {
+      if (
+        (SESSION_COOKIE_NAMES as readonly string[]).includes(cookie.name) &&
+        !found.has(cookie.name)
+      ) {
         found.set(cookie.name, cookie.value);
       }
     }
   }
   return found;
+}
+
+function hasRequiredCookies(cookies: ReadonlyMap<string, string>): boolean {
+  return REQUIRED_COOKIE_NAMES.every((name) => cookies.has(name));
+}
+
+function serializeSessionCookies(cookies: ReadonlyMap<string, string>): string {
+  return SESSION_COOKIE_NAMES.flatMap((name) => {
+    const value = cookies.get(name);
+    return value === undefined ? [] : [`${name}=${value}`];
+  }).join('; ');
 }
