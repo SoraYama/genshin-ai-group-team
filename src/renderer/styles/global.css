@@ -248,6 +248,26 @@ a:hover {
   box-shadow: var(--gta-shadow-card);
 }
 
+.gta-language-select select {
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(20, 25, 34, 0.55);
+  color: var(--gta-text-on-dark);
+  padding: 5px 8px;
+  font: inherit;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .gta-nav button {
   position: relative;
   padding: 7px var(--gta-s5);
@@ -475,7 +495,7 @@ a:hover {
 
 .gta-meta-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
   gap: var(--gta-s4);
 }
 
@@ -511,6 +531,13 @@ a:hover {
 .gta-meta-value.is-mono {
   font-family: var(--gta-font-mono);
   font-weight: 500;
+}
+
+.gta-meta-detail {
+  color: var(--gta-text-on-light-faint);
+  font-family: var(--gta-font-mono);
+  font-size: 10px;
+  white-space: nowrap;
 }
 
 .gta-actions {
@@ -702,6 +729,32 @@ a:hover {
   font-weight: 400;
 }
 
+.gta-build-summary {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 5px;
+  margin-top: var(--gta-s3);
+  padding-top: var(--gta-s3);
+  border-top: 1px solid var(--gta-stroke-soft);
+}
+
+.gta-build-line {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: var(--gta-s2);
+  color: var(--gta-text-on-light-faint);
+  font-size: var(--gta-text-xs);
+}
+
+.gta-build-line strong {
+  overflow: hidden;
+  color: var(--gta-text-on-light-soft);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ===== Empty / status helpers ===== */
 .gta-empty {
   text-align: center;
@@ -822,6 +875,19 @@ a:hover {
   font-weight: 600;
 }
 
+.gta-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: var(--gta-s2);
+  color: var(--gta-text-on-light);
+  font-size: var(--gta-text-sm);
+  cursor: pointer;
+}
+
+.gta-checkbox-row input {
+  accent-color: var(--gta-gold);
+}
+
 .gta-input,
 .gta-textarea,
 .gta-select {
@@ -880,6 +946,20 @@ a:hover {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: var(--gta-s3) var(--gta-s4);
   margin: 0;
+}
+
+.gta-update-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gta-s4);
+}
+
+.gta-update-progress {
+  width: 100%;
+  height: 8px;
+  margin-top: var(--gta-s3);
+  accent-color: var(--gta-gold);
 }
 
 .gta-status-grid > div {

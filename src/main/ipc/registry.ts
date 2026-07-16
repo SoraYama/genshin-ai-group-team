@@ -25,10 +25,9 @@ export function registerHandler<C extends IpcChannel>(channel: C, handler: Handl
       if (error instanceof IpcError) {
         return { ok: false, error: error.toJSON() };
       }
-      const message = error instanceof Error ? error.message : 'Unknown error';
       return {
         ok: false,
-        error: { code: IpcErrorCodes.Internal, message }
+        error: { code: IpcErrorCodes.Internal, message: 'Internal request error' }
       };
     }
   });

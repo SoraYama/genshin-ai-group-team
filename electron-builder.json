@@ -1,6 +1,7 @@
 {
   "appId": "moe.sorayama.genshin-team-advisor",
   "productName": "Genshin Team Advisor",
+  "artifactName": "${name}-${version}-${arch}.${ext}",
   "directories": {
     "output": "release",
     "buildResources": "resources"
@@ -11,27 +12,50 @@
     "package.json"
   ],
   "asarUnpack": [
-    "node_modules/@anthropic-ai/claude-agent-sdk/**/*"
+    "node_modules/@anthropic-ai/claude-agent-sdk/**/*",
+    "node_modules/@anthropic-ai/claude-agent-sdk-*/**/*"
   ],
   "extraResources": [
     {
       "from": "resources/scenarios",
       "to": "scenarios",
       "filter": ["**/*.json"]
+    },
+    {
+      "from": "resources/credits.md",
+      "to": "credits.md"
+    },
+    {
+      "from": "docs",
+      "to": "docs",
+      "filter": ["privacy.md", "data-acquisition.md", "llm-provider.md", "troubleshooting.md"]
+    },
+    {
+      "from": "LICENSE",
+      "to": "LICENSE"
     }
   ],
   "mac": {
-    "target": ["dmg"],
+    "target": ["dmg", "zip"],
     "category": "public.app-category.utilities",
     "hardenedRuntime": true,
-    "gatekeeperAssess": false
+    "gatekeeperAssess": false,
+    "x64ArchFiles": "Contents/Resources/app.asar.unpacked/node_modules/@anthropic-ai/claude-agent-sdk-darwin-*/claude"
   },
   "win": {
     "target": ["nsis"]
   },
   "nsis": {
     "oneClick": false,
-    "allowToChangeInstallationDir": true,
-    "deleteAppDataOnUninstall": true
-  }
+    "allowToChangeInstallationDirectory": true,
+    "deleteAppDataOnUninstall": false
+  },
+  "publish": [
+    {
+      "provider": "github",
+      "owner": "SoraYama",
+      "repo": "genshin-ai-group-team",
+      "releaseType": "draft"
+    }
+  ]
 }

@@ -24,20 +24,71 @@ export interface LlmHealthReport {
 export interface PublicConfig {
   llm: LlmConfigPublicView;
   appVersion: string;
+  monthlyUsage: LlmMonthlyUsage;
 }
+
+export interface LlmMonthlyUsage {
+  month: string;
+  inputTokens: number;
+  outputTokens: number;
+  estimatedCostUsd: number;
+}
+
+export type UpdateStatus =
+  | { state: 'disabled'; currentVersion: string; reason: 'development' | 'unsupported' }
+  | { state: 'idle'; currentVersion: string }
+  | { state: 'checking'; currentVersion: string }
+  | { state: 'available'; currentVersion: string; version: string }
+  | { state: 'not-available'; currentVersion: string }
+  | {
+      state: 'downloading';
+      currentVersion: string;
+      version?: string;
+      percent: number;
+      transferred: number;
+      total: number;
+    }
+  | { state: 'downloaded'; currentVersion: string; version: string }
+  | { state: 'error'; currentVersion: string; message: string };
 
 export const DEFAULT_BASE_URL = 'https://api.anthropic.com';
 export const DEFAULT_MODEL = 'claude-sonnet-4-6';
 
 export interface CharacterStats {
-  level: number;
-  hp: number;
-  atk: number;
-  def: number;
-  critRate: number;
-  critDmg: number;
-  energyRecharge: number;
-  elementalMastery: number;
+  hp?: number;
+  atk?: number;
+  def?: number;
+  critRate?: number;
+  critDmg?: number;
+  energyRecharge?: number;
+  elementalMastery?: number;
+}
+
+export type DataCompleteness = 'basic' | 'build' | 'detailed';
+export type BuildField = 'stats' | 'weapon' | 'artifacts' | 'talents';
+export type FieldSource =
+  | 'miyoushe-index'
+  | 'miyoushe-list'
+  | 'miyoushe-detail'
+  | 'enka';
+
+export interface FieldProvenance {
+  source: FieldSource;
+  fetchedAt: string;
+  stale?: boolean;
+}
+
+export interface CharacterBuildSnapshot {
+  stats?: CharacterStats;
+  weapon?: CharacterWeapon;
+  artifacts?: ArtifactPiece[];
+  talents?: CharacterTalents;
+}
+
+export interface CharacterProvenance {
+  ownership: FieldProvenance;
+  build?: FieldProvenance;
+  stats?: FieldProvenance;
 }
 
 export interface CharacterProfile {
@@ -46,13 +97,14 @@ export interface CharacterProfile {
   element: string;
   rarity: number;
   imageUrl: string;
-  stats: CharacterStats;
-  weapon?: CharacterWeapon;
-  artifacts?: ArtifactPiece[];
+  level?: number;
+  build?: CharacterBuildSnapshot;
   constellation?: number;
-  talents?: CharacterTalents;
   friendship?: number;
   source?: CharacterSource;
+  completeness: DataCompleteness;
+  missingFields: BuildField[];
+  provenance: CharacterProvenance;
 }
 
 export type CharacterSource = 'enka' | 'miyoushe' | 'merged';
@@ -109,7 +161,19 @@ export interface BindCookieResult {
 
 export type ProfileSource = 'miyoushe' | 'miyoushe+enka' | 'enka' | 'merged' | 'miyoushe-stale';
 
+export interface ProfileCoverage {
+  expectedOwnedCount?: number;
+  ownedCount: number;
+  detailedCount: number;
+  buildCount: number;
+  statsCount: number;
+  enkaShowcaseCount: number;
+  missingDetailCount: number;
+  partial: boolean;
+}
+
 export interface PersistedProfile {
+  schemaVersion: 2;
   uid: string;
   region?: string;
   nickname?: string;
@@ -117,6 +181,7 @@ export interface PersistedProfile {
   source: ProfileSource;
   fetchedAt: string;
   characters: CharacterProfile[];
+  coverage: ProfileCoverage;
 }
 
 export interface ProfileListItem {
@@ -126,6 +191,7 @@ export interface ProfileListItem {
   source: ProfileSource;
   fetchedAt: string;
   characterCount: number;
+  coverage: ProfileCoverage;
 }
 
 export interface ProfileStateView {
@@ -168,12 +234,17 @@ export interface TeamRecommendation {
   characters: Array<{ id: number; name: string; element: string }>;
   reasoning: string;
   rotationTip: string;
+  confidence?: 'low' | 'medium' | 'high';
+  assumptions?: string[];
+  critiqueIssues?: string[];
 }
 
 export interface RecommendationResult {
   source: 'llm' | 'fallback';
   summary: string;
   teams: TeamRecommendation[];
+  partial?: boolean;
+  dataNotes?: string[];
 }
 
 export type AdvisorSide = 'single' | 'left' | 'right';

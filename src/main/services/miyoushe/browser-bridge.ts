@@ -1,6 +1,11 @@
 import { BrowserWindow, session } from 'electron';
 import { MIYOUSHE_LOGIN_PARTITION } from '../miyoushe-login-window.js';
-import type { MiyousheCharacterDetail } from '../miyoushe-game-record.js';
+import {
+  mapMiyousheCharacterDetailData,
+  mapMiyousheCharacterListData,
+  type MiyousheCharacterDetail,
+  type MiyousheRosterCoverage
+} from '../miyoushe-game-record.js';
 
 /**
  * Battle Chronicle web app — the same SPA used inside the miyoushe app's "战绩"
@@ -61,11 +66,13 @@ const STEALTH_SCRIPT = `
 
 const DEFAULT_HIDDEN_TIMEOUT_MS = 15_000;
 const DEFAULT_VISIBLE_TIMEOUT_MS = 180_000;
-const TARGET_PATH = '/game_record/app/genshin/api/index';
+const TARGET_INDEX_PATH = '/game_record/app/genshin/api/index';
+const TARGET_LIST_PATH = '/game_record/app/genshin/api/character/list';
+const TARGET_DETAIL_PATH = '/game_record/app/genshin/api/character/detail';
 
 const COOKIE_KEYS = ['ltoken_v2', 'ltuid_v2', 'ltmid_v2'] as const;
 
-const VERBOSE_LOG = process.env.MIYOUSHE_DEBUG !== '0';
+const VERBOSE_LOG = process.env.MIYOUSHE_DEBUG === '1';
 function logInfo(message: string): void {
   if (VERBOSE_LOG) console.info(`[miyoushe-bridge] ${message}`);
 }
@@ -123,7 +130,14 @@ export interface FetchRosterOptions {
 }
 
 export type BrowserBridgeResult =
-  | { ok: true; mode: 'data'; uid: string; nickname?: string; characters: MiyousheCharacterDetail[] }
+  | {
+      ok: true;
+      mode: 'data';
+      uid: string;
+      nickname?: string;
+      characters: MiyousheCharacterDetail[];
+      coverage: MiyousheRosterCoverage;
+    }
   | { ok: true; mode: 'warmup'; indexCalled: boolean }
   | { ok: false; reason: 'timeout' | 'navigation' | 'parse' | 'upstream'; message: string };
 
@@ -144,6 +158,7 @@ interface IndexResponse {
   message?: string;
   data?: {
     role?: { nickname?: string; game_uid?: string; region?: string };
+    stats?: { avatar_number?: number };
     avatars?: Array<{
       id?: number;
       name?: string;
@@ -155,6 +170,79 @@ interface IndexResponse {
       actived_constellation_num?: number;
       fetter?: number;
     }>;
+  };
+}
+
+interface BridgeApiResponse {
+  retcode?: number;
+  message?: string;
+  data?: unknown;
+}
+
+interface BridgeInterceptState {
+  index?: IndexResponse;
+  listed?: MiyousheCharacterDetail[];
+  detailedById: Map<number, MiyousheCharacterDetail>;
+}
+
+function buildBridgeResult(state: BridgeInterceptState): BrowserBridgeResult | undefined {
+  const indexData = state.index?.data;
+  const role = indexData?.role;
+  const indexCharacters = (indexData?.avatars ?? [])
+    .filter((item): item is NonNullable<typeof item> & { id: number } => typeof item?.id === 'number')
+    .map(
+      (item): MiyousheCharacterDetail => ({
+        id: item.id,
+        name: item.name ?? '',
+        element: item.element ?? '',
+        level: item.level ?? 0,
+        rarity: item.rarity ?? 0,
+        iconUrl: item.icon ?? '',
+        imageUrl: item.image,
+        constellation: item.actived_constellation_num ?? 0,
+        friendship: item.fetter ?? 0,
+        artifacts: []
+      })
+    );
+  const baseCharacters = state.listed ?? indexCharacters;
+  if (!state.index && baseCharacters.length === 0) return undefined;
+
+  const characters = baseCharacters.map(
+    (character) => state.detailedById.get(character.id) ?? character
+  );
+  const listedIds = new Set(baseCharacters.map((character) => character.id));
+  const unexpectedCharacterIds = [...state.detailedById.keys()].filter((id) => !listedIds.has(id));
+  const missingCharacterIds = baseCharacters
+    .filter((character) => !state.detailedById.has(character.id))
+    .map((character) => character.id);
+  const expectedOwnedCount = indexData?.stats?.avatar_number;
+  const listedCount = baseCharacters.length;
+  const fields = {
+    weapon: characters.filter((character) => character.weapon !== undefined).length,
+    artifacts: characters.filter((character) => character.artifacts.length > 0).length,
+    talents: characters.filter((character) => character.talents !== undefined).length,
+    stats: characters.filter((character) => character.stats !== undefined).length
+  };
+  return {
+    ok: true,
+    mode: 'data',
+    uid: typeof role?.game_uid === 'string' ? role.game_uid : '',
+    nickname: role?.nickname,
+    characters,
+    coverage: {
+      expectedOwnedCount,
+      listedCount,
+      detailedCount: characters.length - missingCharacterIds.length,
+      missingCharacterIds,
+      duplicateCharacterIds: [],
+      unexpectedCharacterIds,
+      failedBatches: [],
+      fields,
+      partial:
+        missingCharacterIds.length > 0 ||
+        unexpectedCharacterIds.length > 0 ||
+        (expectedOwnedCount !== undefined && expectedOwnedCount !== listedCount)
+    }
   };
 }
 
@@ -335,9 +423,12 @@ export class MiyousheBrowserBridge {
 
     const dbg = win.webContents.debugger;
     const requestUrls = new Map<string, string>();
+    const interceptState: BridgeInterceptState = { detailedById: new Map() };
     let settled = false;
+    let graceTimer: ReturnType<typeof setTimeout> | undefined;
 
     const cleanup = () => {
+      if (graceTimer) clearTimeout(graceTimer);
       if (!win.isDestroyed()) win.close();
       try {
         dbg.detach();
@@ -356,12 +447,22 @@ export class MiyousheBrowserBridge {
       };
 
       const timer = setTimeout(() => {
-        finish({
-          ok: false,
-          reason: 'timeout',
-          message: `Battle Chronicle 页面在 ${timeoutMs}ms 内没有返回 /index 响应`
-        });
+        finish(
+          buildBridgeResult(interceptState) ?? {
+            ok: false,
+            reason: 'timeout',
+            message: `Battle Chronicle 页面在 ${timeoutMs}ms 内没有返回角色数据`
+          }
+        );
       }, timeoutMs);
+
+      const scheduleBestResult = () => {
+        if (graceTimer) clearTimeout(graceTimer);
+        graceTimer = setTimeout(() => {
+          const best = buildBridgeResult(interceptState);
+          if (best) finish(best);
+        }, 1_500);
+      };
 
       try {
         dbg.attach('1.3');
@@ -376,7 +477,15 @@ export class MiyousheBrowserBridge {
 
       dbg.on('message', (_event, method, params) => {
         if (settled) return;
-        void this.handleCdpMessage(dbg, method, params, requestUrls, finish);
+        void this.handleCdpMessage(
+          dbg,
+          method,
+          params,
+          requestUrls,
+          interceptState,
+          scheduleBestResult,
+          finish
+        );
       });
 
       win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
@@ -415,6 +524,8 @@ export class MiyousheBrowserBridge {
     method: string,
     params: unknown,
     requestUrls: Map<string, string>,
+    state: BridgeInterceptState,
+    scheduleBestResult: () => void,
     finish: (r: BrowserBridgeResult) => void
   ): Promise<void> {
     try {
@@ -428,51 +539,61 @@ export class MiyousheBrowserBridge {
         const url = requestUrls.get(p.requestId);
         if (!url) return;
         requestUrls.delete(p.requestId);
-        if (!url.includes(TARGET_PATH)) return;
-        logInfo(`intercepted ${TARGET_PATH} for requestId ${p.requestId}`);
+        const targetPath = [TARGET_INDEX_PATH, TARGET_LIST_PATH, TARGET_DETAIL_PATH].find((path) =>
+          url.includes(path)
+        );
+        if (!targetPath) return;
+        logInfo(`intercepted ${targetPath} for requestId ${p.requestId}`);
         const raw = (await dbg.sendCommand('Network.getResponseBody', {
           requestId: p.requestId
         })) as CdpResponseBody;
         const text = raw.base64Encoded
           ? Buffer.from(raw.body, 'base64').toString('utf8')
           : raw.body;
-        let parsed: IndexResponse;
+        let parsed: BridgeApiResponse;
         try {
-          parsed = JSON.parse(text) as IndexResponse;
+          parsed = JSON.parse(text) as BridgeApiResponse;
         } catch {
-          finish({ ok: false, reason: 'parse', message: `非 JSON 响应：${text.slice(0, 200)}` });
+          finish({
+            ok: false,
+            reason: 'parse',
+            message: `Battle Chronicle 返回了非 JSON 响应（${text.length} bytes）`
+          });
           return;
         }
         if (parsed.retcode !== 0) {
           finish({
             ok: false,
             reason: 'upstream',
-            message: `Battle Chronicle /index retcode=${parsed.retcode ?? 'unknown'} ${parsed.message ?? ''}`
+            message: `Battle Chronicle ${targetPath} retcode=${parsed.retcode ?? 'unknown'} ${parsed.message ?? ''}`
           });
           return;
         }
-        const role = parsed.data?.role;
-        const avatars = parsed.data?.avatars ?? [];
-        finish({
-          ok: true,
-          mode: 'data',
-          uid: typeof role?.game_uid === 'string' ? role.game_uid : '',
-          nickname: role?.nickname,
-          characters: avatars
-            .filter((a): a is NonNullable<typeof a> & { id: number } => typeof a?.id === 'number')
-            .map((a) => ({
-              id: a.id,
-              name: a.name ?? '',
-              element: a.element ?? '',
-              level: a.level ?? 0,
-              rarity: a.rarity ?? 0,
-              iconUrl: a.icon ?? '',
-              imageUrl: a.image,
-              constellation: a.actived_constellation_num ?? 0,
-              friendship: a.fetter ?? 0,
-              artifacts: []
-            }))
-        });
+        if (targetPath === TARGET_INDEX_PATH) {
+          state.index = parsed as IndexResponse;
+        } else if (targetPath === TARGET_LIST_PATH) {
+          const listed = mapMiyousheCharacterListData(parsed.data);
+          if (!listed) {
+            finish({ ok: false, reason: 'parse', message: 'character/list 缺少 list 数组' });
+            return;
+          }
+          state.listed = listed;
+        } else {
+          const detailed = mapMiyousheCharacterDetailData(parsed.data);
+          if (!detailed) {
+            finish({ ok: false, reason: 'parse', message: 'character/detail 缺少 list 数组' });
+            return;
+          }
+          for (const character of detailed) state.detailedById.set(character.id, character);
+        }
+
+        const complete =
+          state.listed !== undefined &&
+          state.listed.length > 0 &&
+          state.listed.every((character) => state.detailedById.has(character.id));
+        const best = buildBridgeResult(state);
+        if (complete && best) finish(best);
+        else scheduleBestResult();
       }
     } catch (error) {
       logWarn(

@@ -1,6 +1,9 @@
+import { createHash } from 'node:crypto';
 import { request } from 'undici';
 import type {
   ArtifactPiece,
+  ArtifactSlot,
+  CharacterStats,
   CharacterTalents,
   CharacterWeapon,
   StatPair
@@ -13,14 +16,17 @@ import {
 import { MIYOUSHE_UA } from './miyoushe-client.js';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
+const DEFAULT_DETAIL_BATCH_SIZE = 20;
 const DEFAULT_BASE_CN = 'https://api-takumi-record.mihoyo.com';
-const DEFAULT_BASE_GLOBAL = 'https://bbs-api-os.hoyolab.com';
+const DEFAULT_BASE_GLOBAL = 'https://sg-public-api.hoyolab.com/event';
 
 const PATH_INDEX = '/game_record/app/genshin/api/index';
+const PATH_CHARACTER_LIST = '/game_record/app/genshin/api/character/list';
+const PATH_CHARACTER_DETAIL = '/game_record/app/genshin/api/character/detail';
 const PATH_SPIRAL_ABYSS = '/game_record/app/genshin/api/spiralAbyss';
 const PATH_ROLE_COMBAT = '/game_record/app/genshin/api/role_combat';
 
-const VERBOSE_LOG = process.env.MIYOUSHE_DEBUG !== '0';
+const VERBOSE_LOG = process.env.MIYOUSHE_DEBUG === '1';
 
 function logInfo(message: string): void {
   if (VERBOSE_LOG) console.info(`[miyoushe-record] ${message}`);
@@ -28,15 +34,12 @@ function logInfo(message: string): void {
 function logWarn(message: string): void {
   if (VERBOSE_LOG) console.warn(`[miyoushe-record] ${message}`);
 }
-function redactCookie(cookie: string): string {
-  return cookie
-    .split(';')
-    .map((p) => {
-      const i = p.indexOf('=');
-      if (i < 0) return p.trim();
-      return `${p.slice(0, i).trim()}=…(${p.length - i - 1}b)`;
-    })
-    .join('; ');
+function redactUid(uid: string): string {
+  return uid.length <= 3 ? '***' : `***${uid.slice(-3)}`;
+}
+
+function shortHash(value: string): string {
+  return createHash('sha256').update(value).digest('hex').slice(0, 12);
 }
 
 export interface MiyousheGameRecordClientOptions {
@@ -55,6 +58,8 @@ export type MiyousheFetchError =
   | { kind: 'auth-expired'; retcode?: number; message: string }
   | { kind: 'captcha-required'; retcode?: number; message: string }
   | { kind: 'rate-limited'; retcode?: number; message: string }
+  | { kind: 'signature'; retcode?: number; message: string }
+  | { kind: 'schema-drift'; message: string }
   | { kind: 'network'; message: string }
   | { kind: 'parse'; message: string }
   | { kind: 'upstream'; retcode?: number; httpStatus?: number; message: string };
@@ -76,6 +81,34 @@ export interface MiyousheCharacterDetail {
   weapon?: CharacterWeapon;
   artifacts: ArtifactPiece[];
   talents?: CharacterTalents;
+  stats?: Partial<Omit<CharacterStats, 'level'>>;
+}
+
+export interface MiyousheRosterCoverage {
+  expectedOwnedCount?: number;
+  listedCount: number;
+  detailedCount: number;
+  missingCharacterIds: number[];
+  duplicateCharacterIds: number[];
+  unexpectedCharacterIds: number[];
+  failedBatches: Array<{ batchIndex: number; kind: MiyousheFetchError['kind'] }>;
+  fields: {
+    weapon: number;
+    artifacts: number;
+    talents: number;
+    stats: number;
+  };
+  partial: boolean;
+}
+
+export interface MiyousheDetailedRoster {
+  characters: MiyousheCharacterDetail[];
+  coverage: MiyousheRosterCoverage;
+}
+
+export interface FetchDetailedRosterOptions {
+  expectedOwnedCount?: number;
+  batchSize?: number;
 }
 
 export interface MiyoushePlayerIndex {
@@ -112,6 +145,54 @@ interface RawCharacterListItem {
   actived_constellation_num?: number;
   fetter?: number;
   weapon?: RawWeapon;
+}
+
+interface RawCharacterListData {
+  list?: RawCharacterListItem[];
+}
+
+interface RawArtifactSet {
+  id?: number;
+  name?: string;
+}
+
+interface RawArtifact {
+  id?: number;
+  icon?: string;
+  pos?: number;
+  pos_name?: string;
+  rarity?: number;
+  level?: number;
+  set?: RawArtifactSet;
+  main_property?: RawProperty;
+  sub_property_list?: RawProperty[];
+}
+
+interface RawSkill {
+  skill_id?: number;
+  skill_type?: number;
+  level?: number;
+  is_unlock?: boolean;
+}
+
+interface RawDetailedCharacter extends RawCharacterListItem {
+  base?: RawCharacterListItem;
+  relics?: RawArtifact[];
+  skills?: RawSkill[];
+  base_properties?: RawProperty[];
+  selected_properties?: RawProperty[];
+  extra_properties?: RawProperty[];
+  element_properties?: RawProperty[];
+}
+
+interface RawPropertyInfo {
+  property_type?: number;
+  name?: string;
+}
+
+interface RawCharacterDetailData {
+  list?: RawDetailedCharacter[];
+  property_map?: Record<string, RawPropertyInfo>;
 }
 
 interface RawWeapon {
@@ -194,10 +275,15 @@ const STAT_KEY_BY_PROPERTY_TYPE: Record<number, string> = {
   46: 'cryoDmg'
 };
 
-function statKeyFromProperty(prop: RawProperty | undefined): string {
+function statKeyFromProperty(
+  prop: RawProperty | undefined,
+  propertyMap?: Record<string, RawPropertyInfo>
+): string {
   if (!prop) return 'unknown';
   if (prop.name) return prop.name;
   if (prop.property_type !== undefined) {
+    const mapped = propertyMap?.[String(prop.property_type)]?.name;
+    if (mapped) return mapped;
     return STAT_KEY_BY_PROPERTY_TYPE[prop.property_type] ?? `prop_${prop.property_type}`;
   }
   return 'unknown';
@@ -212,11 +298,20 @@ function statValueFromProperty(prop: RawProperty | undefined): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function toStatPair(prop: RawProperty | undefined): StatPair {
-  return { key: statKeyFromProperty(prop), value: statValueFromProperty(prop) };
+function toStatPair(
+  prop: RawProperty | undefined,
+  propertyMap?: Record<string, RawPropertyInfo>
+): StatPair {
+  return {
+    key: statKeyFromProperty(prop, propertyMap),
+    value: statValueFromProperty(prop)
+  };
 }
 
-function mapWeapon(raw: RawWeapon | undefined): CharacterWeapon | undefined {
+function mapWeapon(
+  raw: RawWeapon | undefined,
+  propertyMap?: Record<string, RawPropertyInfo>
+): CharacterWeapon | undefined {
   if (!raw || raw.id === undefined) return undefined;
   return {
     id: raw.id,
@@ -225,9 +320,153 @@ function mapWeapon(raw: RawWeapon | undefined): CharacterWeapon | undefined {
     level: raw.level ?? 0,
     refinement: raw.affix_level ?? 1,
     rarity: raw.rarity ?? 0,
-    mainStat: raw.main_property ? toStatPair(raw.main_property) : undefined,
-    subStat: raw.sub_property ? toStatPair(raw.sub_property) : undefined
+    mainStat: raw.main_property ? toStatPair(raw.main_property, propertyMap) : undefined,
+    subStat: raw.sub_property ? toStatPair(raw.sub_property, propertyMap) : undefined
   };
+}
+
+const ARTIFACT_SLOT_BY_POSITION: Record<number, ArtifactSlot> = {
+  1: 'flower',
+  2: 'plume',
+  3: 'sands',
+  4: 'goblet',
+  5: 'circlet'
+};
+
+function artifactSlot(raw: RawArtifact): ArtifactSlot | undefined {
+  if (raw.pos !== undefined && ARTIFACT_SLOT_BY_POSITION[raw.pos]) {
+    return ARTIFACT_SLOT_BY_POSITION[raw.pos];
+  }
+  const name = raw.pos_name?.toLowerCase() ?? '';
+  if (name.includes('flower') || name.includes('生之花')) return 'flower';
+  if (name.includes('plume') || name.includes('feather') || name.includes('死之羽')) return 'plume';
+  if (name.includes('sands') || name.includes('时之沙')) return 'sands';
+  if (name.includes('goblet') || name.includes('空之杯')) return 'goblet';
+  if (name.includes('circlet') || name.includes('理之冠')) return 'circlet';
+  return undefined;
+}
+
+function mapArtifact(
+  raw: RawArtifact,
+  propertyMap?: Record<string, RawPropertyInfo>
+): ArtifactPiece | undefined {
+  const slot = artifactSlot(raw);
+  if (!slot || raw.id === undefined || !raw.main_property) return undefined;
+  return {
+    slot,
+    setId: raw.set?.id ?? 0,
+    setName: raw.set?.name ?? '',
+    level: raw.level ?? 0,
+    rarity: raw.rarity ?? 0,
+    mainStat: toStatPair(raw.main_property, propertyMap),
+    subStats: (raw.sub_property_list ?? []).map((prop) => toStatPair(prop, propertyMap)),
+    iconUrl: raw.icon
+  };
+}
+
+function mapTalents(skills: RawSkill[] | undefined): CharacterTalents | undefined {
+  const unlocked = (skills ?? []).filter(
+    (skill): skill is RawSkill & { level: number } =>
+      skill.is_unlock !== false && typeof skill.level === 'number'
+  );
+  const byType = new Map(unlocked.map((skill) => [skill.skill_type, skill.level]));
+  const normalAttack = byType.get(1) ?? unlocked[0]?.level;
+  const elementalSkill = byType.get(2) ?? unlocked[1]?.level;
+  const elementalBurst = byType.get(3) ?? unlocked[2]?.level;
+  if (
+    normalAttack === undefined ||
+    elementalSkill === undefined ||
+    elementalBurst === undefined
+  ) {
+    return undefined;
+  }
+  return { normalAttack, elementalSkill, elementalBurst };
+}
+
+const CORE_STAT_BY_PROPERTY_TYPE: Record<number, keyof Omit<CharacterStats, 'level'>> = {
+  1: 'hp',
+  4: 'atk',
+  7: 'def',
+  20: 'critRate',
+  22: 'critDmg',
+  23: 'energyRecharge',
+  28: 'elementalMastery'
+};
+
+function mapCoreStats(raw: RawDetailedCharacter): Partial<Omit<CharacterStats, 'level'>> | undefined {
+  const properties = [
+    ...(raw.base_properties ?? []),
+    ...(raw.selected_properties ?? []),
+    ...(raw.extra_properties ?? []),
+    ...(raw.element_properties ?? [])
+  ];
+  const stats: Partial<Omit<CharacterStats, 'level'>> = {};
+  for (const property of properties) {
+    if (property.property_type === undefined) continue;
+    const key = CORE_STAT_BY_PROPERTY_TYPE[property.property_type];
+    if (!key) continue;
+    const rawValue = statValueFromProperty(property);
+    stats[key] =
+      (key === 'critRate' || key === 'critDmg' || key === 'energyRecharge') &&
+      !String(property.final ?? property.value ?? '').includes('%') &&
+      rawValue <= 10
+        ? Number((rawValue * 100).toFixed(2))
+        : rawValue;
+  }
+  return Object.keys(stats).length > 0 ? stats : undefined;
+}
+
+function mapCharacterListItem(item: RawCharacterListItem): MiyousheCharacterDetail {
+  return {
+    id: item.id ?? 0,
+    name: item.name ?? '',
+    element: item.element ?? '',
+    level: item.level ?? 0,
+    rarity: item.rarity ?? 0,
+    iconUrl: item.icon ?? '',
+    imageUrl: item.image,
+    constellation: item.actived_constellation_num ?? 0,
+    friendship: item.fetter ?? 0,
+    weapon: mapWeapon(item.weapon),
+    artifacts: []
+  };
+}
+
+function mapDetailedCharacter(
+  raw: RawDetailedCharacter,
+  propertyMap?: Record<string, RawPropertyInfo>
+): MiyousheCharacterDetail {
+  const base = raw.base ?? raw;
+  const mappedBase = mapCharacterListItem(base);
+  return {
+    ...mappedBase,
+    imageUrl: raw.image ?? mappedBase.imageUrl,
+    weapon: mapWeapon(raw.weapon ?? base.weapon, propertyMap),
+    artifacts: (raw.relics ?? [])
+      .map((artifact) => mapArtifact(artifact, propertyMap))
+      .filter((artifact): artifact is ArtifactPiece => artifact !== undefined),
+    talents: mapTalents(raw.skills),
+    stats: mapCoreStats(raw)
+  };
+}
+
+/** Parse sanitized browser-intercepted list data without exposing raw payloads. */
+export function mapMiyousheCharacterListData(data: unknown): MiyousheCharacterDetail[] | undefined {
+  if (!isObject(data) || !Array.isArray(data['list'])) return undefined;
+  return (data['list'] as RawCharacterListItem[])
+    .filter((item) => typeof item?.id === 'number')
+    .map(mapCharacterListItem);
+}
+
+/** Parse sanitized browser-intercepted detail data through the direct-client mapper. */
+export function mapMiyousheCharacterDetailData(data: unknown): MiyousheCharacterDetail[] | undefined {
+  if (!isObject(data) || !Array.isArray(data['list'])) return undefined;
+  const propertyMap = isObject(data['property_map'])
+    ? (data['property_map'] as Record<string, RawPropertyInfo>)
+    : undefined;
+  return (data['list'] as RawDetailedCharacter[])
+    .filter((item) => typeof (item.base ?? item)?.id === 'number')
+    .map((item) => mapDetailedCharacter(item, propertyMap));
 }
 
 function classifyError(payload: {
@@ -237,17 +476,21 @@ function classifyError(payload: {
 }): MiyousheFetchError {
   const retcode = payload.retcode;
   const message = payload.message ?? `retcode=${retcode ?? 'unknown'}`;
+  if (payload.httpStatus === 429) {
+    return { kind: 'rate-limited', retcode, message };
+  }
   if (retcode === -100 || retcode === 10001 || retcode === 10002) {
     return { kind: 'auth-expired', retcode, message };
   }
-  if (retcode === 1034) {
+  if (retcode === 1034 || retcode === 5003) {
     return { kind: 'captcha-required', retcode, message };
   }
   if (retcode === 10101 || retcode === 10103) {
     return { kind: 'rate-limited', retcode, message };
   }
-  // 5003 — typically "endpoint version mismatch" / DS soft-fail. Classified as
-  // upstream so the legacy /character fallback gets a chance.
+  if (retcode === -5003) {
+    return { kind: 'signature', retcode, message };
+  }
   return {
     kind: 'upstream',
     retcode,
@@ -285,60 +528,130 @@ export class MiyousheGameRecordClient {
   }
 
   /**
-   * Fetch every owned character.
-   *
-   * The reliable path is `/index` (GET) — it returns an `avatars[]` array
-   * with id/name/element/level/rarity/constellation/icon/image for every
-   * owned character. This is the same endpoint the miyoushe web profile uses.
-   *
-   * `/character/list` and `/character/detail` (which carry artifact + talent
-   * data) require a matched `device_id` / `device_fp` pair that we don't
-   * have a reliable way to produce yet; they consistently return retcode 5003.
-   * For v0.6 we accept losing artifact data and prioritize getting the full
-   * roster, which is the user-visible value. Weapons / artifacts are still
-   * available via Enka for the showcased 8 characters.
+   * Compatibility wrapper used by the current profile IPC. The authoritative
+   * implementation is `fetchDetailedRoster`, which preserves ownership order
+   * and explicit coverage. Callers that need partial diagnostics should use it
+   * directly instead of discarding coverage here.
    */
   async fetchCharacterDetails(
     uid: string,
     cookie: string
   ): Promise<MiyousheFetchResult<MiyousheCharacterDetail[]>> {
-    const region = regionFromUid(uid);
-    logInfo(`fetchCharacterDetails uid=${uid} region=${region.region} cookie=${redactCookie(cookie)}`);
+    const index = await this.fetchPlayerIndex(uid, cookie);
+    if (!index.ok) return index;
+    const roster = await this.fetchDetailedRoster(uid, cookie, {
+      expectedOwnedCount: index.data.totalCharacters
+    });
+    return roster.ok ? { ok: true, data: roster.data.characters } : roster;
+  }
 
-    const query = `role_id=${encodeURIComponent(uid)}&server=${encodeURIComponent(region.region)}`;
-    const indexResult = await this.getSigned<{ avatars?: RawCharacterListItem[] }>(
-      PATH_INDEX,
+  async fetchDetailedRoster(
+    uid: string,
+    cookie: string,
+    options: FetchDetailedRosterOptions = {}
+  ): Promise<MiyousheFetchResult<MiyousheDetailedRoster>> {
+    const region = regionFromUid(uid);
+    logInfo(`fetchDetailedRoster uid=${redactUid(uid)} region=${region.region}`);
+    const payload = { role_id: uid, server: region.region };
+    const listResult = await this.postSigned<RawCharacterListData>(
+      PATH_CHARACTER_LIST,
       region,
       cookie,
-      query
+      payload
     );
-    if (!indexResult.ok) return indexResult;
+    if (!listResult.ok) return listResult;
+    if (!Array.isArray(listResult.data.list)) {
+      return {
+        ok: false,
+        error: { kind: 'schema-drift', message: 'character/list 缺少 list 数组' }
+      };
+    }
 
-    const avatars = Array.isArray(indexResult.data.avatars) ? indexResult.data.avatars : [];
-    logInfo(`/index returned ${avatars.length} avatars`);
-    return { ok: true, data: this.fromListOnly(avatars) };
-  }
+    const list = listResult.data.list.filter(
+      (item): item is RawCharacterListItem & { id: number } => typeof item.id === 'number'
+    );
+    const duplicateCharacterIds: number[] = [];
+    const uniqueList: Array<RawCharacterListItem & { id: number }> = [];
+    const listedIds = new Set<number>();
+    for (const item of list) {
+      if (listedIds.has(item.id)) {
+        duplicateCharacterIds.push(item.id);
+      } else {
+        listedIds.add(item.id);
+        uniqueList.push(item);
+      }
+    }
 
-  private fromListOnly(list: RawCharacterListItem[]): MiyousheCharacterDetail[] {
-    return list
-      .filter((item) => typeof item.id === 'number')
-      .map((item) => this.mapListItem(item));
-  }
+    const batchSize = Math.max(1, Math.min(options.batchSize ?? DEFAULT_DETAIL_BATCH_SIZE, 100));
+    const detailById = new Map<number, MiyousheCharacterDetail>();
+    const unexpectedCharacterIds: number[] = [];
+    const failedBatches: MiyousheRosterCoverage['failedBatches'] = [];
 
-  private mapListItem(item: RawCharacterListItem): MiyousheCharacterDetail {
-    return {
-      id: item.id ?? 0,
-      name: item.name ?? '',
-      element: item.element ?? '',
-      level: item.level ?? 0,
-      rarity: item.rarity ?? 0,
-      iconUrl: item.icon ?? '',
-      imageUrl: item.image,
-      constellation: item.actived_constellation_num ?? 0,
-      friendship: item.fetter ?? 0,
-      weapon: mapWeapon(item.weapon),
-      artifacts: []
+    for (let offset = 0; offset < uniqueList.length; offset += batchSize) {
+      const batchIndex = Math.floor(offset / batchSize);
+      const characterIds = uniqueList.slice(offset, offset + batchSize).map((item) => item.id);
+      const detailResult = await this.postSigned<RawCharacterDetailData>(
+        PATH_CHARACTER_DETAIL,
+        region,
+        cookie,
+        { ...payload, character_ids: characterIds }
+      );
+      if (!detailResult.ok) {
+        failedBatches.push({ batchIndex, kind: detailResult.error.kind });
+        continue;
+      }
+      if (!Array.isArray(detailResult.data.list)) {
+        failedBatches.push({ batchIndex, kind: 'schema-drift' });
+        continue;
+      }
+      for (const raw of detailResult.data.list) {
+        const base = raw.base ?? raw;
+        if (typeof base.id !== 'number') continue;
+        if (!listedIds.has(base.id)) {
+          unexpectedCharacterIds.push(base.id);
+          continue;
+        }
+        detailById.set(
+          base.id,
+          mapDetailedCharacter(raw, detailResult.data.property_map)
+        );
+      }
+    }
+
+    const characters = uniqueList.map((item) => detailById.get(item.id) ?? mapCharacterListItem(item));
+    const missingCharacterIds = uniqueList
+      .filter((item) => !detailById.has(item.id))
+      .map((item) => item.id);
+    const fields = {
+      weapon: characters.filter((character) => character.weapon !== undefined).length,
+      artifacts: characters.filter((character) => character.artifacts.length > 0).length,
+      talents: characters.filter((character) => character.talents !== undefined).length,
+      stats: characters.filter((character) => character.stats !== undefined).length
     };
+    const listedCount = uniqueList.length;
+    const expectedMismatch =
+      options.expectedOwnedCount !== undefined && options.expectedOwnedCount !== listedCount;
+    const coverage: MiyousheRosterCoverage = {
+      expectedOwnedCount: options.expectedOwnedCount,
+      listedCount,
+      detailedCount: detailById.size,
+      missingCharacterIds,
+      duplicateCharacterIds,
+      unexpectedCharacterIds,
+      failedBatches,
+      fields,
+      partial:
+        expectedMismatch ||
+        missingCharacterIds.length > 0 ||
+        duplicateCharacterIds.length > 0 ||
+        unexpectedCharacterIds.length > 0 ||
+        failedBatches.length > 0
+    };
+    logInfo(
+      `coverage uid=${redactUid(uid)} listed=${listedCount} detailed=${detailById.size} ` +
+        `partial=${coverage.partial} fields=${JSON.stringify(fields)}`
+    );
+    return { ok: true, data: { characters, coverage } };
   }
 
   async fetchPlayerIndex(
@@ -486,6 +799,25 @@ export class MiyousheGameRecordClient {
     });
   }
 
+  private async postSigned<T>(
+    path: string,
+    region: MiyousheRegion,
+    cookie: string,
+    payload: Record<string, unknown>
+  ): Promise<MiyousheFetchResult<T>> {
+    // The exact same string is signed and sent. Re-stringifying after signing
+    // can reorder/alter bytes and produces an invalid DS signature.
+    const body = JSON.stringify(payload);
+    return this.doSignedRequest<T>({
+      method: 'POST',
+      path,
+      region,
+      cookie,
+      query: '',
+      body
+    });
+  }
+
   private async doSignedRequest<T>(args: {
     method: 'GET' | 'POST';
     path: string;
@@ -500,9 +832,10 @@ export class MiyousheGameRecordClient {
     const url = `${this.resolveBase(region)}${path}${query ? `?${query}` : ''}`;
     const headers = this.buildHeaders(region, cookie, token.header);
 
+    const requestMaterial = `${query}\n${body}`;
     logInfo(
-      `→ ${method} ${path}${query ? `?${query}` : ''} ` +
-        `ds=${token.header.slice(0, 30)}… body=${body || '∅'}` +
+      `→ ${method} ${path} materialLength=${requestMaterial.length} ` +
+        `materialHash=${shortHash(requestMaterial)}` +
         (isRetry ? ' [retry]' : '')
     );
 
@@ -519,17 +852,19 @@ export class MiyousheGameRecordClient {
       try {
         parsed = JSON.parse(text) as RawEnvelope<T>;
       } catch {
-        logWarn(`← HTTP ${response.statusCode} non-JSON: ${text.slice(0, 200)}`);
+        logWarn(
+          `← HTTP ${response.statusCode} non-JSON length=${text.length} hash=${shortHash(text)}`
+        );
         return {
           ok: false,
-          error: { kind: 'parse', message: `非 JSON 响应：${text.slice(0, 200)}` }
+          error: { kind: 'parse', message: `非 JSON 响应（HTTP ${response.statusCode}）` }
         };
       }
       const retcode = parsed?.retcode;
       const message = parsed?.message;
       logInfo(
         `← HTTP ${response.statusCode} retcode=${retcode ?? '?'}` +
-          (message ? ` message="${message}"` : '') +
+          (message ? ` message="${message.replace(/[\r\n]/g, ' ').slice(0, 120)}"` : '') +
           (retcode === 0 ? ` data-keys=${parsed?.data ? Object.keys(parsed.data as object).join(',') : 'null'}` : '')
       );
       if (retcode === 0 && parsed?.data !== undefined) {
@@ -542,8 +877,9 @@ export class MiyousheGameRecordClient {
         httpStatus: response.statusCode
       });
 
-      // Retry once on auth/5xx with a fresh DS — only one attempt to avoid loops.
-      if (!isRetry && (classified.kind === 'auth-expired' || (response.statusCode >= 500 && response.statusCode < 600))) {
+      // Retry once on transient 5xx with a fresh DS. Auth/captcha/signature
+      // failures are not transient and retrying them only increases risk-control.
+      if (!isRetry && response.statusCode >= 500 && response.statusCode < 600) {
         return this.doSignedRequest<T>({ ...args, isRetry: true });
       }
 

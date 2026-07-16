@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../../ipc';
 import type {
   HistoryQueryResult,
@@ -6,6 +6,7 @@ import type {
   RecommendationHistoryEntry
 } from '../../../shared/domain';
 import { ButtonGlyph } from '../../design/Icons';
+import { localizeError, useI18n } from '../../i18n';
 
 interface HistoryPageProps {
   state: ProfileStateView;
@@ -32,6 +33,7 @@ const DEFAULT_FILTERS: Filters = {
 };
 
 export function HistoryPage({ state }: HistoryPageProps) {
+  const { locale, t } = useI18n();
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   const [query, setQuery] = useState<HistoryQueryResult>({
     items: [],
@@ -43,6 +45,7 @@ export function HistoryPage({ state }: HistoryPageProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const filtersRef = useRef(filters);
 
   const load = useCallback(
     async (next: Filters, offset: number) => {
@@ -60,17 +63,21 @@ export function HistoryPage({ state }: HistoryPageProps) {
         });
         setQuery(result);
       } catch (err) {
-        setError(err instanceof Error ? err.message : '加载失败');
+        setError(localizeError(err, locale, t, 'history.error.load'));
       } finally {
         setLoading(false);
       }
     },
-    [state.activeUid]
+    [locale, state.activeUid, t]
   );
 
   useEffect(() => {
-    void load(filters, 0);
-  }, [load, filters.scope, state.activeUid]);
+    filtersRef.current = filters;
+  }, [filters]);
+
+  useEffect(() => {
+    void load(filtersRef.current, 0);
+  }, [load, filters.scope]);
 
   async function applyFilters() {
     await load(filters, 0);
@@ -96,7 +103,7 @@ export function HistoryPage({ state }: HistoryPageProps) {
 
   async function clearMatching() {
     if (filters.scope !== 'active' && filters.source === 'all' && !filters.enemyKeyword.trim()) {
-      setError('批量清除至少要指定当前 UID、来源或关键词中的一个');
+      setError(t('history.error.clearGuard'));
       return;
     }
     try {
@@ -106,16 +113,16 @@ export function HistoryPage({ state }: HistoryPageProps) {
         enemyKeyword: filters.enemyKeyword.trim() || undefined
       });
       await load(filters, 0);
-      setError(result.removed === 0 ? '没有匹配的历史记录' : null);
+      setError(result.removed === 0 ? t('history.error.noMatches') : null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '批量删除失败');
+      setError(localizeError(err, locale, t, 'history.error.clear'));
     }
   }
 
   return (
     <section>
       <h2 className="gta-section-title">
-        推荐历史
+        {t('history.title')}
         <span className="gta-section-sub">HISTORY · MAX 200</span>
       </h2>
 
@@ -123,7 +130,7 @@ export function HistoryPage({ state }: HistoryPageProps) {
         <div className="gta-panel-body">
           <div className="gta-form-grid">
             <label className="gta-field">
-              <span className="gta-field-label">范围</span>
+              <span className="gta-field-label">{t('history.scope')}</span>
               <select
                 className="gta-select"
                 value={filters.scope}
@@ -134,12 +141,12 @@ export function HistoryPage({ state }: HistoryPageProps) {
                   }))
                 }
               >
-                <option value="active">当前 UID</option>
-                <option value="all">全部 UID</option>
+                <option value="active">{t('history.scope.active')}</option>
+                <option value="all">{t('history.scope.all')}</option>
               </select>
             </label>
             <label className="gta-field">
-              <span className="gta-field-label">来源</span>
+              <span className="gta-field-label">{t('history.source')}</span>
               <select
                 className="gta-select"
                 value={filters.source}
@@ -150,13 +157,13 @@ export function HistoryPage({ state }: HistoryPageProps) {
                   }))
                 }
               >
-                <option value="all">全部</option>
+                <option value="all">{t('history.source.all')}</option>
                 <option value="llm">LLM</option>
-                <option value="fallback">本地启发式</option>
+                <option value="fallback">{t('history.source.fallback')}</option>
               </select>
             </label>
             <label className="gta-field">
-              <span className="gta-field-label">敌人关键词</span>
+              <span className="gta-field-label">{t('history.enemyKeyword')}</span>
               <input
                 type="text"
                 className="gta-input"
@@ -167,7 +174,7 @@ export function HistoryPage({ state }: HistoryPageProps) {
               />
             </label>
             <label className="gta-field">
-              <span className="gta-field-label">起始日期</span>
+              <span className="gta-field-label">{t('history.fromDate')}</span>
               <input
                 type="date"
                 className="gta-input is-mono"
@@ -178,7 +185,7 @@ export function HistoryPage({ state }: HistoryPageProps) {
               />
             </label>
             <label className="gta-field">
-              <span className="gta-field-label">结束日期</span>
+              <span className="gta-field-label">{t('history.toDate')}</span>
               <input
                 type="date"
                 className="gta-input is-mono"
@@ -189,7 +196,7 @@ export function HistoryPage({ state }: HistoryPageProps) {
               />
             </label>
             <label className="gta-field">
-              <span className="gta-field-label">每页</span>
+              <span className="gta-field-label">{t('history.perPage')}</span>
               <input
                 type="number"
                 className="gta-input is-mono"
@@ -216,7 +223,7 @@ export function HistoryPage({ state }: HistoryPageProps) {
               <span className="gta-btn-icon">
                 <ButtonGlyph name="refresh" />
               </span>
-              {loading ? '加载中…' : '应用筛选'}
+              {loading ? t('common.loading') : t('history.apply')}
             </button>
             <button
               type="button"
@@ -226,7 +233,7 @@ export function HistoryPage({ state }: HistoryPageProps) {
               <span className="gta-btn-icon">
                 <ButtonGlyph name="trash" />
               </span>
-              删除匹配项
+              {t('history.deleteMatching')}
             </button>
           </div>
         </div>
@@ -235,19 +242,21 @@ export function HistoryPage({ state }: HistoryPageProps) {
       {error && <p className="gta-error">{error}</p>}
 
       <p className="gta-history-stats">
-        <span>共 {query.total} 条</span>
+        <span>{t('history.total', { count: query.total })}</span>
         <span>
-          当前页：
-          {query.total === 0
-            ? '0-0'
-            : `${query.offset + 1}-${Math.min(query.offset + query.limit, query.total)}`}
+          {t('history.page', {
+            range:
+              query.total === 0
+                ? '0-0'
+                : `${query.offset + 1}-${Math.min(query.offset + query.limit, query.total)}`
+          })}
         </span>
       </p>
 
       {query.items.length === 0 ? (
         <div className="gta-panel">
           <div className="gta-panel-body">
-            <p className="gta-hint">暂无匹配的历史记录。</p>
+            <p className="gta-hint">{t('history.empty')}</p>
           </div>
         </div>
       ) : (
@@ -271,7 +280,7 @@ export function HistoryPage({ state }: HistoryPageProps) {
           onClick={() => void gotoPrev()}
           disabled={query.offset === 0}
         >
-          上一页
+          {t('history.prev')}
         </button>
         <button
           type="button"
@@ -279,7 +288,7 @@ export function HistoryPage({ state }: HistoryPageProps) {
           onClick={() => void gotoNext()}
           disabled={!query.hasMore}
         >
-          下一页
+          {t('history.next')}
         </button>
       </div>
     </section>
@@ -294,34 +303,39 @@ interface HistoryListItemProps {
 }
 
 function HistoryListItem({ item, expanded, onToggle, onDelete }: HistoryListItemProps) {
+  const { t } = useI18n();
   const isLlm = item.result.source === 'llm';
   return (
     <li className={expanded ? 'gta-history-entry is-expanded' : 'gta-history-entry'}>
       <button type="button" className="gta-history-summary" onClick={onToggle}>
         <span className="gta-history-time">{formatTime(item.createdAt)}</span>
         <span className={isLlm ? 'gta-tag is-llm' : 'gta-tag is-fallback'}>
-          {isLlm ? 'LLM' : '本地'}
+          {isLlm ? 'LLM' : t('history.local')}
         </span>
         {item.side !== 'single' && (
           <span className="gta-tag is-accent">
-            对比·{item.side === 'left' ? '左' : '右'}
+            {t('history.compareSide', {
+              side: item.side === 'left' ? t('history.left') : t('history.right')
+            })}
           </span>
         )}
         <span className="gta-history-uid">UID {item.uid}</span>
         <span className="gta-history-enemies">
-          {item.enemyNames.length > 0 ? item.enemyNames.join('、') : '未指定敌人'}
+          {item.enemyNames.length > 0 ? item.enemyNames.join(', ') : t('history.noEnemies')}
         </span>
       </button>
 
       {expanded && (
         <div className="gta-history-body">
           <p style={{ margin: 0 }}>{item.result.summary}</p>
+          {item.result.dataNotes && item.result.dataNotes.length > 0 && (
+            <p className="gta-hint" style={{ margin: 0 }}>
+              {t('advisor.dataNotes', { notes: item.result.dataNotes.join('; ') })}
+            </p>
+          )}
           {item.preference && (
-            <p
-              className="gta-hint"
-              style={{ margin: 0, fontSize: 'var(--gta-text-sm)' }}
-            >
-              <span className="gta-team-line-label">偏好</span>
+            <p className="gta-hint" style={{ margin: 0, fontSize: 'var(--gta-text-sm)' }}>
+              <span className="gta-team-line-label">{t('advisor.preference')}</span>
               {item.preference}
             </p>
           )}
@@ -332,13 +346,25 @@ function HistoryListItem({ item, expanded, onToggle, onDelete }: HistoryListItem
                 {team.characters.map((c) => `${c.name}(${c.element})`).join(' · ')}
               </p>
               <p>
-                <span className="gta-team-line-label">思路</span>
+                <span className="gta-team-line-label">{t('advisor.reasoning')}</span>
                 {team.reasoning}
               </p>
               <p>
-                <span className="gta-team-line-label">手法</span>
+                <span className="gta-team-line-label">{t('advisor.rotation')}</span>
                 {team.rotationTip}
               </p>
+              {team.assumptions && team.assumptions.length > 0 && (
+                <p className="gta-hint">
+                  <span className="gta-team-line-label">{t('advisor.assumptions')}</span>
+                  {team.assumptions.join('; ')}
+                </p>
+              )}
+              {team.critiqueIssues && team.critiqueIssues.length > 0 && (
+                <p className="gta-hint">
+                  <span className="gta-team-line-label">{t('advisor.risks')}</span>
+                  {team.critiqueIssues.join('; ')}
+                </p>
+              )}
             </article>
           ))}
           <div className="gta-actions">
@@ -346,7 +372,7 @@ function HistoryListItem({ item, expanded, onToggle, onDelete }: HistoryListItem
               <span className="gta-btn-icon">
                 <ButtonGlyph name="trash" />
               </span>
-              删除此条
+              {t('history.deleteOne')}
             </button>
           </div>
         </div>

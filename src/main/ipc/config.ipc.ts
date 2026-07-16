@@ -12,7 +12,16 @@ const llmConfigInputSchema = z.object({
     .optional()
     .or(z.literal('')),
   model: z.string().trim().optional(),
-  customHeaders: z.record(z.string()).optional()
+  customHeaders: z
+    .record(
+      z.string().trim().min(1).max(128),
+      z.string().trim().min(1).max(4096)
+    )
+    .refine(
+      (headers) => Object.keys(headers).every((name) => /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name)),
+      'custom header 名称不合法'
+    )
+    .optional()
 });
 
 export interface ConfigIpcDeps {

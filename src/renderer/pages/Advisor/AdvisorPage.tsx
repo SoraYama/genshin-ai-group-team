@@ -1,12 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../../ipc';
 import type {
   AdvisorEvent,
-  AdvisorSide,
   ProfileStateView,
   RecommendationResult
 } from '../../../shared/domain';
 import { ButtonGlyph } from '../../design/Icons';
+import { localizeError, useI18n } from '../../i18n';
 
 interface AdvisorPageProps {
   state: ProfileStateView;
@@ -28,21 +28,20 @@ interface RunState {
 }
 
 const DEFAULT_ENEMIES_SINGLE = 'abyss-mage, ruin-guard';
-const DEFAULT_PREF = '操作简单、容错高';
-
 function emptySideState(): SideState {
   return { stage: '', message: '', streamText: '', result: null };
 }
 
 export function AdvisorPage({ state, onGotoOnboarding }: AdvisorPageProps) {
+  const { locale, t } = useI18n();
   const activeUid = state.activeUid;
   const [mode, setMode] = useState<Mode>('single');
   const [singleEnemies, setSingleEnemies] = useState(DEFAULT_ENEMIES_SINGLE);
-  const [singlePref, setSinglePref] = useState(DEFAULT_PREF);
+  const [singlePref, setSinglePref] = useState(() => t('advisor.defaultPreference'));
   const [leftEnemies, setLeftEnemies] = useState('abyss-mage');
-  const [leftPref, setLeftPref] = useState(DEFAULT_PREF);
+  const [leftPref, setLeftPref] = useState(() => t('advisor.defaultPreference'));
   const [rightEnemies, setRightEnemies] = useState('ruin-guard');
-  const [rightPref, setRightPref] = useState(DEFAULT_PREF);
+  const [rightPref, setRightPref] = useState(() => t('advisor.defaultPreference'));
   const [diffSummary, setDiffSummary] = useState<string>('');
   const [run, setRun] = useState<RunState>({ kind: 'idle' });
   const [single, setSingle] = useState<SideState>(emptySideState());
@@ -53,25 +52,8 @@ export function AdvisorPage({ state, onGotoOnboarding }: AdvisorPageProps) {
   const leftScrollRef = useRef<HTMLPreElement | null>(null);
   const rightScrollRef = useRef<HTMLPreElement | null>(null);
 
-  useEffect(() => {
-    const unsubscribe = api.advisor.onEvent(handleEvent);
-    return () => {
-      unsubscribe();
-    };
-  }, []);
-
-  useEffect(() => {
-    autoscroll(singleScrollRef.current);
-  }, [single.streamText]);
-  useEffect(() => {
-    autoscroll(leftScrollRef.current);
-  }, [left.streamText]);
-  useEffect(() => {
-    autoscroll(rightScrollRef.current);
-  }, [right.streamText]);
-
-  function handleEvent(event: AdvisorEvent) {
-    const setter = getSetterForSide(event.side);
+  const handleEvent = useCallback((event: AdvisorEvent) => {
+    const setter = event.side === 'left' ? setLeft : event.side === 'right' ? setRight : setSingle;
     switch (event.type) {
       case 'started':
         setRun({ kind: 'running' });
@@ -106,13 +88,24 @@ export function AdvisorPage({ state, onGotoOnboarding }: AdvisorPageProps) {
         setRun({ kind: 'error', message: event.message });
         break;
     }
-  }
+  }, []);
 
-  function getSetterForSide(side: AdvisorSide) {
-    if (side === 'left') return setLeft;
-    if (side === 'right') return setRight;
-    return setSingle;
-  }
+  useEffect(() => {
+    const unsubscribe = api.advisor.onEvent(handleEvent);
+    return () => {
+      unsubscribe();
+    };
+  }, [handleEvent]);
+
+  useEffect(() => {
+    autoscroll(singleScrollRef.current);
+  }, [single.streamText]);
+  useEffect(() => {
+    autoscroll(leftScrollRef.current);
+  }, [left.streamText]);
+  useEffect(() => {
+    autoscroll(rightScrollRef.current);
+  }, [right.streamText]);
 
   async function handleSingleRun() {
     if (!activeUid) return;
@@ -128,7 +121,7 @@ export function AdvisorPage({ state, onGotoOnboarding }: AdvisorPageProps) {
       if (run.kind !== 'cancelled') {
         setRun({
           kind: 'error',
-          message: error instanceof Error ? error.message : '推荐请求失败'
+          message: localizeError(error, locale, t, 'advisor.error.recommend')
         });
       }
     }
@@ -156,7 +149,7 @@ export function AdvisorPage({ state, onGotoOnboarding }: AdvisorPageProps) {
       if (run.kind !== 'cancelled') {
         setRun({
           kind: 'error',
-          message: error instanceof Error ? error.message : '对比请求失败'
+          message: localizeError(error, locale, t, 'advisor.error.compare')
         });
       }
     }
@@ -172,18 +165,18 @@ export function AdvisorPage({ state, onGotoOnboarding }: AdvisorPageProps) {
     return (
       <section>
         <h2 className="gta-section-title">
-          AI 配队推荐
+          {t('advisor.title')}
           <span className="gta-section-sub">ADVISOR</span>
         </h2>
         <div className="gta-panel">
           <div className="gta-panel-body">
-            <p className="gta-hint">还没有绑定 UID。先去绑定一个账号再来生成推荐。</p>
+            <p className="gta-hint">{t('advisor.noUid')}</p>
             <div className="gta-actions">
               <button type="button" className="gta-btn" onClick={onGotoOnboarding}>
                 <span className="gta-btn-icon">
                   <ButtonGlyph name="plus" />
                 </span>
-                去绑定
+                {t('advisor.gotoBind')}
               </button>
             </div>
           </div>
@@ -196,7 +189,7 @@ export function AdvisorPage({ state, onGotoOnboarding }: AdvisorPageProps) {
     <section>
       <div className="gta-page-head">
         <h2 className="gta-section-title">
-          AI 配队推荐
+          {t('advisor.title')}
           <span className="gta-section-sub">UID {activeUid}</span>
         </h2>
         <div className="gta-segment">
@@ -205,14 +198,14 @@ export function AdvisorPage({ state, onGotoOnboarding }: AdvisorPageProps) {
             className={mode === 'single' ? 'is-active' : ''}
             onClick={() => setMode('single')}
           >
-            单环境
+            {t('advisor.single')}
           </button>
           <button
             type="button"
             className={mode === 'compare' ? 'is-active' : ''}
             onClick={() => setMode('compare')}
           >
-            双环境对比
+            {t('advisor.compare')}
           </button>
         </div>
       </div>
@@ -223,17 +216,17 @@ export function AdvisorPage({ state, onGotoOnboarding }: AdvisorPageProps) {
             <div className="gta-panel-body">
               <div className="gta-form">
                 <label className="gta-field">
-                  <span className="gta-field-label">本期敌人</span>
+                  <span className="gta-field-label">{t('advisor.enemiesCurrent')}</span>
                   <textarea
                     className="gta-textarea"
                     value={singleEnemies}
                     onChange={(event) => setSingleEnemies(event.target.value)}
                     spellCheck={false}
-                    placeholder="多个敌人用逗号或换行分隔"
+                    placeholder={t('advisor.enemiesPlaceholder')}
                   />
                 </label>
                 <label className="gta-field">
-                  <span className="gta-field-label">偏好（可选）</span>
+                  <span className="gta-field-label">{t('advisor.preferenceOptional')}</span>
                   <input
                     type="text"
                     className="gta-input"
@@ -251,7 +244,7 @@ export function AdvisorPage({ state, onGotoOnboarding }: AdvisorPageProps) {
                     <span className="gta-btn-icon">
                       <ButtonGlyph name="check" />
                     </span>
-                    {isRunning ? '推荐生成中…' : 'AI 推荐'}
+                    {isRunning ? t('advisor.generating') : t('advisor.generate')}
                   </button>
                   {isRunning && (
                     <button
@@ -262,7 +255,7 @@ export function AdvisorPage({ state, onGotoOnboarding }: AdvisorPageProps) {
                       <span className="gta-btn-icon">
                         <ButtonGlyph name="x" />
                       </span>
-                      取消
+                      {t('advisor.cancel')}
                     </button>
                   )}
                 </div>
@@ -270,7 +263,11 @@ export function AdvisorPage({ state, onGotoOnboarding }: AdvisorPageProps) {
             </div>
           </div>
 
-          <SidePanel title="单环境结果" sideState={single} scrollRef={singleScrollRef} />
+          <SidePanel
+            title={t('advisor.singleResult')}
+            sideState={single}
+            scrollRef={singleScrollRef}
+          />
         </>
       )}
 
@@ -280,11 +277,11 @@ export function AdvisorPage({ state, onGotoOnboarding }: AdvisorPageProps) {
             <div className="gta-panel">
               <div className="gta-panel-body">
                 <h3 className="gta-name" style={{ fontSize: 'var(--gta-text-lg)' }}>
-                  环境 A
+                  {t('advisor.environmentA')}
                 </h3>
                 <div className="gta-form">
                   <label className="gta-field">
-                    <span className="gta-field-label">敌人</span>
+                    <span className="gta-field-label">{t('advisor.enemies')}</span>
                     <textarea
                       className="gta-textarea"
                       value={leftEnemies}
@@ -293,7 +290,7 @@ export function AdvisorPage({ state, onGotoOnboarding }: AdvisorPageProps) {
                     />
                   </label>
                   <label className="gta-field">
-                    <span className="gta-field-label">偏好</span>
+                    <span className="gta-field-label">{t('advisor.preference')}</span>
                     <input
                       type="text"
                       className="gta-input"
@@ -307,11 +304,11 @@ export function AdvisorPage({ state, onGotoOnboarding }: AdvisorPageProps) {
             <div className="gta-panel">
               <div className="gta-panel-body">
                 <h3 className="gta-name" style={{ fontSize: 'var(--gta-text-lg)' }}>
-                  环境 B
+                  {t('advisor.environmentB')}
                 </h3>
                 <div className="gta-form">
                   <label className="gta-field">
-                    <span className="gta-field-label">敌人</span>
+                    <span className="gta-field-label">{t('advisor.enemies')}</span>
                     <textarea
                       className="gta-textarea"
                       value={rightEnemies}
@@ -320,7 +317,7 @@ export function AdvisorPage({ state, onGotoOnboarding }: AdvisorPageProps) {
                     />
                   </label>
                   <label className="gta-field">
-                    <span className="gta-field-label">偏好</span>
+                    <span className="gta-field-label">{t('advisor.preference')}</span>
                     <input
                       type="text"
                       className="gta-input"
@@ -343,7 +340,7 @@ export function AdvisorPage({ state, onGotoOnboarding }: AdvisorPageProps) {
               <span className="gta-btn-icon">
                 <ButtonGlyph name="check" />
               </span>
-              {isRunning ? '对比生成中…' : '生成双环境对比'}
+              {isRunning ? t('advisor.comparing') : t('advisor.generateCompare')}
             </button>
             {isRunning && (
               <button
@@ -354,28 +351,33 @@ export function AdvisorPage({ state, onGotoOnboarding }: AdvisorPageProps) {
                 <span className="gta-btn-icon">
                   <ButtonGlyph name="x" />
                 </span>
-                取消
+                {t('advisor.cancel')}
               </button>
             )}
           </div>
 
           {diffSummary && (
             <div className="gta-diff-summary" style={{ marginBottom: 'var(--gta-s4)' }}>
-              <span className="gta-team-line-label">差异</span>
+              <span className="gta-team-line-label">{t('advisor.difference')}</span>
               {diffSummary}
             </div>
           )}
 
           <div className="gta-compare-grid">
-            <SidePanel title="环境 A" sideState={left} scrollRef={leftScrollRef} />
-            <SidePanel title="环境 B" sideState={right} scrollRef={rightScrollRef} />
+            <SidePanel title={t('advisor.environmentA')} sideState={left} scrollRef={leftScrollRef} />
+            <SidePanel title={t('advisor.environmentB')} sideState={right} scrollRef={rightScrollRef} />
           </div>
         </>
       )}
 
       {run.kind === 'error' && run.message && (
         <p className="gta-error" style={{ marginTop: 'var(--gta-s4)' }}>
-          推荐请求失败：{run.message}
+          {t('advisor.error.withMessage', {
+            message:
+              locale === 'en-US' && /[\u3400-\u9fff]/u.test(run.message)
+                ? t('common.error.internal')
+                : run.message
+          })}
         </p>
       )}
     </section>
@@ -389,6 +391,7 @@ interface SidePanelProps {
 }
 
 function SidePanel({ title, sideState, scrollRef }: SidePanelProps) {
+  const { locale, t } = useI18n();
   if (!sideState.stage && !sideState.result) {
     return null;
   }
@@ -397,15 +400,13 @@ function SidePanel({ title, sideState, scrollRef }: SidePanelProps) {
     <div className="gta-panel">
       <div className="gta-panel-body">
         <div className="gta-page-head" style={{ marginBottom: 0 }}>
-          <h3
-            className="gta-name"
-            style={{ fontSize: 'var(--gta-text-lg)', margin: 0 }}
-          >
+          <h3 className="gta-name" style={{ fontSize: 'var(--gta-text-lg)', margin: 0 }}>
             {title}
           </h3>
           {sideState.result && (
             <span className={isLlm ? 'gta-tag is-llm' : 'gta-tag is-fallback'}>
-              {isLlm ? 'LLM' : '本地启发式'} · {sideState.result.teams.length} 套
+              {isLlm ? 'LLM' : t('advisor.localHeuristic')} ·{' '}
+              {t('advisor.teamCount', { count: sideState.result.teams.length })}
             </span>
           )}
         </div>
@@ -413,11 +414,15 @@ function SidePanel({ title, sideState, scrollRef }: SidePanelProps) {
         {sideState.stage && (
           <div className="gta-stream-wrap">
             <p className="gta-progress-line">
-              <span className="gta-team-line-label">阶段</span>
+              <span className="gta-team-line-label">{t('advisor.stage')}</span>
               <code>{sideState.stage}</code>
-              {sideState.message && (
+              {(progressLabel(sideState.stage, t) || sideState.message) && (
                 <span style={{ color: 'var(--gta-text-on-light-faint)' }}>
-                  · {sideState.message}
+                  ·{' '}
+                  {progressLabel(sideState.stage, t) ||
+                    (locale === 'en-US' && /[\u3400-\u9fff]/u.test(sideState.message)
+                      ? t('common.error.internal')
+                      : sideState.message)}
                 </span>
               )}
             </p>
@@ -432,22 +437,46 @@ function SidePanel({ title, sideState, scrollRef }: SidePanelProps) {
         {sideState.result && (
           <div className="gta-form">
             <p style={{ margin: 0 }}>{sideState.result.summary}</p>
+            {sideState.result.dataNotes && sideState.result.dataNotes.length > 0 && (
+              <p className="gta-hint" style={{ margin: 0 }}>
+                {t('advisor.dataNotes', { notes: sideState.result.dataNotes.join('; ') })}
+              </p>
+            )}
             {sideState.result.teams.map((team, index) => (
               <article key={`${team.name}-${index}`} className="gta-team-card">
-                <h4>{team.name}</h4>
+                <h4>
+                  {team.name}
+                  {team.confidence && (
+                    <span className="gta-tag" style={{ marginLeft: 8 }}>
+                      {t('advisor.confidence', { level: confidenceLabel(team.confidence, t) })}
+                    </span>
+                  )}
+                </h4>
                 <p className="gta-team-roster">
                   {team.characters
                     .map((character) => `${character.name}(${character.element})`)
                     .join(' · ')}
                 </p>
                 <p>
-                  <span className="gta-team-line-label">思路</span>
+                  <span className="gta-team-line-label">{t('advisor.reasoning')}</span>
                   {team.reasoning}
                 </p>
                 <p>
-                  <span className="gta-team-line-label">手法</span>
+                  <span className="gta-team-line-label">{t('advisor.rotation')}</span>
                   {team.rotationTip}
                 </p>
+                {team.assumptions && team.assumptions.length > 0 && (
+                  <p className="gta-hint">
+                    <span className="gta-team-line-label">{t('advisor.assumptions')}</span>
+                    {team.assumptions.join('; ')}
+                  </p>
+                )}
+                {team.critiqueIssues && team.critiqueIssues.length > 0 && (
+                  <p className="gta-hint">
+                    <span className="gta-team-line-label">{t('advisor.risks')}</span>
+                    {team.critiqueIssues.join('; ')}
+                  </p>
+                )}
               </article>
             ))}
           </div>
@@ -455,6 +484,36 @@ function SidePanel({ title, sideState, scrollRef }: SidePanelProps) {
       </div>
     </div>
   );
+}
+
+function confidenceLabel(
+  confidence: 'low' | 'medium' | 'high',
+  t: ReturnType<typeof useI18n>['t']
+): string {
+  return {
+    low: t('advisor.confidence.low'),
+    medium: t('advisor.confidence.medium'),
+    high: t('advisor.confidence.high')
+  }[confidence];
+}
+
+function progressLabel(stage: string, t: ReturnType<typeof useI18n>['t']): string {
+  const labels: Record<string, string> = {
+    starting: t('advisor.progress.starting'),
+    analyzing: t('advisor.progress.analyzing'),
+    'data-curator': t('advisor.progress.data-curator'),
+    'team-composer': t('advisor.progress.team-composer'),
+    critique: t('advisor.progress.critique'),
+    'rotation-coach': t('advisor.progress.rotation-coach'),
+    explain: t('advisor.progress.explain'),
+    'fallback-characters': t('advisor.progress.fallback-characters'),
+    'fallback-key': t('advisor.progress.fallback-key'),
+    'fallback-error': t('advisor.progress.fallback-error'),
+    done: t('advisor.progress.done'),
+    'done-fallback': t('advisor.progress.done-fallback'),
+    cancelled: t('advisor.progress.cancelled')
+  };
+  return labels[stage] ?? '';
 }
 
 function autoscroll(el: HTMLPreElement | null) {

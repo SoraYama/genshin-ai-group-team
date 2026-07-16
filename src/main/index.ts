@@ -25,16 +25,29 @@ import { HistoryStore } from './services/history-store.js';
 import { IconProxyService, registerIconProxyScheme } from './services/icon-proxy.js';
 import { ScenarioStore } from './services/scenario-store.js';
 import { ScenarioRefresher } from './services/scenario-refresher.js';
+import { AgentSdkAdapter } from './services/agent-sdk-adapter.js';
+import { createAdvisorOrchestrator } from './services/advisor-orchestrator.js';
+import type { CharacterProfile } from '../shared/domain.js';
 import { registerConfigIpc } from './ipc/config.ipc.js';
 import { registerProfileIpc } from './ipc/profile.ipc.js';
 import { registerAdvisorIpc } from './ipc/advisor.ipc.js';
 import { registerHistoryIpc } from './ipc/history.ipc.js';
 import { registerScenarioIpc } from './ipc/scenario.ipc.js';
 import { ensureAllChannelsRegistered } from './ipc/registry.js';
+import { registerUpdateIpc } from './ipc/update.ipc.js';
+import { UpdateService } from './services/update-service.js';
+import { UPDATE_EVENT_CHANNEL } from '../shared/ipc-contract.js';
+
+const isolatedUserDataDir = process.env.GTA_E2E_USER_DATA_DIR;
+if (isolatedUserDataDir) {
+  app.setPath('userData', isolatedUserDataDir);
+}
 
 registerIconProxyScheme();
 
 const isDev = process.env.NODE_ENV === 'development';
+const backgroundRefreshEnabled = process.env.GTA_DISABLE_BACKGROUND_REFRESH !== '1';
+const packagedSdkSmokeUrl = process.env.GTA_PACKAGED_SDK_SMOKE_URL;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let mainWindow: BrowserWindow | undefined;
@@ -60,6 +73,10 @@ async function bootstrapServices(): Promise<void> {
   const profiles = new ProfileStore();
   const history = new HistoryStore();
   const advisor = new AdvisorAgent(config, profiles, history);
+  const updates = new UpdateService({
+    enabled: app.isPackaged && !packagedSdkSmokeUrl,
+    onStatus: (status) => mainWindow?.webContents.send(UPDATE_EVENT_CHANNEL, status)
+  });
 
   const scenarioStore = new ScenarioStore({
     bundledDir: resolveBundledScenarioDir(),
@@ -82,9 +99,18 @@ async function bootstrapServices(): Promise<void> {
   registerAdvisorIpc({ advisor, getMainWindow: () => mainWindow });
   registerHistoryIpc({ history });
   registerScenarioIpc({ store: scenarioStore, refresher: scenarioRefresher });
+  registerUpdateIpc(updates);
   ensureAllChannelsRegistered();
 
-  scenarioRefresher.start();
+  if (app.isPackaged) {
+    void updates.check().catch(() => {
+      // electron-updater also emits a sanitized error state. Startup must remain usable offline.
+    });
+  }
+
+  if (backgroundRefreshEnabled) {
+    scenarioRefresher.start();
+  }
 
   // Recover the previous miyoushe login (if any) from the persistent partition.
   // Fire-and-forget — window creation should not wait on this.
@@ -120,6 +146,10 @@ async function seedRosterSessionsFromPersistedCookie(deps: {
 }
 
 function applyContentSecurityPolicy(): void {
+  session.defaultSession.setPermissionCheckHandler(() => false);
+  session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
+    callback(false);
+  });
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     const csp = isDev
       ? "default-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:5294 ws://localhost:5294 data:; img-src 'self' gtai-img: data:"
@@ -156,6 +186,13 @@ function createWindow(): void {
     mainWindow?.show();
   });
 
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  mainWindow.webContents.on('will-attach-webview', (event) => event.preventDefault());
+  mainWindow.webContents.on('will-navigate', (event, targetUrl) => {
+    const allowedUrl = isDev ? 'http://localhost:5294/' : new URL(`file://${path.join(__dirname, '../renderer/index.html')}`).href;
+    if (!targetUrl.startsWith(allowedUrl)) event.preventDefault();
+  });
+
   if (isDev) {
     void mainWindow.loadURL('http://localhost:5294');
     mainWindow.webContents.openDevTools({ mode: 'detach' });
@@ -168,7 +205,84 @@ function createWindow(): void {
   });
 }
 
+async function runPackagedSdkSmoke(baseUrl: string): Promise<void> {
+  const abortController = new AbortController();
+  const timer = setTimeout(() => abortController.abort(), 60_000);
+  let sdkStderr = '';
+  try {
+    const sdk = new AgentSdkAdapter();
+    const characters: CharacterProfile[] = [1, 2, 3, 4].map((id) => ({
+      id,
+      name: `Smoke ${id}`,
+      element: ['Pyro', 'Hydro', 'Anemo', 'Geo'][id - 1] ?? 'None',
+      rarity: 5,
+      imageUrl: '',
+      level: 90,
+      completeness: 'basic',
+      missingFields: ['stats', 'weapon', 'artifacts', 'talents'],
+      provenance: {
+        ownership: { source: 'miyoushe-list', fetchedAt: '2026-01-01T00:00:00Z' }
+      }
+    }));
+    const result = await createAdvisorOrchestrator(sdk).run({
+      serializedProfile: JSON.stringify({
+        profile: {
+          coverage: { partial: true },
+          characters: characters.map(({ id, name, element }) => ({ id, name, element }))
+        },
+        enemies: ['smoke-enemy']
+      }),
+      characters,
+      correlationId: 'packaged-smoke',
+      side: 'single',
+      emit: () => {},
+      sdkOptions: {
+        apiKey: 'local-packaged-smoke',
+        baseUrl,
+        model: 'smoke-model',
+        clientVersion: app.getVersion(),
+        systemPrompt: '',
+        cwd: app.getPath('userData'),
+        abortController,
+        stderr: (data) => {
+          sdkStderr = `${sdkStderr}${data}`.slice(-2_000);
+        }
+      }
+    });
+    const passed =
+      result.source === 'llm' &&
+      result.teams.length === 1 &&
+      result.teams[0]?.characters.length === 4;
+    console.log(JSON.stringify({ gate: 'packaged-sdk', status: passed ? 'passed' : 'failed' }));
+    app.exit(passed ? 0 : 1);
+  } catch (error) {
+    const safeMessage =
+      error instanceof Error
+        ? error.message
+            .replaceAll(baseUrl, '<local-provider>')
+            .replaceAll('local-packaged-smoke', '<redacted>')
+            .slice(0, 1_000)
+        : 'Unknown error';
+    console.error(
+      JSON.stringify({
+        gate: 'packaged-sdk',
+        status: 'failed',
+        error: error instanceof Error ? error.name : 'Error',
+        message: safeMessage,
+        sdkStderr: sdkStderr.replaceAll(baseUrl, '<local-provider>').slice(-1_000)
+      })
+    );
+    app.exit(1);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 app.whenReady().then(async () => {
+  if (packagedSdkSmokeUrl) {
+    await runPackagedSdkSmoke(packagedSdkSmokeUrl);
+    return;
+  }
   const iconProxy = new IconProxyService();
   await iconProxy.init();
   await bootstrapServices();

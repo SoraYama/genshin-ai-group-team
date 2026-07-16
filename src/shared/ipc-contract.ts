@@ -16,16 +16,23 @@ import type {
   ScenarioEnvelope,
   ScenarioListItem,
   ScenarioMode,
-  ScenarioPayload
+  ScenarioPayload,
+  UpdateStatus
 } from './domain.js';
 
 export const ADVISOR_EVENT_CHANNEL = 'advisor:event' as const;
+export const UPDATE_EVENT_CHANNEL = 'update:event' as const;
 
 export interface IpcContract {
   'config:get-public': { req: void; res: PublicConfig };
   'config:set-llm': { req: LlmConfigInput; res: { ok: true } };
   'config:test-llm': { req: void; res: LlmHealthReport };
   'config:clear-llm': { req: void; res: { ok: true } };
+
+  'update:get-state': { req: void; res: UpdateStatus };
+  'update:check': { req: void; res: { ok: true } };
+  'update:download': { req: void; res: { ok: true } };
+  'update:install': { req: void; res: { ok: true } };
 
   'miyoushe:bind': { req: { cookie: string }; res: BindCookieResult };
   'miyoushe:login-via-browser': {
@@ -92,6 +99,10 @@ export const ALL_IPC_CHANNELS: IpcChannel[] = [
   'config:set-llm',
   'config:test-llm',
   'config:clear-llm',
+  'update:get-state',
+  'update:check',
+  'update:download',
+  'update:install',
   'miyoushe:bind',
   'miyoushe:login-via-browser',
   'miyoushe:logout',
@@ -121,6 +132,13 @@ export interface RendererApi {
     setLlm: (input: IpcRequest<'config:set-llm'>) => Promise<IpcResponse<'config:set-llm'>>;
     testLlm: () => Promise<IpcResponse<'config:test-llm'>>;
     clearLlm: () => Promise<IpcResponse<'config:clear-llm'>>;
+  };
+  update: {
+    getState: () => Promise<IpcResponse<'update:get-state'>>;
+    check: () => Promise<IpcResponse<'update:check'>>;
+    download: () => Promise<IpcResponse<'update:download'>>;
+    install: () => Promise<IpcResponse<'update:install'>>;
+    onEvent: (cb: (event: UpdateStatus) => void) => () => void;
   };
   miyoushe: {
     bind: (input: IpcRequest<'miyoushe:bind'>) => Promise<IpcResponse<'miyoushe:bind'>>;

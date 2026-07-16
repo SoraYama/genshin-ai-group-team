@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const requestMock = vi.fn();
 
@@ -13,6 +13,36 @@ function mockJson(status: number, payload: unknown) {
   };
 }
 
+function mockText(status: number, text: string) {
+  return {
+    statusCode: status,
+    body: { text: async () => text }
+  };
+}
+
+const list = [
+  {
+    id: 10000046,
+    name: 'Character A',
+    element: 'Pyro',
+    level: 90,
+    rarity: 5,
+    icon: 'icon-a.png',
+    actived_constellation_num: 1,
+    fetter: 10
+  },
+  {
+    id: 10000037,
+    name: 'Character B',
+    element: 'Cryo',
+    level: 80,
+    rarity: 5,
+    icon: 'icon-b.png',
+    actived_constellation_num: 0,
+    fetter: 8
+  }
+];
+
 beforeEach(() => {
   requestMock.mockReset();
 });
@@ -23,7 +53,6 @@ describe('regionFromUid', () => {
       '../../../src/main/services/miyoushe-game-record.js'
     );
     expect(regionFromUid('100000001').region).toBe('cn_gf01');
-    expect(regionFromUid('200000001').region).toBe('cn_gf01');
     expect(regionFromUid('500000001').region).toBe('cn_qd01');
     expect(regionFromUid('600000001')).toEqual({ region: 'os_usa', isGlobal: true });
     expect(regionFromUid('700000001')).toEqual({ region: 'os_euro', isGlobal: true });
@@ -32,107 +61,254 @@ describe('regionFromUid', () => {
   });
 });
 
-describe('MiyousheGameRecordClient.fetchCharacterDetails', () => {
-  it('reads the avatars array from /index and maps it to character details', async () => {
-    const { MiyousheGameRecordClient } = await import(
+describe('browser bridge payload mappers', () => {
+  it('uses the same list/detail mapping contract as direct HTTP', async () => {
+    const { mapMiyousheCharacterDetailData, mapMiyousheCharacterListData } = await import(
       '../../../src/main/services/miyoushe-game-record.js'
     );
-
-    requestMock.mockResolvedValueOnce(
-      mockJson(200, {
-        retcode: 0,
-        message: 'OK',
-        data: {
-          role: { nickname: 'Test' },
-          stats: { active_day_number: 100, world_level: 9, avatar_number: 2 },
-          avatars: [
-            {
-              id: 10000046,
-              name: 'Hu Tao',
-              element: 'Pyro',
-              level: 90,
-              rarity: 5,
-              icon: 'icon-hutao.png',
-              image: 'image-hutao.png',
-              actived_constellation_num: 0,
-              fetter: 9
-            },
-            {
-              id: 10000037,
-              name: 'Ganyu',
-              element: 'Cryo',
-              level: 80,
-              rarity: 5,
-              icon: 'icon-ganyu.png',
-              actived_constellation_num: 1,
-              fetter: 5
-            }
-          ]
+    expect(mapMiyousheCharacterListData({ list })?.map((character) => character.id)).toEqual([
+      10000046,
+      10000037
+    ]);
+    const detailed = mapMiyousheCharacterDetailData({
+      list: [
+        {
+          base: list[0],
+          weapon: { id: 1, name: 'Bridge Weapon', level: 90, rarity: 5, affix_level: 3 },
+          relics: [],
+          skills: [
+            { skill_type: 1, level: 6 },
+            { skill_type: 2, level: 8 },
+            { skill_type: 3, level: 9 }
+          ],
+          selected_properties: [{ property_type: 20, final: '0.55' }]
         }
-      })
-    );
-
-    const client = new MiyousheGameRecordClient();
-    const result = await client.fetchCharacterDetails('100000001', 'ltoken=x; ltuid=y');
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.data).toHaveLength(2);
-    const first = result.data[0]!;
-    expect(first.id).toBe(10000046);
-    expect(first.name).toBe('Hu Tao');
-    expect(first.iconUrl).toBe('icon-hutao.png');
-    expect(first.imageUrl).toBe('image-hutao.png');
-    expect(first.constellation).toBe(0);
-    expect(first.friendship).toBe(9);
-    // Artifacts and talents are not available via /index — leave empty/undefined.
-    expect(first.artifacts).toEqual([]);
-    expect(first.talents).toBeUndefined();
-
-    expect(requestMock).toHaveBeenCalledTimes(1);
-    const call = requestMock.mock.calls[0]!;
-    expect(String(call[0])).toContain('/game_record/app/genshin/api/index');
-    expect(String(call[0])).toContain('role_id=100000001');
-    const headers = (call[1] as { headers: Record<string, string> }).headers;
-    expect(headers.cookie).toBe('ltoken=x; ltuid=y');
-    expect(headers.DS).toMatch(/^\d+,\d{6},[a-f0-9]{32}$/);
-    expect(headers['x-rpc-client_type']).toBe('5');
-    expect(headers['x-rpc-app_version']).toBeTruthy();
-    // We deliberately do NOT send device_id / device_fp — see comments in
-    // miyoushe-game-record.ts buildHeaders().
-    expect(headers['x-rpc-device_id']).toBeUndefined();
-    expect(headers['x-rpc-device_fp']).toBeUndefined();
+      ]
+    });
+    expect(detailed?.[0]).toMatchObject({
+      id: 10000046,
+      weapon: { name: 'Bridge Weapon', refinement: 3 },
+      talents: { normalAttack: 6, elementalSkill: 8, elementalBurst: 9 },
+      stats: { critRate: 55 }
+    });
+    expect(mapMiyousheCharacterDetailData({ wrong: [] })).toBeUndefined();
   });
+});
 
-  it('classifies retcode -100 as auth-expired and retries once with a fresh DS', async () => {
+describe('MiyousheGameRecordClient.fetchDetailedRoster', () => {
+  it('POSTs list/detail with the exact body, preserves order, and maps build fields', async () => {
     const { MiyousheGameRecordClient } = await import(
       '../../../src/main/services/miyoushe-game-record.js'
     );
 
     requestMock
-      .mockResolvedValueOnce(mockJson(200, { retcode: -100, message: 'login expired' }))
-      .mockResolvedValueOnce(mockJson(200, { retcode: -100, message: 'login expired' }));
+      .mockResolvedValueOnce(mockJson(200, { retcode: 0, data: { list } }))
+      .mockResolvedValueOnce(
+        mockJson(200, {
+          retcode: 0,
+          data: {
+            property_map: {
+              '20': { property_type: 20, name: 'CRIT Rate' },
+              '22': { property_type: 22, name: 'CRIT DMG' }
+            },
+            list: [
+              {
+                base: list[1],
+                weapon: {
+                  id: 11501,
+                  name: 'Weapon B',
+                  icon: 'weapon-b.png',
+                  rarity: 5,
+                  level: 90,
+                  affix_level: 2,
+                  main_property: { property_type: 4, final: '608' },
+                  sub_property: { property_type: 22, final: '66.2%' }
+                },
+                relics: [
+                  {
+                    id: 50120,
+                    pos: 3,
+                    rarity: 5,
+                    level: 20,
+                    set: { id: 15001, name: 'Test Set' },
+                    main_property: { property_type: 23, value: '51.8%' },
+                    sub_property_list: [{ property_type: 20, value: '3.9%' }]
+                  }
+                ],
+                skills: [
+                  { skill_type: 1, level: 6, is_unlock: true },
+                  { skill_type: 2, level: 9, is_unlock: true },
+                  { skill_type: 3, level: 10, is_unlock: true }
+                ],
+                selected_properties: [
+                  { property_type: 20, final: '0.612' },
+                  { property_type: 22, final: '1.84' },
+                  { property_type: 23, final: '1.35' }
+                ]
+              },
+              {
+                base: list[0],
+                weapon: {
+                  id: 13501,
+                  name: 'Weapon A',
+                  icon: 'weapon-a.png',
+                  rarity: 5,
+                  level: 90,
+                  affix_level: 1
+                },
+                relics: [],
+                skills: [
+                  { skill_type: 1, level: 6 },
+                  { skill_type: 2, level: 8 },
+                  { skill_type: 3, level: 8 }
+                ],
+                base_properties: [
+                  { property_type: 1, final: '32000' },
+                  { property_type: 4, final: '1800' },
+                  { property_type: 7, final: '900' }
+                ]
+              }
+            ]
+          }
+        })
+      );
 
     const client = new MiyousheGameRecordClient();
-    const result = await client.fetchCharacterDetails('100000001', 'cookie=stale');
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.kind).toBe('auth-expired');
-    // /index + 1 auth retry.
+    const result = await client.fetchDetailedRoster('100000001', 'ltoken=x; ltuid=y', {
+      expectedOwnedCount: 2
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.data.characters.map((character) => character.id)).toEqual([
+      10000046,
+      10000037
+    ]);
+    expect(result.data.characters[0]?.weapon?.name).toBe('Weapon A');
+    expect(result.data.characters[1]?.artifacts[0]).toMatchObject({
+      slot: 'sands',
+      setName: 'Test Set',
+      mainStat: { key: 'energyRecharge', value: 51.8 }
+    });
+    expect(result.data.characters[1]?.talents).toEqual({
+      normalAttack: 6,
+      elementalSkill: 9,
+      elementalBurst: 10
+    });
+    expect(result.data.characters[1]?.stats).toEqual({
+      critRate: 61.2,
+      critDmg: 184,
+      energyRecharge: 135
+    });
+    expect(result.data.coverage).toMatchObject({
+      expectedOwnedCount: 2,
+      listedCount: 2,
+      detailedCount: 2,
+      partial: false,
+      fields: { weapon: 2, artifacts: 1, talents: 2, stats: 2 }
+    });
+
     expect(requestMock).toHaveBeenCalledTimes(2);
+    const listCall = requestMock.mock.calls[0]!;
+    expect(String(listCall[0])).toContain('/game_record/app/genshin/api/character/list');
+    expect((listCall[1] as { body: string }).body).toBe(
+      JSON.stringify({ role_id: '100000001', server: 'cn_gf01' })
+    );
+    const detailCall = requestMock.mock.calls[1]!;
+    expect((detailCall[1] as { body: string }).body).toBe(
+      JSON.stringify({
+        role_id: '100000001',
+        server: 'cn_gf01',
+        character_ids: [10000046, 10000037]
+      })
+    );
+    const headers = (detailCall[1] as { headers: Record<string, string> }).headers;
+    expect(headers.DS).toMatch(/^\d+,\d{6},[a-f0-9]{32}$/);
+    expect(headers['x-rpc-device_id']).toBeUndefined();
+    expect(headers['x-rpc-device_fp']).toBeUndefined();
   });
 
-  it('classifies retcode 1034 as captcha-required without retrying', async () => {
+  it('batches detail requests and reports missing/duplicate IDs as partial', async () => {
     const { MiyousheGameRecordClient } = await import(
       '../../../src/main/services/miyoushe-game-record.js'
     );
-
-    requestMock.mockResolvedValueOnce(mockJson(200, { retcode: 1034, message: 'verify' }));
+    requestMock
+      .mockResolvedValueOnce(
+        mockJson(200, { retcode: 0, data: { list: [list[0], list[0], list[1]] } })
+      )
+      .mockResolvedValueOnce(
+        mockJson(200, { retcode: 0, data: { list: [{ base: list[0] }] } })
+      )
+      .mockResolvedValueOnce(mockJson(429, { retcode: 0, message: 'too many requests' }));
 
     const client = new MiyousheGameRecordClient();
-    const result = await client.fetchCharacterDetails('100000001', 'c=1');
+    const result = await client.fetchDetailedRoster('100000001', 'cookie=valid-enough', {
+      expectedOwnedCount: 3,
+      batchSize: 1
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.characters).toHaveLength(2);
+    expect(result.data.coverage).toMatchObject({
+      listedCount: 2,
+      detailedCount: 1,
+      duplicateCharacterIds: [10000046],
+      missingCharacterIds: [10000037],
+      failedBatches: [{ batchIndex: 1, kind: 'rate-limited' }],
+      partial: true
+    });
+    expect(result.data.characters[1]?.artifacts).toEqual([]);
+    expect(result.data.characters[1]?.talents).toBeUndefined();
+  });
+
+  it.each([
+    [5003, 200, 'captcha-required'],
+    [1034, 200, 'captcha-required'],
+    [-5003, 200, 'signature'],
+    [-100, 200, 'auth-expired'],
+    [10101, 200, 'rate-limited']
+  ])('classifies retcode %s as %s', async (retcode, status, expectedKind) => {
+    const { MiyousheGameRecordClient } = await import(
+      '../../../src/main/services/miyoushe-game-record.js'
+    );
+    requestMock.mockResolvedValueOnce(mockJson(status, { retcode, message: 'failure' }));
+    const result = await new MiyousheGameRecordClient().fetchDetailedRoster(
+      '100000001',
+      'cookie=valid-enough'
+    );
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error.kind).toBe('captcha-required');
+    expect(result.error.kind).toBe(expectedKind);
     expect(requestMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('classifies non-JSON without leaking response text', async () => {
+    const { MiyousheGameRecordClient } = await import(
+      '../../../src/main/services/miyoushe-game-record.js'
+    );
+    requestMock.mockResolvedValueOnce(mockText(403, 'secret upstream response body'));
+    const result = await new MiyousheGameRecordClient().fetchDetailedRoster(
+      '100000001',
+      'cookie=valid-enough'
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.kind).toBe('parse');
+    expect(result.error.message).not.toContain('secret upstream response body');
+  });
+
+  it('uses the current sg-public-api route for global UIDs', async () => {
+    const { MiyousheGameRecordClient } = await import(
+      '../../../src/main/services/miyoushe-game-record.js'
+    );
+    requestMock.mockResolvedValueOnce(mockJson(200, { retcode: 0, data: { list: [] } }));
+    const result = await new MiyousheGameRecordClient().fetchDetailedRoster(
+      '800000001',
+      'cookie=valid-enough'
+    );
+    expect(result.ok).toBe(true);
+    expect(String(requestMock.mock.calls[0]?.[0])).toBe(
+      'https://sg-public-api.hoyolab.com/event/game_record/app/genshin/api/character/list'
+    );
   });
 });

@@ -1,7 +1,11 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import { ALL_IPC_CHANNELS, ADVISOR_EVENT_CHANNEL } from '../shared/ipc-contract.js';
+import {
+  ALL_IPC_CHANNELS,
+  ADVISOR_EVENT_CHANNEL,
+  UPDATE_EVENT_CHANNEL
+} from '../shared/ipc-contract.js';
 import type { IpcChannel, IpcContract, RendererApi } from '../shared/ipc-contract.js';
-import type { AdvisorEvent } from '../shared/domain.js';
+import type { AdvisorEvent, UpdateStatus } from '../shared/domain.js';
 
 interface IpcEnvelope<T> {
   ok: true;
@@ -42,6 +46,19 @@ const api: RendererApi = {
     setLlm: (input: IpcContract['config:set-llm']['req']) => invoke('config:set-llm', input),
     testLlm: () => invoke('config:test-llm', undefined),
     clearLlm: () => invoke('config:clear-llm', undefined)
+  },
+  update: {
+    getState: () => invoke('update:get-state', undefined),
+    check: () => invoke('update:check', undefined),
+    download: () => invoke('update:download', undefined),
+    install: () => invoke('update:install', undefined),
+    onEvent: (cb: (event: UpdateStatus) => void): (() => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, value: UpdateStatus) => cb(value);
+      ipcRenderer.on(UPDATE_EVENT_CHANNEL, handler);
+      return () => {
+        ipcRenderer.removeListener(UPDATE_EVENT_CHANNEL, handler);
+      };
+    }
   },
   miyoushe: {
     bind: (input) => invoke('miyoushe:bind', input),

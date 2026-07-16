@@ -1,9 +1,6 @@
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { request } from 'undici';
 import { app } from 'electron';
-import { query, type Options as SdkOptions } from '@anthropic-ai/claude-agent-sdk';
 import type {
   AdvisorCompareRequest,
   AdvisorCompareResult,
@@ -12,45 +9,18 @@ import type {
   AdvisorSide,
   CharacterProfile,
   LlmHealthReport,
-  PersistedProfile,
   RecommendationResult,
   TeamRecommendation
 } from '../../shared/domain.js';
-import { ADVISOR_SYSTEM_PROMPT_V1 } from '../agents/advisor/prompt.js';
 import type { ConfigService } from './config-service.js';
 import type { HistoryStore } from './history-store.js';
 import type { ProfileStore } from './profile-store.js';
+import { AgentSdkAdapter } from './agent-sdk-adapter.js';
+import { serializeAdvisorProfile } from './advisor-profile-serializer.js';
+import { createAdvisorOrchestrator } from './advisor-orchestrator.js';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
-const DEFAULT_RECOMMEND_TIMEOUT_MS = 60_000;
-const DISALLOWED_TOOLS = [
-  'Bash',
-  'Edit',
-  'Write',
-  'Read',
-  'Glob',
-  'Grep',
-  'NotebookEdit',
-  'WebFetch',
-  'WebSearch',
-  'Task'
-];
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-function resolveClaudeCliPath(): string {
-  if (app.isPackaged) {
-    return path.join(
-      process.resourcesPath,
-      'app.asar.unpacked/node_modules/@anthropic-ai/claude-agent-sdk/cli.js'
-    );
-  }
-  return path.resolve(
-    __dirname,
-    '../../node_modules/@anthropic-ai/claude-agent-sdk/cli.js'
-  );
-}
-
+const DEFAULT_RECOMMEND_TIMEOUT_MS = 180_000;
 interface ParsedTeamFromLlm {
   name?: string;
   characterIds?: number[];
@@ -74,6 +44,8 @@ interface RunOneInput {
 
 export class AdvisorAgent {
   private currentAbort: AbortController | undefined;
+  private readonly sdk = new AgentSdkAdapter();
+  private readonly orchestrator = createAdvisorOrchestrator(this.sdk);
 
   constructor(
     private readonly config: ConfigService,
@@ -118,10 +90,8 @@ export class AdvisorAgent {
 
       const latencyMs = Date.now() - start;
       const ok = statusCode >= 200 && statusCode < 300;
-      const message = ok ? undefined : truncate(await body.text(), 200);
-      if (ok) {
-        await body.dump();
-      }
+      const message = ok ? undefined : `Provider returned HTTP ${statusCode}`;
+      await body.dump();
       return { ok, latencyMs, model, baseUrl, httpStatus: statusCode, message };
     } catch (error) {
       return {
@@ -129,7 +99,7 @@ export class AdvisorAgent {
         latencyMs: Date.now() - start,
         model,
         baseUrl,
-        message: error instanceof Error ? error.message : String(error)
+        message: `Provider request failed (${error instanceof Error ? error.name : 'Error'})`
       };
     }
   }
@@ -217,8 +187,7 @@ export class AdvisorAgent {
         type: 'progress',
         correlationId,
         side,
-        stage: 'fallback',
-        message: '角色不足 4 个，使用本地启发式算法'
+        stage: 'fallback-characters'
       });
       const fallback = buildFallback(profile.characters, input.enemyNames);
       this.persistHistory(input, fallback);
@@ -232,8 +201,7 @@ export class AdvisorAgent {
         type: 'progress',
         correlationId,
         side,
-        stage: 'fallback',
-        message: 'LLM API Key 未配置，使用本地启发式算法'
+        stage: 'fallback-key'
       });
       const fallback = buildFallback(profile.characters, input.enemyNames);
       this.persistHistory(input, fallback);
@@ -241,6 +209,7 @@ export class AdvisorAgent {
       return fallback;
     }
 
+    this.currentAbort?.abort();
     const abort = new AbortController();
     this.currentAbort = abort;
     const cancelTimer = setTimeout(() => {
@@ -252,88 +221,30 @@ export class AdvisorAgent {
         type: 'progress',
         correlationId,
         side,
-        stage: 'analyzing',
-        message: '正在分析角色面板与敌人环境...'
+        stage: 'analyzing'
       });
 
-      const userMessage = buildUserMessage(profile, input);
-      const options: SdkOptions = {
-        systemPrompt: ADVISOR_SYSTEM_PROMPT_V1,
-        env: {
-          ANTHROPIC_AUTH_TOKEN: apiKey,
-          ANTHROPIC_BASE_URL: this.config.getBaseUrl(),
-          ANTHROPIC_MODEL: this.config.getModel(),
-          ELECTRON_RUN_AS_NODE: '1'
+      const result = await this.orchestrator.run({
+        serializedProfile: serializeAdvisorProfile(profile, input),
+        characters: profile.characters,
+        correlationId,
+        side,
+        emit,
+        onUsage: (inputTokens, outputTokens, estimatedCostUsd) => {
+          this.config.recordUsage(inputTokens, outputTokens, estimatedCostUsd);
         },
-        pathToClaudeCodeExecutable: resolveClaudeCliPath(),
-        executable: process.execPath as 'node',
-        disallowedTools: DISALLOWED_TOOLS,
-        maxTurns: 1,
-        permissionMode: 'bypassPermissions',
-        abortController: abort,
-        cwd: app.getPath('userData'),
-        stderr: (data) => {
-          if (data.trim().length > 0) {
-            emit({
-              type: 'progress',
-              correlationId,
-              side,
-              stage: 'sdk-log',
-              message: data.trim().slice(0, 200)
-            });
-          }
+        sdkOptions: {
+          apiKey,
+          baseUrl: this.config.getBaseUrl(),
+          model: this.config.getModel(),
+          clientVersion: app.getVersion(),
+          customHeaders: this.config.getCustomHeaders(),
+          systemPrompt: '',
+          cwd: app.getPath('userData'),
+          abortController: abort,
+          maxTurns: 1
         }
-      };
-
-      let accumulated = '';
-      const q = query({ prompt: userMessage, options });
-
-      for await (const message of q) {
-        if (abort.signal.aborted) {
-          break;
-        }
-        const text = extractTextFromMessage(message);
-        if (text) {
-          accumulated += text;
-          emit({ type: 'delta', correlationId, side, text });
-        }
-        if (isResultMessage(message)) {
-          const final = (message as { result?: string }).result;
-          if (typeof final === 'string' && final.length > 0 && !accumulated.includes(final)) {
-            accumulated += final;
-            emit({ type: 'delta', correlationId, side, text: final });
-          }
-          break;
-        }
-      }
-
-      if (abort.signal.aborted) {
-        emit({ type: 'cancelled', correlationId, side });
-        throw new Error('cancelled');
-      }
-
-      const parsed = extractJsonPayload(accumulated);
-      if (!parsed || !Array.isArray(parsed.teams) || parsed.teams.length === 0) {
-        emit({
-          type: 'progress',
-          correlationId,
-          side,
-          stage: 'fallback',
-          message: '模型未输出合法 JSON，回退本地启发式算法'
-        });
-        const fallback = buildFallback(profile.characters, input.enemyNames);
-        this.persistHistory(input, fallback);
-        emit({ type: 'final', correlationId, side, result: fallback });
-        return fallback;
-      }
-
-      const result = normalizeLlmResult(parsed, profile.characters);
-      if (result.teams.length === 0) {
-        const fallback = buildFallback(profile.characters, input.enemyNames);
-        this.persistHistory(input, fallback);
-        emit({ type: 'final', correlationId, side, result: fallback });
-        return fallback;
-      }
+      });
       this.persistHistory(input, result);
       emit({ type: 'final', correlationId, side, result });
       return result;
@@ -342,13 +253,11 @@ export class AdvisorAgent {
         emit({ type: 'cancelled', correlationId, side });
         throw error;
       }
-      const message = error instanceof Error ? error.message : String(error);
       emit({
         type: 'progress',
         correlationId,
         side,
-        stage: 'fallback',
-        message: `LLM 调用失败：${message}`
+        stage: 'fallback-error'
       });
       const fallback = buildFallback(profile.characters, input.enemyNames);
       this.persistHistory(input, fallback);
@@ -376,56 +285,6 @@ export class AdvisorAgent {
       // 永不让历史持久化失败影响推荐主流程
     }
   }
-}
-
-function buildUserMessage(
-  profile: PersistedProfile,
-  input: { enemyNames: string[]; preference?: string }
-): string {
-  const compact = {
-    characters: profile.characters.map((character) => ({
-      id: character.id,
-      name: character.name,
-      element: character.element,
-      rarity: character.rarity,
-      stats: character.stats
-    })),
-    enemies: input.enemyNames,
-    preference: input.preference ?? ''
-  };
-  return JSON.stringify(compact);
-}
-
-function extractTextFromMessage(message: unknown): string {
-  if (!isObject(message) || (message as { type?: string }).type !== 'assistant') {
-    return '';
-  }
-  const apiMessage = (message as { message?: unknown }).message;
-  if (!isObject(apiMessage)) {
-    return '';
-  }
-  const content = (apiMessage as { content?: unknown }).content;
-  if (!Array.isArray(content)) {
-    return '';
-  }
-  let text = '';
-  for (const block of content) {
-    if (isObject(block) && (block as { type?: string }).type === 'text') {
-      const t = (block as { text?: string }).text;
-      if (typeof t === 'string') {
-        text += t;
-      }
-    }
-  }
-  return text;
-}
-
-function isResultMessage(message: unknown): boolean {
-  return isObject(message) && (message as { type?: string }).type === 'result';
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
 }
 
 export function extractJsonPayload(raw: string): ParsedLlmPayload | undefined {
@@ -464,13 +323,11 @@ export function normalizeLlmResult(
     const ids = Array.isArray(team.characterIds)
       ? team.characterIds.filter((value): value is number => Number.isInteger(value))
       : [];
+    if (ids.length !== 4 || new Set(ids).size !== 4) continue;
     const picks = ids
       .map((id) => byId.get(id))
-      .filter((value): value is CharacterProfile => Boolean(value))
-      .slice(0, 4);
-    if (picks.length < 4) {
-      continue;
-    }
+      .filter((value): value is CharacterProfile => Boolean(value));
+    if (picks.length !== 4) continue;
     teams.push({
       name: team.name?.trim() || `推荐配队 ${index + 1}`,
       characters: picks.map((c) => ({ id: c.id, name: c.name, element: c.element })),
@@ -487,15 +344,16 @@ export function normalizeLlmResult(
 }
 
 function scoreCharacter(character: CharacterProfile): number {
-  const { stats } = character;
+  const stats = character.build?.stats;
   return (
-    stats.level * 3 +
-    stats.atk / 14 +
-    stats.hp / 220 +
-    stats.critRate * 4 +
-    stats.critDmg * 2 +
-    stats.energyRecharge +
-    stats.elementalMastery / 3
+    (character.level ?? 1) * 3 +
+    character.rarity * 30 +
+    (stats?.atk ?? 0) / 14 +
+    (stats?.hp ?? 0) / 220 +
+    (stats?.critRate ?? 0) * 4 +
+    (stats?.critDmg ?? 0) * 2 +
+    (stats?.energyRecharge ?? 0) +
+    (stats?.elementalMastery ?? 0) / 3
   );
 }
 
@@ -510,14 +368,14 @@ export function buildFallback(
     source: 'fallback',
     summary:
       enemyNames.length > 0
-        ? `已根据角色面板与敌人信息（${enemyNames.join('、')}）生成基础推荐。`
-        : '未提供敌人信息，已根据角色面板综合强度生成基础推荐。',
+        ? `已根据已知角色数据与敌人信息（${enemyNames.join('、')}）生成基础推荐；缺失面板不会按 0 处理。`
+        : '未提供敌人信息，已根据已知角色数据生成基础推荐；缺失面板不会按 0 处理。',
     teams: [
       {
         name: '基础稳妥队',
         characters: core.map((c) => ({ id: c.id, name: c.name, element: c.element })),
-        reasoning: '本地启发式：按面板综合强度选最强 4 名角色，确保输出与生存上限。',
-        rotationTip: '先副 C/辅助挂元素，主 C 收伤；注意充能闭环。'
+        reasoning: '本地启发式：以等级、稀有度和已知面板做可解释排序；未知字段只降低置信度。',
+        rotationTip: '先副 C/辅助挂元素，主 C 输出；充能数据未知时请以实战循环为准。'
       }
     ]
   };
@@ -553,8 +411,4 @@ export function buildDiffSummary(
 
 function joinUrl(base: string, p: string): string {
   return `${base.replace(/\/+$/, '')}/${p.replace(/^\/+/, '')}`;
-}
-
-function truncate(value: string, max: number): string {
-  return value.length > max ? `${value.slice(0, max)}…` : value;
 }

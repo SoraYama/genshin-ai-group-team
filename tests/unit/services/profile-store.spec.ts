@@ -32,6 +32,7 @@ beforeEach(() => {
 
 function makeProfile(uid: string, characterCount = 0): PersistedProfile {
   return {
+    schemaVersion: 2,
     uid,
     nickname: `Traveler-${uid.slice(-3)}`,
     level: 60,
@@ -43,17 +44,34 @@ function makeProfile(uid: string, characterCount = 0): PersistedProfile {
       element: 'Fire',
       rarity: 5,
       imageUrl: 'https://example.com/x.png',
-      stats: {
-        level: 90,
-        hp: 30000,
-        atk: 2000,
-        def: 800,
-        critRate: 70,
-        critDmg: 200,
-        energyRecharge: 130,
-        elementalMastery: 80
+      level: 90,
+      build: {
+        stats: {
+          hp: 30000,
+          atk: 2000,
+          def: 800,
+          critRate: 70,
+          critDmg: 200,
+          energyRecharge: 130,
+          elementalMastery: 80
+        }
+      },
+      completeness: 'build' as const,
+      missingFields: ['weapon', 'artifacts', 'talents'] as const,
+      provenance: {
+        ownership: { source: 'enka' as const, fetchedAt: '2026-01-01T00:00:00.000Z' },
+        stats: { source: 'enka' as const, fetchedAt: '2026-01-01T00:00:00.000Z' }
       }
-    }))
+    })),
+    coverage: {
+      ownedCount: characterCount,
+      detailedCount: 0,
+      buildCount: characterCount,
+      statsCount: characterCount,
+      enkaShowcaseCount: characterCount,
+      missingDetailCount: characterCount,
+      partial: characterCount > 0
+    }
   };
 }
 

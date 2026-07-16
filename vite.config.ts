@@ -17,6 +17,8 @@ export default defineConfig({
     strictPort: true
   },
   build: {
+    // Renderer runs only in Electron 43 (Chromium 142), not in legacy browsers.
+    target: 'chrome142',
     outDir: path.resolve(__dirname, 'dist/renderer'),
     emptyOutDir: true,
     sourcemap: true

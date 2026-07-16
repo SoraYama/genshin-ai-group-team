@@ -12,7 +12,15 @@ interface PersistedSchema {
     encryptedApiKey?: string;
     baseUrl?: string;
     model?: string;
+    encryptedCustomHeaders?: Record<string, string>;
+    /** @deprecated v1 migration source; values are encrypted on first access. */
     customHeaders?: Record<string, string>;
+  };
+  monthlyUsage?: {
+    month: string;
+    inputTokens: number;
+    outputTokens: number;
+    estimatedCostUsd: number;
   };
 }
 
@@ -31,6 +39,7 @@ export class ConfigService {
       name: 'config',
       defaults: DEFAULTS
     });
+    this.migrateLegacyCustomHeaders();
   }
 
   getApiKey(): string | undefined {
@@ -59,7 +68,18 @@ export class ConfigService {
   }
 
   getCustomHeaders(): Record<string, string> {
-    return this.store.get('llm').customHeaders ?? {};
+    if (!safeStorage.isEncryptionAvailable()) {
+      return {};
+    }
+    const llm = this.store.get('llm');
+    const encryptedHeaders = llm.encryptedCustomHeaders ?? {};
+    const decrypted = this.decryptHeaders(encryptedHeaders);
+
+    if (llm.customHeaders && Object.keys(llm.customHeaders).length > 0) {
+      return { ...llm.customHeaders, ...decrypted };
+    }
+
+    return decrypted;
   }
 
   setLlm(input: LlmConfigInput): void {
@@ -85,7 +105,12 @@ export class ConfigService {
     }
 
     if (input.customHeaders !== undefined) {
-      next.customHeaders = input.customHeaders;
+      if (Object.keys(input.customHeaders).length > 0) {
+        next.encryptedCustomHeaders = this.encryptHeaders(input.customHeaders);
+      } else {
+        delete next.encryptedCustomHeaders;
+      }
+      delete next.customHeaders;
     }
 
     this.store.set('llm', next);
@@ -101,14 +126,93 @@ export class ConfigService {
       hasApiKey: Boolean(llm.encryptedApiKey),
       baseUrl: llm.baseUrl ?? DEFAULT_BASE_URL,
       model: llm.model ?? DEFAULT_MODEL,
-      customHeaderKeys: Object.keys(llm.customHeaders ?? {})
+      customHeaderKeys: Array.from(
+        new Set([
+          ...Object.keys(llm.encryptedCustomHeaders ?? {}),
+          ...Object.keys(llm.customHeaders ?? {})
+        ])
+      ).sort()
     };
   }
 
   getPublicConfig(): PublicConfig {
     return {
       llm: this.getPublicView(),
-      appVersion: app.getVersion()
+      appVersion: app.getVersion(),
+      monthlyUsage: this.getMonthlyUsage()
     };
+  }
+
+  recordUsage(inputTokens: number, outputTokens: number, estimatedCostUsd = 0): void {
+    const month = new Date().toISOString().slice(0, 7);
+    const current = this.getMonthlyUsage();
+    this.store.set('monthlyUsage', {
+      month,
+      inputTokens: (current.month === month ? current.inputTokens : 0) + Math.max(0, inputTokens),
+      outputTokens:
+        (current.month === month ? current.outputTokens : 0) + Math.max(0, outputTokens),
+      estimatedCostUsd:
+        (current.month === month ? current.estimatedCostUsd : 0) +
+        Math.max(0, estimatedCostUsd)
+    });
+  }
+
+  private getMonthlyUsage(): NonNullable<PersistedSchema['monthlyUsage']> {
+    const month = new Date().toISOString().slice(0, 7);
+    const usage = this.store.get('monthlyUsage');
+    return usage?.month === month
+      ? usage
+      : { month, inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 };
+  }
+
+  private encryptHeaders(headers: Record<string, string>): Record<string, string> {
+    if (!safeStorage.isEncryptionAvailable()) {
+      throw new Error(
+        'safeStorage encryption is not available on this platform. ' +
+          'Please ensure your OS keychain / Credential Vault is unlocked.'
+      );
+    }
+
+    return Object.fromEntries(
+      Object.entries(headers).map(([key, value]) => [
+        key,
+        safeStorage.encryptString(value).toString('base64')
+      ])
+    );
+  }
+
+  private migrateLegacyCustomHeaders(): void {
+    const llm = this.store.get('llm');
+    if (
+      !llm.customHeaders ||
+      Object.keys(llm.customHeaders).length === 0 ||
+      !safeStorage.isEncryptionAvailable()
+    ) {
+      return;
+    }
+
+    const migrated = {
+      ...llm.customHeaders,
+      ...this.decryptHeaders(llm.encryptedCustomHeaders ?? {})
+    };
+    const next = { ...llm, encryptedCustomHeaders: this.encryptHeaders(migrated) };
+    delete next.customHeaders;
+    this.store.set('llm', next);
+  }
+
+  private decryptHeaders(headers: Record<string, string>): Record<string, string> {
+    if (!safeStorage.isEncryptionAvailable()) {
+      return {};
+    }
+
+    return Object.fromEntries(
+      Object.entries(headers).flatMap(([key, value]) => {
+        try {
+          return [[key, safeStorage.decryptString(Buffer.from(value, 'base64'))]];
+        } catch {
+          return [];
+        }
+      })
+    );
   }
 }

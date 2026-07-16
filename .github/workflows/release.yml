@@ -1,0 +1,126 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and verify ${{ matrix.label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            label: macos-universal
+            command: npm run pack:mac:universal -- --publish never
+          - os: windows-latest
+            label: windows-x64
+            command: npm run pack:win -- --publish never
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Verify tag matches package version
+        shell: bash
+        run: node -e "if ('v' + require('./package.json').version !== process.env.GITHUB_REF_NAME) throw new Error('tag and package version differ')"
+      - run: npm run gate:local
+      - run: npm run test:e2e:run
+      - name: Install the Intel Agent SDK binary for the universal macOS app
+        if: runner.os == 'macOS'
+        run: npm run prepare:mac-universal-sdk
+      - name: Build signed/notarized release candidates without publishing
+        run: ${{ matrix.command }}
+        env:
+          CSC_LINK: ${{ runner.os == 'macOS' && secrets.MACOS_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ runner.os == 'macOS' && secrets.MACOS_CSC_KEY_PASSWORD || '' }}
+          APPLE_ID: ${{ runner.os == 'macOS' && secrets.APPLE_ID || '' }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ runner.os == 'macOS' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ runner.os == 'macOS' && secrets.APPLE_TEAM_ID || '' }}
+      - name: Verify packaged Agent SDK protocol
+        run: npm run test:packaged:sdk
+      - name: Verify package size budget
+        run: npm run test:package-budget
+      - name: Verify updater metadata and ZIP checksum
+        if: runner.os == 'macOS'
+        run: npm run test:update-metadata
+      - name: Verify universal runtime and architecture-specific SDK binaries
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          app="release/mac-universal/Genshin Team Advisor.app"
+          lipo -verify_arch x86_64 "$app/Contents/MacOS/Genshin Team Advisor"
+          lipo -verify_arch arm64 "$app/Contents/MacOS/Genshin Team Advisor"
+          lipo -verify_arch x86_64 "$app/Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework"
+          lipo -verify_arch arm64 "$app/Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework"
+          test "$(lipo -archs "$app/Contents/Resources/app.asar.unpacked/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude")" = "arm64"
+          test "$(lipo -archs "$app/Contents/Resources/app.asar.unpacked/node_modules/@anthropic-ai/claude-agent-sdk-darwin-x64/claude")" = "x86_64"
+      - name: Verify Gatekeeper accepts the notarized app
+        if: runner.os == 'macOS'
+        shell: bash
+        run: spctl --assess --type execute --verbose=2 release/mac-universal/*.app
+      - name: Verify Windows install, SDK, uninstall, and data retention
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./tests/packaged/windows-install-smoke.ps1
+      - name: Create macOS SHA-256 manifest
+        if: runner.os == 'macOS'
+        shell: bash
+        run: cd release && find . -maxdepth 1 -type f \( -name '*.dmg' -o -name '*.zip' \) -exec shasum -a 256 {} \; > SHA256SUMS-macos.txt
+      - name: Create Windows SHA-256 manifest
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Get-ChildItem release -File -Filter *.exe | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)"
+          } | Set-Content release/SHA256SUMS-windows.txt
+      - name: Collect verified release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.label }}
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/*.exe
+            release/*.blockmap
+            release/latest*.yml
+            release/SHA256SUMS-*.txt
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-draft:
+    name: Publish verified draft release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+      - name: Create draft and upload only verified assets
+        shell: bash
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --draft \
+            --verify-tag \
+            --title "Genshin Team Advisor $GITHUB_REF_NAME" \
+            --generate-notes \
+            release-assets/*
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

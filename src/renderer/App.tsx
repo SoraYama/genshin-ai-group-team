@@ -5,18 +5,28 @@ import { RosterPage } from './pages/Roster/RosterPage';
 import { AdvisorPage } from './pages/Advisor/AdvisorPage';
 import { HistoryPage } from './pages/History/HistoryPage';
 import { useProfileState } from './hooks/useProfileState';
+import { useI18n } from './i18n';
 
 type View = 'roster' | 'advisor' | 'history' | 'onboarding' | 'settings';
 
-const NAV_ITEMS: Array<{ key: View; label: string }> = [
-  { key: 'roster', label: '角色' },
-  { key: 'advisor', label: '推荐' },
-  { key: 'history', label: '历史' },
-  { key: 'onboarding', label: '绑定' },
-  { key: 'settings', label: '设置' }
-];
+const NAV_ITEMS = [
+  { key: 'roster', label: 'app.nav.roster' },
+  { key: 'advisor', label: 'app.nav.advisor' },
+  { key: 'history', label: 'app.nav.history' },
+  { key: 'onboarding', label: 'app.nav.onboarding' },
+  { key: 'settings', label: 'app.nav.settings' }
+] as const satisfies ReadonlyArray<{
+  key: View;
+  label:
+    | 'app.nav.roster'
+    | 'app.nav.advisor'
+    | 'app.nav.history'
+    | 'app.nav.onboarding'
+    | 'app.nav.settings';
+}>;
 
 export default function App() {
+  const { locale, setLocale, t } = useI18n();
   const { state, loading, refresh } = useProfileState();
   const [view, setView] = useState<View>('roster');
   const [hasInitialized, setHasInitialized] = useState(false);
@@ -36,9 +46,9 @@ export default function App() {
         <header className="gta-topbar">
           <div className="gta-brand">
             <span className="gta-brand-mark">Genshin Team Advisor</span>
-            <span className="gta-brand-sub">v0.5 · BYOK</span>
+            <span className="gta-brand-sub">LOCAL · BYOK</span>
           </div>
-          <nav className="gta-nav" aria-label="主导航">
+          <nav className="gta-nav" aria-label={t('app.navLabel')}>
             {NAV_ITEMS.map((item) => (
               <button
                 key={item.key}
@@ -46,14 +56,25 @@ export default function App() {
                 className={view === item.key ? 'is-active' : ''}
                 onClick={() => setView(item.key)}
               >
-                {item.label}
+                {t(item.label)}
               </button>
             ))}
+            <label className="gta-language-select">
+              <span className="sr-only">{t('app.language')}</span>
+              <select
+                aria-label={t('app.language')}
+                value={locale}
+                onChange={(event) => setLocale(event.target.value === 'en-US' ? 'en-US' : 'zh-CN')}
+              >
+                <option value="zh-CN">中文</option>
+                <option value="en-US">English</option>
+              </select>
+            </label>
           </nav>
         </header>
         <main>
           {loading || !state ? (
-            <p className="gta-hint gta-on-bg">Loading…</p>
+            <p className="gta-hint gta-on-bg">{t('common.loading')}</p>
           ) : view === 'settings' ? (
             <SettingsPage />
           ) : view === 'onboarding' ? (

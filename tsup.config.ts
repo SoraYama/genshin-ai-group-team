@@ -2,7 +2,10 @@ import { defineConfig } from 'tsup';
 
 export default defineConfig([
   {
-    entry: { index: 'src/main/index.ts' },
+    entry: {
+      index: 'src/main/index.ts',
+      'miyoushe-detail-gate': 'src/main/gates/miyoushe-detail-gate.ts'
+    },
     outDir: 'dist/main',
     format: ['esm'],
     target: 'node20',

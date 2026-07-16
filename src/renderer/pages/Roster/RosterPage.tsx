@@ -8,6 +8,7 @@ import type {
 } from '../../../shared/domain';
 import { ButtonGlyph, ElementIcon, PortraitFallback, StarIcon } from '../../design/Icons';
 import { normalizeElement } from '../../design/tokens';
+import { localizeError, useI18n } from '../../i18n';
 
 interface RosterPageProps {
   state: ProfileStateView;
@@ -20,14 +21,6 @@ type Status =
   | { kind: 'loading'; label?: string }
   | { kind: 'error'; message: string };
 
-const SOURCE_LABEL: Record<PersistedProfile['source'], string> = {
-  miyoushe: '米游社',
-  'miyoushe+enka': '米游社 + Enka',
-  enka: 'Enka',
-  merged: '米游社 + Enka 融合',
-  'miyoushe-stale': '米游社（已过期）'
-};
-
 function formatTime(iso: string): string {
   const d = new Date(iso);
   const mm = String(d.getMonth() + 1).padStart(2, '0');
@@ -38,6 +31,7 @@ function formatTime(iso: string): string {
 }
 
 export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPageProps) {
+  const { locale, t } = useI18n();
   const [profile, setProfile] = useState<PersistedProfile | null>(null);
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
   const [lastRefresh, setLastRefresh] = useState<RefreshSummary | null>(null);
@@ -67,10 +61,10 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
     } catch (error) {
       setStatus({
         kind: 'error',
-        message: error instanceof Error ? error.message : '加载失败'
+        message: localizeError(error, locale, t, 'roster.error.load')
       });
     }
-  }, []);
+  }, [locale, t]);
 
   useEffect(() => {
     if (!activeUid) {
@@ -89,7 +83,7 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
     if (!activeUid) {
       return;
     }
-    setStatus({ kind: 'loading', label: '正在刷新…' });
+    setStatus({ kind: 'loading', label: t('roster.action.refreshing') });
     try {
       const outcome = await api.profile.refresh({ uid: activeUid });
       setProfile(outcome.profile);
@@ -99,14 +93,14 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
     } catch (error) {
       setStatus({
         kind: 'error',
-        message: error instanceof Error ? error.message : '刷新失败'
+        message: localizeError(error, locale, t, 'roster.error.refresh')
       });
     }
   }
 
   async function handleReloginAndRefresh() {
     if (!activeUid) return;
-    setStatus({ kind: 'loading', label: '等待米游社浏览器登录…' });
+    setStatus({ kind: 'loading', label: t('roster.action.waitLogin') });
     try {
       const login = await api.miyoushe.loginViaBrowser();
       if (!login.ok) {
@@ -114,8 +108,9 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
           kind: 'error',
           message:
             login.reason === 'cancelled'
-              ? '已取消登录'
-              : login.message ?? `登录失败：${login.reason}`
+              ? t('roster.error.cancelled')
+              : (locale === 'zh-CN' ? login.message : undefined) ??
+                t('roster.error.login', { reason: login.reason })
         });
         return;
       }
@@ -123,11 +118,11 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
       if (!match) {
         setStatus({
           kind: 'error',
-          message: '登录的米游社账号不包含当前 UID，请改用相应账号登录或绑定新 UID'
+          message: t('roster.error.uidMismatch')
         });
         return;
       }
-      setStatus({ kind: 'loading', label: '正在拉取全角色…' });
+      setStatus({ kind: 'loading', label: t('roster.action.fetchingAll') });
       const refreshed = await api.profile.importFromSession({
         sessionId: login.sessionId,
         uid: activeUid
@@ -148,13 +143,13 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
     } catch (error) {
       setStatus({
         kind: 'error',
-        message: error instanceof Error ? error.message : '重新登录失败'
+        message: localizeError(error, locale, t, 'roster.error.relogin')
       });
     }
   }
 
   async function handleLogout() {
-    setStatus({ kind: 'loading', label: '正在退出米游社登录…' });
+    setStatus({ kind: 'loading', label: t('roster.action.loggingOut') });
     try {
       await api.miyoushe.logout();
       setLastRefresh(null);
@@ -163,34 +158,38 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
     } catch (error) {
       setStatus({
         kind: 'error',
-        message: error instanceof Error ? error.message : '退出失败'
+        message: localizeError(error, locale, t, 'roster.error.logout')
       });
     }
   }
 
   async function handlePing() {
     if (!activeUid) return;
-    setStatus({ kind: 'loading', label: '正在测试米游社连接…' });
+    setStatus({ kind: 'loading', label: t('roster.action.testing') });
     try {
       const result = await api.miyoushe.ping({ uid: activeUid });
       if (result.ok) {
         setStatus({
           kind: 'error',
-          message:
-            `✓ 米游社连接 OK — 昵称 ${result.nickname ?? '?'}，` +
-            `世界等级 ${result.worldLevel ?? '?'}，` +
-            `账号共 ${result.totalCharacters ?? '?'} 角色`
+          message: t('roster.ping.ok', {
+            nickname: result.nickname ?? '?',
+            level: result.worldLevel ?? '?',
+            count: result.totalCharacters ?? '?'
+          })
         });
       } else {
         setStatus({
           kind: 'error',
-          message: `✗ 米游社连接失败：${result.reason}${result.retcode !== undefined ? ` (retcode=${result.retcode})` : ''}`
+          message: t('roster.ping.failed', {
+            reason: result.reason,
+            retcode: result.retcode !== undefined ? ` (retcode=${result.retcode})` : ''
+          })
         });
       }
     } catch (error) {
       setStatus({
         kind: 'error',
-        message: error instanceof Error ? error.message : '测试失败'
+        message: localizeError(error, locale, t, 'roster.error.test')
       });
     }
   }
@@ -204,18 +203,18 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
     return (
       <section>
         <h2 className="gta-section-title">
-          角色面板
+          {t('roster.title')}
           <span className="gta-section-sub">ROSTER</span>
         </h2>
         <div className="gta-panel">
           <div className="gta-panel-body">
-            <p className="gta-hint">还没有绑定任何账号。</p>
+            <p className="gta-hint">{t('roster.emptyAccounts')}</p>
             <div className="gta-actions">
               <button type="button" className="gta-btn" onClick={onGotoOnboarding}>
                 <span className="gta-btn-icon">
                   <ButtonGlyph name="plus" />
                 </span>
-                去绑定米游社账号
+                {t('roster.gotoBind')}
               </button>
             </div>
           </div>
@@ -227,7 +226,7 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
   return (
     <section>
       <h2 className="gta-section-title">
-        角色面板
+        {t('roster.title')}
         <span className="gta-section-sub">ROSTER</span>
       </h2>
 
@@ -245,7 +244,9 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
                 >
                   <span className="uid">UID {item.uid}</span>
                   <span className="nickname">{item.nickname ?? '—'}</span>
-                  <span className="count">{item.characterCount} 角色</span>
+                  <span className="count">
+                    {t('roster.characters', { count: item.characterCount })}
+                  </span>
                 </button>
               );
             })}
@@ -258,10 +259,7 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
         <p className="gta-hint">{status.label}</p>
       )}
       {lastRefresh && status.kind === 'idle' && (
-        <RefreshBanner
-          summary={lastRefresh}
-          onRelogin={() => void handleReloginAndRefresh()}
-        />
+        <RefreshBanner summary={lastRefresh} onRelogin={() => void handleReloginAndRefresh()} />
       )}
 
       {profile && (
@@ -277,28 +275,44 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
                     </dd>
                   </div>
                   <div className="gta-meta-cell">
-                    <dt className="gta-meta-label">昵称</dt>
+                    <dt className="gta-meta-label">{t('roster.nickname')}</dt>
                     <dd className="gta-meta-value" style={{ margin: 0 }}>
                       {profile.nickname ?? '—'}
                     </dd>
                   </div>
                   <div className="gta-meta-cell">
-                    <dt className="gta-meta-label">世界等级</dt>
+                    <dt className="gta-meta-label">{t('roster.worldLevel')}</dt>
                     <dd className="gta-meta-value is-mono" style={{ margin: 0 }}>
                       {profile.level ?? '—'}
                     </dd>
                   </div>
                   <div className="gta-meta-cell">
-                    <dt className="gta-meta-label">数据来源</dt>
+                    <dt className="gta-meta-label">{t('roster.source')}</dt>
                     <dd className="gta-meta-value" style={{ margin: 0 }}>
-                      {SOURCE_LABEL[profile.source]}
+                      {sourceLabel(profile.source, t)}
                     </dd>
                   </div>
                   <div className="gta-meta-cell">
-                    <dt className="gta-meta-label">刷新时间</dt>
+                    <dt className="gta-meta-label">{t('roster.refreshedAt')}</dt>
                     <dd className="gta-meta-value is-mono" style={{ margin: 0 }}>
                       {formatTime(profile.fetchedAt)}
                     </dd>
+                  </div>
+                  <div className="gta-meta-cell" data-testid="profile-coverage-summary">
+                    <dt className="gta-meta-label">{t('roster.completeness')}</dt>
+                    <dd className="gta-meta-value" style={{ margin: 0 }}>
+                      {profile.coverage.partial ? t('roster.partial') : t('roster.complete')}
+                    </dd>
+                    <span className="gta-meta-detail">
+                      {t('roster.coverage', {
+                        owned: profile.coverage.ownedCount,
+                        expected:
+                          profile.coverage.expectedOwnedCount !== undefined
+                            ? ` / ${profile.coverage.expectedOwnedCount}`
+                            : '',
+                        detailed: profile.coverage.detailedCount
+                      })}
+                    </span>
                   </div>
                 </dl>
                 <div className="gta-actions">
@@ -311,19 +325,19 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
                     <span className="gta-btn-icon">
                       <ButtonGlyph name="refresh" />
                     </span>
-                    {status.kind === 'loading' ? '刷新中…' : '刷新数据'}
+                    {status.kind === 'loading' ? t('roster.refreshing') : t('roster.refresh')}
                   </button>
                   <button
                     type="button"
                     className="gta-btn gta-btn--ghost"
                     onClick={() => void handleReloginAndRefresh()}
                     disabled={!activeUid || status.kind === 'loading'}
-                    title="弹出米游社登录窗口，重新拉取全部角色 + 武器 + 圣遗物"
+                    title={t('roster.loginTitle')}
                   >
                     <span className="gta-btn-icon">
                       <ButtonGlyph name="refresh" />
                     </span>
-                    {authHasCookie ? '更换米游社账号' : '登录米游社'}
+                    {authHasCookie ? t('roster.switchAccount') : t('roster.login')}
                   </button>
                   {authHasCookie && (
                     <>
@@ -332,23 +346,23 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
                         className="gta-btn gta-btn--ghost"
                         onClick={() => void handlePing()}
                         disabled={status.kind === 'loading'}
-                        title="只调用 /index 探针，验证 cookie + DS 签名是否能跑通"
+                        title={t('roster.pingTitle')}
                       >
-                        测试米游社连接
+                        {t('roster.ping')}
                       </button>
                       <button
                         type="button"
                         className="gta-btn gta-btn--ghost"
                         onClick={() => void handleLogout()}
                         disabled={status.kind === 'loading'}
-                        title="清除本地保存的米游社 cookie"
+                        title={t('roster.logoutTitle')}
                       >
-                        退出米游社登录
+                        {t('roster.logout')}
                       </button>
                     </>
                   )}
                   <button type="button" className="gta-btn gta-btn--ghost" onClick={onGotoOnboarding}>
-                    绑定新账号
+                    {t('roster.bindNew')}
                   </button>
                   <button
                     type="button"
@@ -358,7 +372,7 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
                     <span className="gta-btn-icon">
                       <ButtonGlyph name="trash" />
                     </span>
-                    删除缓存
+                    {t('roster.deleteCache')}
                   </button>
                 </div>
               </div>
@@ -369,8 +383,7 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
             <div className="gta-panel">
               <div className="gta-panel-body">
                 <p className="gta-hint">
-                  当前没有角色面板数据。请在游戏内将想分析的角色放进角色展示柜，等约 5
-                  分钟后回到这里点 &ldquo;刷新 Enka&rdquo;。
+                  {t('roster.emptyProfile')}
                 </p>
               </div>
             </div>
@@ -392,8 +405,15 @@ interface CharacterCardProps {
 }
 
 function CharacterCard({ character }: CharacterCardProps) {
+  const { t } = useI18n();
   const element = normalizeElement(character.element);
   const stars = Math.max(1, Math.min(5, character.rarity));
+  const stats = character.build?.stats;
+  const completenessLabel = {
+    basic: t('roster.basic'),
+    build: t('roster.build'),
+    detailed: t('roster.detailed')
+  }[character.completeness];
   return (
     <article className={`gta-card r${stars}`}>
       <div className="gta-card-head">
@@ -418,32 +438,89 @@ function CharacterCard({ character }: CharacterCardProps) {
               ))}
             </span>
             <span className="gta-level">
-              Lv <span className="num">{character.stats.level}</span>
+              Lv <span className="num">{character.level ?? t('common.unknown')}</span>
             </span>
           </div>
+          <span
+            className="gta-tag"
+            title={t('roster.missing', {
+              fields: character.missingFields.join(', ') || t('common.none')
+            })}
+          >
+            {completenessLabel}
+          </span>
         </div>
       </div>
       <div className="gta-card-divider" />
       <dl className="gta-stats">
-        <Stat label="攻击" value={character.stats.atk} />
-        <Stat label="生命" value={character.stats.hp} />
-        <Stat label="防御" value={character.stats.def} />
-        <Stat label="暴击率" value={character.stats.critRate} suffix="%" />
-        <Stat label="暴伤" value={character.stats.critDmg} suffix="%" />
-        <Stat label="充能" value={character.stats.energyRecharge} suffix="%" />
-        <Stat label="精通" value={character.stats.elementalMastery} />
+        <Stat label={t('roster.atk')} value={stats?.atk} />
+        <Stat label={t('roster.hp')} value={stats?.hp} />
+        <Stat label={t('roster.def')} value={stats?.def} />
+        <Stat label={t('roster.critRate')} value={stats?.critRate} suffix="%" />
+        <Stat label={t('roster.critDmg')} value={stats?.critDmg} suffix="%" />
+        <Stat label={t('roster.energyRecharge')} value={stats?.energyRecharge} suffix="%" />
+        <Stat label={t('roster.elementalMastery')} value={stats?.elementalMastery} />
       </dl>
+      <div className="gta-build-summary">
+        <BuildLine
+          label={t('roster.weapon')}
+          value={
+            character.build?.weapon
+              ? `${character.build.weapon.name} · Lv ${character.build.weapon.level} · ${t('roster.refinement', { level: character.build.weapon.refinement })}`
+              : t('common.unknown')
+          }
+        />
+        <BuildLine
+          label={t('roster.talents')}
+          value={
+            character.build?.talents
+              ? `${character.build.talents.normalAttack} / ${character.build.talents.elementalSkill} / ${character.build.talents.elementalBurst}`
+              : t('common.unknown')
+          }
+        />
+        <BuildLine label={t('roster.artifacts')} value={formatArtifactSummary(character, t)} />
+      </div>
     </article>
   );
 }
 
-function Stat({ label, value, suffix }: { label: string; value: number; suffix?: string }) {
+function BuildLine({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="gta-build-line">
+      <span>{label}</span>
+      <strong title={value}>{value}</strong>
+    </div>
+  );
+}
+
+function formatArtifactSummary(
+  character: CharacterProfile,
+  t: ReturnType<typeof useI18n>['t']
+): string {
+  const artifacts = character.build?.artifacts;
+  if (!artifacts || artifacts.length === 0) return t('common.unknown');
+  const sets = new Map<string, number>();
+  for (const artifact of artifacts) {
+    sets.set(artifact.setName, (sets.get(artifact.setName) ?? 0) + 1);
+  }
+  const setSummary = [...sets.entries()]
+    .sort((left, right) => right[1] - left[1])
+    .map(([name, count]) => `${name}×${count}`)
+    .join(' · ');
+  return t('roster.artifactCount', {
+    count: artifacts.length,
+    sets: setSummary ? ` · ${setSummary}` : ''
+  });
+}
+
+function Stat({ label, value, suffix }: { label: string; value?: number; suffix?: string }) {
+  const { t } = useI18n();
   return (
     <div className="gta-stat">
       <dt className="gta-stat-label">{label}</dt>
       <dd className="gta-stat-value" style={{ margin: 0 }}>
-        {value}
-        {suffix && <span className="pct">{suffix}</span>}
+        {value ?? t('common.unknown')}
+        {value !== undefined && suffix && <span className="pct">{suffix}</span>}
       </dd>
     </div>
   );
@@ -454,27 +531,8 @@ interface RefreshBannerProps {
   onRelogin: () => void;
 }
 
-const MIYOUSHE_STATUS_LABEL: Record<RefreshSummary['miyoushe'], string> = {
-  ok: '✓ 拉取成功',
-  failed: '⚠ 拉取失败',
-  skipped: '— 跳过',
-  'no-cookie': '— 未登录米游社',
-  'auth-expired': '⚠ 登录已过期',
-  'captcha-required': '⚠ 需要在米游社完成验证',
-  'rate-limited': '⚠ 触发限频，请稍后再试'
-};
-
-const ENKA_STATUS_LABEL: Record<RefreshSummary['enka'], string> = {
-  ok: '✓ 拉取成功',
-  failed: '⚠ 拉取失败',
-  skipped: '— 跳过',
-  'no-cookie': '—',
-  'auth-expired': '—',
-  'captcha-required': '—',
-  'rate-limited': '—'
-};
-
 function RefreshBanner({ summary, onRelogin }: RefreshBannerProps) {
+  const { locale, t } = useI18n();
   const needsRelogin =
     summary.miyoushe === 'no-cookie' || summary.miyoushe === 'auth-expired';
   return (
@@ -485,35 +543,43 @@ function RefreshBanner({ summary, onRelogin }: RefreshBannerProps) {
       <div className="gta-panel-body" style={{ paddingTop: 'var(--gta-s3)', paddingBottom: 'var(--gta-s3)' }}>
         <div className="gta-meta-grid" style={{ margin: 0 }}>
           <div className="gta-meta-cell">
-            <dt className="gta-meta-label">米游社全角色</dt>
+            <dt className="gta-meta-label">{t('roster.refresh.miyoushe')}</dt>
             <dd className="gta-meta-value" style={{ margin: 0 }}>
-              {MIYOUSHE_STATUS_LABEL[summary.miyoushe]}
+              {refreshStatusLabel(summary.miyoushe, t, true)}
               {summary.miyoushe === 'ok' && (
-                <span className="gta-mono">（{summary.miyousheCharacterCount} 角色）</span>
+                <span className="gta-mono">
+                  {t('roster.refresh.count', { count: summary.miyousheCharacterCount })}
+                </span>
               )}
             </dd>
             {summary.miyousheError && summary.miyoushe !== 'ok' && (
               <p className="gta-hint" style={{ marginTop: 4 }}>
-                {summary.miyousheError}
+                {locale === 'en-US' && /[\u3400-\u9fff]/u.test(summary.miyousheError)
+                  ? t('common.error.upstream')
+                  : summary.miyousheError}
               </p>
             )}
           </div>
           <div className="gta-meta-cell">
-            <dt className="gta-meta-label">Enka 展示柜</dt>
+            <dt className="gta-meta-label">{t('roster.refresh.enka')}</dt>
             <dd className="gta-meta-value" style={{ margin: 0 }}>
-              {ENKA_STATUS_LABEL[summary.enka]}
+              {refreshStatusLabel(summary.enka, t, false)}
               {summary.enka === 'ok' && (
-                <span className="gta-mono">（{summary.enkaCharacterCount} 角色）</span>
+                <span className="gta-mono">
+                  {t('roster.refresh.count', { count: summary.enkaCharacterCount })}
+                </span>
               )}
             </dd>
             {summary.enkaError && summary.enka !== 'ok' && (
               <p className="gta-hint" style={{ marginTop: 4 }}>
-                {summary.enkaError}
+                {locale === 'en-US' && /[\u3400-\u9fff]/u.test(summary.enkaError)
+                  ? t('common.error.upstream')
+                  : summary.enkaError}
               </p>
             )}
           </div>
           <div className="gta-meta-cell">
-            <dt className="gta-meta-label">合并后总角色</dt>
+            <dt className="gta-meta-label">{t('roster.refresh.merged')}</dt>
             <dd className="gta-meta-value is-mono" style={{ margin: 0 }}>
               {summary.totalCharacterCount}
             </dd>
@@ -523,8 +589,8 @@ function RefreshBanner({ summary, onRelogin }: RefreshBannerProps) {
           <div className="gta-actions" style={{ marginTop: 'var(--gta-s3)' }}>
             <p className="gta-hint" style={{ margin: 0, flex: 1 }}>
               {summary.miyoushe === 'no-cookie'
-                ? '当前 UID 还没有登录态，米游社全角色无法拉取。'
-                : '米游社登录态已过期，建议重新登录。'}
+                ? t('roster.refresh.noCookie')
+                : t('roster.refresh.expired')}
             </p>
             <button
               type="button"
@@ -534,11 +600,41 @@ function RefreshBanner({ summary, onRelogin }: RefreshBannerProps) {
               <span className="gta-btn-icon">
                 <ButtonGlyph name="refresh" />
               </span>
-              重新登录米游社
+              {t('roster.relogin')}
             </button>
           </div>
         )}
       </div>
     </div>
   );
+}
+
+function sourceLabel(
+  source: PersistedProfile['source'],
+  t: ReturnType<typeof useI18n>['t']
+): string {
+  return {
+    miyoushe: t('roster.source.miyoushe'),
+    'miyoushe+enka': t('roster.source.miyousheEnka'),
+    enka: t('roster.source.enka'),
+    merged: t('roster.source.merged'),
+    'miyoushe-stale': t('roster.source.stale')
+  }[source];
+}
+
+function refreshStatusLabel(
+  status: RefreshSummary['miyoushe'],
+  t: ReturnType<typeof useI18n>['t'],
+  isMiyoushe: boolean
+): string {
+  if (!isMiyoushe && !['ok', 'failed', 'skipped'].includes(status)) return '—';
+  return {
+    ok: t('roster.status.ok'),
+    failed: t('roster.status.failed'),
+    skipped: t('roster.status.skipped'),
+    'no-cookie': t('roster.status.noCookie'),
+    'auth-expired': t('roster.status.authExpired'),
+    'captcha-required': t('roster.status.captcha'),
+    'rate-limited': t('roster.status.rateLimited')
+  }[status];
 }

@@ -86,10 +86,26 @@ export class MiyousheLoginWindow {
         session: ses,
         contextIsolation: true,
         nodeIntegration: false,
-        sandbox: true
+        sandbox: true,
+        webSecurity: true
       }
     });
+    ses.setPermissionCheckHandler(() => false);
+    ses.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
     win.webContents.setUserAgent(DESKTOP_CHROME_UA);
+    win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    win.webContents.on('will-attach-webview', (event) => event.preventDefault());
+    win.webContents.on('will-navigate', (event, targetUrl) => {
+      try {
+        const host = new URL(targetUrl).hostname;
+        if (!host.endsWith('.miyoushe.com') && host !== 'miyoushe.com' &&
+            !host.endsWith('.mihoyo.com') && host !== 'mihoyo.com') {
+          event.preventDefault();
+        }
+      } catch {
+        event.preventDefault();
+      }
+    });
     win.webContents.on('did-start-navigation', () => {
       void win.webContents.executeJavaScript(STEALTH_SCRIPT, true).catch(() => {});
     });

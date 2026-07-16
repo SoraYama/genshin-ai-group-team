@@ -16,7 +16,8 @@ import type { MiyousheClient } from '../services/miyoushe-client.js';
 import type {
   MiyousheCharacterDetail,
   MiyousheFetchError,
-  MiyousheGameRecordClient
+  MiyousheGameRecordClient,
+  MiyousheRosterCoverage
 } from '../services/miyoushe-game-record.js';
 import type { MiyousheBrowserBridge } from '../services/miyoushe/browser-bridge.js';
 import type { MiyousheLoginWindow } from '../services/miyoushe-login-window.js';
@@ -79,13 +80,28 @@ export function registerProfileIpc({
     uid: string,
     cookie: string | undefined
   ): Promise<
-    | { ok: true; characters: MiyousheCharacterDetail[]; via: 'http' | 'bridge-hidden' | 'bridge-visible' }
+    | {
+        ok: true;
+        characters: MiyousheCharacterDetail[];
+        coverage: MiyousheRosterCoverage;
+        via: 'http' | 'bridge-hidden' | 'bridge-visible';
+      }
     | { ok: false; via: 'http' | 'bridge'; failure: MiyousheFetchError | { kind: 'bridge'; message: string } }
   > {
     if (cookie) {
-      const direct = await miyousheGameRecord.fetchCharacterDetails(uid, cookie);
+      const index = await miyousheGameRecord.fetchPlayerIndex(uid, cookie);
+      const direct = index.ok
+        ? await miyousheGameRecord.fetchDetailedRoster(uid, cookie, {
+            expectedOwnedCount: index.data.totalCharacters
+          })
+        : index;
       if (direct.ok) {
-        return { ok: true, characters: direct.data, via: 'http' };
+        return {
+          ok: true,
+          characters: direct.data.characters,
+          coverage: direct.data.coverage,
+          via: 'http'
+        };
       }
       if (direct.error.kind === 'auth-expired' || direct.error.kind === 'rate-limited') {
         return { ok: false, via: 'http', failure: direct.error };
@@ -105,7 +121,12 @@ export function registerProfileIpc({
           }
         };
       }
-      return { ok: true, characters: hidden.characters, via: 'bridge-hidden' };
+      return {
+        ok: true,
+        characters: hidden.characters,
+        coverage: hidden.coverage,
+        via: 'bridge-hidden'
+      };
     }
 
     // Hidden failed (or returned warmup-only, which it shouldn't). Escalate
@@ -123,9 +144,19 @@ export function registerProfileIpc({
       }
       // Warmup completed (user closed window / we saw /index 200). Retry HTTP.
       if (cookie) {
-        const retry = await miyousheGameRecord.fetchCharacterDetails(uid, cookie);
+        const index = await miyousheGameRecord.fetchPlayerIndex(uid, cookie);
+        const retry = index.ok
+          ? await miyousheGameRecord.fetchDetailedRoster(uid, cookie, {
+              expectedOwnedCount: index.data.totalCharacters
+            })
+          : index;
         if (retry.ok) {
-          return { ok: true, characters: retry.data, via: 'bridge-visible' };
+          return {
+            ok: true,
+            characters: retry.data.characters,
+            coverage: retry.data.coverage,
+            via: 'bridge-visible'
+          };
         }
       }
       return {
@@ -264,7 +295,7 @@ export function registerProfileIpc({
     const uid = parsed.data.uid;
     const existing = store.get(uid);
 
-    let enkaCharacters: PersistedProfile['characters'] = existing?.characters ?? [];
+    let enkaCharacters: PersistedProfile['characters'] = [];
     let enkaNickname: string | undefined = existing?.nickname;
     let enkaLevel: number | undefined = existing?.level;
     let enkaRegion: string | undefined = existing?.region;
@@ -285,11 +316,13 @@ export function registerProfileIpc({
     }
 
     let miyousheCharacters: MiyousheCharacterDetail[] | undefined;
+    let miyousheCoverage: MiyousheRosterCoverage | undefined;
     let miyousheFailure: MiyousheFetchError | { kind: 'bridge'; message: string } | undefined;
     const cookie = rosterSessions.peek(uid);
     const result = await fetchMiyousheRoster(uid, cookie);
     if (result.ok) {
       miyousheCharacters = result.characters;
+      miyousheCoverage = result.coverage;
     } else {
       miyousheFailure = result.failure;
       if (
@@ -301,9 +334,29 @@ export function registerProfileIpc({
     }
 
     const enkaFreshCount = enkaOk ? enkaCharacters.length : 0;
+    if (!enkaOk && miyousheCharacters === undefined && existing) {
+      return {
+        profile: existing,
+        summary: {
+          enka: 'failed',
+          enkaCharacterCount: 0,
+          enkaError,
+          miyoushe: miyousheStatus({
+            hasCookie: cookie !== undefined,
+            failure: miyousheFailure,
+            ok: false
+          }),
+          miyousheCharacterCount: 0,
+          miyousheError: miyousheFailure?.message,
+          totalCharacterCount: existing.characters.length
+        }
+      };
+    }
     const merged = mergeProfile({
       enkaCharacters,
-      miyousheCharacters
+      miyousheCharacters,
+      miyousheCoverage,
+      ownershipSource: result.ok && result.via === 'http' ? 'miyoushe-list' : 'miyoushe-index'
     });
 
     const source = resolveRefreshSource({
@@ -314,13 +367,15 @@ export function registerProfileIpc({
     });
 
     const profile: PersistedProfile = {
+      schemaVersion: 2,
       uid,
       region: enkaRegion,
       nickname: enkaNickname,
       level: enkaLevel,
       source,
       fetchedAt: new Date().toISOString(),
-      characters: merged.characters
+      characters: merged.characters,
+      coverage: merged.coverage
     };
     store.upsert(profile);
 
@@ -420,7 +475,13 @@ export function registerProfileIpc({
       // Enka miss is OK; miyoushe alone is still useful.
     }
 
-    const merged = mergeProfile({ enkaCharacters, miyousheCharacters });
+    const merged = mergeProfile({
+      enkaCharacters,
+      miyousheCharacters,
+      miyousheCoverage: recordResult.ok ? recordResult.coverage : undefined,
+      ownershipSource:
+        recordResult.ok && recordResult.via === 'http' ? 'miyoushe-list' : 'miyoushe-index'
+    });
     const source = resolveImportSource({
       hasEnka: enkaOk,
       hasMiyoushe: miyousheCharacters !== undefined,
@@ -428,13 +489,15 @@ export function registerProfileIpc({
     });
 
     const profile: PersistedProfile = {
+      schemaVersion: 2,
       uid: target.gameUid,
       region: target.region,
       nickname: enkaNickname ?? target.nickname,
       level: enkaLevel ?? target.level,
       source,
       fetchedAt: new Date().toISOString(),
-      characters: merged.characters
+      characters: merged.characters,
+      coverage: merged.coverage
     };
 
     store.upsert(profile);

@@ -4,15 +4,16 @@ import { createRoot } from 'react-dom/client';
 // Self-hosted fonts (Electron offline-friendly).
 // Noto Sans SC = Source Han Sans SC (OFL), the closest free analogue to the
 // proprietary GI_*_Web family used by Genshin's official web UI.
-import '@fontsource/noto-sans-sc/400.css';
-import '@fontsource/noto-sans-sc/500.css';
-import '@fontsource/noto-sans-sc/700.css';
-import '@fontsource/noto-sans-sc/900.css';
-import '@fontsource/jetbrains-mono/400.css';
-import '@fontsource/jetbrains-mono/500.css';
-import '@fontsource/jetbrains-mono/700.css';
+import '@fontsource/noto-sans-sc/chinese-simplified-400.css';
+import '@fontsource/noto-sans-sc/chinese-simplified-500.css';
+import '@fontsource/noto-sans-sc/chinese-simplified-700.css';
+import '@fontsource/noto-sans-sc/chinese-simplified-900.css';
+import '@fontsource/jetbrains-mono/latin-400.css';
+import '@fontsource/jetbrains-mono/latin-500.css';
+import '@fontsource/jetbrains-mono/latin-700.css';
 
 import App from './App';
+import { I18nProvider } from './i18n';
 import './styles/global.css';
 
 const root = document.getElementById('root');
@@ -22,6 +23,8 @@ if (!root) {
 
 createRoot(root).render(
   <StrictMode>
-    <App />
+    <I18nProvider>
+      <App />
+    </I18nProvider>
   </StrictMode>
 );
