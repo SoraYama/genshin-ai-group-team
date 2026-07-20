@@ -3,7 +3,6 @@ import { IpcError, IpcErrorCodes } from '../../shared/errors.js';
 import type {
   BindCookieResult,
   PersistedProfile,
-  ProfileSource,
   RefreshSourceStatus,
   RefreshSummary
 } from '../../shared/domain.js';
@@ -88,28 +87,34 @@ export function registerProfileIpc({
       }
     | { ok: false; via: 'http' | 'bridge'; failure: MiyousheFetchError | { kind: 'bridge'; message: string } }
   > {
-    if (cookie) {
-      const index = await miyousheGameRecord.fetchPlayerIndex(uid, cookie);
-      const direct = index.ok
-        ? await miyousheGameRecord.fetchDetailedRoster(uid, cookie, {
-            expectedOwnedCount: index.data.totalCharacters
-          })
-        : index;
-      if (direct.ok) {
-        return {
-          ok: true,
-          characters: direct.data.characters,
-          coverage: direct.data.coverage,
-          via: 'http'
-        };
-      }
-      if (
-        direct.error.kind === 'auth-expired' ||
-        direct.error.kind === 'rate-limited' ||
-        direct.error.kind === 'captcha-required'
-      ) {
-        return { ok: false, via: 'http', failure: direct.error };
-      }
+    if (!cookie) {
+      return {
+        ok: false,
+        via: 'bridge',
+        failure: { kind: 'bridge', message: '没有可用的米游社登录态，请先登录' }
+      };
+    }
+
+    const index = await miyousheGameRecord.fetchPlayerIndex(uid, cookie);
+    const direct = index.ok
+      ? await miyousheGameRecord.fetchDetailedRoster(uid, cookie, {
+          expectedOwnedCount: index.data.totalCharacters
+        })
+      : index;
+    if (direct.ok) {
+      return {
+        ok: true,
+        characters: direct.data.characters,
+        coverage: direct.data.coverage,
+        via: 'http'
+      };
+    }
+    if (
+      direct.error.kind === 'auth-expired' ||
+      direct.error.kind === 'rate-limited' ||
+      direct.error.kind === 'captcha-required'
+    ) {
+      return { ok: false, via: 'http', failure: direct.error };
     }
 
     const hidden = await miyousheBridge.fetchRoster({ visible: false });
@@ -331,7 +336,10 @@ export function registerProfileIpc({
     let miyousheCharacters: MiyousheCharacterDetail[] | undefined;
     let miyousheCoverage: MiyousheRosterCoverage | undefined;
     let miyousheFailure: MiyousheFetchError | { kind: 'bridge'; message: string } | undefined;
-    const cookie = rosterSessions.peek(uid);
+    const cookie = rosterSessions.peek(uid) ?? (await loginWindow.readPersistedCookie());
+    if (cookie && !rosterSessions.hasCookie(uid)) {
+      rosterSessions.put(uid, cookie);
+    }
     const result = await fetchMiyousheRoster(uid, cookie);
     if (result.ok) {
       miyousheCharacters = result.characters;
@@ -369,14 +377,10 @@ export function registerProfileIpc({
       enkaCharacters,
       miyousheCharacters,
       miyousheCoverage,
+      cachedProfile: existing
+        ? { characters: existing.characters, coverage: existing.coverage }
+        : undefined,
       ownershipSource: result.ok && result.via === 'http' ? 'miyoushe-list' : 'miyoushe-index'
-    });
-
-    const source = resolveRefreshSource({
-      previous: existing?.source,
-      hasEnka: enkaOk && enkaCharacters.length > 0,
-      hasMiyoushe: miyousheCharacters !== undefined,
-      miyousheStale: miyousheFailure !== undefined
     });
 
     const profile: PersistedProfile = {
@@ -385,7 +389,7 @@ export function registerProfileIpc({
       region: enkaRegion,
       nickname: enkaNickname,
       level: enkaLevel,
-      source,
+      source: merged.source,
       fetchedAt: new Date().toISOString(),
       characters: merged.characters,
       coverage: merged.coverage
@@ -461,6 +465,8 @@ export function registerProfileIpc({
       throw new IpcError(IpcErrorCodes.Internal, '无法选择 UID');
     }
 
+    const existing = store.get(target.gameUid);
+
     // Cache cookie under every UID this miyoushe account owns BEFORE trying
     // the roster fetch, so the bridge fallback (which reads cookies from the
     // partition) sees the right state.
@@ -471,19 +477,16 @@ export function registerProfileIpc({
     // Pull full roster (game_record HTTP → BrowserBridge fallback).
     const recordResult = await fetchMiyousheRoster(target.gameUid, input.cookie);
     const miyousheCharacters = recordResult.ok ? recordResult.characters : undefined;
-    const miyousheFailure = recordResult.ok ? undefined : recordResult.failure;
 
     // Pull Enka showcase for precise stats.
     let enkaCharacters: PersistedProfile['characters'] = [];
     let enkaNickname: string | undefined;
     let enkaLevel: number | undefined;
-    let enkaOk = false;
     try {
       const enkaResult = await enka.fetchProfile(target.gameUid);
       enkaCharacters = enkaResult.characters;
       enkaNickname = enkaResult.nickname;
       enkaLevel = enkaResult.level;
-      enkaOk = enkaResult.characters.length > 0;
     } catch {
       // Enka miss is OK; miyoushe alone is still useful.
     }
@@ -492,13 +495,11 @@ export function registerProfileIpc({
       enkaCharacters,
       miyousheCharacters,
       miyousheCoverage: recordResult.ok ? recordResult.coverage : undefined,
+      cachedProfile: existing
+        ? { characters: existing.characters, coverage: existing.coverage }
+        : undefined,
       ownershipSource:
         recordResult.ok && recordResult.via === 'http' ? 'miyoushe-list' : 'miyoushe-index'
-    });
-    const source = resolveImportSource({
-      hasEnka: enkaOk,
-      hasMiyoushe: miyousheCharacters !== undefined,
-      miyousheStale: miyousheFailure !== undefined
     });
 
     const profile: PersistedProfile = {
@@ -507,7 +508,7 @@ export function registerProfileIpc({
       region: target.region,
       nickname: enkaNickname ?? target.nickname,
       level: enkaLevel ?? target.level,
-      source,
+      source: merged.source,
       fetchedAt: new Date().toISOString(),
       characters: merged.characters,
       coverage: merged.coverage
@@ -541,35 +542,6 @@ function miyousheStatus(input: {
     if (input.failure.kind === 'rate-limited') return 'rate-limited';
   }
   return 'failed';
-}
-
-function resolveImportSource(input: {
-  hasEnka: boolean;
-  hasMiyoushe: boolean;
-  miyousheStale: boolean;
-}): ProfileSource {
-  if (input.hasEnka && input.hasMiyoushe) return 'merged';
-  if (input.hasMiyoushe) return 'miyoushe';
-  if (input.hasEnka) return 'miyoushe+enka';
-  if (input.miyousheStale) return 'miyoushe-stale';
-  return 'miyoushe';
-}
-
-function resolveRefreshSource(input: {
-  previous?: ProfileSource;
-  hasEnka: boolean;
-  hasMiyoushe: boolean;
-  miyousheStale: boolean;
-}): ProfileSource {
-  if (input.hasEnka && input.hasMiyoushe) return 'merged';
-  if (input.hasMiyoushe) return 'miyoushe';
-  if (input.hasEnka) {
-    return input.previous === 'merged' || input.previous === 'miyoushe-stale'
-      ? 'miyoushe-stale'
-      : input.previous ?? 'enka';
-  }
-  if (input.miyousheStale) return 'miyoushe-stale';
-  return input.previous ?? 'enka';
 }
 
 function formatIssues(issues: Array<{ message: string }>): string {
