@@ -93,7 +93,8 @@ export function mergeProfile(input: ProfileMergeInput): ProfileMergeOutput {
     enkaShowcaseCount: input.enkaCharacters.length,
     missingDetailCount,
     partial:
-      input.miyousheCoverage?.partial ??
+      miyousheList.length === 0 ||
+      input.miyousheCoverage?.partial === true ||
       ((expectedOwnedCount !== undefined && expectedOwnedCount !== ownedCount) ||
         missingDetailCount > 0)
   };

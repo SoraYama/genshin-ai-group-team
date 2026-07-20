@@ -107,14 +107,19 @@ describe('mergeProfile', () => {
     expect(character.missingFields).toContain('stats');
   });
 
-  it('falls back to Enka-only when miyoushe is unavailable', () => {
-    const { characters, source } = mergeProfile({
+  it('marks Enka-only showcase data as partial ownership', () => {
+    const { characters, source, coverage } = mergeProfile({
       enkaCharacters: [enkaChar()],
       miyousheCharacters: undefined
     });
     expect(source).toBe('enka');
-    expect(characters[0]?.source).toBe('enka');
-    expect(characters[0]?.build?.weapon).toBeUndefined();
+    expect(characters).toHaveLength(1);
+    expect(coverage).toMatchObject({
+      ownedCount: 1,
+      enkaShowcaseCount: 1,
+      partial: true
+    });
+    expect(coverage.expectedOwnedCount).toBeUndefined();
   });
 
   it('keeps Enka characters not present in the miyoushe list', () => {
