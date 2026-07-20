@@ -70,6 +70,19 @@ function miyousheChar(
   };
 }
 
+function cachedCharacter(id: number, hp: number): CharacterProfile {
+  return enkaChar({
+    id,
+    name: `Cached-${id}`,
+    build: { stats: { hp } },
+    source: 'miyoushe',
+    provenance: {
+      ownership: { source: 'miyoushe-list', fetchedAt: FETCHED_AT },
+      stats: { source: 'miyoushe-detail', fetchedAt: FETCHED_AT }
+    }
+  });
+}
+
 describe('mergeProfile', () => {
   it('merges field-by-field with explicit provenance and detailed completeness', () => {
     const { characters, source, coverage } = mergeProfile({
@@ -130,6 +143,75 @@ describe('mergeProfile', () => {
     });
     expect(characters).toHaveLength(2);
     expect(characters.find((character) => character.id === 99)?.source).toBe('enka');
+  });
+
+  it('preserves cached MiHoYo ownership when refresh only returns an Enka subset', () => {
+    const cachedCharacters = [cachedCharacter(1, 10000), cachedCharacter(2, 20000)];
+    const freshEnka = enkaChar({ id: 1, build: { stats: { hp: 35000 } } });
+
+    const result = mergeProfile({
+      enkaCharacters: [freshEnka],
+      cachedProfile: {
+        characters: cachedCharacters,
+        coverage: {
+          expectedOwnedCount: 2,
+          ownedCount: 2,
+          detailedCount: 0,
+          buildCount: 2,
+          statsCount: 2,
+          enkaShowcaseCount: 0,
+          missingDetailCount: 2,
+          partial: false
+        }
+      }
+    });
+
+    expect(result.source).toBe('miyoushe-stale');
+    expect(result.characters.map((character) => character.id)).toEqual([1, 2]);
+    expect(result.characters[0]?.build?.stats?.hp).toBe(35000);
+    expect(result.characters[0]?.provenance.stats).toMatchObject({ source: 'enka' });
+    expect(result.characters[1]?.build?.stats?.hp).toBe(20000);
+    expect(result.characters[1]?.provenance.stats).toMatchObject({ stale: true });
+    expect(result.coverage).toMatchObject({ ownedCount: 2, partial: true });
+  });
+
+  it('replaces stale cached ownership when a fresh MiHoYo roster succeeds', () => {
+    const result = mergeProfile({
+      enkaCharacters: [],
+      miyousheCharacters: [miyousheChar({ id: 3, name: 'Fresh-3' })],
+      miyousheCoverage: {
+        expectedOwnedCount: 1,
+        listedCount: 1,
+        detailedCount: 1,
+        missingCharacterIds: [],
+        duplicateCharacterIds: [],
+        unexpectedCharacterIds: [],
+        failedBatches: [],
+        partial: false,
+        fields: { weapon: 1, artifacts: 1, talents: 1, stats: 0 }
+      },
+      cachedProfile: {
+        characters: [cachedCharacter(1, 10000), cachedCharacter(2, 20000)],
+        coverage: {
+          expectedOwnedCount: 2,
+          ownedCount: 2,
+          detailedCount: 0,
+          buildCount: 2,
+          statsCount: 2,
+          enkaShowcaseCount: 0,
+          missingDetailCount: 2,
+          partial: true
+        }
+      }
+    });
+
+    expect(result.source).toBe('miyoushe');
+    expect(result.characters.map((character) => character.id)).toEqual([3]);
+    expect(result.characters[0]?.provenance.ownership).toMatchObject({
+      source: 'miyoushe-list'
+    });
+    expect(result.characters[0]?.provenance.ownership.stale).toBeUndefined();
+    expect(result.coverage.partial).toBe(false);
   });
 
   it('returns miyoushe-stale with empty coverage when both feeds are empty', () => {
