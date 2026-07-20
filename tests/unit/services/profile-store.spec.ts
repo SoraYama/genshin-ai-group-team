@@ -221,4 +221,21 @@ describe('ProfileStore', () => {
       'gtai-img://avatar/UI_AvatarIcon_X.png'
     );
   });
+
+  it('repairs persisted Enka-only v2 profiles that were marked complete', async () => {
+    const profile = makeProfile('333333333', 12);
+    profile.source = 'miyoushe+enka';
+    profile.coverage.partial = false;
+    profile.coverage.expectedOwnedCount = 12;
+    electronStoreState.set('profilesByUid', { '333333333': profile });
+
+    const { ProfileStore } = await import('../../../src/main/services/profile-store.js');
+    const store = new ProfileStore();
+
+    const repaired = store.get('333333333');
+    expect(repaired?.source).toBe('enka');
+    expect(repaired?.coverage.partial).toBe(true);
+    expect(repaired?.coverage.expectedOwnedCount).toBeUndefined();
+    expect(repaired?.coverage.ownedCount).toBe(12);
+  });
 });

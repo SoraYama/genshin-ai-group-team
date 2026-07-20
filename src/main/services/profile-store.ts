@@ -225,10 +225,34 @@ export class ProfileStore {
             ...character,
             imageUrl: rewriteEnkaToProxyUrl(character.imageUrl)
           }));
-          const changed = characters.some(
+          const imageChanged = characters.some(
             (character, index) => character.imageUrl !== value.characters[index]?.imageUrl
           );
-          migrated[uid] = changed ? { ...value, characters } : value;
+          const enkaOnly =
+            characters.length > 0 &&
+            characters.every((character) => character.provenance.ownership.source === 'enka');
+          const coverageChanged =
+            enkaOnly &&
+            (value.source !== 'enka' ||
+              !value.coverage.partial ||
+              value.coverage.expectedOwnedCount !== undefined);
+          const changed = imageChanged || coverageChanged;
+          migrated[uid] = changed
+            ? {
+                ...value,
+                source: enkaOnly ? 'enka' : value.source,
+                characters,
+                coverage: enkaOnly
+                  ? {
+                      ...value.coverage,
+                      expectedOwnedCount: undefined,
+                      ownedCount: characters.length,
+                      enkaShowcaseCount: characters.length,
+                      partial: true
+                    }
+                  : value.coverage
+              }
+            : value;
           dirty ||= changed;
         } else {
           migrated[uid] = migrateLegacyProfile(value);
