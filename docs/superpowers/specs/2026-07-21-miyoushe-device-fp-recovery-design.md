@@ -48,7 +48,10 @@ Battle Chronicle 的国服接口在当前真实账号环境下稳定返回 `HTTP
 - 构造 `getFp` 请求并校验 `{ retcode: 0, data: { code: 200, device_fp } }`。
 - 将新的设备字段写回 `persist:miyoushe-login` 的 Chromium Cookie 分区。
 - 返回包含新设备字段的内存 Cookie 字符串，供当前请求立即重放。
+- 在主进程内按设备哈希缓存本次进程最新的 `DEVICEFP`，使仍持有旧 Cookie 副本的后续 list/detail 批次自动使用新指纹；应用退出即清空。
 - 查询并更新设备恢复冷却状态。
+
+同一设备的并发刷新使用 single-flight：第一个请求实际调用 `getFp`，其余请求等待同一 Promise，不得并发改变同一设备档案。若登录补齐刚在 5 分钟内取得新指纹，紧随其后的首个 5003 直接复用该新指纹进行 Chromium 重放，不再次调用 `getFp`。
 
 该服务通过依赖注入接收 HTTP transport、时间函数、随机值生成器、Cookie 写入器与冷却存储，因此单元测试不访问真实网络或真实用户目录。
 
@@ -76,6 +79,7 @@ Battle Chronicle 的国服接口在当前真实账号环境下稳定返回 `HTTP
 - 通过持久化 Chromium transport 发送；
 - 针对同一个业务请求只执行一次；
 - 重放仍返回 5003 时直接返回错误，不进入第二轮恢复或 Node/Chromium 循环。
+- 重放成功后清除失败冷却；重放仍为 5003 时由客户端通知设备服务写入冷却。单独取得 `getFp` 成功响应不等于 Battle Chronicle 恢复成功。
 
 ### 冷却状态
 
