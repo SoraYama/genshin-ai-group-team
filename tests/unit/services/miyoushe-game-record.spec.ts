@@ -188,6 +188,67 @@ describe('device fingerprint application boundaries', () => {
 });
 
 describe('CN 5003 device fingerprint recovery', () => {
+  it('enters a gate cooldown after a detail replay remains 5003 and skips the next roster replay', async () => {
+    const { MiyousheDetailGateDeviceFpCoordinator } =
+      await import('../../../src/main/gates/miyoushe-detail-recovery.js');
+    const { MiyousheGameRecordClient } =
+      await import('../../../src/main/services/miyoushe-game-record.js');
+    const retryAt = 1_800_000_000_000 + 72 * 60 * 60 * 1000;
+    const rawDeviceFp = {
+      applyKnownFingerprint: vi.fn((cookie: string) => cookie),
+      ensureForSession: vi.fn(async () => ({
+        ok: true as const,
+        cookie: OLD_COOKIE,
+        deviceHash: 'device-hash',
+        refreshed: false
+      })),
+      recoverFrom5003: vi.fn(async () => ({
+        ok: true as const,
+        cookie: NEW_COOKIE,
+        deviceHash: 'device-hash',
+        refreshed: true
+      })),
+      finishReplay: vi.fn()
+    };
+    const deviceFp = new MiyousheDetailGateDeviceFpCoordinator(rawDeviceFp, {
+      now: () => 1_800_000_000_000
+    });
+    await deviceFp.ensureForSession(OLD_COOKIE);
+    requestMock
+      .mockResolvedValueOnce(mockJson(200, { retcode: 0, data: { list: [list[0]] } }))
+      .mockResolvedValueOnce(mockJson(200, { retcode: 5003, message: 'detail blocked' }))
+      .mockResolvedValueOnce(mockJson(200, { retcode: 5003, message: 'roster blocked' }));
+    const browserTransport = vi
+      .fn()
+      .mockResolvedValueOnce(mockBrowserJson(200, { retcode: 5003, message: 'replay blocked' }));
+    const events: unknown[] = [];
+    const client = new MiyousheGameRecordClient({
+      browserTransport,
+      deviceFp,
+      onDeviceRecoveryEvent: (event) => events.push(event)
+    });
+
+    const first = await client.fetchDetailedRoster('100000001', OLD_COOKIE);
+    const second = await client.fetchDetailedRoster('100000001', OLD_COOKIE);
+
+    expect(first).toMatchObject({
+      ok: true,
+      data: { coverage: { partial: true, failedBatches: [{ batchIndex: 0 }] } }
+    });
+    expect(second).toMatchObject({
+      ok: false,
+      error: { kind: 'captcha-required', retcode: 5003 }
+    });
+    expect(rawDeviceFp.recoverFrom5003).toHaveBeenCalledTimes(1);
+    expect(browserTransport).toHaveBeenCalledTimes(1);
+    expect(events).toEqual([
+      { phase: 'detected', retcode: 5003 },
+      { phase: 'replayed', final: '5003' },
+      { phase: 'detected', retcode: 5003 },
+      { phase: 'skipped', reason: 'cooldown', retryAt }
+    ]);
+  });
+
   it.each([
     ['more than five minutes later', 1_800_000_000_000 + 6 * 60_000],
     ['after a clock rollback', 1_799_999_000_000]
@@ -359,6 +420,66 @@ describe('CN 5003 device fingerprint recovery', () => {
     expect(JSON.stringify(events)).not.toMatch(
       /private-auth-token|device-id|device-fingerprint|seed-id|private-device-hash|secret upstream|https?:\/\//
     );
+  });
+
+  it('emits a terminal network skip when the recovery dependency throws', async () => {
+    const { MiyousheGameRecordClient } =
+      await import('../../../src/main/services/miyoushe-game-record.js');
+    requestMock.mockResolvedValueOnce(mockJson(200, { retcode: 5003, message: 'secret upstream' }));
+    const browserTransport = vi.fn();
+    const deviceFp = {
+      applyKnownFingerprint: vi.fn((cookie: string) => cookie),
+      recoverFrom5003: vi.fn(async () => {
+        throw new Error('private recovery response');
+      }),
+      finishReplay: vi.fn()
+    };
+    const events: unknown[] = [];
+
+    const result = await new MiyousheGameRecordClient({
+      browserTransport,
+      deviceFp,
+      onDeviceRecoveryEvent: (event) => events.push(event)
+    }).ping('100000001', OLD_COOKIE);
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { kind: 'captcha-required', retcode: 5003 }
+    });
+    expect(events).toEqual([
+      { phase: 'detected', retcode: 5003 },
+      { phase: 'skipped', reason: 'network' }
+    ]);
+    expect(JSON.stringify(events)).not.toMatch(/secret upstream|private recovery response/);
+    expect(browserTransport).not.toHaveBeenCalled();
+  });
+
+  it('contains a throwing event callback when recovery also throws', async () => {
+    const { MiyousheGameRecordClient } =
+      await import('../../../src/main/services/miyoushe-game-record.js');
+    requestMock.mockResolvedValueOnce(mockJson(200, { retcode: 5003, message: 'initial' }));
+    const deviceFp = {
+      applyKnownFingerprint: vi.fn((cookie: string) => cookie),
+      recoverFrom5003: vi.fn(async () => {
+        throw new Error('private recovery response');
+      }),
+      finishReplay: vi.fn()
+    };
+    const onDeviceRecoveryEvent = vi.fn(() => {
+      throw new Error('private callback response');
+    });
+
+    const result = await new MiyousheGameRecordClient({
+      browserTransport: vi.fn(),
+      deviceFp,
+      onDeviceRecoveryEvent
+    }).ping('100000001', OLD_COOKIE);
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { kind: 'captcha-required', retcode: 5003 }
+    });
+    expect(onDeviceRecoveryEvent).toHaveBeenCalledTimes(2);
   });
 
   it('does not let a throwing recovery event callback alter the request result', async () => {

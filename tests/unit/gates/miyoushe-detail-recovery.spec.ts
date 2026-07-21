@@ -115,4 +115,129 @@ describe('MiyousheDetailGateDeviceFpCoordinator', () => {
     expect(JSON.stringify(recovered)).not.toContain('secret upstream response');
     expect(raw.recoverFrom5003).not.toHaveBeenCalled();
   });
+
+  it('lets recover-first own the atomic budget and reuses its result for later ensure', async () => {
+    let rawGetFpCalls = 0;
+    const recovered = {
+      ok: true as const,
+      cookie: FINAL_COOKIE,
+      deviceHash: 'device-hash',
+      refreshed: true
+    };
+    const raw = createRawDeviceFp({
+      ensure: async () => {
+        rawGetFpCalls += 1;
+        return recovered;
+      },
+      recover: async () => {
+        rawGetFpCalls += 1;
+        return recovered;
+      }
+    });
+    const coordinator = new MiyousheDetailGateDeviceFpCoordinator(raw);
+
+    await expect(coordinator.recoverFrom5003(INITIAL_COOKIE)).resolves.toBe(recovered);
+    await expect(coordinator.ensureForSession(INITIAL_COOKIE)).resolves.toBe(recovered);
+
+    expect(rawGetFpCalls).toBe(1);
+    expect(raw.recoverFrom5003).toHaveBeenCalledTimes(1);
+    expect(raw.ensureForSession).not.toHaveBeenCalled();
+  });
+
+  it('singleflights concurrent recover-first and ensure starts', async () => {
+    let resolveRecovery!: (result: {
+      ok: true;
+      cookie: string;
+      deviceHash: string;
+      refreshed: true;
+    }) => void;
+    const deferred = new Promise<{
+      ok: true;
+      cookie: string;
+      deviceHash: string;
+      refreshed: true;
+    }>((resolve) => {
+      resolveRecovery = resolve;
+    });
+    let rawGetFpCalls = 0;
+    const raw = createRawDeviceFp({
+      ensure: async () => {
+        rawGetFpCalls += 1;
+        return {
+          ok: true as const,
+          cookie: 'wrong-second-cookie',
+          deviceHash: 'wrong-second-hash',
+          refreshed: true
+        };
+      },
+      recover: async () => {
+        rawGetFpCalls += 1;
+        return deferred;
+      }
+    });
+    const coordinator = new MiyousheDetailGateDeviceFpCoordinator(raw);
+
+    const recovery = coordinator.recoverFrom5003(INITIAL_COOKIE);
+    const ensure = coordinator.ensureForSession(INITIAL_COOKIE);
+    await vi.waitFor(() => expect(raw.recoverFrom5003).toHaveBeenCalledTimes(1));
+    const recovered = {
+      ok: true as const,
+      cookie: FINAL_COOKIE,
+      deviceHash: 'device-hash',
+      refreshed: true as const
+    };
+    resolveRecovery(recovered);
+
+    await expect(recovery).resolves.toBe(recovered);
+    await expect(ensure).resolves.toBe(recovered);
+    expect(rawGetFpCalls).toBe(1);
+    expect(raw.ensureForSession).not.toHaveBeenCalled();
+  });
+
+  it('joins concurrent recovery to an unchanged ensure before resolving either caller', async () => {
+    let resolveEnsure!: (result: {
+      ok: true;
+      cookie: string;
+      deviceHash: string;
+      refreshed: false;
+    }) => void;
+    const deferredEnsure = new Promise<{
+      ok: true;
+      cookie: string;
+      deviceHash: string;
+      refreshed: false;
+    }>((resolve) => {
+      resolveEnsure = resolve;
+    });
+    let rawGetFpCalls = 0;
+    const recovered = {
+      ok: true as const,
+      cookie: FINAL_COOKIE,
+      deviceHash: 'device-hash',
+      refreshed: true
+    };
+    const raw = createRawDeviceFp({
+      ensure: async () => deferredEnsure,
+      recover: async () => {
+        rawGetFpCalls += 1;
+        return recovered;
+      }
+    });
+    const coordinator = new MiyousheDetailGateDeviceFpCoordinator(raw);
+
+    const ensure = coordinator.ensureForSession(INITIAL_COOKIE);
+    const recovery = coordinator.recoverFrom5003(INITIAL_COOKIE);
+    await vi.waitFor(() => expect(raw.ensureForSession).toHaveBeenCalledTimes(1));
+    resolveEnsure({
+      ok: true,
+      cookie: INITIAL_COOKIE,
+      deviceHash: 'device-hash',
+      refreshed: false
+    });
+
+    await expect(ensure).resolves.toBe(recovered);
+    await expect(recovery).resolves.toBe(recovered);
+    expect(rawGetFpCalls).toBe(1);
+    expect(raw.recoverFrom5003).toHaveBeenCalledTimes(1);
+  });
 });

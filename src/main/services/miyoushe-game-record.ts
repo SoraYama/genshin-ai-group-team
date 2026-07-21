@@ -1005,6 +1005,7 @@ export class MiyousheGameRecordClient {
         try {
           recovered = await this.deviceFp.recoverFrom5003(effectiveCookie);
         } catch {
+          this.emitDeviceRecoveryEvent({ phase: 'skipped', reason: 'network' });
           return { ok: false, error: classified };
         }
         if (!recovered.ok) {
