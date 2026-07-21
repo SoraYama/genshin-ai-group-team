@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
+import { describe, expect, it, vi } from 'vitest';
 import {
   buildDeviceFpPayload,
   ensureStableDeviceProfile,
@@ -76,7 +77,7 @@ describe('stable Miyoushe device profiles', () => {
 
     expect(ensured.profile).toEqual({
       deviceId: 'generated-device-id',
-      deviceFp: expect.stringMatching(/^[a-f0-9]{13}$/),
+      deviceFp: createHash('sha256').update('generated-device-id').digest('hex').slice(0, 13),
       seedId: 'generated-seed-id',
       seedTime: '1715000000000'
     });
@@ -90,7 +91,69 @@ describe('stable Miyoushe device profiles', () => {
     expect(merged).toContain('ltoken_v2=auth-token');
     expect(merged).toContain('ltuid_v2=123456789');
     expect(merged).toContain('ltmid_v2=member-token');
-    expect(ensureStableDeviceProfile(merged).updates).toEqual({});
+    const unexpectedGenerator = {
+      now: vi.fn(() => 1_900_000_000_000),
+      randomUuid: vi.fn(() => 'unexpected-device-id'),
+      randomHex: vi.fn(() => 'unexpected-seed-id')
+    };
+    expect(ensureStableDeviceProfile(merged, unexpectedGenerator).updates).toEqual({});
+    expect(unexpectedGenerator.now).not.toHaveBeenCalled();
+    expect(unexpectedGenerator.randomUuid).not.toHaveBeenCalled();
+    expect(unexpectedGenerator.randomHex).not.toHaveBeenCalled();
+  });
+
+  it('replaces existing device cookies without changing authentication cookies', () => {
+    const cookie = [
+      'ltoken_v2=auth-token',
+      'ltuid_v2=123456789',
+      '_MHYUUID=old-device',
+      'DEVICEFP=old-fp',
+      'DEVICEFP_SEED_ID=old-seed',
+      'DEVICEFP_SEED_TIME=old-time'
+    ].join('; ');
+
+    expect(
+      mergeDeviceCookies(cookie, {
+        _MHYUUID: 'new-device',
+        DEVICEFP: 'new-fp',
+        DEVICEFP_SEED_ID: 'new-seed',
+        DEVICEFP_SEED_TIME: 'new-time'
+      })
+    ).toBe(
+      [
+        'ltoken_v2=auth-token',
+        'ltuid_v2=123456789',
+        '_MHYUUID=new-device',
+        'DEVICEFP=new-fp',
+        'DEVICEFP_SEED_ID=new-seed',
+        'DEVICEFP_SEED_TIME=new-time'
+      ].join('; ')
+    );
+  });
+
+  it('treats empty existing device fields as missing', () => {
+    const ensured = ensureStableDeviceProfile(
+      '_MHYUUID= ; DEVICEFP=; DEVICEFP_SEED_ID= ; DEVICEFP_SEED_TIME=; ltoken_v2=auth-token',
+      {
+        now: () => 1_715_000_000_000,
+        randomUuid: () => 'generated-device-id',
+        randomHex: () => 'generated-seed-id'
+      }
+    );
+
+    expect(ensured).toEqual({
+      profile: {
+        deviceId: 'generated-device-id',
+        deviceFp: createHash('sha256').update('generated-device-id').digest('hex').slice(0, 13),
+        seedId: 'generated-seed-id',
+        seedTime: '1715000000000'
+      },
+      updates: {
+        _MHYUUID: 'generated-device-id',
+        DEVICEFP_SEED_ID: 'generated-seed-id',
+        DEVICEFP_SEED_TIME: '1715000000000'
+      }
+    });
   });
 
   it('builds a deterministic UIGF-shaped Android device-fingerprint payload', () => {
