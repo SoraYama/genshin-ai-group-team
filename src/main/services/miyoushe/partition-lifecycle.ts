@@ -21,6 +21,18 @@ const EMPTY_RECOVERY_STATE = (): DeviceFpRecoveryState => ({
   failuresByDevice: {}
 });
 
+const AUTH_INVALID_RETCODES = new Set([-100, 10001, 10002]);
+
+function shouldRevokePartitionBindings(
+  response: { ok: boolean; retcode?: number },
+  roleCount: number
+): boolean {
+  return (
+    (response.retcode !== undefined && AUTH_INVALID_RETCODES.has(response.retcode)) ||
+    (roleCount === 0 && (response.ok || response.retcode === 0))
+  );
+}
+
 export function createMiyousheDeviceFpCooldown(
   options: {
     createPersistent?: () => MiyousheDeviceFpRecoveryStore;
@@ -236,7 +248,7 @@ export async function seedRosterSessionsFromPersistedCookie(deps: {
     const bind = await deps.miyoushe.fetchRoles(effectiveCookie);
     if (!deps.lifecycle.isCurrent(generation)) return;
     if (!bind.ok || bind.roles.length === 0) {
-      if (bind.retcode !== undefined) {
+      if (shouldRevokePartitionBindings(bind, bind.roles.length)) {
         deps.profiles.reconcilePartitionCredentialSources([]);
       }
       console.warn('[miyoushe] persisted cookie failed re-validation; skipping seed');

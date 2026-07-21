@@ -4,10 +4,29 @@ import {
   MiyoushePartitionLifecycle,
   seedRosterSessionsFromPersistedCookie
 } from '../../../src/main/services/miyoushe/partition-lifecycle.js';
+import type { BindCookieResult } from '../../../src/shared/domain.js';
 
 const UID = '100000001';
 const OLD_COOKIE = 'ltoken_v2=old; ltuid_v2=old; ltmid_v2=old';
 const COMPLETED_OLD_COOKIE = `${OLD_COOKIE}; DEVICEFP=old-fingerprint`;
+
+function createPersistedCookieSeedDeps(bind: BindCookieResult) {
+  return {
+    lifecycle: new MiyoushePartitionLifecycle(),
+    loginWindow: { readPersistedCookie: vi.fn().mockResolvedValue(OLD_COOKIE) },
+    deviceFp: {
+      ensureForSessionAt: vi.fn().mockResolvedValue({
+        ok: true as const,
+        cookie: COMPLETED_OLD_COOKIE,
+        deviceHash: '0123456789ab',
+        refreshed: false
+      })
+    },
+    miyoushe: { fetchRoles: vi.fn().mockResolvedValue(bind) },
+    rosterSessions: { put: vi.fn() },
+    profiles: { reconcilePartitionCredentialSources: vi.fn() }
+  };
+}
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -285,37 +304,72 @@ describe('seedRosterSessionsFromPersistedCookie', () => {
     expect(deps.rosterSessions.put).not.toHaveBeenCalled();
   });
 
-  it('revokes stale partition authorization after a definitive invalid-cookie response', async () => {
-    const lifecycle = new MiyoushePartitionLifecycle();
-    const deps = {
-      lifecycle,
-      loginWindow: { readPersistedCookie: vi.fn().mockResolvedValue(OLD_COOKIE) },
-      deviceFp: {
-        ensureForSessionAt: vi.fn().mockResolvedValue({
-          ok: true,
-          cookie: COMPLETED_OLD_COOKIE,
-          deviceHash: '0123456789ab',
-          refreshed: false
-        })
-      },
-      miyoushe: {
-        fetchRoles: vi.fn().mockResolvedValue({
-          ok: false,
-          retcode: -100,
-          message: '登录失效',
-          roles: []
-        })
-      },
-      rosterSessions: { put: vi.fn() },
-      profiles: {
-        setCredentialSource: vi.fn(),
-        reconcilePartitionCredentialSources: vi.fn()
-      }
-    };
+  it.each([-100, 10001, 10002])(
+    'revokes stale partition authorization for auth-invalid retcode %s',
+    async (retcode) => {
+      const deps = createPersistedCookieSeedDeps({
+        ok: false,
+        retcode,
+        message: '登录失效',
+        roles: []
+      });
+
+      await seedRosterSessionsFromPersistedCookie(deps);
+
+      expect(deps.profiles.reconcilePartitionCredentialSources).toHaveBeenCalledWith([]);
+      expect(deps.rosterSessions.put).not.toHaveBeenCalled();
+    }
+  );
+
+  it('revokes stale partition authorization when a successful response proves there are no roles', async () => {
+    const deps = createPersistedCookieSeedDeps({
+      ok: true,
+      retcode: 0,
+      message: 'OK',
+      roles: []
+    });
 
     await seedRosterSessionsFromPersistedCookie(deps);
 
     expect(deps.profiles.reconcilePartitionCredentialSources).toHaveBeenCalledWith([]);
     expect(deps.rosterSessions.put).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['risk control', 5003],
+    ['captcha', 1034],
+    ['rate limit', 10101],
+    ['alternate rate limit', 10103],
+    ['signature rejection', -5003],
+    ['maintenance', -502002],
+    ['upstream HTTP 5xx', -1],
+    ['network failure', undefined],
+    ['response parse failure', undefined]
+  ])('preserves an existing partition binding after transient %s', async (name, retcode) => {
+    const sensitiveMessage = `sensitive-${name}`;
+    const deps = createPersistedCookieSeedDeps({
+      ok: false,
+      retcode,
+      message: sensitiveMessage,
+      roles: []
+    });
+    let existingCredentialSource: 'partition' | undefined = 'partition';
+    deps.profiles.reconcilePartitionCredentialSources.mockImplementation((verifiedUids) => {
+      existingCredentialSource = verifiedUids.includes(UID) ? 'partition' : undefined;
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    try {
+      await seedRosterSessionsFromPersistedCookie(deps);
+
+      expect(existingCredentialSource).toBe('partition');
+      expect(deps.profiles.reconcilePartitionCredentialSources).not.toHaveBeenCalled();
+      expect(deps.rosterSessions.put).not.toHaveBeenCalled();
+      const logged = JSON.stringify(warn.mock.calls);
+      expect(logged).not.toContain(OLD_COOKIE);
+      expect(logged).not.toContain(sensitiveMessage);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
