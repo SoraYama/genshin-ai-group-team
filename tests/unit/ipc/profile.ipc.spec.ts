@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   CharacterProfile,
   PersistedProfile,
@@ -19,14 +19,13 @@ vi.mock('../../../src/main/ipc/registry.js', () => ({
   }
 }));
 
-import {
-  registerProfileIpc,
-  type ProfileIpcDeps
-} from '../../../src/main/ipc/profile.ipc.js';
+import { registerProfileIpc, type ProfileIpcDeps } from '../../../src/main/ipc/profile.ipc.js';
 
 const UID = '100000001';
+const SECOND_UID = '100000002';
 const FETCHED_AT = '2026-01-01T00:00:00.000Z';
 const COOKIE = 'ltoken_v2=test; ltuid_v2=test; ltmid_v2=test';
+const COMPLETED_COOKIE = `${COOKIE}; _MHYUUID=device; DEVICEFP=fingerprint`;
 
 const fullCoverageForTwo: MiyousheRosterCoverage = {
   expectedOwnedCount: 2,
@@ -134,6 +133,14 @@ function setup(existing: PersistedProfile | undefined) {
         message: 'not authenticated'
       })
     },
+    deviceFp: {
+      ensureForSession: vi.fn().mockImplementation(async (cookie: string) => ({
+        ok: true,
+        cookie,
+        deviceHash: '0123456789ab',
+        refreshed: false
+      }))
+    },
     loginWindow: {
       runOnce: vi.fn(),
       readPersistedCookie: vi.fn(),
@@ -185,6 +192,129 @@ async function importFromCookie(): Promise<PersistedProfile> {
 
 beforeEach(() => {
   handlers.clear();
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+describe('miyoushe:login-via-browser device recovery', () => {
+  function successfulBind() {
+    return {
+      ok: true as const,
+      roles: [
+        { gameUid: UID, region: 'cn_gf01', nickname: 'Traveler', level: 60 },
+        { gameUid: SECOND_UID, region: 'cn_gf01', nickname: 'Traveler 2', level: 59 }
+      ]
+    };
+  }
+
+  async function loginViaBrowser(): Promise<unknown> {
+    const handler = handlers.get('miyoushe:login-via-browser');
+    if (!handler) throw new Error('miyoushe:login-via-browser handler was not registered');
+    return handler(undefined);
+  }
+
+  it('uses the completed Cookie everywhere without exposing device recovery details', async () => {
+    const deps = setup(undefined);
+    deps.loginWindow.runOnce.mockResolvedValue({ ok: true, cookie: COOKIE });
+    deps.deviceFp.ensureForSession.mockResolvedValue({
+      ok: true,
+      cookie: COMPLETED_COOKIE,
+      deviceHash: '0123456789ab',
+      refreshed: true
+    });
+    deps.miyoushe.fetchRoles.mockResolvedValue(successfulBind());
+    deps.loginSessions.put.mockReturnValue('login-session-id');
+
+    const result = await loginViaBrowser();
+
+    expect(deps.deviceFp.ensureForSession).toHaveBeenCalledWith(COOKIE);
+    expect(deps.miyoushe.fetchRoles).toHaveBeenCalledWith(COMPLETED_COOKIE);
+    expect(deps.rosterSessions.put).toHaveBeenCalledWith(UID, COMPLETED_COOKIE);
+    expect(deps.rosterSessions.put).toHaveBeenCalledWith(SECOND_UID, COMPLETED_COOKIE);
+    expect(deps.loginSessions.put).toHaveBeenCalledWith(COMPLETED_COOKIE);
+    expect(result).toEqual({
+      ok: true,
+      bind: { ok: true, roles: successfulBind().roles },
+      sessionId: 'login-session-id'
+    });
+    expect(JSON.stringify(result)).not.toContain(COMPLETED_COOKIE);
+    expect(JSON.stringify(result)).not.toContain('deviceHash');
+    expect(JSON.stringify(result)).not.toContain('refreshed');
+  });
+
+  it('continues with the completed Cookie when device recovery is cooling down', async () => {
+    const deps = setup(undefined);
+    deps.loginWindow.runOnce.mockResolvedValue({ ok: true, cookie: COOKIE });
+    deps.deviceFp.ensureForSession.mockResolvedValue({
+      ok: false,
+      cookie: COMPLETED_COOKIE,
+      reason: 'cooldown',
+      retryAt: 1_800_000_000_000
+    });
+    deps.miyoushe.fetchRoles.mockResolvedValue(successfulBind());
+    deps.loginSessions.put.mockReturnValue('login-session-id');
+
+    const result = await loginViaBrowser();
+
+    expect(deps.miyoushe.fetchRoles).toHaveBeenCalledWith(COMPLETED_COOKIE);
+    expect(deps.rosterSessions.put).toHaveBeenCalledWith(UID, COMPLETED_COOKIE);
+    expect(deps.rosterSessions.put).toHaveBeenCalledWith(SECOND_UID, COMPLETED_COOKIE);
+    expect(deps.loginSessions.put).toHaveBeenCalledWith(COMPLETED_COOKIE);
+    expect(result).toMatchObject({ ok: true, sessionId: 'login-session-id' });
+    expect(JSON.stringify(result)).not.toContain('cooldown');
+    expect(JSON.stringify(result)).not.toContain('retryAt');
+  });
+
+  it('falls back to the login Cookie when device recovery rejects without leaking the error', async () => {
+    const deps = setup(undefined);
+    const secret = 'device-recovery-secret';
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    deps.loginWindow.runOnce.mockResolvedValue({ ok: true, cookie: COOKIE });
+    deps.deviceFp.ensureForSession.mockRejectedValue(new Error(secret));
+    deps.miyoushe.fetchRoles.mockResolvedValue(successfulBind());
+    deps.loginSessions.put.mockReturnValue('login-session-id');
+
+    const result = await loginViaBrowser();
+
+    expect(deps.deviceFp.ensureForSession).toHaveBeenCalledWith(COOKIE);
+    expect(deps.miyoushe.fetchRoles).toHaveBeenCalledWith(COOKIE);
+    expect(deps.rosterSessions.put).toHaveBeenCalledWith(UID, COOKIE);
+    expect(deps.rosterSessions.put).toHaveBeenCalledWith(SECOND_UID, COOKIE);
+    expect(deps.loginSessions.put).toHaveBeenCalledWith(COOKIE);
+    expect(result).toMatchObject({ ok: true, sessionId: 'login-session-id' });
+    expect(JSON.stringify(result)).not.toContain(secret);
+    expect(JSON.stringify([...warn.mock.calls, ...error.mock.calls])).not.toContain(secret);
+  });
+
+  it('does not seed either session store when role binding fails', async () => {
+    const deps = setup(undefined);
+    deps.loginWindow.runOnce.mockResolvedValue({ ok: true, cookie: COOKIE });
+    deps.deviceFp.ensureForSession.mockResolvedValue({
+      ok: true,
+      cookie: COMPLETED_COOKIE,
+      deviceHash: '0123456789ab',
+      refreshed: true
+    });
+    deps.miyoushe.fetchRoles.mockResolvedValue({
+      ok: false,
+      reason: 'auth-expired',
+      message: 'Cookie expired'
+    });
+
+    const result = await loginViaBrowser();
+
+    expect(deps.deviceFp.ensureForSession).toHaveBeenCalledWith(COOKIE);
+    expect(result).toEqual({
+      ok: false,
+      reason: 'bind-failed',
+      message: 'Cookie expired'
+    });
+    expect(deps.rosterSessions.put).not.toHaveBeenCalled();
+    expect(deps.loginSessions.put).not.toHaveBeenCalled();
+  });
 });
 
 describe('profile:refresh roster integrity', () => {

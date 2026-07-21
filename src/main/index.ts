@@ -15,11 +15,11 @@ import { ConfigService } from './services/config-service.js';
 import { AdvisorAgent } from './services/advisor-agent.js';
 import { MiyousheClient } from './services/miyoushe-client.js';
 import { MiyousheCalculatorClient } from './services/miyoushe-calculator.js';
-import {
-  MiyousheGameRecordClient
-} from './services/miyoushe-game-record.js';
+import { MiyousheGameRecordClient } from './services/miyoushe-game-record.js';
 import { MiyousheBrowserBridge } from './services/miyoushe/browser-bridge.js';
 import { createMiyousheBrowserTransport } from './services/miyoushe/browser-transport.js';
+import { MiyousheDeviceFpRecoveryStore } from './services/miyoushe/device-fp-recovery-store.js';
+import { MiyousheDeviceFpService } from './services/miyoushe/device-fp.js';
 import { MIYOUSHE_LOGIN_PARTITION, MiyousheLoginWindow } from './services/miyoushe-login-window.js';
 import { LoginSessionStore, RosterSessionStore } from './services/login-session-store.js';
 import { AvatarMetadataService } from './services/avatar-metadata.js';
@@ -68,15 +68,20 @@ async function bootstrapServices(): Promise<void> {
   const config = new ConfigService();
   const miyoushe = new MiyousheClient();
   const miyousheCalculator = new MiyousheCalculatorClient();
+  const loginWindow = new MiyousheLoginWindow();
+  const deviceFpCooldown = new MiyousheDeviceFpRecoveryStore();
+  const deviceFp = new MiyousheDeviceFpService({
+    cookieWriter: loginWindow,
+    cooldown: deviceFpCooldown
+  });
   const miyousheSession = session.fromPartition(MIYOUSHE_LOGIN_PARTITION);
   const browserTransport = createMiyousheBrowserTransport(miyousheSession);
   // Keep a Chromium-network retry for ordinary transport differences. Risk
   // control itself is recovered exclusively by the official Battle Chronicle
   // page or a supported data-source fallback; the former custom GeeTest
   // submitter repeatedly produced retcode 10306 and has been removed.
-  const miyousheGameRecord = new MiyousheGameRecordClient({ browserTransport });
+  const miyousheGameRecord = new MiyousheGameRecordClient({ browserTransport, deviceFp });
   const miyousheBridge = new MiyousheBrowserBridge();
-  const loginWindow = new MiyousheLoginWindow();
   const loginSessions = new LoginSessionStore();
   const rosterSessions = new RosterSessionStore();
   const metadata = new AvatarMetadataService();
@@ -102,6 +107,7 @@ async function bootstrapServices(): Promise<void> {
     miyousheGameRecord,
     miyousheCalculator,
     miyousheBridge,
+    deviceFp,
     loginWindow,
     loginSessions,
     rosterSessions,
@@ -128,6 +134,7 @@ async function bootstrapServices(): Promise<void> {
   // Fire-and-forget — window creation should not wait on this.
   void seedRosterSessionsFromPersistedCookie({
     loginWindow,
+    deviceFp,
     miyoushe,
     rosterSessions
   });
@@ -135,25 +142,33 @@ async function bootstrapServices(): Promise<void> {
 
 async function seedRosterSessionsFromPersistedCookie(deps: {
   loginWindow: MiyousheLoginWindow;
+  deviceFp: Pick<MiyousheDeviceFpService, 'ensureForSession'>;
   miyoushe: MiyousheClient;
   rosterSessions: RosterSessionStore;
 }): Promise<void> {
   try {
     const cookie = await deps.loginWindow.readPersistedCookie();
     if (!cookie) return;
-    const bind = await deps.miyoushe.fetchRoles(cookie);
+    let effectiveCookie = cookie;
+    try {
+      const deviceResult = await deps.deviceFp.ensureForSession(cookie);
+      effectiveCookie = deviceResult.cookie;
+    } catch {
+      // Device recovery is best-effort and may reject with sensitive context.
+    }
+    const bind = await deps.miyoushe.fetchRoles(effectiveCookie);
     if (!bind.ok || bind.roles.length === 0) {
       console.warn('[miyoushe] persisted cookie failed re-validation; skipping seed');
       return;
     }
     for (const role of bind.roles) {
-      deps.rosterSessions.put(role.gameUid, cookie);
+      deps.rosterSessions.put(role.gameUid, effectiveCookie);
     }
     console.info(
       `[miyoushe] restored login session for ${bind.roles.length} UID(s) from persistent partition`
     );
-  } catch (error) {
-    console.warn('[miyoushe] seed from persisted cookie failed:', error);
+  } catch {
+    console.warn('[miyoushe] seed from persisted cookie failed');
   }
 }
 

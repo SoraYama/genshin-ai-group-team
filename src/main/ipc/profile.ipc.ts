@@ -7,10 +7,7 @@ import type {
   RefreshSummary
 } from '../../shared/domain.js';
 import type { EnkaClient } from '../services/enka-client.js';
-import type {
-  LoginSessionStore,
-  RosterSessionStore
-} from '../services/login-session-store.js';
+import type { LoginSessionStore, RosterSessionStore } from '../services/login-session-store.js';
 import type { MiyousheClient } from '../services/miyoushe-client.js';
 import type { MiyousheCalculatorClient } from '../services/miyoushe-calculator.js';
 import type {
@@ -20,6 +17,7 @@ import type {
   MiyousheRosterCoverage
 } from '../services/miyoushe-game-record.js';
 import type { MiyousheBrowserBridge } from '../services/miyoushe/browser-bridge.js';
+import type { MiyousheDeviceFpService } from '../services/miyoushe/device-fp.js';
 import type { MiyousheLoginWindow } from '../services/miyoushe-login-window.js';
 import type { ProfileStore } from '../services/profile-store.js';
 import { mergeProfile } from '../services/profile-merger.js';
@@ -31,7 +29,10 @@ const cookieSchema = z.object({
 
 const importSchema = z.object({
   cookie: z.string().min(10, 'Cookie 长度异常'),
-  uid: z.string().regex(/^\d{9}$/, 'UID 必须为 9 位数字').optional()
+  uid: z
+    .string()
+    .regex(/^\d{9}$/, 'UID 必须为 9 位数字')
+    .optional()
 });
 
 const uidSchema = z.object({
@@ -40,7 +41,10 @@ const uidSchema = z.object({
 
 const importFromSessionSchema = z.object({
   sessionId: z.string().min(8),
-  uid: z.string().regex(/^\d{9}$/, 'UID 必须为 9 位数字').optional()
+  uid: z
+    .string()
+    .regex(/^\d{9}$/, 'UID 必须为 9 位数字')
+    .optional()
 });
 
 export interface ProfileIpcDeps {
@@ -48,6 +52,7 @@ export interface ProfileIpcDeps {
   miyousheGameRecord: MiyousheGameRecordClient;
   miyousheCalculator: MiyousheCalculatorClient;
   miyousheBridge: MiyousheBrowserBridge;
+  deviceFp: Pick<MiyousheDeviceFpService, 'ensureForSession'>;
   loginWindow: MiyousheLoginWindow;
   loginSessions: LoginSessionStore;
   rosterSessions: RosterSessionStore;
@@ -60,6 +65,7 @@ export function registerProfileIpc({
   miyousheGameRecord,
   miyousheCalculator,
   miyousheBridge,
+  deviceFp,
   loginWindow,
   loginSessions,
   rosterSessions,
@@ -88,7 +94,11 @@ export function registerProfileIpc({
         coverage: MiyousheRosterCoverage;
         via: 'http' | 'calculator' | 'bridge-hidden' | 'bridge-visible';
       }
-    | { ok: false; via: 'http' | 'bridge'; failure: MiyousheFetchError | { kind: 'bridge'; message: string } }
+    | {
+        ok: false;
+        via: 'http' | 'bridge';
+        failure: MiyousheFetchError | { kind: 'bridge'; message: string };
+      }
   > {
     if (!cookie) {
       return {
@@ -208,8 +218,7 @@ export function registerProfileIpc({
       via: 'bridge',
       failure: {
         kind: 'bridge',
-        message:
-          hidden.ok ? '内部错误：hidden 模式返回 warmup' : hidden.message
+        message: hidden.ok ? '内部错误：hidden 模式返回 warmup' : hidden.message
       }
     };
   }
@@ -228,7 +237,16 @@ export function registerProfileIpc({
       return { ok: false, reason: outcome.reason, message: outcome.message };
     }
 
-    const bind = await miyoushe.fetchRoles(outcome.cookie);
+    let cookie = outcome.cookie;
+    try {
+      const deviceResult = await deviceFp.ensureForSession(cookie);
+      cookie = deviceResult.cookie;
+    } catch {
+      // Device recovery is best-effort. Keep the authenticated browser Cookie
+      // and do not log a potentially sensitive rejection.
+    }
+
+    const bind = await miyoushe.fetchRoles(cookie);
     if (!bind.ok || bind.roles.length === 0) {
       return {
         ok: false,
@@ -241,10 +259,10 @@ export function registerProfileIpc({
     // in-memory roster store for every UID the account owns so refreshes
     // work immediately.
     for (const role of bind.roles) {
-      rosterSessions.put(role.gameUid, outcome.cookie);
+      rosterSessions.put(role.gameUid, cookie);
     }
 
-    const sessionId = loginSessions.put(outcome.cookie);
+    const sessionId = loginSessions.put(cookie);
     return { ok: true, bind: stripCookieFromBind(bind), sessionId };
   });
 
@@ -363,10 +381,7 @@ export function registerProfileIpc({
       miyousheCoverage = result.coverage;
     } else {
       miyousheFailure = result.failure;
-      if (
-        'kind' in result.failure &&
-        result.failure.kind === 'auth-expired'
-      ) {
+      if ('kind' in result.failure && result.failure.kind === 'auth-expired') {
         rosterSessions.revoke(uid);
       }
     }
