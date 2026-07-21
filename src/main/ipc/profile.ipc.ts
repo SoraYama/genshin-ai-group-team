@@ -12,6 +12,7 @@ import type {
   RosterSessionStore
 } from '../services/login-session-store.js';
 import type { MiyousheClient } from '../services/miyoushe-client.js';
+import type { MiyousheCalculatorClient } from '../services/miyoushe-calculator.js';
 import type {
   MiyousheCharacterDetail,
   MiyousheFetchError,
@@ -45,6 +46,7 @@ const importFromSessionSchema = z.object({
 export interface ProfileIpcDeps {
   miyoushe: MiyousheClient;
   miyousheGameRecord: MiyousheGameRecordClient;
+  miyousheCalculator: MiyousheCalculatorClient;
   miyousheBridge: MiyousheBrowserBridge;
   loginWindow: MiyousheLoginWindow;
   loginSessions: LoginSessionStore;
@@ -56,6 +58,7 @@ export interface ProfileIpcDeps {
 export function registerProfileIpc({
   miyoushe,
   miyousheGameRecord,
+  miyousheCalculator,
   miyousheBridge,
   loginWindow,
   loginSessions,
@@ -64,16 +67,16 @@ export function registerProfileIpc({
   store
 }: ProfileIpcDeps): void {
   /**
-   * Three-stage roster fetch:
-   *   1. Direct HTTP — fastest, works when session is already GeeTest-warm.
-   *   2. Hidden BrowserBridge — loads Battle Chronicle silently; works when
-   *      the partition is warm but our HTTP recipe is slightly off.
-   *   3. Visible BrowserBridge — surfaces the window so the user can solve
-   *      mihoyo's anti-bot captcha. This is the only reliable path for a
-   *      cold session; without it 5003 will persist indefinitely.
+   * Roster fetch order:
+   *   1. Battle Chronicle HTTP for the richest official detail payload.
+   *   2. Enhancement-calculator sync for authoritative ownership when the
+   *      Battle Chronicle endpoint is pinned at 5003.
+   *   3. BrowserBridge only for non-captcha transport/page failures.
    *
-   * Auth/rate-limit errors short-circuit before the visible step because
-   * they're cookie/IP problems that another fetch can't fix.
+   * Auth/rate-limit errors short-circuit because another transport cannot
+   * repair the account session or IP limit. A direct 5003 never opens a
+   * futile captcha loop: calculator success wins; calculator failure is
+   * surfaced verbatim.
    */
   async function fetchMiyousheRoster(
     uid: string,
@@ -83,7 +86,7 @@ export function registerProfileIpc({
         ok: true;
         characters: MiyousheCharacterDetail[];
         coverage: MiyousheRosterCoverage;
-        via: 'http' | 'bridge-hidden' | 'bridge-visible';
+        via: 'http' | 'calculator' | 'bridge-hidden' | 'bridge-visible';
       }
     | { ok: false; via: 'http' | 'bridge'; failure: MiyousheFetchError | { kind: 'bridge'; message: string } }
   > {
@@ -109,15 +112,29 @@ export function registerProfileIpc({
         via: 'http'
       };
     }
-    if (
-      direct.error.kind === 'auth-expired' ||
-      direct.error.kind === 'rate-limited' ||
-      direct.error.kind === 'captcha-required'
-    ) {
+    if (direct.error.kind === 'auth-expired' || direct.error.kind === 'rate-limited') {
       return { ok: false, via: 'http', failure: direct.error };
     }
 
-    const hidden = await miyousheBridge.fetchRoster({ visible: false });
+    // The enhancement calculator has its own signed sync endpoint and risk
+    // policy. It returns the complete owned roster (plus weapon/talent basics)
+    // even when Battle Chronicle is pinned at 5003. This is now the supported
+    // 5003 recovery path; promoting 5003 into the H5's 1034 GeeTest branch was
+    // tested live and the official verifier correctly rejected it as 10306.
+    const calculator = await miyousheCalculator.fetchOwnedRoster(uid, cookie);
+    if (calculator.ok) {
+      return {
+        ok: true,
+        characters: calculator.data.characters,
+        coverage: calculator.data.coverage,
+        via: 'calculator'
+      };
+    }
+    if (direct.error.kind === 'captcha-required') {
+      return { ok: false, via: 'http', failure: calculator.error };
+    }
+
+    const hidden = await miyousheBridge.fetchRoster({ visible: false, uid });
     if (hidden?.ok && hidden.mode === 'data') {
       if (hidden.uid && hidden.uid !== uid) {
         return {
@@ -146,7 +163,7 @@ export function registerProfileIpc({
         hidden.reason === 'navigation' ||
         hidden.reason === 'parse');
     if (hiddenFailed) {
-      const visible = await miyousheBridge.fetchRoster({ visible: true });
+      const visible = await miyousheBridge.fetchRoster({ visible: true, uid });
       if (!visible.ok) {
         return {
           ok: false,
@@ -380,7 +397,7 @@ export function registerProfileIpc({
       cachedProfile: existing
         ? { characters: existing.characters, coverage: existing.coverage }
         : undefined,
-      ownershipSource: result.ok && result.via === 'http' ? 'miyoushe-list' : 'miyoushe-index'
+      ownershipSource: result.ok ? 'miyoushe-list' : 'miyoushe-index'
     });
 
     const profile: PersistedProfile = {
@@ -474,7 +491,7 @@ export function registerProfileIpc({
       rosterSessions.put(role.gameUid, input.cookie);
     }
 
-    // Pull full roster (game_record HTTP → BrowserBridge fallback).
+    // Pull full roster (game_record HTTP → calculator sync → bridge).
     const recordResult = await fetchMiyousheRoster(target.gameUid, input.cookie);
     const miyousheCharacters = recordResult.ok ? recordResult.characters : undefined;
 
@@ -498,8 +515,7 @@ export function registerProfileIpc({
       cachedProfile: existing
         ? { characters: existing.characters, coverage: existing.coverage }
         : undefined,
-      ownershipSource:
-        recordResult.ok && recordResult.via === 'http' ? 'miyoushe-list' : 'miyoushe-index'
+      ownershipSource: recordResult.ok ? 'miyoushe-list' : 'miyoushe-index'
     });
 
     const profile: PersistedProfile = {

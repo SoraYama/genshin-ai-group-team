@@ -3,8 +3,12 @@
 ## 米游社登录或全角色拉取失败
 
 - 先在角色页运行“测试米游社连接”。登录过期时重新登录。
-- 出现验证码/5003 时，在弹出的可见窗口进入“原神战绩”完成验证后再试。
-- 风控、限频或 schema 变化会显示 partial；应用不会把缺失字段伪装成 0。
+- Battle Chronicle 返回 5003 时，应用会自动改用米游社养成计算器同步接口获取完整角色池，不要求用户重复验证码。
+- 5003 不是可强制转成 1034 的验证码类型；实测官方 verify 会返回 10306。遇到 10306 时不要循环点选。
+- 若提示“养成计算器角色同步未开启”，应用不会擅自修改该隐私设置；请在米游社养成计算器中开启同步后刷新，或继续使用已保留的权威缓存。
+- 米游社刷新失败时，应用会保留已有的权威角色池并标记为 stale；新鲜 Enka 数据只补强展示角色，不会再把完整缓存缩减为展示柜子集。
+- 如果页面只有 Enka 角色且显示“部分数据”，说明当前没有可用的米游社 ownership；需重新登录后拉取全部角色。
+- 风控、限频或 schema 变化会显示 partial；应用不会把缺失字段伪装成 0，也不会把计算器同步失败伪装成空角色池。
 - 维护者可运行 `npm run gate:miyoushe-detail`。无持久登录态时该命令会明确 skip，不会读取环境变量中的 Cookie。
 
 ## Enka 没有角色或返回 429
@@ -27,4 +31,4 @@
 
 ## English summary
 
-Re-authenticate when the MiHoYo session expires; complete verification in the visible Battle Chronicle window for captcha/5003 responses. An empty Enka showcase is not an empty account, and 429 responses require waiting for the advertised TTL. Provider failures or invalid agent output trigger a complete local fallback. Official macOS releases must be signed and notarized; Windows 1.0 is unsigned and may show a SmartScreen warning. Verify SHA-256 checksums from the GitHub Release before installing.
+Re-authenticate when the MiHoYo session expires. Battle Chronicle 5003 responses fall back to MiHoYo's calculator-sync roster; do not loop on a 10306 captcha. If calculator sync is disabled, enable it explicitly in MiHoYo or keep the preserved authoritative cache. Enka-only profiles are always partial and never define the full owned roster. An empty Enka showcase is not an empty account, and 429 responses require waiting for the advertised TTL. Provider failures or invalid agent output trigger a complete local fallback. Official macOS releases must be signed and notarized; Windows 1.0 is unsigned and may show a SmartScreen warning. Verify SHA-256 checksums from the GitHub Release before installing.

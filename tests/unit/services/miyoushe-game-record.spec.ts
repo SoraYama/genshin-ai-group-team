@@ -6,9 +6,10 @@ vi.mock('undici', () => ({
   request: requestMock
 }));
 
-function mockJson(status: number, payload: unknown) {
+function mockJson(status: number, payload: unknown, headers: Record<string, string> = {}) {
   return {
     statusCode: status,
+    headers,
     body: { text: async () => JSON.stringify(payload) }
   };
 }
@@ -49,9 +50,7 @@ beforeEach(() => {
 
 describe('regionFromUid', () => {
   it('maps UID prefixes to expected servers', async () => {
-    const { regionFromUid } = await import(
-      '../../../src/main/services/miyoushe-game-record.js'
-    );
+    const { regionFromUid } = await import('../../../src/main/services/miyoushe-game-record.js');
     expect(regionFromUid('100000001').region).toBe('cn_gf01');
     expect(regionFromUid('500000001').region).toBe('cn_qd01');
     expect(regionFromUid('600000001')).toEqual({ region: 'os_usa', isGlobal: true });
@@ -63,13 +62,10 @@ describe('regionFromUid', () => {
 
 describe('deviceHeadersFromCookie', () => {
   it('uses only a complete device id/fingerprint pair from the same cookie context', async () => {
-    const { deviceHeadersFromCookie } = await import(
-      '../../../src/main/services/miyoushe-game-record.js'
-    );
+    const { deviceHeadersFromCookie } =
+      await import('../../../src/main/services/miyoushe-game-record.js');
     expect(
-      deviceHeadersFromCookie(
-        'ltoken_v2=token; _MHYUUID=device-id; DEVICEFP=device-fingerprint'
-      )
+      deviceHeadersFromCookie('ltoken_v2=token; _MHYUUID=device-id; DEVICEFP=device-fingerprint')
     ).toEqual({
       'x-rpc-device_id': 'device-id',
       'x-rpc-device_fp': 'device-fingerprint'
@@ -81,11 +77,14 @@ describe('deviceHeadersFromCookie', () => {
 
 describe('Chromium transport fallback', () => {
   it('retries a captcha-classified response once through the browser session', async () => {
-    const { MiyousheGameRecordClient } = await import(
-      '../../../src/main/services/miyoushe-game-record.js'
-    );
+    const { MiyousheGameRecordClient } =
+      await import('../../../src/main/services/miyoushe-game-record.js');
     requestMock.mockResolvedValueOnce(
-      mockJson(200, { retcode: 5003, message: '访问异常，请稍后重试' })
+      mockJson(
+        200,
+        { retcode: 5003, message: '访问异常，请稍后重试' },
+        { 'x-trace-id': 'node-risk-trace' }
+      )
     );
     const browserTransport = vi.fn().mockResolvedValue({
       statusCode: 200,
@@ -114,86 +113,43 @@ describe('Chromium transport fallback', () => {
     expect(browserTransport.mock.calls[0]?.[1].headers).toHaveProperty('DS');
   });
 
-  it('retries with user verification headers after Chromium also returns 5003', async () => {
-    const { MiyousheGameRecordClient } = await import(
-      '../../../src/main/services/miyoushe-game-record.js'
-    );
+});
+
+describe('Battle Chronicle request profile', () => {
+  it('matches the current official index request shape', async () => {
+    const { MiyousheGameRecordClient } =
+      await import('../../../src/main/services/miyoushe-game-record.js');
     requestMock.mockResolvedValueOnce(
-      mockJson(200, { retcode: 5003, message: '访问异常，请稍后重试' })
-    );
-    const browserTransport = vi
-      .fn()
-      .mockResolvedValueOnce({
-        statusCode: 200,
-        headers: {},
-        bodyText: JSON.stringify({ retcode: 5003, message: '访问异常，请稍后重试' })
+      mockJson(200, {
+        retcode: 0,
+        data: { role: { nickname: 'Traveler' }, stats: { avatar_number: 80 } }
       })
-      .mockResolvedValueOnce({
-        statusCode: 200,
-        headers: {},
-        bodyText: JSON.stringify({ retcode: 0, data: { stats: { avatar_number: 80 } } })
-      });
-    const verificationProvider = vi.fn().mockResolvedValue({
-      ok: true,
-      headers: { 'x-rpc-challenge': 'final-challenge' }
-    });
-    const client = new MiyousheGameRecordClient({
-      browserTransport,
-      verificationProvider
-    });
-
-    const result = await client.ping('100000001', 'cookie=valid-enough');
-    expect(result.ok).toBe(true);
-    expect(verificationProvider).toHaveBeenCalledWith(
-      'cookie=valid-enough',
-      '/game_record/app/genshin/api/index'
     );
-    expect(browserTransport).toHaveBeenCalledTimes(2);
-    expect(browserTransport.mock.calls[1]?.[1].headers).toMatchObject({
-      'x-rpc-challenge': 'final-challenge'
-    });
-  });
 
-  it('surfaces a rejected interactive verification without hiding the cached-data fallback', async () => {
-    const { MiyousheGameRecordClient } = await import(
-      '../../../src/main/services/miyoushe-game-record.js'
+    await new MiyousheGameRecordClient().ping(
+      '100000001',
+      'ltoken_v2=token; _MHYUUID=device-id; DEVICEFP=device-fingerprint'
     );
-    requestMock.mockResolvedValueOnce(mockJson(200, { retcode: 5003 }));
-    const browserTransport = vi.fn().mockResolvedValueOnce({
-      statusCode: 200,
-      headers: {},
-      bodyText: JSON.stringify({ retcode: 5003 })
-    });
-    const client = new MiyousheGameRecordClient({
-      browserTransport,
-      verificationProvider: vi.fn().mockResolvedValue({
-        ok: false,
-        retcode: 10306,
-        message: '已保留本地角色缓存'
-      })
-    });
 
-    const result = await client.ping('100000001', 'cookie=valid-enough');
-
-    expect(result).toEqual({
-      ok: false,
-      error: {
-        kind: 'captcha-required',
-        retcode: 10306,
-        message: '已保留本地角色缓存'
+    const headers = (
+      requestMock.mock.calls[0]?.[1] as {
+        headers: Record<string, string>;
       }
-    });
+    ).headers;
+    expect(headers['x-rpc-app_version']).toBe('2.111.0');
+    expect(headers['user-agent']).toContain('miHoYoBBS/2.111.0');
+    expect(headers['x-rpc-tool_verison']).toBe('v6.7.2-gr-cn');
+    expect(headers['x-rpc-page']).toBe('v6.7.2-gr-cn_#/ys');
+    expect(headers).not.toHaveProperty('content-type');
   });
 });
 
 describe('browser bridge payload mappers', () => {
   it('uses the same list/detail mapping contract as direct HTTP', async () => {
-    const { mapMiyousheCharacterDetailData, mapMiyousheCharacterListData } = await import(
-      '../../../src/main/services/miyoushe-game-record.js'
-    );
+    const { mapMiyousheCharacterDetailData, mapMiyousheCharacterListData } =
+      await import('../../../src/main/services/miyoushe-game-record.js');
     expect(mapMiyousheCharacterListData({ list })?.map((character) => character.id)).toEqual([
-      10000046,
-      10000037
+      10000046, 10000037
     ]);
     const detailed = mapMiyousheCharacterDetailData({
       list: [
@@ -222,9 +178,8 @@ describe('browser bridge payload mappers', () => {
 
 describe('MiyousheGameRecordClient.fetchDetailedRoster', () => {
   it('POSTs list/detail with the exact body, preserves order, and maps build fields', async () => {
-    const { MiyousheGameRecordClient } = await import(
-      '../../../src/main/services/miyoushe-game-record.js'
-    );
+    const { MiyousheGameRecordClient } =
+      await import('../../../src/main/services/miyoushe-game-record.js');
 
     requestMock
       .mockResolvedValueOnce(mockJson(200, { retcode: 0, data: { list } }))
@@ -305,10 +260,7 @@ describe('MiyousheGameRecordClient.fetchDetailedRoster', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    expect(result.data.characters.map((character) => character.id)).toEqual([
-      10000046,
-      10000037
-    ]);
+    expect(result.data.characters.map((character) => character.id)).toEqual([10000046, 10000037]);
     expect(result.data.characters[0]?.weapon?.name).toBe('Weapon A');
     expect(result.data.characters[1]?.artifacts[0]).toMatchObject({
       slot: 'sands',
@@ -339,6 +291,9 @@ describe('MiyousheGameRecordClient.fetchDetailedRoster', () => {
     expect((listCall[1] as { body: string }).body).toBe(
       JSON.stringify({ role_id: '100000001', server: 'cn_gf01' })
     );
+    expect((listCall[1] as { headers: Record<string, string> }).headers['content-type']).toBe(
+      'application/json;charset=UTF-8'
+    );
     expect((listCall[1] as { headers: Record<string, string> }).headers).not.toHaveProperty(
       'x-rpc-device_id'
     );
@@ -357,16 +312,13 @@ describe('MiyousheGameRecordClient.fetchDetailedRoster', () => {
   });
 
   it('batches detail requests and reports missing/duplicate IDs as partial', async () => {
-    const { MiyousheGameRecordClient } = await import(
-      '../../../src/main/services/miyoushe-game-record.js'
-    );
+    const { MiyousheGameRecordClient } =
+      await import('../../../src/main/services/miyoushe-game-record.js');
     requestMock
       .mockResolvedValueOnce(
         mockJson(200, { retcode: 0, data: { list: [list[0], list[0], list[1]] } })
       )
-      .mockResolvedValueOnce(
-        mockJson(200, { retcode: 0, data: { list: [{ base: list[0] }] } })
-      )
+      .mockResolvedValueOnce(mockJson(200, { retcode: 0, data: { list: [{ base: list[0] }] } }))
       .mockResolvedValueOnce(mockJson(429, { retcode: 0, message: 'too many requests' }));
 
     const client = new MiyousheGameRecordClient();
@@ -396,9 +348,8 @@ describe('MiyousheGameRecordClient.fetchDetailedRoster', () => {
     [-100, 200, 'auth-expired'],
     [10101, 200, 'rate-limited']
   ])('classifies retcode %s as %s', async (retcode, status, expectedKind) => {
-    const { MiyousheGameRecordClient } = await import(
-      '../../../src/main/services/miyoushe-game-record.js'
-    );
+    const { MiyousheGameRecordClient } =
+      await import('../../../src/main/services/miyoushe-game-record.js');
     requestMock.mockResolvedValueOnce(mockJson(status, { retcode, message: 'failure' }));
     const result = await new MiyousheGameRecordClient().fetchDetailedRoster(
       '100000001',
@@ -411,9 +362,8 @@ describe('MiyousheGameRecordClient.fetchDetailedRoster', () => {
   });
 
   it('classifies non-JSON without leaking response text', async () => {
-    const { MiyousheGameRecordClient } = await import(
-      '../../../src/main/services/miyoushe-game-record.js'
-    );
+    const { MiyousheGameRecordClient } =
+      await import('../../../src/main/services/miyoushe-game-record.js');
     requestMock.mockResolvedValueOnce(mockText(403, 'secret upstream response body'));
     const result = await new MiyousheGameRecordClient().fetchDetailedRoster(
       '100000001',
@@ -426,9 +376,8 @@ describe('MiyousheGameRecordClient.fetchDetailedRoster', () => {
   });
 
   it('uses the current sg-public-api route for global UIDs', async () => {
-    const { MiyousheGameRecordClient } = await import(
-      '../../../src/main/services/miyoushe-game-record.js'
-    );
+    const { MiyousheGameRecordClient } =
+      await import('../../../src/main/services/miyoushe-game-record.js');
     requestMock.mockResolvedValueOnce(mockJson(200, { retcode: 0, data: { list: [] } }));
     const result = await new MiyousheGameRecordClient().fetchDetailedRoster(
       '800000001',

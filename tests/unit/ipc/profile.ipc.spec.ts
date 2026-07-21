@@ -121,6 +121,12 @@ function setup(existing: PersistedProfile | undefined) {
       fetchDetailedRoster: vi.fn(),
       ping: vi.fn()
     },
+    miyousheCalculator: {
+      fetchOwnedRoster: vi.fn().mockResolvedValue({
+        ok: false,
+        error: { kind: 'upstream', retcode: -502002, message: 'sync disabled' }
+      })
+    },
     miyousheBridge: {
       fetchRoster: vi.fn().mockResolvedValue({
         ok: false,
@@ -219,6 +225,30 @@ describe('profile:refresh roster integrity', () => {
     expect(deps.miyousheBridge.fetchRoster).not.toHaveBeenCalled();
   });
 
+  it('recovers retcode 5003 through the official calculator sync roster', async () => {
+    const deps = setup(existingProfile());
+    deps.rosterSessions.peek.mockReturnValue(COOKIE);
+    deps.miyousheGameRecord.fetchPlayerIndex.mockResolvedValue({
+      ok: false,
+      error: { kind: 'captcha-required', retcode: 5003, message: 'risk control' }
+    });
+    deps.miyousheCalculator.fetchOwnedRoster.mockResolvedValue({
+      ok: true,
+      data: {
+        characters: [miyousheCharacter(1), miyousheCharacter(2)],
+        coverage: fullCoverageForTwo
+      }
+    });
+
+    const outcome = await refresh();
+
+    expect(deps.miyousheCalculator.fetchOwnedRoster).toHaveBeenCalledWith(UID, COOKIE);
+    expect(deps.miyousheBridge.fetchRoster).not.toHaveBeenCalled();
+    expect(outcome.profile.characters.map((character) => character.id)).toEqual([1, 2]);
+    expect(outcome.profile.source).toBe('merged');
+    expect(outcome.profile.coverage.partial).toBe(false);
+  });
+
   it('does not erase an existing roster when both import sources fail', async () => {
     const existing = existingProfile();
     const deps = setup(existing);
@@ -237,5 +267,6 @@ describe('profile:refresh roster integrity', () => {
     expect(imported.characters.map((character) => character.id)).toEqual([1, 2]);
     expect(imported.source).toBe('miyoushe-stale');
     expect(imported.coverage.partial).toBe(true);
+    expect(deps.miyousheBridge.fetchRoster).not.toHaveBeenCalled();
   });
 });

@@ -1,13 +1,13 @@
 import path from 'node:path';
 import { app } from 'electron';
 import { MiyousheClient } from '../services/miyoushe-client.js';
+import { MiyousheCalculatorClient } from '../services/miyoushe-calculator.js';
 import {
   MiyousheGameRecordClient,
   type MiyousheFetchError,
   type MiyousheRosterCoverage
 } from '../services/miyoushe-game-record.js';
 import { MiyousheLoginWindow } from '../services/miyoushe-login-window.js';
-import { MiyousheBrowserBridge } from '../services/miyoushe/browser-bridge.js';
 
 // `electron dist/main/miyoushe-detail-gate.mjs` does not load package.json as
 // the application entry, so Electron otherwise uses the shared "Electron"
@@ -43,18 +43,18 @@ interface SafeRoleReport {
         partial: boolean;
       }
     | { ok: false; failure: SafeFailure };
-}
-
-type SafeBridgeReport =
-  | {
+  calculator:
+    | {
       attempted: true;
       ok: true;
       listedCount: number;
       detailedCount: number;
       partial: boolean;
-      uidSuffix: string;
+      fields: MiyousheRosterCoverage['fields'];
     }
-  | { attempted: true; ok: false; reason: string };
+    | { attempted: true; ok: false; failure: SafeFailure }
+    | { attempted: false };
+}
 
 function safeFailure(error: MiyousheFetchError): SafeFailure {
   return {
@@ -128,6 +128,7 @@ async function run(): Promise<number> {
   }
 
   const client = new MiyousheGameRecordClient();
+  const calculator = new MiyousheCalculatorClient();
   const reports: SafeRoleReport[] = [];
   for (const role of rolesResult.roles) {
     const indexResult = await client.fetchPlayerIndex(role.gameUid, cookie);
@@ -135,6 +136,11 @@ async function run(): Promise<number> {
     const rosterResult = await client.fetchDetailedRoster(role.gameUid, cookie, {
       expectedOwnedCount
     });
+    const needsCalculator =
+      !indexResult.ok || !rosterResult.ok || rosterResult.data.coverage.partial;
+    const calculatorResult = needsCalculator
+      ? await calculator.fetchOwnedRoster(role.gameUid, cookie)
+      : undefined;
     reports.push({
       uidSuffix: uidSuffix(role.gameUid),
       region: role.region,
@@ -143,46 +149,45 @@ async function run(): Promise<number> {
         : { ok: false, failure: safeFailure(indexResult.error) },
       roster: rosterResult.ok
         ? safeCoverage(rosterResult.data.coverage, expectedOwnedCount)
-        : { ok: false, failure: safeFailure(rosterResult.error) }
+        : { ok: false, failure: safeFailure(rosterResult.error) },
+      calculator:
+        calculatorResult === undefined
+          ? { attempted: false }
+          : calculatorResult.ok
+            ? {
+                attempted: true,
+                ok: true,
+                listedCount: calculatorResult.data.coverage.listedCount,
+                detailedCount: calculatorResult.data.coverage.detailedCount,
+                partial: calculatorResult.data.coverage.partial,
+                fields: calculatorResult.data.coverage.fields
+              }
+            : {
+                attempted: true,
+                ok: false,
+                failure: safeFailure(calculatorResult.error)
+              }
     });
   }
 
-  const directFailed = reports.some((report) => !report.index.ok || !report.roster.ok);
-  let bridge: SafeBridgeReport | undefined;
-  if (directFailed) {
-    const result = await new MiyousheBrowserBridge().fetchRoster({
-      visible: false,
-      timeoutMs: 30_000
-    });
-    bridge =
-      result.ok && result.mode === 'data'
-        ? {
-            attempted: true,
-            ok: true,
-            listedCount: result.coverage.listedCount,
-            detailedCount: result.coverage.detailedCount,
-            partial: result.coverage.partial,
-            uidSuffix: uidSuffix(result.uid)
-          }
-        : {
-            attempted: true,
-            ok: false,
-            reason: result.ok ? result.mode : result.reason
-          };
-  }
-
-  const failed = directFailed && bridge?.ok !== true;
+  const resolved = (report: SafeRoleReport): boolean =>
+    (report.index.ok && report.roster.ok && !report.roster.partial) ||
+    (report.calculator.attempted && report.calculator.ok && !report.calculator.partial);
+  const failed = reports.some((report) => !resolved(report));
   const partial =
-    reports.some((report) => report.roster.ok && report.roster.partial) ||
-    (bridge?.ok === true && bridge.partial);
+    !failed &&
+    reports.some(
+      (report) =>
+        (report.roster.ok && report.roster.partial) ||
+        (report.calculator.attempted && report.calculator.ok && report.calculator.partial)
+    );
   console.log(
     JSON.stringify(
       {
         gate: 'miyoushe-detail',
         status: failed ? 'failed' : partial ? 'partial' : 'passed',
         accountCount: reports.length,
-        reports,
-        bridge
+        reports
       },
       null,
       2

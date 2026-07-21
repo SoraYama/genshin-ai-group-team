@@ -468,7 +468,11 @@ function CharacterCard({ character }: CharacterCardProps) {
           label={t('roster.weapon')}
           value={
             character.build?.weapon
-              ? `${character.build.weapon.name} · Lv ${character.build.weapon.level} · ${t('roster.refinement', { level: character.build.weapon.refinement })}`
+              ? `${character.build.weapon.name} · Lv ${character.build.weapon.level}${
+                  character.build.weapon.refinement === undefined
+                    ? ''
+                    : ` · ${t('roster.refinement', { level: character.build.weapon.refinement })}`
+                }`
               : t('common.unknown')
           }
         />

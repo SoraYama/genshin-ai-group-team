@@ -30,7 +30,7 @@ const weaponSchema = z.object({
   name: z.string(),
   iconUrl: z.string(),
   level: z.number(),
-  refinement: z.number(),
+  refinement: z.number().optional(),
   rarity: z.number(),
   mainStat: statPairSchema.optional(),
   subStat: statPairSchema.optional()

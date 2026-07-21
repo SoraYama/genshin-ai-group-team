@@ -27,7 +27,7 @@ export interface AdvisorCharacterInput {
   weapon?: {
     name: string;
     level: number;
-    refinement: number;
+    refinement?: number;
     rarity: number;
   };
   artifactSummary?: AdvisorArtifactSummary;

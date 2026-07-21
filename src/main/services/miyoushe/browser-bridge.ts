@@ -1,11 +1,18 @@
-import { BrowserWindow, session } from 'electron';
+import { app, BrowserWindow, session } from 'electron';
 import { MIYOUSHE_LOGIN_PARTITION } from '../miyoushe-login-window.js';
 import {
   mapMiyousheCharacterDetailData,
   mapMiyousheCharacterListData,
+  regionFromUid,
   type MiyousheCharacterDetail,
   type MiyousheRosterCoverage
 } from '../miyoushe-game-record.js';
+import {
+  buildOfficialRosterUrl,
+  classifyOfficialRecordUrl,
+  classifyOfficialVerificationUrl,
+  OFFICIAL_PAGE_PRELOAD_SCRIPT
+} from './official-page.js';
 
 /**
  * Battle Chronicle web app — the same SPA used inside the miyoushe app's "战绩"
@@ -17,29 +24,6 @@ import {
  * We intercept the response via Chrome DevTools Protocol — no signature
  * computation on our side, no salt rotation maintenance, no header guessing.
  */
-// Two URL strategies:
-//
-// - HIDDEN_URL: the miyoushe app's mobile Battle Chronicle webview. When
-//   loaded in an "app-like" UA, it auto-fetches /index on init. Renders blank
-//   in a standalone PC browser (missing the mihoyo JS bridge), but as long as
-//   it fires the API call the data-interception still works in hidden mode.
-//
-// - VISIBLE_URL: the miyoushe.com Genshin page — a real desktop site that
-//   renders correctly. When a user is logged in they can navigate to their
-//   profile/战绩 from here; when that page makes its /index call we intercept
-//   it. The user-visible window also lets them complete any GeeTest captcha
-//   mihoyo throws at first-touch sessions.
-const HIDDEN_URL =
-  'https://webstatic.mihoyo.com/app/community-game-records/index.html?bbs_presentation_style=fullscreen#/ys';
-const VISIBLE_URL = 'https://www.miyoushe.com/ys/';
-
-// Mobile webview UA — convinces Battle Chronicle JS to render even outside
-// the actual mihoyo app. Required for hidden-mode loading to be useful.
-const MOBILE_WEBVIEW_UA =
-  'Mozilla/5.0 (Linux; Android 13; M2101K9C Build/TKQ1.220829.002; wv) ' +
-  'AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/108.0.5359.128 ' +
-  'Mobile Safari/537.36 miHoYoBBS/2.71.1';
-
 // Real desktop Chrome UA — same shape miyoushe.com sees from a normal Chrome
 // browser. Without this the page either renders a blank "browser not
 // supported" state or trips mihoyo's anti-bot heuristics.
@@ -47,28 +31,8 @@ const DESKTOP_CHROME_UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
-// Script injected before page scripts run; masks the remaining Electron
-// tells beyond what `disable-blink-features=AutomationControlled` covers.
-const STEALTH_SCRIPT = `
-  try {
-    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-    if (window.chrome === undefined) {
-      window.chrome = { runtime: {} };
-    }
-    Object.defineProperty(navigator, 'plugins', {
-      get: () => [1, 2, 3, 4, 5]
-    });
-    Object.defineProperty(navigator, 'languages', {
-      get: () => ['zh-CN', 'zh', 'en-US', 'en']
-    });
-  } catch (_) {}
-`;
-
 const DEFAULT_HIDDEN_TIMEOUT_MS = 15_000;
-const DEFAULT_VISIBLE_TIMEOUT_MS = 180_000;
-const TARGET_INDEX_PATH = '/game_record/app/genshin/api/index';
-const TARGET_LIST_PATH = '/game_record/app/genshin/api/character/list';
-const TARGET_DETAIL_PATH = '/game_record/app/genshin/api/character/detail';
+const DEFAULT_VISIBLE_TIMEOUT_MS = 600_000;
 
 const COOKIE_KEYS = [
   'ltoken_v2',
@@ -114,6 +78,19 @@ function configureTrustedNavigation(win: BrowserWindow): void {
   win.webContents.on('will-navigate', (event, url) => {
     if (!isTrustedMiyousheUrl(url)) event.preventDefault();
   });
+}
+
+function bringVerificationWindowToFront(win: BrowserWindow): void {
+  if (win.isDestroyed()) return;
+  win.center();
+  win.show();
+  win.setAlwaysOnTop(true, 'floating');
+  win.moveTop();
+  win.focus();
+  app.focus({ steal: true });
+  setTimeout(() => {
+    if (!win.isDestroyed()) win.setAlwaysOnTop(false);
+  }, 2_000);
 }
 
 /**
@@ -163,6 +140,8 @@ export interface FetchRosterOptions {
    */
   visible?: boolean;
   timeoutMs?: number;
+  /** In-game UID whose authoritative owned-character list should be opened. */
+  uid?: string;
 }
 
 export type BrowserBridgeResult =
@@ -177,12 +156,11 @@ export type BrowserBridgeResult =
   | { ok: true; mode: 'warmup'; indexCalled: boolean }
   | { ok: false; reason: 'timeout' | 'navigation' | 'parse' | 'upstream'; message: string };
 
-interface CdpRequestWillBeSent {
+interface CdpRequestPaused {
   requestId: string;
-  request: { url: string };
-}
-interface CdpLoadingFinished {
-  requestId: string;
+  request: { url: string; method?: string };
+  responseStatusCode?: number;
+  responseHeaders?: Array<{ name: string; value: string }>;
 }
 interface CdpResponseBody {
   body: string;
@@ -216,6 +194,7 @@ interface BridgeApiResponse {
 }
 
 interface BridgeInterceptState {
+  requestedUid: string;
   index?: IndexResponse;
   listed?: MiyousheCharacterDetail[];
   detailedById: Map<number, MiyousheCharacterDetail>;
@@ -251,7 +230,7 @@ function buildBridgeResult(state: BridgeInterceptState): BrowserBridgeResult | u
   const missingCharacterIds = baseCharacters
     .filter((character) => !state.detailedById.has(character.id))
     .map((character) => character.id);
-  const expectedOwnedCount = indexData?.stats?.avatar_number;
+  const expectedOwnedCount = indexData?.stats?.avatar_number ?? state.listed?.length;
   const listedCount = baseCharacters.length;
   const fields = {
     weapon: characters.filter((character) => character.weapon !== undefined).length,
@@ -262,7 +241,7 @@ function buildBridgeResult(state: BridgeInterceptState): BrowserBridgeResult | u
   return {
     ok: true,
     mode: 'data',
-    uid: typeof role?.game_uid === 'string' ? role.game_uid : '',
+    uid: typeof role?.game_uid === 'string' ? role.game_uid : state.requestedUid,
     nickname: role?.nickname,
     characters,
     coverage: {
@@ -290,52 +269,55 @@ export class MiyousheBrowserBridge {
     this.partition = options.partition ?? MIYOUSHE_LOGIN_PARTITION;
   }
 
-  /**
-   * Returns the player's roster as the Battle Chronicle sees it. We don't
-   * select a specific UID — the page uses whichever account is set as default
-   * for the logged-in miyoushe user. The caller compares the returned `uid`
-   * against what they expected; mismatch is a user-resolvable problem (need
-   * to switch the default UID inside miyoushe's app), not an API bug.
-   *
-   * Pass `visible: true` to surface the window so the user can complete any
-   * GeeTest captcha mihoyo throws at "unverified" sessions. Mihoyo's
-   * anti-bot returns retcode 5003 for sessions that haven't completed a
-   * challenge — the only way to recover is to let the user solve it in a
-   * real interactive window.
-   */
+  /** Open MiHoYo's own all-character page and capture its sanitized data. */
   async fetchRoster(options: FetchRosterOptions = {}): Promise<BrowserBridgeResult> {
     if (this.inflight) {
       return this.inflight;
     }
-    const task = options.visible ? this.runWarmupVisible(options) : this.runInterceptHidden(options);
+    const task = this.runOfficialPage(options);
     this.inflight = task.finally(() => {
       this.inflight = undefined;
     });
     return this.inflight;
   }
 
-  /**
-   * Visible warm-up: open a real interactive window so the user can solve any
-   * GeeTest challenge mihoyo serves. We DO NOT attach `webContents.debugger`
-   * — that would block DevTools (single CDP slot per webContents) and seems
-   * to leave the page in a stuck state for some renderer pipelines. Instead
-   * we observe via `session.webRequest.onCompleted` (a separate API with no
-   * CDP conflict). When we see the page successfully complete an /index
-   * request, we signal "warmup done"; the caller retries direct HTTP.
-   */
-  private async runWarmupVisible(options: FetchRosterOptions): Promise<BrowserBridgeResult> {
-    const timeoutMs = options.timeoutMs ?? DEFAULT_VISIBLE_TIMEOUT_MS;
-    const url = VISIBLE_URL;
+  private async runOfficialPage(options: FetchRosterOptions): Promise<BrowserBridgeResult> {
+    const visible = options.visible === true;
+    const timeoutMs =
+      options.timeoutMs ?? (visible ? DEFAULT_VISIBLE_TIMEOUT_MS : DEFAULT_HIDDEN_TIMEOUT_MS);
+    const gameUid = options.uid;
+    if (!gameUid) {
+      return {
+        ok: false,
+        reason: 'navigation',
+        message: '官方战绩页缺少目标游戏 UID'
+      };
+    }
     const ses = session.fromPartition(this.partition);
+
     await replicateCookiesAcrossDomains(ses);
+    const accountCookies = await ses.cookies.get({ domain: '.mihoyo.com', name: 'ltuid_v2' });
+    const communityUid = accountCookies[0]?.value;
+    if (!communityUid) {
+      return {
+        ok: false,
+        reason: 'upstream',
+        message: '官方战绩页缺少 ltuid_v2 登录态，请重新登录米游社'
+      };
+    }
+    const url = buildOfficialRosterUrl({
+      communityUid,
+      gameUid,
+      region: regionFromUid(gameUid).region
+    });
 
     const win = new BrowserWindow({
-      show: true,
+      show: visible,
       width: 1280,
       height: 800,
       autoHideMenuBar: true,
       backgroundColor: '#16191f',
-      title: '米游社验证 — 请打开「我的」→「原神战绩」，加载完成后可关闭此窗口',
+      title: visible ? '米游社安全验证 — 完成后角色列表会自动导入' : undefined,
       webPreferences: {
         session: ses,
         contextIsolation: true,
@@ -346,101 +328,7 @@ export class MiyousheBrowserBridge {
     });
     configureTrustedNavigation(win);
     win.on('page-title-updated', (event) => event.preventDefault());
-    win.webContents.setUserAgent(DESKTOP_CHROME_UA);
-    win.webContents.on('dom-ready', () => {
-      void win.webContents.executeJavaScript(STEALTH_SCRIPT, true).catch(() => {});
-    });
-    win.webContents.on('did-finish-load', () => {
-      logInfo(`[visible] did-finish-load: ${win.webContents.getURL()}`);
-    });
-    win.webContents.on('did-fail-load', (_e, code, desc, validatedURL) => {
-      logWarn(`[visible] did-fail-load ${code} ${desc} url=${validatedURL}`);
-    });
-    win.webContents.on('console-message', (_event, level, message, _line, source) => {
-      logInfo(`[visible page L${level}] ${message.slice(0, 240)} (${source})`);
-    });
-
-    // Keep the verification surface identical to a normal browser unless the
-    // developer explicitly asks for diagnostics.
-    if (VERBOSE_LOG) win.webContents.openDevTools({ mode: 'detach' });
-    logInfo(`opened VISIBLE window → ${url}`);
-
-    return new Promise<BrowserBridgeResult>((resolve) => {
-      let settled = false;
-      let indexCalled = false;
-
-      const filter = {
-        urls: [
-          '*://*.mihoyo.com/game_record/app/genshin/api/index*',
-          '*://*.miyoushe.com/game_record/app/genshin/api/index*'
-        ]
-      };
-
-      const requestHook = (details: Electron.OnCompletedListenerDetails) => {
-        logInfo(`[visible webRequest] ${details.method} ${details.url.slice(0, 100)} → HTTP ${details.statusCode}`);
-        if (details.statusCode === 200) {
-          indexCalled = true;
-          // HTTP 200 does not mean business success: mihoyo returns retcode
-          // 5003 inside a 200 response. Keep the window open so the user can
-          // complete verification, then let an explicit close trigger retry.
-        }
-      };
-      ses.webRequest.onCompleted(filter, requestHook);
-
-      const timer = setTimeout(() => {
-        finish({
-          ok: false,
-          reason: 'timeout',
-          message: `验证窗口超时（${timeoutMs}ms 内未观察到 /index 调用）`
-        });
-      }, timeoutMs);
-
-      const finish = (result: BrowserBridgeResult) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        // Deregister webRequest hook on this session.
-        ses.webRequest.onCompleted(filter, null);
-        if (!win.isDestroyed()) {
-          win.removeAllListeners('closed');
-          win.close();
-        }
-        resolve(result);
-      };
-
-      win.on('closed', () => {
-        // User dismissed the window. Treat as best-effort warmup; caller will
-        // retry direct HTTP and find out if the session is actually warm.
-        finish({ ok: true, mode: 'warmup', indexCalled });
-      });
-
-      void win.loadURL(url);
-    });
-  }
-
-  private async runInterceptHidden(options: FetchRosterOptions): Promise<BrowserBridgeResult> {
-    const timeoutMs = options.timeoutMs ?? DEFAULT_HIDDEN_TIMEOUT_MS;
-    const url = HIDDEN_URL;
-    const ses = session.fromPartition(this.partition);
-
-    // Cookies set during login land on `.miyoushe.com`. The hidden URL lives
-    // on `.mihoyo.com` and won't see those cookies unless we replicate them.
-    await replicateCookiesAcrossDomains(ses);
-
-    const win = new BrowserWindow({
-      show: false,
-      width: 1280,
-      height: 800,
-      backgroundColor: '#16191f',
-      webPreferences: {
-        session: ses,
-        contextIsolation: true,
-        sandbox: true,
-        nodeIntegration: false,
-        webSecurity: true
-      }
-    });
-    configureTrustedNavigation(win);
+    if (visible) bringVerificationWindowToFront(win);
 
     // Electron 43 can leave debugger commands pending when the initial
     // renderer target has not been committed yet. Commit an isolated blank
@@ -457,36 +345,32 @@ export class MiyousheBrowserBridge {
       };
     }
 
-    // Mobile webview UA — convinces Battle Chronicle JS to fire its /index
-    // request even outside the actual mihoyo app shell.
-    win.webContents.setUserAgent(MOBILE_WEBVIEW_UA);
-
-    win.webContents.on('dom-ready', () => {
-      void win.webContents.executeJavaScript(STEALTH_SCRIPT, true).catch(() => {});
-    });
+    win.webContents.setUserAgent(DESKTOP_CHROME_UA);
     win.webContents.on('did-fail-load', (_e, code, desc, validatedURL) => {
-      logWarn(`[hidden] did-fail-load ${code} ${desc} url=${validatedURL}`);
+      logWarn(`[official] did-fail-load ${code} ${desc} url=${validatedURL}`);
     });
     win.webContents.on('render-process-gone', (_e, details) =>
-      logWarn(`[hidden] render-process-gone reason=${details.reason}`)
+      logWarn(`[official] render-process-gone reason=${details.reason}`)
     );
 
-    logInfo(`opened hidden window → ${url}`);
+    logInfo(`opened ${visible ? 'visible' : 'hidden'} official roster page for UID suffix ${gameUid.slice(-3)}`);
 
     const dbg = win.webContents.debugger;
-    const requestUrls = new Map<string, string>();
-    const interceptState: BridgeInterceptState = { detailedById: new Map() };
+    const interceptState: BridgeInterceptState = {
+      requestedUid: gameUid,
+      detailedById: new Map()
+    };
     let settled = false;
     let graceTimer: ReturnType<typeof setTimeout> | undefined;
 
     const cleanup = () => {
       if (graceTimer) clearTimeout(graceTimer);
-      if (!win.isDestroyed()) win.close();
       try {
         dbg.detach();
       } catch {
         // already detached
       }
+      if (!win.isDestroyed()) win.close();
     };
 
     return new Promise<BrowserBridgeResult>((resolve) => {
@@ -533,10 +417,21 @@ export class MiyousheBrowserBridge {
           dbg,
           method,
           params,
-          requestUrls,
           interceptState,
+          visible,
           scheduleBestResult,
           finish
+        );
+      });
+
+      win.on('closed', () => {
+        if (settled) return;
+        finish(
+          buildBridgeResult(interceptState) ?? {
+            ok: false,
+            reason: 'upstream',
+            message: '用户关闭了官方验证页，尚未捕获完整角色列表'
+          }
         );
       });
 
@@ -550,15 +445,36 @@ export class MiyousheBrowserBridge {
         }
       });
 
-      logInfo('Network.enable → sendCommand');
-      dbg
-        .sendCommand('Network.enable')
+      logInfo('CDP Fetch/Page enable → official roster page');
+      Promise.all([
+        dbg.sendCommand('Page.enable'),
+        dbg.sendCommand('Fetch.enable', {
+          patterns: [
+            {
+              urlPattern:
+                'https://api-takumi-record.mihoyo.com/game_record/*genshin/api/*',
+              requestStage: 'Response'
+            },
+            {
+              urlPattern:
+                'https://api-takumi-record.mihoyo.com/game_record/card/wapi/*Verification*',
+              requestStage: 'Response'
+            }
+          ]
+        })
+      ])
+        .then(() =>
+          dbg.sendCommand('Page.addScriptToEvaluateOnNewDocument', {
+            source: OFFICIAL_PAGE_PRELOAD_SCRIPT
+          })
+        )
         .then(() => {
-          logInfo(`Network.enable OK → loadURL ${url}`);
+          logInfo('official preload installed → loadURL');
           return win.loadURL(url);
         })
         .then(() => {
           logInfo('loadURL resolved');
+          if (visible) bringVerificationWindowToFront(win);
         })
         .catch((error) => {
           logWarn(`navigation pipeline failed: ${error instanceof Error ? error.message : error}`);
@@ -575,37 +491,46 @@ export class MiyousheBrowserBridge {
     dbg: Electron.Debugger,
     method: string,
     params: unknown,
-    requestUrls: Map<string, string>,
     state: BridgeInterceptState,
+    interactive: boolean,
     scheduleBestResult: () => void,
     finish: (r: BrowserBridgeResult) => void
   ): Promise<void> {
     try {
-      if (method === 'Network.requestWillBeSent') {
-        const p = params as CdpRequestWillBeSent;
-        requestUrls.set(p.requestId, p.request.url);
-        return;
-      }
-      if (method === 'Network.loadingFinished') {
-        const p = params as CdpLoadingFinished;
-        const url = requestUrls.get(p.requestId);
-        if (!url) return;
-        requestUrls.delete(p.requestId);
-        const targetPath = [TARGET_INDEX_PATH, TARGET_LIST_PATH, TARGET_DETAIL_PATH].find((path) =>
-          url.includes(path)
-        );
-        if (!targetPath) return;
-        logInfo(`intercepted ${targetPath} for requestId ${p.requestId}`);
-        const raw = (await dbg.sendCommand('Network.getResponseBody', {
+      if (method === 'Fetch.requestPaused') {
+        const p = params as CdpRequestPaused;
+        const targetKind = classifyOfficialRecordUrl(p.request.url);
+        const verificationKind = classifyOfficialVerificationUrl(p.request.url);
+        if (
+          (!targetKind && !verificationKind) ||
+          p.responseStatusCode === undefined ||
+          !['GET', 'POST'].includes(p.request.method ?? '')
+        ) {
+          await dbg.sendCommand('Fetch.continueRequest', { requestId: p.requestId });
+          return;
+        }
+        const responseLabel = targetKind ?? `verification-${verificationKind}`;
+        logInfo(`paused official ${responseLabel} response for requestId ${p.requestId}`);
+        const raw = (await dbg.sendCommand('Fetch.getResponseBody', {
           requestId: p.requestId
         })) as CdpResponseBody;
         const text = raw.base64Encoded
           ? Buffer.from(raw.body, 'base64').toString('utf8')
           : raw.body;
+        if (text.length === 0) {
+          await dbg.sendCommand('Fetch.continueRequest', { requestId: p.requestId });
+          return;
+        }
         let parsed: BridgeApiResponse;
         try {
           parsed = JSON.parse(text) as BridgeApiResponse;
         } catch {
+          const contentEncoding = p.responseHeaders?.find(
+            (header) => header.name.toLowerCase() === 'content-encoding'
+          )?.value;
+          logWarn(
+            `official ${responseLabel} non-json body length=${text.length} base64=${raw.base64Encoded} encoding=${contentEncoding ?? 'none'} prefix=${Buffer.from(text).subarray(0, 8).toString('hex')}`
+          );
           finish({
             ok: false,
             reason: 'parse',
@@ -613,17 +538,33 @@ export class MiyousheBrowserBridge {
           });
           return;
         }
+        if (verificationKind) {
+          logInfo(
+            `official verification ${verificationKind} retcode=${parsed.retcode ?? 'unknown'}`
+          );
+          await dbg.sendCommand('Fetch.continueRequest', { requestId: p.requestId });
+          return;
+        }
+        if (!targetKind) {
+          await dbg.sendCommand('Fetch.continueRequest', { requestId: p.requestId });
+          return;
+        }
+        await dbg.sendCommand('Fetch.continueRequest', { requestId: p.requestId });
         if (parsed.retcode !== 0) {
+          if (interactive && [1034, 10306].includes(parsed.retcode ?? 0)) {
+            logInfo(`official ${targetKind} remains in interactive verification`);
+            return;
+          }
           finish({
             ok: false,
             reason: 'upstream',
-            message: `Battle Chronicle ${targetPath} retcode=${parsed.retcode ?? 'unknown'} ${parsed.message ?? ''}`
+            message: `官方战绩页 ${targetKind} retcode=${parsed.retcode ?? 'unknown'} ${parsed.message ?? ''}`
           });
           return;
         }
-        if (targetPath === TARGET_INDEX_PATH) {
+        if (targetKind === 'index') {
           state.index = parsed as IndexResponse;
-        } else if (targetPath === TARGET_LIST_PATH) {
+        } else if (targetKind === 'list') {
           const listed = mapMiyousheCharacterListData(parsed.data);
           if (!listed) {
             finish({ ok: false, reason: 'parse', message: 'character/list 缺少 list 数组' });
@@ -653,4 +594,5 @@ export class MiyousheBrowserBridge {
       );
     }
   }
+
 }

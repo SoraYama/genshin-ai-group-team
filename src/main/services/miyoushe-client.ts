@@ -1,5 +1,6 @@
 import { request } from 'undici';
 import type { BindCookieResult, MiyousheRole } from '../../shared/domain.js';
+import { MIYOUSHE_APP_VERSION_WEB } from './miyoushe/ds-token.js';
 
 export interface MiyousheClientOptions {
   rolesUrl?: string;
@@ -12,8 +13,7 @@ const DEFAULT_ROLES_URL =
 const DEFAULT_TIMEOUT_MS = 8_000;
 
 export const MIYOUSHE_UA =
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
-  '(KHTML, like Gecko) miHoYoBBS/2.55.1';
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' + `miHoYoBBS/${MIYOUSHE_APP_VERSION_WEB}`;
 
 const DEFAULT_UA = MIYOUSHE_UA;
 

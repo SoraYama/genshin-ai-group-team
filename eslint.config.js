@@ -14,9 +14,9 @@ const sharedGlobals = {
 export default [
   {
     ignores: [
-      'dist/**',
+      '**/dist/**',
       'release/**',
-      'node_modules/**',
+      '**/node_modules/**',
       'legacy/**',
       'coverage/**',
       'playwright-report/**',

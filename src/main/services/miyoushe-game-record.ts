@@ -11,6 +11,8 @@ import type {
 import {
   CLIENT_TYPE_WEB,
   MIYOUSHE_APP_VERSION_WEB,
+  MIYOUSHE_RECORD_PAGE,
+  MIYOUSHE_RECORD_TOOL_VERSION,
   signDsV2
 } from './miyoushe/ds-token.js';
 import { MIYOUSHE_UA } from './miyoushe-client.js';
@@ -53,9 +55,7 @@ export function deviceHeadersFromCookie(cookie: string): Record<string, string> 
   }
   const deviceId = values.get('_MHYUUID');
   const deviceFp = values.get('DEVICEFP');
-  return deviceId && deviceFp
-    ? { 'x-rpc-device_id': deviceId, 'x-rpc-device_fp': deviceFp }
-    : {};
+  return deviceId && deviceFp ? { 'x-rpc-device_id': deviceId, 'x-rpc-device_fp': deviceFp } : {};
 }
 
 export interface MiyousheGameRecordClientOptions {
@@ -64,15 +64,7 @@ export interface MiyousheGameRecordClientOptions {
   timeoutMs?: number;
   userAgent?: string;
   browserTransport?: MiyousheBrowserTransport;
-  verificationProvider?: (
-    cookie: string,
-    challengePath: string
-  ) => Promise<MiyousheVerificationProviderResult>;
 }
-
-export type MiyousheVerificationProviderResult =
-  | { ok: true; headers: Record<string, string> }
-  | { ok: false; message: string; retcode?: number };
 
 export interface MiyousheBrowserTransportRequest {
   method: 'GET' | 'POST';
@@ -416,11 +408,7 @@ function mapTalents(skills: RawSkill[] | undefined): CharacterTalents | undefine
   const normalAttack = byType.get(1) ?? unlocked[0]?.level;
   const elementalSkill = byType.get(2) ?? unlocked[1]?.level;
   const elementalBurst = byType.get(3) ?? unlocked[2]?.level;
-  if (
-    normalAttack === undefined ||
-    elementalSkill === undefined ||
-    elementalBurst === undefined
-  ) {
+  if (normalAttack === undefined || elementalSkill === undefined || elementalBurst === undefined) {
     return undefined;
   }
   return { normalAttack, elementalSkill, elementalBurst };
@@ -436,7 +424,9 @@ const CORE_STAT_BY_PROPERTY_TYPE: Record<number, keyof Omit<CharacterStats, 'lev
   28: 'elementalMastery'
 };
 
-function mapCoreStats(raw: RawDetailedCharacter): Partial<Omit<CharacterStats, 'level'>> | undefined {
+function mapCoreStats(
+  raw: RawDetailedCharacter
+): Partial<Omit<CharacterStats, 'level'>> | undefined {
   const properties = [
     ...(raw.base_properties ?? []),
     ...(raw.selected_properties ?? []),
@@ -502,7 +492,9 @@ export function mapMiyousheCharacterListData(data: unknown): MiyousheCharacterDe
 }
 
 /** Parse sanitized browser-intercepted detail data through the direct-client mapper. */
-export function mapMiyousheCharacterDetailData(data: unknown): MiyousheCharacterDetail[] | undefined {
+export function mapMiyousheCharacterDetailData(
+  data: unknown
+): MiyousheCharacterDetail[] | undefined {
   if (!isObject(data) || !Array.isArray(data['list'])) return undefined;
   const propertyMap = isObject(data['property_map'])
     ? (data['property_map'] as Record<string, RawPropertyInfo>)
@@ -554,10 +546,6 @@ export class MiyousheGameRecordClient {
   private readonly timeoutMs: number;
   private readonly userAgent: string;
   private readonly browserTransport?: MiyousheBrowserTransport;
-  private readonly verificationProvider?: (
-    cookie: string,
-    challengePath: string
-  ) => Promise<MiyousheVerificationProviderResult>;
 
   constructor(options: MiyousheGameRecordClientOptions = {}) {
     this.baseUrlCn = options.baseUrlCn ?? DEFAULT_BASE_CN;
@@ -565,7 +553,6 @@ export class MiyousheGameRecordClient {
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.userAgent = options.userAgent ?? MIYOUSHE_UA;
     this.browserTransport = options.browserTransport;
-    this.verificationProvider = options.verificationProvider;
   }
 
   /**
@@ -661,14 +648,13 @@ export class MiyousheGameRecordClient {
           unexpectedCharacterIds.push(base.id);
           continue;
         }
-        detailById.set(
-          base.id,
-          mapDetailedCharacter(raw, detailResult.data.property_map)
-        );
+        detailById.set(base.id, mapDetailedCharacter(raw, detailResult.data.property_map));
       }
     }
 
-    const characters = uniqueList.map((item) => detailById.get(item.id) ?? mapCharacterListItem(item));
+    const characters = uniqueList.map(
+      (item) => detailById.get(item.id) ?? mapCharacterListItem(item)
+    );
     const missingCharacterIds = uniqueList
       .filter((item) => !detailById.has(item.id))
       .map((item) => item.id);
@@ -721,15 +707,16 @@ export class MiyousheGameRecordClient {
       ok: true,
       data: {
         nickname: typeof role['nickname'] === 'string' ? (role['nickname'] as string) : undefined,
-        worldLevel: typeof stats['world_level'] === 'number'
-          ? (stats['world_level'] as number)
-          : undefined,
-        activeDays: typeof stats['active_day_number'] === 'number'
-          ? (stats['active_day_number'] as number)
-          : undefined,
-        totalCharacters: typeof stats['avatar_number'] === 'number'
-          ? (stats['avatar_number'] as number)
-          : avatars?.length
+        worldLevel:
+          typeof stats['world_level'] === 'number' ? (stats['world_level'] as number) : undefined,
+        activeDays:
+          typeof stats['active_day_number'] === 'number'
+            ? (stats['active_day_number'] as number)
+            : undefined,
+        totalCharacters:
+          typeof stats['avatar_number'] === 'number'
+            ? (stats['avatar_number'] as number)
+            : avatars?.length
       }
     };
   }
@@ -751,24 +738,30 @@ export class MiyousheGameRecordClient {
     return {
       ok: true,
       data: {
-        scheduleId: typeof result.data['schedule_id'] === 'string'
-          ? (result.data['schedule_id'] as string)
-          : undefined,
-        startTime: typeof result.data['start_time'] === 'string'
-          ? (result.data['start_time'] as string)
-          : undefined,
-        endTime: typeof result.data['end_time'] === 'string'
-          ? (result.data['end_time'] as string)
-          : undefined,
-        totalBattleTimes: typeof result.data['total_battle_times'] === 'number'
-          ? (result.data['total_battle_times'] as number)
-          : undefined,
-        maxFloor: typeof result.data['max_floor'] === 'string'
-          ? (result.data['max_floor'] as string)
-          : undefined,
-        totalStar: typeof result.data['total_star'] === 'number'
-          ? (result.data['total_star'] as number)
-          : undefined,
+        scheduleId:
+          typeof result.data['schedule_id'] === 'string'
+            ? (result.data['schedule_id'] as string)
+            : undefined,
+        startTime:
+          typeof result.data['start_time'] === 'string'
+            ? (result.data['start_time'] as string)
+            : undefined,
+        endTime:
+          typeof result.data['end_time'] === 'string'
+            ? (result.data['end_time'] as string)
+            : undefined,
+        totalBattleTimes:
+          typeof result.data['total_battle_times'] === 'number'
+            ? (result.data['total_battle_times'] as number)
+            : undefined,
+        maxFloor:
+          typeof result.data['max_floor'] === 'string'
+            ? (result.data['max_floor'] as string)
+            : undefined,
+        totalStar:
+          typeof result.data['total_star'] === 'number'
+            ? (result.data['total_star'] as number)
+            : undefined,
         raw: result.data
       }
     };
@@ -790,12 +783,14 @@ export class MiyousheGameRecordClient {
     return {
       ok: true,
       data: {
-        scheduleId: typeof result.data['schedule_id'] === 'string'
-          ? (result.data['schedule_id'] as string)
-          : undefined,
-        maxRoundId: typeof result.data['max_round_id'] === 'number'
-          ? (result.data['max_round_id'] as number)
-          : undefined,
+        scheduleId:
+          typeof result.data['schedule_id'] === 'string'
+            ? (result.data['schedule_id'] as string)
+            : undefined,
+        maxRoundId:
+          typeof result.data['max_round_id'] === 'number'
+            ? (result.data['max_round_id'] as number)
+            : undefined,
         raw: result.data
       }
     };
@@ -806,32 +801,34 @@ export class MiyousheGameRecordClient {
   }
 
   private buildHeaders(
+    method: 'GET' | 'POST',
     region: MiyousheRegion,
     cookie: string,
-    ds: string,
-    extraHeaders: Record<string, string> = {}
+    ds: string
   ): Record<string, string> {
     // Only reuse the matched device pair produced by the same persisted
     // browser session. Manual three-cookie imports continue without these
     // optional headers; we never invent or persist a random pair.
-    return {
+    const headers: Record<string, string> = {
       cookie,
       'user-agent': this.userAgent,
       accept: 'application/json, text/plain, */*',
-      'content-type': 'application/json;charset=UTF-8',
       DS: ds,
       'x-rpc-app_version': MIYOUSHE_APP_VERSION_WEB,
       'x-rpc-client_type': CLIENT_TYPE_WEB,
       'x-rpc-language': region.isGlobal ? 'en-us' : 'zh-cn',
-      Referer: region.isGlobal
-        ? 'https://act.hoyolab.com/'
-        : 'https://webstatic.mihoyo.com/',
-      Origin: region.isGlobal
-        ? 'https://act.hoyolab.com'
-        : 'https://webstatic.mihoyo.com',
-      ...deviceHeadersFromCookie(cookie),
-      ...extraHeaders
+      Referer: region.isGlobal ? 'https://act.hoyolab.com/' : 'https://webstatic.mihoyo.com/',
+      Origin: region.isGlobal ? 'https://act.hoyolab.com' : 'https://webstatic.mihoyo.com',
+      ...deviceHeadersFromCookie(cookie)
     };
+    if (method === 'POST') {
+      headers['content-type'] = 'application/json;charset=UTF-8';
+    }
+    if (!region.isGlobal) {
+      headers['x-rpc-page'] = MIYOUSHE_RECORD_PAGE;
+      headers['x-rpc-tool_verison'] = MIYOUSHE_RECORD_TOOL_VERSION;
+    }
+    return headers;
   }
 
   private async getSigned<T>(
@@ -878,8 +875,6 @@ export class MiyousheGameRecordClient {
     body: string;
     isRetry?: boolean;
     useBrowserTransport?: boolean;
-    verificationAttempt?: boolean;
-    extraHeaders?: Record<string, string>;
   }): Promise<MiyousheFetchResult<T>> {
     const {
       method,
@@ -889,13 +884,11 @@ export class MiyousheGameRecordClient {
       query,
       body,
       isRetry,
-      useBrowserTransport,
-      verificationAttempt,
-      extraHeaders
+      useBrowserTransport
     } = args;
     const token = signDsV2({ query, body, clientType: CLIENT_TYPE_WEB });
     const url = `${this.resolveBase(region)}${path}${query ? `?${query}` : ''}`;
-    const headers = this.buildHeaders(region, cookie, token.header, extraHeaders);
+    const headers = this.buildHeaders(method, region, cookie, token.header);
 
     const requestMaterial = `${query}\n${body}`;
     logInfo(
@@ -945,7 +938,9 @@ export class MiyousheGameRecordClient {
       logInfo(
         `← HTTP ${response.statusCode} retcode=${retcode ?? '?'}` +
           (message ? ` message="${message.replace(/[\r\n]/g, ' ').slice(0, 120)}"` : '') +
-          (retcode === 0 ? ` data-keys=${parsed?.data ? Object.keys(parsed.data as object).join(',') : 'null'}` : '')
+          (retcode === 0
+            ? ` data-keys=${parsed?.data ? Object.keys(parsed.data as object).join(',') : 'null'}`
+            : '')
       );
       if (retcode === 0 && parsed?.data !== undefined) {
         return { ok: true, data: parsed.data };
@@ -956,41 +951,19 @@ export class MiyousheGameRecordClient {
         message,
         httpStatus: response.statusCode
       });
+      if (classified.kind === 'captcha-required') {
+        logInfo(`risk-context transport=${useBrowserTransport ? 'chromium' : 'node'}`);
+      }
 
       // 5003/1034 can be tied to the Node HTTP/TLS fingerprint even when the
       // cookie and DS are valid. Retry once through Electron's persisted
-      // Chromium session before escalating to interactive verification.
-      if (
-        classified.kind === 'captcha-required' &&
-        this.browserTransport &&
-        !useBrowserTransport
-      ) {
-        return this.doSignedRequest<T>({ ...args, isRetry: false, useBrowserTransport: true });
-      }
-
-      if (
-        classified.kind === 'captcha-required' &&
-        this.verificationProvider &&
-        !verificationAttempt
-      ) {
-        const verification = await this.verificationProvider(cookie, path);
-        if (verification.ok) {
-          return this.doSignedRequest<T>({
-            ...args,
-            isRetry: false,
-            useBrowserTransport: true,
-            verificationAttempt: true,
-            extraHeaders: verification.headers
-          });
-        }
-        return {
-          ok: false,
-          error: {
-            kind: 'captcha-required',
-            retcode: verification.retcode ?? classified.retcode,
-            message: verification.message
-          }
-        };
+      // Chromium session. The caller owns any data-source fallback.
+      if (classified.kind === 'captcha-required' && this.browserTransport && !useBrowserTransport) {
+        return this.doSignedRequest<T>({
+          ...args,
+          isRetry: false,
+          useBrowserTransport: true
+        });
       }
 
       // Retry once on transient 5xx with a fresh DS. Auth/captcha/signature

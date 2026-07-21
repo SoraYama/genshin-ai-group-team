@@ -4,6 +4,7 @@ import {
   CLIENT_TYPE_ANDROID,
   CLIENT_TYPE_WEB,
   resolveSalt,
+  signDsV1,
   signDsV2
 } from '../../../src/main/services/miyoushe/ds-token.js';
 
@@ -69,5 +70,22 @@ describe('signDsV2', () => {
 
   it('throws on unknown client type', () => {
     expect(() => resolveSalt('99')).toThrowError(/No DS salt/);
+  });
+});
+
+describe('signDsV1', () => {
+  it('uses the calculator web salt without binding request body or query', () => {
+    const token = signDsV1({
+      salt: 'CALCULATOR_SALT',
+      nowSeconds: 1_715_000_200,
+      randomString: 'a1b2c3'
+    });
+    const expectedDs = md5('salt=CALCULATOR_SALT&t=1715000200&r=a1b2c3');
+    expect(token).toEqual({
+      ts: 1_715_000_200,
+      r: 'a1b2c3',
+      ds: expectedDs,
+      header: `1715000200,a1b2c3,${expectedDs}`
+    });
   });
 });

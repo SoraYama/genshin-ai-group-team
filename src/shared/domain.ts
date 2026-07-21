@@ -114,7 +114,8 @@ export interface CharacterWeapon {
   name: string;
   iconUrl: string;
   level: number;
-  refinement: number;
+  /** Undefined when a source exposes the equipped weapon but not its refinement rank. */
+  refinement?: number;
   rarity: number;
   mainStat?: StatPair;
   subStat?: StatPair;
