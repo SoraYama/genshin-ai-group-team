@@ -96,6 +96,32 @@ describe('ProfileStore', () => {
     expect(restartedStore.setCredentialSource('999999999', 'partition')).toBe(false);
   });
 
+  it('atomically reconciles partition bindings without revoking unverified manual profiles', async () => {
+    const stalePartition = {
+      ...makeProfile('111111111'),
+      credentialSource: 'partition' as const
+    };
+    const manual = {
+      ...makeProfile('222222222'),
+      credentialSource: 'manual' as const
+    };
+    const newlyVerified = makeProfile('333333333');
+    electronStoreState.set('profilesByUid', {
+      [stalePartition.uid]: stalePartition,
+      [manual.uid]: manual,
+      [newlyVerified.uid]: newlyVerified
+    });
+    const { ProfileStore } = await import('../../../src/main/services/profile-store.js');
+    const store = new ProfileStore();
+
+    store.reconcilePartitionCredentialSources([newlyVerified.uid, newlyVerified.uid]);
+
+    const restartedStore = new ProfileStore();
+    expect(restartedStore.get(stalePartition.uid)?.credentialSource).toBeUndefined();
+    expect(restartedStore.get(manual.uid)?.credentialSource).toBe('manual');
+    expect(restartedStore.get(newlyVerified.uid)?.credentialSource).toBe('partition');
+  });
+
   it('upserts a profile and marks it active when no active uid is set', async () => {
     const { ProfileStore } = await import('../../../src/main/services/profile-store.js');
     const store = new ProfileStore();

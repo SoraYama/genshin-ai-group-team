@@ -188,7 +188,8 @@ describe('seedRosterSessionsFromPersistedCookie', () => {
         put: vi.fn()
       },
       profiles: {
-        setCredentialSource: vi.fn()
+        setCredentialSource: vi.fn(),
+        reconcilePartitionCredentialSources: vi.fn()
       }
     };
 
@@ -214,9 +215,10 @@ describe('seedRosterSessionsFromPersistedCookie', () => {
     expect(deps.miyoushe.fetchRoles).not.toHaveBeenCalled();
     expect(deps.rosterSessions.put).not.toHaveBeenCalled();
     expect(deps.profiles.setCredentialSource).not.toHaveBeenCalled();
+    expect(deps.profiles.reconcilePartitionCredentialSources).not.toHaveBeenCalled();
   });
 
-  it('marks only UIDs verified from the persistent partition as partition-bound', async () => {
+  it('reconciles stale bindings to the multi-region UIDs verified from the current partition', async () => {
     const lifecycle = new MiyoushePartitionLifecycle();
     const deps = {
       lifecycle,
@@ -234,25 +236,86 @@ describe('seedRosterSessionsFromPersistedCookie', () => {
       miyoushe: {
         fetchRoles: vi.fn().mockResolvedValue({
           ok: true,
-          roles: [{ gameUid: UID }, { gameUid: '100000002' }]
+          roles: [
+            { gameUid: UID, region: 'cn_gf01' },
+            { gameUid: '100000002', region: 'os_usa' },
+            { gameUid: UID, region: 'cn_qd01' }
+          ]
         })
       },
       rosterSessions: {
         put: vi.fn()
       },
       profiles: {
-        setCredentialSource: vi.fn()
+        setCredentialSource: vi.fn(),
+        reconcilePartitionCredentialSources: vi.fn()
       }
     };
     await seedRosterSessionsFromPersistedCookie(deps);
 
     expect(deps.rosterSessions.put.mock.calls).toEqual([
       [UID, COMPLETED_OLD_COOKIE, 'partition'],
-      ['100000002', COMPLETED_OLD_COOKIE, 'partition']
+      ['100000002', COMPLETED_OLD_COOKIE, 'partition'],
+      [UID, COMPLETED_OLD_COOKIE, 'partition']
     ]);
-    expect(deps.profiles.setCredentialSource.mock.calls).toEqual([
-      [UID, 'partition'],
-      ['100000002', 'partition']
+    expect(deps.profiles.reconcilePartitionCredentialSources).toHaveBeenCalledWith([
+      UID,
+      '100000002'
     ]);
+  });
+
+  it('revokes stale partition authorization when the persisted partition is empty', async () => {
+    const deps = {
+      lifecycle: new MiyoushePartitionLifecycle(),
+      loginWindow: { readPersistedCookie: vi.fn().mockResolvedValue(undefined) },
+      deviceFp: { ensureForSessionAt: vi.fn() },
+      miyoushe: { fetchRoles: vi.fn() },
+      rosterSessions: { put: vi.fn() },
+      profiles: {
+        setCredentialSource: vi.fn(),
+        reconcilePartitionCredentialSources: vi.fn()
+      }
+    };
+
+    await seedRosterSessionsFromPersistedCookie(deps);
+
+    expect(deps.profiles.reconcilePartitionCredentialSources).toHaveBeenCalledWith([]);
+    expect(deps.deviceFp.ensureForSessionAt).not.toHaveBeenCalled();
+    expect(deps.miyoushe.fetchRoles).not.toHaveBeenCalled();
+    expect(deps.rosterSessions.put).not.toHaveBeenCalled();
+  });
+
+  it('revokes stale partition authorization after a definitive invalid-cookie response', async () => {
+    const lifecycle = new MiyoushePartitionLifecycle();
+    const deps = {
+      lifecycle,
+      loginWindow: { readPersistedCookie: vi.fn().mockResolvedValue(OLD_COOKIE) },
+      deviceFp: {
+        ensureForSessionAt: vi.fn().mockResolvedValue({
+          ok: true,
+          cookie: COMPLETED_OLD_COOKIE,
+          deviceHash: '0123456789ab',
+          refreshed: false
+        })
+      },
+      miyoushe: {
+        fetchRoles: vi.fn().mockResolvedValue({
+          ok: false,
+          retcode: -100,
+          message: '登录失效',
+          roles: []
+        })
+      },
+      rosterSessions: { put: vi.fn() },
+      profiles: {
+        setCredentialSource: vi.fn(),
+        reconcilePartitionCredentialSources: vi.fn()
+      }
+    };
+
+    await seedRosterSessionsFromPersistedCookie(deps);
+
+    expect(deps.profiles.reconcilePartitionCredentialSources).toHaveBeenCalledWith([]);
+    expect(deps.rosterSessions.put).not.toHaveBeenCalled();
   });
 });

@@ -264,6 +264,7 @@ export function registerProfileIpc({
           // window is later cancelled or fails.
           loginSessions.clear();
           rosterSessions.clear();
+          store.reconcilePartitionCredentialSources([]);
         }
       }
     );
@@ -307,8 +308,8 @@ export function registerProfileIpc({
     // work immediately.
     for (const role of bind.roles) {
       rosterSessions.put(role.gameUid, cookie, 'partition');
-      store.setCredentialSource(role.gameUid, 'partition');
     }
+    store.reconcilePartitionCredentialSources([...new Set(bind.roles.map((role) => role.gameUid))]);
 
     const sessionId = loginSessions.put(cookie);
     return { ok: true, bind: stripCookieFromBind(bind), sessionId };
@@ -319,7 +320,10 @@ export function registerProfileIpc({
     rosterSessions.clear();
     try {
       await partitionLifecycle.transition(() => loginWindow.clearPersistedCookie(), {
-        beforeDrain: () => loginWindow.cancelActiveLogin()
+        beforeDrain: () => {
+          loginWindow.cancelActiveLogin();
+          store.reconcilePartitionCredentialSources([]);
+        }
       });
     } finally {
       // A stale request may have reached an internal roster fallback before

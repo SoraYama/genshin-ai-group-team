@@ -295,6 +295,26 @@ export class ProfileStore {
     return true;
   }
 
+  reconcilePartitionCredentialSources(verifiedUids: Iterable<string>): void {
+    const verified = new Set(verifiedUids);
+    const all = this.getAll();
+    let dirty = false;
+    for (const [uid, profile] of Object.entries(all)) {
+      if (verified.has(uid)) {
+        if (profile.credentialSource !== 'partition') {
+          all[uid] = { ...profile, credentialSource: 'partition' };
+          dirty = true;
+        }
+      } else if (profile.credentialSource === 'partition') {
+        const withoutCredentialSource = { ...profile };
+        delete withoutCredentialSource.credentialSource;
+        all[uid] = withoutCredentialSource;
+        dirty = true;
+      }
+    }
+    if (dirty) this.store.set('profilesByUid', all);
+  }
+
   remove(uid: string): boolean {
     const all = this.getAll();
     if (!(uid in all)) return false;

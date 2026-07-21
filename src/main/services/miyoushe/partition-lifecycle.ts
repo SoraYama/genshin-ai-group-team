@@ -212,12 +212,16 @@ export async function seedRosterSessionsFromPersistedCookie(deps: {
   deviceFp: Pick<LifecycleMiyousheDeviceFp, 'ensureForSessionAt'>;
   miyoushe: Pick<MiyousheClient, 'fetchRoles'>;
   rosterSessions: Pick<RosterSessionStore, 'put'>;
-  profiles: Pick<ProfileStore, 'setCredentialSource'>;
+  profiles: Pick<ProfileStore, 'reconcilePartitionCredentialSources'>;
 }): Promise<void> {
   const generation = deps.lifecycle.capture();
   try {
     const cookie = await deps.loginWindow.readPersistedCookie();
-    if (!cookie || !deps.lifecycle.isCurrent(generation)) return;
+    if (!deps.lifecycle.isCurrent(generation)) return;
+    if (!cookie) {
+      deps.profiles.reconcilePartitionCredentialSources([]);
+      return;
+    }
 
     let effectiveCookie = cookie;
     try {
@@ -232,12 +236,16 @@ export async function seedRosterSessionsFromPersistedCookie(deps: {
     const bind = await deps.miyoushe.fetchRoles(effectiveCookie);
     if (!deps.lifecycle.isCurrent(generation)) return;
     if (!bind.ok || bind.roles.length === 0) {
+      if (bind.retcode !== undefined) {
+        deps.profiles.reconcilePartitionCredentialSources([]);
+      }
       console.warn('[miyoushe] persisted cookie failed re-validation; skipping seed');
       return;
     }
+    const verifiedUids = [...new Set(bind.roles.map((role) => role.gameUid))];
+    deps.profiles.reconcilePartitionCredentialSources(verifiedUids);
     for (const role of bind.roles) {
       deps.rosterSessions.put(role.gameUid, effectiveCookie, 'partition');
-      deps.profiles.setCredentialSource(role.gameUid, 'partition');
     }
     console.info(
       `[miyoushe] restored login session for ${bind.roles.length} UID(s) from persistent partition`

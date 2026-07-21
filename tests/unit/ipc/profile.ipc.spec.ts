@@ -233,6 +233,7 @@ function setup(existing: PersistedProfile | undefined) {
       get: vi.fn().mockReturnValue(existing),
       upsert: vi.fn(),
       setCredentialSource: vi.fn().mockReturnValue(false),
+      reconcilePartitionCredentialSources: vi.fn(),
       setActive: vi.fn(),
       getStateView: vi.fn(),
       remove: vi.fn()
@@ -277,6 +278,20 @@ function makeProfileStoreStateful(
       return true;
     }
   );
+  deps.store.reconcilePartitionCredentialSources.mockImplementation(
+    (verifiedUids: Iterable<string>) => {
+      const verified = new Set(verifiedUids);
+      for (const [uid, profile] of profiles) {
+        if (verified.has(uid)) {
+          profiles.set(uid, { ...profile, credentialSource: 'partition' });
+        } else if (profile.credentialSource === 'partition') {
+          const withoutCredentialSource = { ...profile };
+          delete withoutCredentialSource.credentialSource;
+          profiles.set(uid, withoutCredentialSource);
+        }
+      }
+    }
+  );
   deps.store.getStateView.mockImplementation(() => ({
     profiles: [...profiles.values()].map((profile) => ({
       uid: profile.uid,
@@ -302,16 +317,16 @@ function useRosterStore(deps: ReturnType<typeof setup>, rosterSessions: RosterSe
   deps.rosterSessions.clear.mockImplementation(() => rosterSessions.clear());
 }
 
-async function refresh(): Promise<RefreshOutcome> {
+async function refresh(uid = UID): Promise<RefreshOutcome> {
   const handler = handlers.get('profile:refresh');
   if (!handler) throw new Error('profile:refresh handler was not registered');
-  return (await handler({ uid: UID })) as RefreshOutcome;
+  return (await handler({ uid })) as RefreshOutcome;
 }
 
-async function ping(): Promise<unknown> {
+async function ping(uid = UID): Promise<unknown> {
   const handler = handlers.get('miyoushe:ping');
   if (!handler) throw new Error('miyoushe:ping handler was not registered');
-  return handler({ uid: UID });
+  return handler({ uid });
 }
 
 async function loginViaBrowserRequest(): Promise<unknown> {
@@ -794,7 +809,7 @@ describe('miyoushe:login-via-browser device recovery', () => {
 
     await loginViaBrowser();
 
-    expect(deps.store.setCredentialSource).toHaveBeenCalledWith(UID, 'partition');
+    expect(deps.store.reconcilePartitionCredentialSources).toHaveBeenLastCalledWith([UID]);
     expect(profiles.get(UID)?.credentialSource).toBe('partition');
   });
 
@@ -1380,6 +1395,140 @@ describe('profile:refresh roster integrity', () => {
     expect(deps.miyousheCalculator.fetchOwnedRoster).not.toHaveBeenCalled();
     expect(deps.miyousheBridge.fetchRoster).not.toHaveBeenCalled();
   }
+
+  it('revokes account A before browser B replacement and keeps only B partition-authorized after TTL or restart', async () => {
+    let now = 1_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const accountA = withCredentialSource(existingProfile(), 'partition');
+    const accountB = { ...existingProfile(), uid: SECOND_UID };
+    const deps = setup(undefined);
+    const profiles = makeProfileStoreStateful(deps, [accountA, accountB]);
+    const rosterSessions = new RosterSessionStore(10);
+    useRosterStore(deps, rosterSessions);
+    deps.loginWindow.runOnce.mockResolvedValue({
+      ok: true,
+      cookie: UPDATED_PARTITION_COOKIE
+    });
+    deps.loginWindow.readPersistedCookie.mockResolvedValue(UPDATED_PARTITION_COOKIE);
+    deps.miyoushe.fetchRoles.mockResolvedValue({
+      ok: true,
+      roles: [
+        {
+          gameUid: SECOND_UID,
+          region: 'os_usa',
+          nickname: 'Browser B',
+          level: 60
+        }
+      ]
+    });
+    configurePartitionNetworkSuccess(deps);
+
+    await loginViaBrowserRequest();
+    now += 11;
+
+    expect(profiles.get(UID)?.credentialSource).toBeUndefined();
+    expect(profiles.get(SECOND_UID)?.credentialSource).toBe('partition');
+    expect(deps.store.reconcilePartitionCredentialSources.mock.calls).toEqual([
+      [[]],
+      [[SECOND_UID]]
+    ]);
+
+    deps.loginWindow.readPersistedCookie.mockClear();
+    deps.miyousheGameRecord.fetchPlayerIndex.mockClear();
+    deps.miyousheGameRecord.fetchDetailedRoster.mockClear();
+    deps.miyousheGameRecord.ping.mockClear();
+    deps.miyousheCalculator.fetchOwnedRoster.mockClear();
+    deps.miyousheBridge.fetchRoster.mockClear();
+    deps.enka.fetchProfile.mockRejectedValue(new Error('Enka unavailable'));
+
+    const staleARefresh = await refresh(UID);
+    const staleAPing = await ping(UID);
+
+    expect(staleARefresh.summary.miyoushe).toBe('no-cookie');
+    expect(staleAPing).toEqual({
+      ok: false,
+      reason: '没有可用的米游社登录态，请先登录'
+    });
+    expectNoMiyousheNetwork(deps);
+
+    const browserBRefresh = await refresh(SECOND_UID);
+    const browserBPing = await ping(SECOND_UID);
+
+    expect(browserBRefresh.summary.miyoushe).toBe('ok');
+    expect(browserBPing).toMatchObject({ ok: true });
+    expect(deps.loginWindow.readPersistedCookie).toHaveBeenCalledOnce();
+    expect(deps.miyousheGameRecord.fetchPlayerIndex).toHaveBeenCalledWith(
+      SECOND_UID,
+      UPDATED_PARTITION_COOKIE
+    );
+    expect(deps.miyousheGameRecord.ping).toHaveBeenCalledWith(SECOND_UID, UPDATED_PARTITION_COOKIE);
+
+    rosterSessions.clear();
+    deps.loginWindow.readPersistedCookie.mockClear();
+    deps.miyousheGameRecord.fetchPlayerIndex.mockClear();
+    deps.miyousheGameRecord.fetchDetailedRoster.mockClear();
+    deps.miyousheGameRecord.ping.mockClear();
+    await expect(ping(UID)).resolves.toEqual({
+      ok: false,
+      reason: '没有可用的米游社登录态，请先登录'
+    });
+    expectNoMiyousheNetwork(deps);
+  });
+
+  it('keeps account A revoked when its browser replacement is cancelled', async () => {
+    const accountA = withCredentialSource(existingProfile(), 'partition');
+    const manual = withCredentialSource({ ...existingProfile(), uid: SECOND_UID }, 'manual');
+    const deps = setup(undefined);
+    const profiles = makeProfileStoreStateful(deps, [accountA, manual]);
+    useRosterStore(deps, new RosterSessionStore());
+    deps.loginWindow.runOnce.mockResolvedValue({ ok: false, reason: 'cancelled' });
+    deps.loginWindow.readPersistedCookie.mockResolvedValue(UPDATED_PARTITION_COOKIE);
+    deps.enka.fetchProfile.mockRejectedValue(new Error('Enka unavailable'));
+    configurePartitionNetworkSuccess(deps);
+
+    await expect(loginViaBrowserRequest()).resolves.toEqual({
+      ok: false,
+      reason: 'cancelled'
+    });
+    const refreshed = await refresh(UID);
+    const pingResult = await ping(UID);
+
+    expect(profiles.get(UID)?.credentialSource).toBeUndefined();
+    expect(profiles.get(SECOND_UID)?.credentialSource).toBe('manual');
+    expect(refreshed.summary.miyoushe).toBe('no-cookie');
+    expect(pingResult).toEqual({
+      ok: false,
+      reason: '没有可用的米游社登录态，请先登录'
+    });
+    expectNoMiyousheNetwork(deps);
+  });
+
+  it('keeps account A revoked when replacement account B fails role validation', async () => {
+    const accountA = withCredentialSource(existingProfile(), 'partition');
+    const deps = setup(undefined);
+    const profiles = makeProfileStoreStateful(deps, [accountA]);
+    useRosterStore(deps, new RosterSessionStore());
+    deps.loginWindow.runOnce.mockResolvedValue({
+      ok: true,
+      cookie: UPDATED_PARTITION_COOKIE
+    });
+    deps.miyoushe.fetchRoles.mockResolvedValue({
+      ok: false,
+      retcode: -100,
+      message: 'account B invalid',
+      roles: []
+    });
+
+    await expect(loginViaBrowserRequest()).resolves.toEqual({
+      ok: false,
+      reason: 'bind-failed',
+      message: 'account B invalid'
+    });
+
+    expect(profiles.get(UID)?.credentialSource).toBeUndefined();
+    expect(deps.store.reconcilePartitionCredentialSources).toHaveBeenCalledOnce();
+    expect(deps.store.reconcilePartitionCredentialSources).toHaveBeenCalledWith([]);
+  });
 
   it('keeps manual B disconnected after browser account A replaces its roster sessions', async () => {
     const deps = setup(undefined);
