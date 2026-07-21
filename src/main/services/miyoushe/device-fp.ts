@@ -101,6 +101,10 @@ function internalProfileKey(deviceId: string, seedId: string, seedTime: string):
     .digest('hex');
 }
 
+function internalRestoreKey(profileKey: string, deviceFp: string): string {
+  return createHash('sha256').update(profileKey).update('\0').update(deviceFp).digest('hex');
+}
+
 function hasCompleteDeviceProfile(cookie: string): boolean {
   const cookies = parseCookies(cookie);
   return REQUIRED_DEVICE_COOKIES.every((name) => Boolean(cookies.get(name)));
@@ -182,6 +186,8 @@ export class MiyousheDeviceFpService {
     { deviceFp: string; refreshedAt: number }
   >();
   private readonly inFlightByDevice = new Map<string, Promise<SharedFingerprintResult>>();
+  private readonly restoreInFlightByProfile = new Map<string, Promise<SharedFingerprintResult>>();
+  private readonly fingerprintMutationTailByProfile = new Map<string, Promise<void>>();
   private readonly preparationInFlightByIdentity = new Map<
     string,
     Promise<SharedPreparationResult>
@@ -249,15 +255,11 @@ export class MiyousheDeviceFpService {
     if (hasOriginalStableIdentity && !originalCookies.get('DEVICEFP')) {
       const knownFingerprint = this.latestFingerprintByDevice.get(key);
       if (knownFingerprint) {
-        try {
-          await this.cookieWriter.writeDeviceCookies({ DEVICEFP: knownFingerprint });
-        } catch {
-          this.safeRecordFailure(profile.deviceId, 'persist');
-          return failureResult(preparedCookie, 'persist', profile.deviceId);
-        }
+        const restored = await this.restoreKnownFingerprint(profile, key, knownFingerprint);
+        if (!restored.ok) return failureResult(preparedCookie, restored.reason, profile.deviceId);
         return {
           ok: true,
-          cookie: mergeDeviceCookies(preparedCookie, { DEVICEFP: knownFingerprint }),
+          cookie: mergeDeviceCookies(preparedCookie, { DEVICEFP: restored.deviceFp }),
           deviceHash: publicDeviceHash(profile.deviceId),
           refreshed: false
         };
@@ -483,19 +485,71 @@ export class MiyousheDeviceFpService {
       return fetched;
     }
 
-    try {
-      await this.cookieWriter.writeDeviceCookies({ DEVICEFP: fetched.deviceFp });
-    } catch {
-      this.safeRecordFailure(profile.deviceId, 'persist');
-      return { ok: false, reason: 'persist' };
-    }
+    return this.enqueueFingerprintMutation(key, async () => {
+      try {
+        await this.cookieWriter.writeDeviceCookies({ DEVICEFP: fetched.deviceFp });
+      } catch {
+        this.safeRecordFailure(profile.deviceId, 'persist');
+        return { ok: false, reason: 'persist' };
+      }
 
-    this.latestFingerprintByDevice.set(key, fetched.deviceFp);
-    this.recentRefreshByDevice.set(key, {
-      deviceFp: fetched.deviceFp,
-      refreshedAt: this.now()
+      this.latestFingerprintByDevice.set(key, fetched.deviceFp);
+      this.recentRefreshByDevice.set(key, {
+        deviceFp: fetched.deviceFp,
+        refreshedAt: this.now()
+      });
+      return fetched;
     });
-    return fetched;
+  }
+
+  private restoreKnownFingerprint(
+    profile: StableDeviceProfile,
+    profileKey: string,
+    requestedFingerprint: string
+  ): Promise<SharedFingerprintResult> {
+    const restoreKey = internalRestoreKey(profileKey, requestedFingerprint);
+    const current = this.restoreInFlightByProfile.get(restoreKey);
+    if (current) return current;
+
+    const pending = this.enqueueFingerprintMutation<SharedFingerprintResult>(
+      profileKey,
+      async () => {
+        const latestFingerprint =
+          this.latestFingerprintByDevice.get(profileKey) ?? requestedFingerprint;
+        try {
+          await this.cookieWriter.writeDeviceCookies({ DEVICEFP: latestFingerprint });
+        } catch {
+          this.safeRecordFailure(profile.deviceId, 'persist');
+          return { ok: false, reason: 'persist' };
+        }
+        return { ok: true, deviceFp: latestFingerprint };
+      }
+    ).finally(() => {
+      if (this.restoreInFlightByProfile.get(restoreKey) === pending) {
+        this.restoreInFlightByProfile.delete(restoreKey);
+      }
+    });
+    this.restoreInFlightByProfile.set(restoreKey, pending);
+    return pending;
+  }
+
+  private enqueueFingerprintMutation<T>(
+    profileKey: string,
+    mutation: () => Promise<T>
+  ): Promise<T> {
+    const previous = this.fingerprintMutationTailByProfile.get(profileKey) ?? Promise.resolve();
+    const result = previous.then(mutation);
+    const tail = result.then(
+      () => undefined,
+      () => undefined
+    );
+    this.fingerprintMutationTailByProfile.set(profileKey, tail);
+    void tail.then(() => {
+      if (this.fingerprintMutationTailByProfile.get(profileKey) === tail) {
+        this.fingerprintMutationTailByProfile.delete(profileKey);
+      }
+    });
+    return result;
   }
 
   private async requestFingerprint(profile: StableDeviceProfile): Promise<SharedFingerprintResult> {

@@ -1166,6 +1166,151 @@ describe('MiyousheDeviceFpService', () => {
     expect(JSON.stringify(result)).not.toContain('private-restore-error');
   });
 
+  it('single-flights known fingerprint restoration across different auth Cookies', async () => {
+    const transport = vi.fn<DeviceFpTransport>(async () => validResponse(NEW_FP));
+    const writer = createWriter();
+    const service = new MiyousheDeviceFpService({
+      cookieWriter: writer,
+      cooldown: createCooldown(),
+      transport
+    });
+    const cookieWithoutFp = (auth: string): string =>
+      [
+        `ltoken_v2=${auth}`,
+        `_MHYUUID=${DEVICE_ID}`,
+        `DEVICEFP_SEED_ID=${SEED_ID}`,
+        `DEVICEFP_SEED_TIME=${SEED_TIME}`
+      ].join('; ');
+    await service.ensureForSession(cookieWithoutFp('initial-auth'));
+    writer.writeDeviceCookies.mockClear();
+
+    const [first, second] = await Promise.all([
+      service.ensureForSession(cookieWithoutFp('account-a-secret')),
+      service.ensureForSession(cookieWithoutFp('account-b-secret'))
+    ]);
+
+    expect(writer.writeDeviceCookies).toHaveBeenCalledTimes(1);
+    expect(writer.writeDeviceCookies).toHaveBeenCalledWith({ DEVICEFP: NEW_FP });
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(first).toMatchObject({ ok: true, refreshed: false });
+    expect(second).toMatchObject({ ok: true, refreshed: false });
+    expect(first.cookie).toContain('ltoken_v2=account-a-secret');
+    expect(first.cookie).not.toContain('account-b-secret');
+    expect(second.cookie).toContain('ltoken_v2=account-b-secret');
+    expect(second.cookie).not.toContain('account-a-secret');
+  });
+
+  it('shares one known fingerprint restoration failure across all waiters', async () => {
+    const transport = vi.fn<DeviceFpTransport>(async () => validResponse(NEW_FP));
+    const writer = createWriter();
+    const cooldown = createCooldown();
+    const service = new MiyousheDeviceFpService({ cookieWriter: writer, cooldown, transport });
+    const cookieWithoutFp = (auth: string): string =>
+      [
+        `ltoken_v2=${auth}`,
+        `_MHYUUID=${DEVICE_ID}`,
+        `DEVICEFP_SEED_ID=${SEED_ID}`,
+        `DEVICEFP_SEED_TIME=${SEED_TIME}`
+      ].join('; ');
+    await service.ensureForSession(cookieWithoutFp('initial-auth'));
+    writer.writeDeviceCookies.mockClear();
+    writer.writeDeviceCookies
+      .mockRejectedValueOnce(new Error('private-shared-restore-error'))
+      .mockResolvedValueOnce(undefined);
+
+    const [first, second] = await Promise.all([
+      service.ensureForSession(cookieWithoutFp('account-a-secret')),
+      service.ensureForSession(cookieWithoutFp('account-b-secret'))
+    ]);
+
+    expect(first).toMatchObject({ ok: false, reason: 'persist' });
+    expect(second).toMatchObject({ ok: false, reason: 'persist' });
+    expect(first.cookie).toContain('ltoken_v2=account-a-secret');
+    expect(second.cookie).toContain('ltoken_v2=account-b-secret');
+    expect(writer.writeDeviceCookies).toHaveBeenCalledTimes(1);
+    expect(cooldown.recordFailure).toHaveBeenCalledTimes(1);
+    expect(cooldown.recordFailure).toHaveBeenCalledWith(DEVICE_ID, 'persist');
+    expect(JSON.stringify([first, second])).not.toContain('private-shared-restore-error');
+  });
+
+  it('does not let an interleaved old restore overwrite a newer recovered fingerprint', async () => {
+    let persistedFingerprint: string | undefined;
+    let interleaving = false;
+    let refreshWriteStarted = false;
+    let releaseRefreshWrite: (() => void) | undefined;
+    let releaseOldRestore: (() => void) | undefined;
+    const refreshWriteGate = new Promise<void>((resolve) => {
+      releaseRefreshWrite = resolve;
+    });
+    const oldRestoreGate = new Promise<void>((resolve) => {
+      releaseOldRestore = resolve;
+    });
+    const writer: DeviceFpCookieWriter & {
+      writeDeviceCookies: ReturnType<typeof vi.fn>;
+    } = {
+      writeDeviceCookies: vi.fn(async (updates: Readonly<Record<string, string>>) => {
+        const fingerprint = updates.DEVICEFP;
+        if (!fingerprint) return;
+        if (!interleaving) {
+          persistedFingerprint = fingerprint;
+          return;
+        }
+        if (fingerprint === SECOND_FP && !refreshWriteStarted) {
+          refreshWriteStarted = true;
+          await refreshWriteGate;
+          persistedFingerprint = fingerprint;
+          return;
+        }
+        if (fingerprint === NEW_FP) {
+          await oldRestoreGate;
+          persistedFingerprint = fingerprint;
+          return;
+        }
+        persistedFingerprint = fingerprint;
+      })
+    };
+    const transport = vi
+      .fn<DeviceFpTransport>()
+      .mockResolvedValueOnce(validResponse(NEW_FP))
+      .mockResolvedValueOnce(validResponse(SECOND_FP));
+    const service = new MiyousheDeviceFpService({
+      cookieWriter: writer,
+      cooldown: createCooldown(),
+      transport,
+      recentRefreshMs: 0
+    });
+    const cookieWithoutFp = [
+      'ltoken_v2=restore-auth',
+      `_MHYUUID=${DEVICE_ID}`,
+      `DEVICEFP_SEED_ID=${SEED_ID}`,
+      `DEVICEFP_SEED_TIME=${SEED_TIME}`
+    ].join('; ');
+    await service.ensureForSession(cookieWithoutFp);
+    interleaving = true;
+    writer.writeDeviceCookies.mockClear();
+
+    const recoverPromise = service.recoverFrom5003(completeCookie('recover-auth', OLD_FP));
+    await vi.waitFor(() =>
+      expect(writer.writeDeviceCookies).toHaveBeenCalledWith({ DEVICEFP: SECOND_FP })
+    );
+    const restorePromise = service.ensureForSession(cookieWithoutFp);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    const writesBeforeRefreshRelease = writer.writeDeviceCookies.mock.calls.length;
+    releaseRefreshWrite?.();
+    const recovered = await recoverPromise;
+    releaseOldRestore?.();
+    const restored = await restorePromise;
+
+    expect(writesBeforeRefreshRelease).toBe(1);
+    expect(recovered).toMatchObject({ ok: true, refreshed: true });
+    expect(restored).toMatchObject({ ok: true, refreshed: false });
+    expect(restored.cookie).toContain(`DEVICEFP=${SECOND_FP}`);
+    expect(persistedFingerprint).toBe(SECOND_FP);
+    expect(transport).toHaveBeenCalledTimes(2);
+  });
+
   it('overwrites a stale known-device fingerprint but leaves unknown or ID-less Cookies unchanged', async () => {
     const writer = createWriter();
     const cooldown = createCooldown();
