@@ -3,6 +3,7 @@ import { IpcError, IpcErrorCodes } from '../../shared/errors.js';
 import type {
   BindCookieResult,
   PersistedProfile,
+  ProfileCredentialSource,
   RefreshSourceStatus,
   RefreshSummary
 } from '../../shared/domain.js';
@@ -306,6 +307,7 @@ export function registerProfileIpc({
     // work immediately.
     for (const role of bind.roles) {
       rosterSessions.put(role.gameUid, cookie, 'partition');
+      store.setCredentialSource(role.gameUid, 'partition');
     }
 
     const sessionId = loginSessions.put(cookie);
@@ -348,10 +350,15 @@ export function registerProfileIpc({
       return { ok: false, reason: formatIssues(parsed.error.issues) };
     }
     const generation = partitionLifecycle.capture();
+    const existing = store.get(parsed.data.uid);
     const rosterSession = rosterSessions.peekSession(parsed.data.uid);
-    const persistedCookie = rosterSession ? undefined : await loginWindow.readPersistedCookie();
+    const persistedCookie =
+      !rosterSession && existing?.credentialSource === 'partition'
+        ? await loginWindow.readPersistedCookie()
+        : undefined;
     const cookie = rosterSession?.cookie ?? persistedCookie;
-    const persistence = rosterSession?.persistence ?? 'partition';
+    const persistence =
+      rosterSession?.persistence ?? persistenceForCredentialSource(existing?.credentialSource);
     if (!partitionLifecycle.isCurrent(generation)) {
       return staleMiyousheRequestResult();
     }
@@ -446,9 +453,13 @@ export function registerProfileIpc({
     let miyousheCoverage: MiyousheRosterCoverage | undefined;
     let miyousheFailure: MiyousheFetchError | { kind: 'bridge'; message: string } | undefined;
     const rosterSession = rosterSessions.peekSession(uid);
-    const persistedCookie = rosterSession ? undefined : await loginWindow.readPersistedCookie();
+    const persistedCookie =
+      !rosterSession && existing?.credentialSource === 'partition'
+        ? await loginWindow.readPersistedCookie()
+        : undefined;
     const cookie = rosterSession?.cookie ?? persistedCookie;
-    const persistence = rosterSession?.persistence ?? 'partition';
+    const persistence =
+      rosterSession?.persistence ?? persistenceForCredentialSource(existing?.credentialSource);
     assertCurrent();
     if (cookie && !rosterSessions.hasCookie(uid)) {
       rosterSessions.put(uid, cookie, persistence);
@@ -501,6 +512,12 @@ export function registerProfileIpc({
     const profile: PersistedProfile = {
       schemaVersion: 2,
       uid,
+      credentialSource:
+        rosterSession?.persistence !== undefined
+          ? credentialSourceForPersistence(rosterSession.persistence)
+          : cookie && persistence === 'partition'
+            ? 'partition'
+            : existing?.credentialSource,
       region: enkaRegion,
       nickname: enkaNickname,
       level: enkaLevel,
@@ -618,12 +635,14 @@ export function registerProfileIpc({
 
     const existing = store.get(target.gameUid);
 
-    // Cache cookie under every UID this miyoushe account owns BEFORE trying
-    // the roster fetch, so the bridge fallback (which reads cookies from the
-    // partition) sees the right state.
+    // Cache the verified Cookie under every UID this account owns before the
+    // roster fetch. Partition imports may use BrowserBridge; manual imports
+    // remain isolated and never touch that shared browser session.
     assertCurrent();
+    const credentialSource = credentialSourceForPersistence(input.persistence);
     for (const role of bind.roles) {
       rosterSessions.put(role.gameUid, input.cookie, input.persistence);
+      store.setCredentialSource(role.gameUid, credentialSource);
     }
 
     // Pull full roster (game_record HTTP → calculator sync → bridge).
@@ -658,6 +677,7 @@ export function registerProfileIpc({
     const profile: PersistedProfile = {
       schemaVersion: 2,
       uid: target.gameUid,
+      credentialSource,
       region: target.region,
       nickname: enkaNickname ?? target.nickname,
       level: enkaLevel ?? target.level,
@@ -707,6 +727,16 @@ function staleMiyousheRequestError(): IpcError {
 
 function staleMiyousheRequestResult(): { ok: false; reason: string } {
   return { ok: false, reason: '米游社登录状态已变更，请重试' };
+}
+
+function credentialSourceForPersistence(persistence: DeviceFpPersistence): ProfileCredentialSource {
+  return persistence === 'partition' ? 'partition' : 'manual';
+}
+
+function persistenceForCredentialSource(
+  credentialSource: ProfileCredentialSource | undefined
+): DeviceFpPersistence {
+  return credentialSource === 'partition' ? 'partition' : 'memory-only';
 }
 
 function stripCookieFromBind(bind: BindCookieResult): BindCookieResult {

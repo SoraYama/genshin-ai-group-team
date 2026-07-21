@@ -145,7 +145,8 @@ async function bootstrapServices(): Promise<void> {
     loginWindow,
     deviceFp,
     miyoushe,
-    rosterSessions
+    rosterSessions,
+    profiles
   });
 }
 

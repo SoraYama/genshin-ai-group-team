@@ -12,6 +12,7 @@ import {
   MiyoushePartitionLifecycle,
   seedRosterSessionsFromPersistedCookie
 } from '../../../src/main/services/miyoushe/partition-lifecycle.js';
+import { RosterSessionStore } from '../../../src/main/services/login-session-store.js';
 
 const { handlers } = vi.hoisted(() => ({
   handlers: new Map<string, (payload: unknown) => Promise<unknown> | unknown>()
@@ -231,6 +232,7 @@ function setup(existing: PersistedProfile | undefined) {
     store: {
       get: vi.fn().mockReturnValue(existing),
       upsert: vi.fn(),
+      setCredentialSource: vi.fn().mockReturnValue(false),
       setActive: vi.fn(),
       getStateView: vi.fn(),
       remove: vi.fn()
@@ -246,6 +248,60 @@ function setup(existing: PersistedProfile | undefined) {
   return deps;
 }
 
+type CredentialSourceForTest = 'manual' | 'partition';
+type ProfileWithCredentialSource = PersistedProfile & {
+  credentialSource?: CredentialSourceForTest;
+};
+
+function withCredentialSource(
+  profile: PersistedProfile,
+  credentialSource: CredentialSourceForTest
+): ProfileWithCredentialSource {
+  return { ...profile, credentialSource };
+}
+
+function makeProfileStoreStateful(
+  deps: ReturnType<typeof setup>,
+  initialProfiles: readonly ProfileWithCredentialSource[] = []
+): Map<string, ProfileWithCredentialSource> {
+  const profiles = new Map(initialProfiles.map((profile) => [profile.uid, profile]));
+  deps.store.get.mockImplementation((uid: string) => profiles.get(uid));
+  deps.store.upsert.mockImplementation((profile: ProfileWithCredentialSource) => {
+    profiles.set(profile.uid, profile);
+  });
+  deps.store.setCredentialSource.mockImplementation(
+    (uid: string, credentialSource: CredentialSourceForTest) => {
+      const profile = profiles.get(uid);
+      if (!profile) return false;
+      profiles.set(uid, { ...profile, credentialSource });
+      return true;
+    }
+  );
+  deps.store.getStateView.mockImplementation(() => ({
+    profiles: [...profiles.values()].map((profile) => ({
+      uid: profile.uid,
+      nickname: profile.nickname,
+      level: profile.level,
+      source: profile.source,
+      fetchedAt: profile.fetchedAt,
+      characterCount: profile.characters.length,
+      coverage: profile.coverage
+    }))
+  }));
+  return profiles;
+}
+
+function useRosterStore(deps: ReturnType<typeof setup>, rosterSessions: RosterSessionStore): void {
+  deps.rosterSessions.put.mockImplementation((uid, cookie, persistence) =>
+    rosterSessions.put(uid, cookie, persistence)
+  );
+  deps.rosterSessions.peek.mockImplementation((uid) => rosterSessions.peek(uid));
+  deps.rosterSessions.peekSession.mockImplementation((uid) => rosterSessions.peekSession(uid));
+  deps.rosterSessions.hasCookie.mockImplementation((uid) => rosterSessions.hasCookie(uid));
+  deps.rosterSessions.revoke.mockImplementation((uid) => rosterSessions.revoke(uid));
+  deps.rosterSessions.clear.mockImplementation(() => rosterSessions.clear());
+}
+
 async function refresh(): Promise<RefreshOutcome> {
   const handler = handlers.get('profile:refresh');
   if (!handler) throw new Error('profile:refresh handler was not registered');
@@ -256,6 +312,12 @@ async function ping(): Promise<unknown> {
   const handler = handlers.get('miyoushe:ping');
   if (!handler) throw new Error('miyoushe:ping handler was not registered');
   return handler({ uid: UID });
+}
+
+async function loginViaBrowserRequest(): Promise<unknown> {
+  const handler = handlers.get('miyoushe:login-via-browser');
+  if (!handler) throw new Error('miyoushe:login-via-browser handler was not registered');
+  return handler(undefined);
 }
 
 async function importFromCookie(cookie = COOKIE): Promise<PersistedProfile> {
@@ -430,7 +492,8 @@ describe('miyoushe:login-via-browser device recovery', () => {
       loginWindow: deps.loginWindow,
       deviceFp: deps.deviceFp,
       miyoushe: deps.miyoushe,
-      rosterSessions: deps.rosterSessions
+      rosterSessions: deps.rosterSessions,
+      profiles: deps.store
     });
 
     expect(cookieSeenByReplacement).toEqual([undefined]);
@@ -719,6 +782,22 @@ describe('miyoushe:login-via-browser device recovery', () => {
     );
   });
 
+  it('promotes an existing manual profile only after that same UID is browser-verified', async () => {
+    const manualProfile = withCredentialSource(existingProfile(), 'manual');
+    const deps = setup(manualProfile);
+    const profiles = makeProfileStoreStateful(deps, [manualProfile]);
+    deps.loginWindow.runOnce.mockResolvedValue({ ok: true, cookie: PARTITION_A_COOKIE });
+    deps.miyoushe.fetchRoles.mockResolvedValue({
+      ok: true,
+      roles: [{ gameUid: UID, region: 'cn_gf01', nickname: 'Verified UID', level: 60 }]
+    });
+
+    await loginViaBrowser();
+
+    expect(deps.store.setCredentialSource).toHaveBeenCalledWith(UID, 'partition');
+    expect(profiles.get(UID)?.credentialSource).toBe('partition');
+  });
+
   it('keeps the old account revoked when its replacement login is cancelled', async () => {
     const deps = setup(undefined);
     const { opaqueSessions, rosterCookies } = makeSessionStoresStateful(deps);
@@ -982,6 +1061,38 @@ describe('profile:import-from-cookie lifecycle', () => {
     );
   });
 
+  it('marks every existing UID verified by a manual Cookie as manual', async () => {
+    const secondProfile = withCredentialSource(
+      { ...existingProfile(), uid: SECOND_UID },
+      'partition'
+    );
+    const deps = setup(undefined);
+    const profiles = makeProfileStoreStateful(deps, [secondProfile]);
+    deps.miyoushe.fetchRoles.mockResolvedValue({
+      ok: true,
+      roles: [
+        { gameUid: UID, region: 'cn_gf01', nickname: 'Manual B', level: 60 },
+        { gameUid: SECOND_UID, region: 'cn_gf01', nickname: 'Manual B alt', level: 59 }
+      ]
+    });
+    deps.miyousheGameRecord.fetchPlayerIndex.mockResolvedValue({
+      ok: true,
+      data: { totalCharacters: 2 }
+    });
+    deps.miyousheGameRecord.fetchDetailedRoster.mockResolvedValue({
+      ok: true,
+      data: {
+        characters: [miyousheCharacter(1), miyousheCharacter(2)],
+        coverage: fullCoverageForTwo
+      }
+    });
+
+    await importFromCookie(MANUAL_B_COOKIE);
+
+    expect(profiles.get(UID)?.credentialSource).toBe('manual');
+    expect(profiles.get(SECOND_UID)?.credentialSource).toBe('manual');
+  });
+
   it('rejects a manual import when device preparation cannot establish a stable identity', async () => {
     const deps = setup(undefined);
     deps.deviceFp.ensureForSessionAt.mockResolvedValue({
@@ -1147,6 +1258,7 @@ describe('profile:import-from-cookie lifecycle', () => {
       cookie: UPDATED_PARTITION_COOKIE,
       persistence: 'partition'
     });
+    expect(imported.credentialSource).toBe('partition');
     expect(imported.coverage.partial).toBe(false);
   });
 
@@ -1242,8 +1354,112 @@ describe('profile:import-from-cookie lifecycle', () => {
 });
 
 describe('profile:refresh roster integrity', () => {
+  function configurePartitionNetworkSuccess(deps: ReturnType<typeof setup>): void {
+    deps.miyousheGameRecord.fetchPlayerIndex.mockResolvedValue({
+      ok: true,
+      data: { totalCharacters: 2 }
+    });
+    deps.miyousheGameRecord.fetchDetailedRoster.mockResolvedValue({
+      ok: true,
+      data: {
+        characters: [miyousheCharacter(1), miyousheCharacter(2)],
+        coverage: fullCoverageForTwo
+      }
+    });
+    deps.miyousheGameRecord.ping.mockResolvedValue({
+      ok: true,
+      data: { nickname: 'Wrong account', worldLevel: 9, totalCharacters: 2 }
+    });
+  }
+
+  function expectNoMiyousheNetwork(deps: ReturnType<typeof setup>): void {
+    expect(deps.loginWindow.readPersistedCookie).not.toHaveBeenCalled();
+    expect(deps.miyousheGameRecord.fetchPlayerIndex).not.toHaveBeenCalled();
+    expect(deps.miyousheGameRecord.fetchDetailedRoster).not.toHaveBeenCalled();
+    expect(deps.miyousheGameRecord.ping).not.toHaveBeenCalled();
+    expect(deps.miyousheCalculator.fetchOwnedRoster).not.toHaveBeenCalled();
+    expect(deps.miyousheBridge.fetchRoster).not.toHaveBeenCalled();
+  }
+
+  it('keeps manual B disconnected after browser account A replaces its roster sessions', async () => {
+    const deps = setup(undefined);
+    const profiles = makeProfileStoreStateful(deps);
+    useRosterStore(deps, new RosterSessionStore());
+    deps.loginWindow.runOnce.mockResolvedValue({ ok: true, cookie: PARTITION_A_COOKIE });
+    deps.loginWindow.readPersistedCookie.mockResolvedValue(PARTITION_A_COOKIE);
+    deps.miyoushe.fetchRoles.mockImplementation(async (cookie: string) => ({
+      ok: true as const,
+      roles: [
+        cookie === MANUAL_B_COOKIE
+          ? { gameUid: UID, region: 'cn_gf01', nickname: 'Manual B', level: 60 }
+          : { gameUid: SECOND_UID, region: 'cn_gf01', nickname: 'Browser A', level: 59 }
+      ]
+    }));
+    configurePartitionNetworkSuccess(deps);
+
+    const manualProfile = await importFromCookie(MANUAL_B_COOKIE);
+    await loginViaBrowserRequest();
+
+    deps.loginWindow.readPersistedCookie.mockClear();
+    deps.miyousheGameRecord.fetchPlayerIndex.mockClear();
+    deps.miyousheGameRecord.fetchDetailedRoster.mockClear();
+    deps.miyousheGameRecord.ping.mockClear();
+    deps.miyousheCalculator.fetchOwnedRoster.mockClear();
+    deps.miyousheBridge.fetchRoster.mockClear();
+    deps.enka.fetchProfile.mockRejectedValue(new Error('Enka unavailable'));
+
+    const refreshed = await refresh();
+    const pingResult = await ping();
+
+    expect(profiles.get(UID)?.credentialSource).toBe('manual');
+    expect(profiles.get(SECOND_UID)?.credentialSource).toBeUndefined();
+    expect(refreshed.profile).toEqual(manualProfile);
+    expect(refreshed.summary.miyoushe).toBe('no-cookie');
+    expect(pingResult).toEqual({ ok: false, reason: '没有可用的米游社登录态，请先登录' });
+    expectNoMiyousheNetwork(deps);
+  });
+
+  it('does not adopt a partition Cookie after a manual roster session expires', async () => {
+    let now = 1_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const existing = withCredentialSource(existingProfile(), 'manual');
+    const deps = setup(existing);
+    const rosterSessions = new RosterSessionStore(10);
+    useRosterStore(deps, rosterSessions);
+    rosterSessions.put(UID, MANUAL_B_COOKIE, 'memory-only');
+    now += 11;
+    deps.loginWindow.readPersistedCookie.mockResolvedValue(PARTITION_A_COOKIE);
+    deps.enka.fetchProfile.mockRejectedValue(new Error('Enka unavailable'));
+    configurePartitionNetworkSuccess(deps);
+
+    const refreshed = await refresh();
+    const pingResult = await ping();
+
+    expect(refreshed.profile).toEqual(existing);
+    expect(refreshed.summary.miyoushe).toBe('no-cookie');
+    expect(pingResult).toEqual({ ok: false, reason: '没有可用的米游社登录态，请先登录' });
+    expectNoMiyousheNetwork(deps);
+  });
+
+  it('keeps a persisted manual binding safe after restart with an empty roster store', async () => {
+    const existing = withCredentialSource(existingProfile(), 'manual');
+    const deps = setup(existing);
+    useRosterStore(deps, new RosterSessionStore());
+    deps.loginWindow.readPersistedCookie.mockResolvedValue(PARTITION_A_COOKIE);
+    deps.enka.fetchProfile.mockRejectedValue(new Error('Enka unavailable'));
+    configurePartitionNetworkSuccess(deps);
+
+    const refreshed = await refresh();
+    const pingResult = await ping();
+
+    expect(refreshed.profile).toEqual(existing);
+    expect(refreshed.summary.miyoushe).toBe('no-cookie');
+    expect(pingResult).toEqual({ ok: false, reason: '没有可用的米游社登录态，请先登录' });
+    expectNoMiyousheNetwork(deps);
+  });
+
   it('does not restore a persisted Cookie read that finishes after logout', async () => {
-    const deps = setup(existingProfile());
+    const deps = setup(withCredentialSource(existingProfile(), 'partition'));
     const pendingCookie = deferred<string | undefined>();
     deps.rosterSessions.peek.mockReturnValue(undefined);
     deps.loginWindow.readPersistedCookie.mockReturnValue(pendingCookie.promise);
@@ -1354,8 +1570,8 @@ describe('profile:refresh roster integrity', () => {
     expect(persistedDeviceCookie).not.toHaveBeenCalled();
   });
 
-  it('recovers a persisted Cookie before fetching the authoritative roster', async () => {
-    const deps = setup(undefined);
+  it('lets an explicitly partition-bound profile recover its persisted Cookie', async () => {
+    const deps = setup(withCredentialSource(existingProfile(), 'partition'));
     deps.rosterSessions.peek.mockReturnValue(undefined);
     deps.loginWindow.readPersistedCookie.mockResolvedValue(COOKIE);
     deps.miyousheGameRecord.fetchPlayerIndex.mockResolvedValue({
@@ -1369,25 +1585,35 @@ describe('profile:refresh roster integrity', () => {
         coverage: fullCoverageForTwo
       }
     });
+    deps.miyousheGameRecord.ping.mockResolvedValue({
+      ok: true,
+      data: { nickname: 'Partition A', worldLevel: 9, totalCharacters: 2 }
+    });
 
     const outcome = await refresh();
+    const pingResult = await ping();
 
     expect(outcome.profile.characters).toHaveLength(2);
     expect(deps.rosterSessions.put).toHaveBeenCalledWith(UID, COOKIE, 'partition');
     expect(deps.miyousheGameRecord.fetchPlayerIndex).toHaveBeenCalledWith(UID, COOKIE);
+    expect(deps.miyousheGameRecord.ping).toHaveBeenCalledWith(UID, COOKIE);
+    expect(pingResult).toMatchObject({ ok: true, nickname: 'Partition A' });
     expect(deps.miyousheBridge.fetchRoster).not.toHaveBeenCalled();
   });
 
-  it('preserves cached ownership when no current MiHoYo login is available', async () => {
+  it('does not let a migration-safe unknown profile adopt an arbitrary partition Cookie', async () => {
     const deps = setup(existingProfile());
     deps.rosterSessions.peek.mockReturnValue(undefined);
-    deps.loginWindow.readPersistedCookie.mockResolvedValue(undefined);
+    deps.loginWindow.readPersistedCookie.mockResolvedValue(PARTITION_A_COOKIE);
 
     const outcome = await refresh();
 
     expect(outcome.profile.characters.map((character) => character.id)).toEqual([1, 2]);
     expect(outcome.profile.source).toBe('miyoushe-stale');
     expect(outcome.profile.coverage.partial).toBe(true);
+    expect(deps.loginWindow.readPersistedCookie).not.toHaveBeenCalled();
+    expect(deps.miyousheGameRecord.fetchPlayerIndex).not.toHaveBeenCalled();
+    expect(deps.miyousheCalculator.fetchOwnedRoster).not.toHaveBeenCalled();
     expect(deps.miyousheBridge.fetchRoster).not.toHaveBeenCalled();
   });
 

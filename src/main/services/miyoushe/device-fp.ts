@@ -294,10 +294,7 @@ export class MiyousheDeviceFpService {
     return this.refreshFingerprint(preparedCookie, profile, persistence);
   }
 
-  runWithPersistence<T>(
-    persistence: DeviceFpPersistence,
-    operation: () => Promise<T>
-  ): Promise<T> {
+  runWithPersistence<T>(persistence: DeviceFpPersistence, operation: () => Promise<T>): Promise<T> {
     return this.persistenceScope.run(persistence, operation);
   }
 
@@ -602,10 +599,7 @@ export class MiyousheDeviceFpService {
     return explicit ?? this.persistenceScope.getStore() ?? 'partition';
   }
 
-  private scopedProfileKey(
-    persistence: DeviceFpPersistence,
-    profileKey: string
-  ): string {
+  private scopedProfileKey(persistence: DeviceFpPersistence, profileKey: string): string {
     return `${persistence}:${profileKey}`;
   }
 

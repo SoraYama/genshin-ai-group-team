@@ -76,6 +76,26 @@ function makeProfile(uid: string, characterCount = 0): PersistedProfile {
 }
 
 describe('ProfileStore', () => {
+  it('persists an explicit credential source while leaving migrated profiles unknown by default', async () => {
+    const legacyV2 = makeProfile('111111111', 2) as PersistedProfile & {
+      credentialSource?: 'manual' | 'partition';
+    };
+    electronStoreState.set('profilesByUid', { [legacyV2.uid]: legacyV2 });
+    const { ProfileStore } = await import('../../../src/main/services/profile-store.js');
+    const firstStore = new ProfileStore();
+
+    expect(
+      (firstStore.get(legacyV2.uid) as typeof legacyV2 | undefined)?.credentialSource
+    ).toBeUndefined();
+    expect(firstStore.setCredentialSource(legacyV2.uid, 'manual')).toBe(true);
+
+    const restartedStore = new ProfileStore();
+    expect(
+      (restartedStore.get(legacyV2.uid) as typeof legacyV2 | undefined)?.credentialSource
+    ).toBe('manual');
+    expect(restartedStore.setCredentialSource('999999999', 'partition')).toBe(false);
+  });
+
   it('upserts a profile and marks it active when no active uid is set', async () => {
     const { ProfileStore } = await import('../../../src/main/services/profile-store.js');
     const store = new ProfileStore();
@@ -176,12 +196,8 @@ describe('ProfileStore', () => {
     const store = new ProfileStore();
 
     const profile = store.get('111111111');
-    expect(profile?.characters[0]?.imageUrl).toBe(
-      'gtai-img://avatar/UI_AvatarIcon_Hutao.png'
-    );
-    expect(profile?.characters[1]?.imageUrl).toBe(
-      'gtai-img://avatar/UI_AvatarIcon_Existing.png'
-    );
+    expect(profile?.characters[0]?.imageUrl).toBe('gtai-img://avatar/UI_AvatarIcon_Hutao.png');
+    expect(profile?.characters[1]?.imageUrl).toBe('gtai-img://avatar/UI_AvatarIcon_Existing.png');
   });
 
   it('does not rewrite when there is nothing to migrate (idempotent)', async () => {
@@ -216,7 +232,10 @@ describe('ProfileStore', () => {
     new ProfileStore();
     new ProfileStore();
 
-    const profile = electronStoreState.get('profilesByUid') as Record<string, { characters: Array<{ imageUrl: string }> }>;
+    const profile = electronStoreState.get('profilesByUid') as Record<
+      string,
+      { characters: Array<{ imageUrl: string }> }
+    >;
     expect(profile['222222222']?.characters[0]?.imageUrl).toBe(
       'gtai-img://avatar/UI_AvatarIcon_X.png'
     );
@@ -232,9 +251,7 @@ describe('ProfileStore', () => {
     const { ProfileStore } = await import('../../../src/main/services/profile-store.js');
     const store = new ProfileStore();
 
-    expect(store.get('444444444')?.characters[0]?.imageUrl).toMatch(
-      /^gtai-img:\/\/remote\//
-    );
+    expect(store.get('444444444')?.characters[0]?.imageUrl).toMatch(/^gtai-img:\/\/remote\//);
   });
 
   it('repairs persisted Enka-only v2 profiles that were marked complete', async () => {

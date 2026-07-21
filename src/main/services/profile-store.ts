@@ -6,6 +6,7 @@ import type {
   CharacterStats,
   PersistedProfile,
   ProfileCoverage,
+  ProfileCredentialSource,
   ProfileListItem,
   ProfileSource,
   ProfileStateView
@@ -79,9 +80,7 @@ const legacyProfileSchema = z.object({
   region: z.string().optional(),
   nickname: z.string().optional(),
   level: z.number().optional(),
-  source: z
-    .enum(['miyoushe', 'miyoushe+enka', 'enka', 'merged', 'miyoushe-stale'])
-    .optional(),
+  source: z.enum(['miyoushe', 'miyoushe+enka', 'enka', 'merged', 'miyoushe-stale']).optional(),
   fetchedAt: z.string(),
   characters: z.array(legacyCharacterSchema)
 });
@@ -103,7 +102,9 @@ function isV2Profile(value: unknown): value is PersistedProfile {
   return 'schemaVersion' in value && value.schemaVersion === 2 && 'coverage' in value;
 }
 
-function knownStats(stats: z.infer<typeof legacyStatsSchema> | undefined): CharacterStats | undefined {
+function knownStats(
+  stats: z.infer<typeof legacyStatsSchema> | undefined
+): CharacterStats | undefined {
   if (!stats) return undefined;
   const result: CharacterStats = {};
   const keys: Array<keyof CharacterStats> = [
@@ -146,9 +147,7 @@ function migrateLegacyProfile(value: unknown): PersistedProfile {
   const characters = legacy.characters.map((character): CharacterProfile => {
     const stats = knownStats(character.stats);
     const artifacts =
-      character.artifacts && character.artifacts.length > 0
-        ? character.artifacts
-        : undefined;
+      character.artifacts && character.artifacts.length > 0 ? character.artifacts : undefined;
     const build =
       stats || character.weapon || artifacts || character.talents
         ? { stats, weapon: character.weapon, artifacts, talents: character.talents }
@@ -284,6 +283,16 @@ export class ProfileStore {
 
   get(uid: string): PersistedProfile | undefined {
     return this.getAll()[uid];
+  }
+
+  setCredentialSource(uid: string, credentialSource: ProfileCredentialSource): boolean {
+    const all = this.getAll();
+    const profile = all[uid];
+    if (!profile) return false;
+    if (profile.credentialSource === credentialSource) return true;
+    all[uid] = { ...profile, credentialSource };
+    this.store.set('profilesByUid', all);
+    return true;
   }
 
   remove(uid: string): boolean {

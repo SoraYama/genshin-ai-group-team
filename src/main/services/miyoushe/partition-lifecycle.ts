@@ -3,6 +3,7 @@ import type { MiyousheClient } from '../miyoushe-client.js';
 import type { MiyousheDeviceFpRecovery } from '../miyoushe-game-record.js';
 import type { MiyousheLoginWindow } from '../miyoushe-login-window.js';
 import type { RosterSessionStore } from '../login-session-store.js';
+import type { ProfileStore } from '../profile-store.js';
 import {
   MiyousheDeviceFpRecoveryStore,
   type DeviceFpRecoveryState
@@ -174,10 +175,7 @@ export class MiyoushePartitionLifecycle {
 
 export interface LifecycleMiyousheDeviceFp extends MiyousheDeviceFpRecovery {
   ensureForSession(cookie: string): Promise<DeviceFpResult>;
-  runWithPersistence<T>(
-    persistence: DeviceFpPersistence,
-    operation: () => Promise<T>
-  ): Promise<T>;
+  runWithPersistence<T>(persistence: DeviceFpPersistence, operation: () => Promise<T>): Promise<T>;
   ensureForSessionAt(
     generation: number,
     cookie: string,
@@ -214,6 +212,7 @@ export async function seedRosterSessionsFromPersistedCookie(deps: {
   deviceFp: Pick<LifecycleMiyousheDeviceFp, 'ensureForSessionAt'>;
   miyoushe: Pick<MiyousheClient, 'fetchRoles'>;
   rosterSessions: Pick<RosterSessionStore, 'put'>;
+  profiles: Pick<ProfileStore, 'setCredentialSource'>;
 }): Promise<void> {
   const generation = deps.lifecycle.capture();
   try {
@@ -238,6 +237,7 @@ export async function seedRosterSessionsFromPersistedCookie(deps: {
     }
     for (const role of bind.roles) {
       deps.rosterSessions.put(role.gameUid, effectiveCookie, 'partition');
+      deps.profiles.setCredentialSource(role.gameUid, 'partition');
     }
     console.info(
       `[miyoushe] restored login session for ${bind.roles.length} UID(s) from persistent partition`

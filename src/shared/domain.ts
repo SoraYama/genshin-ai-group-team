@@ -66,11 +66,7 @@ export interface CharacterStats {
 
 export type DataCompleteness = 'basic' | 'build' | 'detailed';
 export type BuildField = 'stats' | 'weapon' | 'artifacts' | 'talents';
-export type FieldSource =
-  | 'miyoushe-index'
-  | 'miyoushe-list'
-  | 'miyoushe-detail'
-  | 'enka';
+export type FieldSource = 'miyoushe-index' | 'miyoushe-list' | 'miyoushe-detail' | 'enka';
 
 export interface FieldProvenance {
   source: FieldSource;
@@ -161,6 +157,7 @@ export interface BindCookieResult {
 }
 
 export type ProfileSource = 'miyoushe' | 'miyoushe+enka' | 'enka' | 'merged' | 'miyoushe-stale';
+export type ProfileCredentialSource = 'manual' | 'partition';
 
 export interface ProfileCoverage {
   expectedOwnedCount?: number;
@@ -176,6 +173,8 @@ export interface ProfileCoverage {
 export interface PersistedProfile {
   schemaVersion: 2;
   uid: string;
+  /** Non-sensitive binding that controls whether this UID may use the shared browser partition. */
+  credentialSource?: ProfileCredentialSource;
   region?: string;
   nickname?: string;
   level?: number;
@@ -302,10 +301,7 @@ export interface AdvisorCompareResult {
 
 // ---------- Scenario data (v0.6) ----------
 
-export type ScenarioMode =
-  | 'spiral-abyss'
-  | 'stygian-onslaught'
-  | 'imaginarium-theater';
+export type ScenarioMode = 'spiral-abyss' | 'stygian-onslaught' | 'imaginarium-theater';
 
 export const ALL_SCENARIO_MODES: ScenarioMode[] = [
   'spiral-abyss',
