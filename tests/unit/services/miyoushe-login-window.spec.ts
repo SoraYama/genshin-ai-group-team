@@ -1,13 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { getCookies, setCookie, fromPartition } = vi.hoisted(() => {
+const { getCookies, setCookie, flushStore, fromPartition } = vi.hoisted(() => {
   const getCookies = vi.fn();
   const setCookie = vi.fn();
+  const flushStore = vi.fn();
   return {
     getCookies,
     setCookie,
+    flushStore,
     fromPartition: vi.fn(() => ({
-      cookies: { get: getCookies, set: setCookie }
+      cookies: { get: getCookies, set: setCookie, flushStore }
     }))
   };
 });
@@ -25,6 +27,7 @@ describe('MiyousheLoginWindow persisted cookie projection', () => {
   beforeEach(() => {
     getCookies.mockReset();
     setCookie.mockReset();
+    flushStore.mockReset();
     fromPartition.mockClear();
   });
 
@@ -119,6 +122,9 @@ describe('MiyousheLoginWindow persisted cookie projection', () => {
       expect(cookie.expirationDate).toBeGreaterThanOrEqual(nowSeconds + 364 * 24 * 60 * 60);
       expect(cookie.expirationDate).toBeLessThanOrEqual(nowSeconds + 366 * 24 * 60 * 60);
     }
+    expect(flushStore).toHaveBeenCalledTimes(1);
+    const [flushOrder] = flushStore.mock.invocationCallOrder;
+    expect(flushOrder).toBeGreaterThan(Math.max(...setCookie.mock.invocationCallOrder));
   });
 
   it('rejects a non-device cookie without writing it', async () => {
@@ -127,6 +133,7 @@ describe('MiyousheLoginWindow persisted cookie projection', () => {
     ).rejects.toThrow('device cookie whitelist');
 
     expect(setCookie).not.toHaveBeenCalled();
+    expect(flushStore).not.toHaveBeenCalled();
   });
 
   it('validates all device cookies before writing any of them', async () => {
@@ -138,6 +145,7 @@ describe('MiyousheLoginWindow persisted cookie projection', () => {
     ).rejects.toThrow('device cookie whitelist');
 
     expect(setCookie).not.toHaveBeenCalled();
+    expect(flushStore).not.toHaveBeenCalled();
   });
 
   it('rejects an empty allowlisted device cookie without writing it', async () => {
@@ -146,5 +154,26 @@ describe('MiyousheLoginWindow persisted cookie projection', () => {
     );
 
     expect(setCookie).not.toHaveBeenCalled();
+    expect(flushStore).not.toHaveBeenCalled();
+  });
+
+  it('does not flush after a cookie write fails', async () => {
+    setCookie
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('disk write failed'));
+
+    await expect(
+      new MiyousheLoginWindow().writeDeviceCookies({ DEVICEFP: 'device-fp' })
+    ).rejects.toThrow('disk write failed');
+
+    expect(setCookie).toHaveBeenCalledTimes(2);
+    expect(flushStore).not.toHaveBeenCalled();
+  });
+
+  it('does not flush an empty device-cookie update', async () => {
+    await new MiyousheLoginWindow().writeDeviceCookies({});
+
+    expect(setCookie).not.toHaveBeenCalled();
+    expect(flushStore).not.toHaveBeenCalled();
   });
 });

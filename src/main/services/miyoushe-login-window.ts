@@ -123,6 +123,9 @@ export class MiyousheLoginWindow {
         });
       }
     }
+    if (validatedEntries.length > 0) {
+      await ses.cookies.flushStore();
+    }
   }
 
   async runOnce(options: LoginWindowOptions = {}): Promise<LoginOutcome> {
