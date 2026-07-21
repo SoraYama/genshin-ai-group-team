@@ -454,6 +454,65 @@ describe('miyoushe:login-via-browser device recovery', () => {
     expect(deps.loginSessions.clear).toHaveBeenCalledOnce();
     expect(deps.miyoushe.fetchRoles).not.toHaveBeenCalled();
   });
+
+  it('revokes an opaque session before waiting for an older lifecycle operation', async () => {
+    const deps = setup(undefined);
+    deps.loginWindow.runOnce.mockResolvedValue({ ok: true, cookie: COOKIE });
+    deps.miyoushe.fetchRoles.mockResolvedValue(successfulBind());
+    const loginResult = (await loginViaBrowser()) as { ok: true; sessionId: string };
+    deps.miyoushe.fetchRoles.mockReset();
+
+    const releaseOlderOperation = deferred<void>();
+    const olderOperation = deps.partitionLifecycle.runAt(
+      deps.partitionLifecycle.capture(),
+      () => releaseOlderOperation.promise
+    );
+    const logoutPromise = logout();
+    await Promise.resolve();
+
+    const importError = await importFromSession(loginResult.sessionId).then(
+      () => undefined,
+      (error: unknown) => error
+    );
+    releaseOlderOperation.resolve();
+    await Promise.all([olderOperation, logoutPromise]);
+
+    expect(importError).toMatchObject({ code: 'IPC_UNAUTHORIZED' });
+    expect(deps.loginSessions.clear).toHaveBeenCalledOnce();
+    expect(deps.miyoushe.fetchRoles).not.toHaveBeenCalled();
+  });
+
+  it('drains an in-flight session import without allowing stale commits after logout', async () => {
+    const deps = setup(undefined);
+    deps.loginWindow.runOnce.mockResolvedValue({ ok: true, cookie: COOKIE });
+    deps.miyoushe.fetchRoles.mockResolvedValue(successfulBind());
+    const loginResult = (await loginViaBrowser()) as { ok: true; sessionId: string };
+    deps.miyoushe.fetchRoles.mockReset();
+    deps.rosterSessions.put.mockClear();
+
+    const pendingBind = deferred<ReturnType<typeof successfulBind>>();
+    deps.miyoushe.fetchRoles.mockReturnValue(pendingBind.promise);
+    const importPromise = importFromSession(loginResult.sessionId);
+    await vi.waitFor(() => expect(deps.miyoushe.fetchRoles).toHaveBeenCalledOnce());
+
+    const logoutPromise = logout();
+    await Promise.resolve();
+    const partitionClearedBeforeImportSettled =
+      deps.loginWindow.clearPersistedCookie.mock.calls.length > 0;
+
+    pendingBind.resolve(successfulBind());
+    const importError = await importPromise.then(
+      () => undefined,
+      (error: unknown) => error
+    );
+    await logoutPromise;
+
+    expect(partitionClearedBeforeImportSettled).toBe(false);
+    expect(importError).toMatchObject({ code: 'IPC_UNAUTHORIZED' });
+    expect(deps.rosterSessions.put).not.toHaveBeenCalled();
+    expect(deps.store.upsert).not.toHaveBeenCalled();
+    expect(deps.store.setActive).not.toHaveBeenCalled();
+  });
 });
 
 describe('profile:refresh roster integrity', () => {

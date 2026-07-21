@@ -56,7 +56,10 @@ export interface ProfileIpcDeps {
   miyousheCalculator: MiyousheCalculatorClient;
   miyousheBridge: MiyousheBrowserBridge;
   deviceFp: Pick<LifecycleMiyousheDeviceFp, 'ensureForSessionAt'>;
-  partitionLifecycle: Pick<MiyoushePartitionLifecycle, 'transition' | 'isCurrent' | 'runAt'>;
+  partitionLifecycle: Pick<
+    MiyoushePartitionLifecycle,
+    'capture' | 'transition' | 'isCurrent' | 'runAt'
+  >;
   loginWindow: MiyousheLoginWindow;
   loginSessions: LoginSessionStore;
   rosterSessions: RosterSessionStore;
@@ -286,9 +289,12 @@ export function registerProfileIpc({
   });
 
   registerHandler('miyoushe:logout', async () => {
+    loginSessions.clear();
+    rosterSessions.clear();
     loginWindow.cancelActiveLogin();
     await partitionLifecycle.transition(() => loginWindow.clearPersistedCookie());
-    loginSessions.clear();
+    // A stale import may have reached an internal roster fallback before its
+    // generation check. Clear once more after every tracked operation drains.
     rosterSessions.clear();
     return { ok: true } as const;
   });
@@ -489,19 +495,32 @@ export function registerProfileIpc({
       throw new IpcError(IpcErrorCodes.ValidationFailed, formatIssues(parsed.error.issues));
     }
 
+    const generation = partitionLifecycle.capture();
     const cookie = loginSessions.consume(parsed.data.sessionId);
     if (!cookie) {
-      throw new IpcError(IpcErrorCodes.Unauthorized, '登录会话已过期，请重新登录');
+      throw expiredLoginSessionError();
     }
 
-    return importWithCookie({ cookie, uid: parsed.data.uid });
+    const imported = await partitionLifecycle.runAt(generation, () =>
+      importWithCookie({ cookie, uid: parsed.data.uid, generation })
+    );
+    if (!imported) throw expiredLoginSessionError();
+    return imported;
   });
 
   async function importWithCookie(input: {
     cookie: string;
     uid?: string;
+    generation?: number;
   }): Promise<PersistedProfile> {
+    const assertCurrent = () => {
+      if (input.generation !== undefined && !partitionLifecycle.isCurrent(input.generation)) {
+        throw expiredLoginSessionError();
+      }
+    };
+
     const bind = await miyoushe.fetchRoles(input.cookie);
+    assertCurrent();
     if (!bind.ok || bind.roles.length === 0) {
       throw new IpcError(
         IpcErrorCodes.Unauthorized,
@@ -529,6 +548,7 @@ export function registerProfileIpc({
 
     // Pull full roster (game_record HTTP → calculator sync → bridge).
     const recordResult = await fetchMiyousheRoster(target.gameUid, input.cookie);
+    assertCurrent();
     const miyousheCharacters = recordResult.ok ? recordResult.characters : undefined;
 
     // Pull Enka showcase for precise stats.
@@ -543,6 +563,7 @@ export function registerProfileIpc({
     } catch {
       // Enka miss is OK; miyoushe alone is still useful.
     }
+    assertCurrent();
 
     const merged = mergeProfile({
       enkaCharacters,
@@ -570,6 +591,10 @@ export function registerProfileIpc({
     store.setActive(profile.uid);
     return profile;
   }
+}
+
+function expiredLoginSessionError(): IpcError {
+  return new IpcError(IpcErrorCodes.Unauthorized, '登录会话已过期，请重新登录');
 }
 
 function stripCookieFromBind(bind: BindCookieResult): BindCookieResult {
