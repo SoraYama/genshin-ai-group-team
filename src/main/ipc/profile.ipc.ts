@@ -513,7 +513,12 @@ export function registerProfileIpc({
     if (!parsed.success) {
       throw new IpcError(IpcErrorCodes.ValidationFailed, formatIssues(parsed.error.issues));
     }
-    return importWithCookie({ cookie: parsed.data.cookie, uid: parsed.data.uid });
+    const generation = partitionLifecycle.capture();
+    const imported = await partitionLifecycle.runAt(generation, () =>
+      importWithCookie({ cookie: parsed.data.cookie, uid: parsed.data.uid, generation })
+    );
+    if (!imported) throw staleMiyousheRequestError();
+    return imported;
   });
 
   registerHandler('profile:import-from-session', async (payload) => {
@@ -538,14 +543,15 @@ export function registerProfileIpc({
   async function importWithCookie(input: {
     cookie: string;
     uid?: string;
-    generation?: number;
+    generation: number;
   }): Promise<PersistedProfile> {
     const assertCurrent = () => {
-      if (input.generation !== undefined && !partitionLifecycle.isCurrent(input.generation)) {
-        throw expiredLoginSessionError();
+      if (!partitionLifecycle.isCurrent(input.generation)) {
+        throw staleMiyousheRequestError();
       }
     };
 
+    assertCurrent();
     const bind = await miyoushe.fetchRoles(input.cookie);
     assertCurrent();
     if (!bind.ok || bind.roles.length === 0) {
@@ -569,6 +575,7 @@ export function registerProfileIpc({
     // Cache cookie under every UID this miyoushe account owns BEFORE trying
     // the roster fetch, so the bridge fallback (which reads cookies from the
     // partition) sees the right state.
+    assertCurrent();
     for (const role of bind.roles) {
       rosterSessions.put(role.gameUid, input.cookie);
     }
@@ -614,7 +621,9 @@ export function registerProfileIpc({
       coverage: merged.coverage
     };
 
+    assertCurrent();
     store.upsert(profile);
+    assertCurrent();
     store.setActive(profile.uid);
     return profile;
   }

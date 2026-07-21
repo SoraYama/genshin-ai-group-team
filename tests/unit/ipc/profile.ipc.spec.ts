@@ -240,6 +240,12 @@ async function importFromCookie(): Promise<PersistedProfile> {
   return (await handler({ uid: UID, cookie: COOKIE })) as PersistedProfile;
 }
 
+async function logoutRequest(): Promise<unknown> {
+  const handler = handlers.get('miyoushe:logout');
+  if (!handler) throw new Error('miyoushe:logout handler was not registered');
+  return handler(undefined);
+}
+
 beforeEach(() => {
   handlers.clear();
 });
@@ -678,6 +684,103 @@ describe('miyoushe:login-via-browser device recovery', () => {
     expect(persistedDeviceCookie).not.toHaveBeenCalled();
     expect(deps.rosterSessions.put).toHaveBeenCalledTimes(rosterPutsBeforeLogout);
     expect(deps.rosterSessions.clear).toHaveBeenCalledTimes(2);
+    expect(deps.store.upsert).not.toHaveBeenCalled();
+    expect(deps.store.setActive).not.toHaveBeenCalled();
+  });
+});
+
+describe('profile:import-from-cookie lifecycle', () => {
+  const successfulManualBind = () => ({
+    ok: true as const,
+    roles: [{ gameUid: UID, region: 'cn_gf01', nickname: 'Traveler', level: 60 }]
+  });
+
+  it('drains a manual import stopped at fetchRoles without allowing stale work after logout', async () => {
+    const deps = setup(undefined);
+    const pendingBind = deferred<ReturnType<typeof successfulManualBind>>();
+    deps.miyoushe.fetchRoles.mockReturnValue(pendingBind.promise);
+    const requestGeneration = deps.partitionLifecycle.capture();
+
+    const importPromise = importFromCookie();
+    await vi.waitFor(() => expect(deps.miyoushe.fetchRoles).toHaveBeenCalledOnce());
+    const logoutPromise = logoutRequest();
+    await vi.waitFor(() =>
+      expect(deps.partitionLifecycle.isCurrent(requestGeneration)).toBe(false)
+    );
+    const partitionClearedBeforeBindSettled =
+      deps.loginWindow.clearPersistedCookie.mock.calls.length > 0;
+    pendingBind.resolve(successfulManualBind());
+
+    let importError: unknown;
+    expect(
+      await settlesWithin(
+        Promise.all([
+          importPromise.catch((error: unknown) => {
+            importError = error;
+          }),
+          logoutPromise
+        ])
+      )
+    ).toBe(true);
+    expect(partitionClearedBeforeBindSettled).toBe(false);
+    expect(importError).toMatchObject({ code: 'IPC_UNAUTHORIZED' });
+    expect(JSON.stringify(importError)).not.toContain(COOKIE);
+    expect(deps.rosterSessions.put).not.toHaveBeenCalled();
+    expect(deps.miyousheGameRecord.fetchPlayerIndex).not.toHaveBeenCalled();
+    expect(deps.store.upsert).not.toHaveBeenCalled();
+    expect(deps.store.setActive).not.toHaveBeenCalled();
+  });
+
+  it('does not deadlock or persist device recovery from a stale manual import', async () => {
+    const deps = setup(undefined);
+    const initial5003Reached = deferred<void>();
+    const continueRecovery = deferred<void>();
+    const persistedDeviceCookie = vi.fn().mockResolvedValue(undefined);
+    const guardedWriter = deps.partitionLifecycle.guardCookieWriter({
+      writeDeviceCookies: persistedDeviceCookie
+    });
+    deps.miyoushe.fetchRoles.mockResolvedValue(successfulManualBind());
+    deps.miyousheGameRecord.fetchPlayerIndex.mockImplementation(async () => {
+      initial5003Reached.resolve();
+      await continueRecovery.promise;
+      try {
+        await deps.partitionLifecycle.runCurrent(() =>
+          guardedWriter.writeDeviceCookies({ DEVICEFP: 'stale-manual-fingerprint' })
+        );
+      } catch {
+        // Mirrors GameRecord's non-fatal recovery containment.
+      }
+      return {
+        ok: false,
+        error: { kind: 'captcha-required', retcode: 5003, message: 'risk control' }
+      };
+    });
+    const requestGeneration = deps.partitionLifecycle.capture();
+
+    const importPromise = importFromCookie();
+    await initial5003Reached.promise;
+    const rosterPutsBeforeLogout = deps.rosterSessions.put.mock.calls.length;
+    const logoutPromise = logoutRequest();
+    await vi.waitFor(() =>
+      expect(deps.partitionLifecycle.isCurrent(requestGeneration)).toBe(false)
+    );
+    continueRecovery.resolve();
+
+    let importError: unknown;
+    expect(
+      await settlesWithin(
+        Promise.all([
+          importPromise.catch((error: unknown) => {
+            importError = error;
+          }),
+          logoutPromise
+        ])
+      )
+    ).toBe(true);
+    expect(importError).toMatchObject({ code: 'IPC_UNAUTHORIZED' });
+    expect(JSON.stringify(importError)).not.toContain(COOKIE);
+    expect(persistedDeviceCookie).not.toHaveBeenCalled();
+    expect(deps.rosterSessions.put).toHaveBeenCalledTimes(rosterPutsBeforeLogout);
     expect(deps.store.upsert).not.toHaveBeenCalled();
     expect(deps.store.setActive).not.toHaveBeenCalled();
   });
