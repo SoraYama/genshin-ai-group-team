@@ -241,7 +241,14 @@ export function registerProfileIpc({
 
   registerHandler('miyoushe:login-via-browser', async () => {
     const { generation } = await partitionLifecycle.transition(undefined, {
-      beforeDrain: () => loginWindow.cancelActiveLogin()
+      beforeDrain: () => {
+        loginWindow.cancelActiveLogin();
+        // Acquiring a browser-login generation is the atomic account
+        // replacement boundary. Old credentials never revive if the new
+        // window is later cancelled or fails.
+        loginSessions.clear();
+        rosterSessions.clear();
+      }
     });
     const outcome = await partitionLifecycle.runAt(generation, () => loginWindow.runOnce());
     if (!outcome || !partitionLifecycle.isCurrent(generation)) {
@@ -514,9 +521,10 @@ export function registerProfileIpc({
       throw new IpcError(IpcErrorCodes.ValidationFailed, formatIssues(parsed.error.issues));
     }
     const generation = partitionLifecycle.capture();
-    const imported = await partitionLifecycle.runAt(generation, () =>
-      importWithCookie({ cookie: parsed.data.cookie, uid: parsed.data.uid, generation })
-    );
+    const imported = await partitionLifecycle.runAt(generation, async () => {
+      const cookie = await ensureManualDeviceCookie(generation, parsed.data.cookie);
+      return importWithCookie({ cookie, uid: parsed.data.uid, generation });
+    });
     if (!imported) throw staleMiyousheRequestError();
     return imported;
   });
@@ -626,6 +634,25 @@ export function registerProfileIpc({
     assertCurrent();
     store.setActive(profile.uid);
     return profile;
+  }
+
+  async function ensureManualDeviceCookie(generation: number, cookie: string): Promise<string> {
+    try {
+      const deviceResult = await deviceFp.ensureForSessionAt(generation, cookie, {
+        persistence: 'memory-only'
+      });
+      if (!deviceResult || !partitionLifecycle.isCurrent(generation)) {
+        throw staleMiyousheRequestError();
+      }
+      if (!deviceResult.deviceHash) {
+        throw new IpcError(IpcErrorCodes.UpstreamUnavailable, '设备身份初始化失败，请重试');
+      }
+      return deviceResult.cookie;
+    } catch (error) {
+      if (!partitionLifecycle.isCurrent(generation)) throw staleMiyousheRequestError();
+      if (error instanceof IpcError) throw error;
+      throw new IpcError(IpcErrorCodes.UpstreamUnavailable, '设备身份初始化失败，请重试');
+    }
   }
 }
 

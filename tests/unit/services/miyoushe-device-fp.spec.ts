@@ -283,6 +283,69 @@ describe('MiyousheDeviceFpService', () => {
     expect(result.cookie).toContain(`DEVICEFP_SEED_TIME=${SEED_TIME}`);
   });
 
+  it('keeps a manual device profile memory-only while reusing its identity and cooldown', async () => {
+    let coolingDown = false;
+    const retryAt = NOW + 60_000;
+    const cooldown: DeviceFpCooldown & {
+      inspect: ReturnType<typeof vi.fn>;
+      recordFailure: ReturnType<typeof vi.fn>;
+      clearFailure: ReturnType<typeof vi.fn>;
+    } = {
+      inspect: vi.fn(
+        (_deviceId: string): DeviceFpCooldownInspection =>
+          coolingDown ? { active: true, retryAt, reason: 'upstream' } : { active: false }
+      ),
+      recordFailure: vi.fn(() => {
+        coolingDown = true;
+      }),
+      clearFailure: vi.fn()
+    };
+    const writer = createWriter();
+    const transport = vi.fn<DeviceFpTransport>(async () => validResponse());
+    const service = new MiyousheDeviceFpService({
+      cookieWriter: writer,
+      cooldown,
+      transport,
+      profileDependencies: fixedProfileDependencies(),
+      now: () => NOW
+    });
+
+    const ensured = await service.ensureForSession(
+      'ltoken_v2=manual; ltuid_v2=manual-account; ltmid_v2=manual-member',
+      { persistence: 'memory-only' }
+    );
+    expect(ensured).toMatchObject({
+      ok: true,
+      deviceHash: shortHash(DEVICE_ID),
+      refreshed: true
+    });
+    expect(ensured.cookie).toContain(`_MHYUUID=${DEVICE_ID}`);
+    expect(ensured.cookie).toContain(`DEVICEFP=${NEW_FP}`);
+    expect(transport).toHaveBeenCalledOnce();
+    expect(writer.writeDeviceCookies).not.toHaveBeenCalled();
+
+    const first5003 = await service.recoverFrom5003(ensured.cookie);
+    expect(first5003).toMatchObject({
+      ok: true,
+      deviceHash: shortHash(DEVICE_ID),
+      refreshed: false
+    });
+    service.finishReplay(first5003.cookie, '5003');
+    const second5003 = await service.recoverFrom5003(first5003.cookie);
+
+    expect(second5003).toEqual({
+      ok: false,
+      cookie: first5003.cookie,
+      deviceHash: shortHash(DEVICE_ID),
+      reason: 'cooldown',
+      retryAt
+    });
+    expect(cooldown.inspect).toHaveBeenCalledWith(DEVICE_ID);
+    expect(cooldown.recordFailure).toHaveBeenCalledWith(DEVICE_ID, 'upstream');
+    expect(transport).toHaveBeenCalledOnce();
+    expect(writer.writeDeviceCookies).not.toHaveBeenCalled();
+  });
+
   it('uses an 8-second total deadline and streams the default transport response', async () => {
     const responseText = validResponse().bodyText;
     const streamed = streamingBody([

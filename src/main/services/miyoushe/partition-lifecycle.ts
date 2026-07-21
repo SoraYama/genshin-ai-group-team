@@ -7,7 +7,12 @@ import {
   MiyousheDeviceFpRecoveryStore,
   type DeviceFpRecoveryState
 } from './device-fp-recovery-store.js';
-import type { DeviceFpCookieWriter, DeviceFpResult, MiyousheDeviceFpService } from './device-fp.js';
+import type {
+  DeviceFpCookieWriter,
+  DeviceFpEnsureOptions,
+  DeviceFpResult,
+  MiyousheDeviceFpService
+} from './device-fp.js';
 
 const EMPTY_RECOVERY_STATE = (): DeviceFpRecoveryState => ({
   schemaVersion: 1,
@@ -168,7 +173,11 @@ export class MiyoushePartitionLifecycle {
 
 export interface LifecycleMiyousheDeviceFp extends MiyousheDeviceFpRecovery {
   ensureForSession(cookie: string): Promise<DeviceFpResult>;
-  ensureForSessionAt(generation: number, cookie: string): Promise<DeviceFpResult | undefined>;
+  ensureForSessionAt(
+    generation: number,
+    cookie: string,
+    options?: DeviceFpEnsureOptions
+  ): Promise<DeviceFpResult | undefined>;
 }
 
 export function bindDeviceFpToPartitionLifecycle(
@@ -181,8 +190,8 @@ export function bindDeviceFpToPartitionLifecycle(
   return {
     applyKnownFingerprint: (cookie) => service.applyKnownFingerprint(cookie),
     ensureForSession: (cookie) => lifecycle.runCurrent(() => service.ensureForSession(cookie)),
-    ensureForSessionAt: (generation, cookie) =>
-      lifecycle.runAt(generation, () => service.ensureForSession(cookie)),
+    ensureForSessionAt: (generation, cookie, options) =>
+      lifecycle.runAt(generation, () => service.ensureForSession(cookie, options)),
     recoverFrom5003: (cookie) => lifecycle.runCurrent(() => service.recoverFrom5003(cookie)),
     finishReplay: (cookie, outcome) => service.finishReplay(cookie, outcome)
   };

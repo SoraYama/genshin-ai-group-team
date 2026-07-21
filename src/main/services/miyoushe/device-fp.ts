@@ -46,6 +46,10 @@ export interface DeviceFpCookieWriter {
   writeDeviceCookies(values: Readonly<Record<string, string>>): Promise<void>;
 }
 
+export interface DeviceFpEnsureOptions {
+  persistence?: 'partition' | 'memory-only';
+}
+
 export interface DeviceFpCooldown {
   inspect(deviceId: string): DeviceFpCooldownInspection;
   recordFailure(deviceId: string, reason: DeviceFpFailureKind): void;
@@ -192,6 +196,7 @@ export class MiyousheDeviceFpService {
     string,
     Promise<SharedPreparationResult>
   >();
+  private readonly memoryOnlyProfileKeys = new Set<string>();
 
   constructor(options: {
     cookieWriter: DeviceFpCookieWriter;
@@ -227,13 +232,18 @@ export class MiyousheDeviceFpService {
     return mergeDeviceCookies(cookie, { DEVICEFP: knownFingerprint });
   }
 
-  async ensureForSession(cookie: string): Promise<DeviceFpResult> {
+  async ensureForSession(
+    cookie: string,
+    options: DeviceFpEnsureOptions = {}
+  ): Promise<DeviceFpResult> {
+    const persistence = options.persistence ?? 'partition';
     const originalCookies = parseCookies(cookie);
-    const prepared = await this.prepareProfile(cookie);
+    const prepared = await this.prepareProfile(cookie, persistence);
     if (!prepared.ok) return prepared.result;
 
     const { cookie: preparedCookie, profile, wasComplete } = prepared.value;
     const key = internalProfileKey(profile.deviceId, profile.seedId, profile.seedTime);
+    if (persistence === 'memory-only') this.memoryOnlyProfileKeys.add(key);
     if (wasComplete) {
       const cachedFingerprint = this.latestFingerprintByDevice.get(key);
       this.latestFingerprintByDevice.set(key, profile.deviceFp);
@@ -273,7 +283,10 @@ export class MiyousheDeviceFpService {
 
   async recoverFrom5003(cookie: string): Promise<DeviceFpResult> {
     const appliedCookie = this.applyKnownFingerprint(cookie);
-    const prepared = await this.prepareProfile(appliedCookie);
+    const prepared = await this.prepareProfile(
+      appliedCookie,
+      this.persistenceForCookie(appliedCookie)
+    );
     if (!prepared.ok) return prepared.result;
 
     const { cookie: preparedCookie, profile } = prepared.value;
@@ -311,9 +324,10 @@ export class MiyousheDeviceFpService {
   }
 
   private async prepareProfile(
-    cookie: string
+    cookie: string,
+    persistence: 'partition' | 'memory-only'
   ): Promise<{ ok: true; value: PreparedProfile } | { ok: false; result: DeviceFpResult }> {
-    const shared = await this.prepareStableProfile(cookie);
+    const shared = await this.prepareStableProfile(cookie, persistence);
     let mergedCookie: string;
     try {
       mergedCookie = mergeDeviceCookies(cookie, shared.updates);
@@ -343,18 +357,26 @@ export class MiyousheDeviceFpService {
     };
   }
 
-  private prepareStableProfile(cookie: string): Promise<SharedPreparationResult> {
+  private prepareStableProfile(
+    cookie: string,
+    persistence: 'partition' | 'memory-only'
+  ): Promise<SharedPreparationResult> {
     const cookies = parseCookies(cookie);
     const deviceId = cookies.get('_MHYUUID');
     const needsInitialization =
       !deviceId || !cookies.get('DEVICEFP_SEED_ID') || !cookies.get('DEVICEFP_SEED_TIME');
-    if (!needsInitialization) return this.createStableProfile(cookie, false);
+    if (!needsInitialization) return this.createStableProfile(cookie, false, persistence);
 
-    const key = deviceId ? fullDeviceHash(deviceId) : PARTITION_PREPARATION_KEY;
+    const identityKey = deviceId
+      ? fullDeviceHash(deviceId)
+      : persistence === 'partition'
+        ? PARTITION_PREPARATION_KEY
+        : fullDeviceHash(cookie);
+    const key = `${persistence}:${identityKey}`;
     const current = this.preparationInFlightByIdentity.get(key);
     if (current) return current;
 
-    const pending = this.createStableProfile(cookie, true).finally(() => {
+    const pending = this.createStableProfile(cookie, true, persistence).finally(() => {
       if (this.preparationInFlightByIdentity.get(key) === pending) {
         this.preparationInFlightByIdentity.delete(key);
       }
@@ -365,7 +387,8 @@ export class MiyousheDeviceFpService {
 
   private async createStableProfile(
     cookie: string,
-    includeFullStableUpdates: boolean
+    includeFullStableUpdates: boolean,
+    persistence: 'partition' | 'memory-only'
   ): Promise<SharedPreparationResult> {
     const knownDeviceId = parseCookies(cookie).get('_MHYUUID');
     let ensured: ReturnType<typeof ensureStableDeviceProfile>;
@@ -399,7 +422,7 @@ export class MiyousheDeviceFpService {
         }
       : ensured.updates;
     const hasStableUpdates = Object.keys(updates).length > 0;
-    if (hasStableUpdates) {
+    if (hasStableUpdates && persistence === 'partition') {
       try {
         await this.cookieWriter.writeDeviceCookies(updates);
       } catch {
@@ -486,11 +509,13 @@ export class MiyousheDeviceFpService {
     }
 
     return this.enqueueFingerprintMutation(key, async () => {
-      try {
-        await this.cookieWriter.writeDeviceCookies({ DEVICEFP: fetched.deviceFp });
-      } catch {
-        this.safeRecordFailure(profile.deviceId, 'persist');
-        return { ok: false, reason: 'persist' };
+      if (!this.memoryOnlyProfileKeys.has(key)) {
+        try {
+          await this.cookieWriter.writeDeviceCookies({ DEVICEFP: fetched.deviceFp });
+        } catch {
+          this.safeRecordFailure(profile.deviceId, 'persist');
+          return { ok: false, reason: 'persist' };
+        }
       }
 
       this.latestFingerprintByDevice.set(key, fetched.deviceFp);
@@ -516,6 +541,9 @@ export class MiyousheDeviceFpService {
       async () => {
         let fingerprintToPersist =
           this.latestFingerprintByDevice.get(profileKey) ?? requestedFingerprint;
+        if (this.memoryOnlyProfileKeys.has(profileKey)) {
+          return { ok: true, deviceFp: fingerprintToPersist };
+        }
         while (true) {
           try {
             await this.cookieWriter.writeDeviceCookies({ DEVICEFP: fingerprintToPersist });
@@ -538,6 +566,17 @@ export class MiyousheDeviceFpService {
     });
     this.restoreInFlightByProfile.set(restoreKey, pending);
     return pending;
+  }
+
+  private persistenceForCookie(cookie: string): 'partition' | 'memory-only' {
+    const cookies = parseCookies(cookie);
+    const deviceId = cookies.get('_MHYUUID');
+    const seedId = cookies.get('DEVICEFP_SEED_ID');
+    const seedTime = cookies.get('DEVICEFP_SEED_TIME');
+    if (!deviceId || !seedId || !seedTime) return 'partition';
+    return this.memoryOnlyProfileKeys.has(internalProfileKey(deviceId, seedId, seedTime))
+      ? 'memory-only'
+      : 'partition';
   }
 
   private enqueueFingerprintMutation<T>(

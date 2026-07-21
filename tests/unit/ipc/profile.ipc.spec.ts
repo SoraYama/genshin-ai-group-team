@@ -255,6 +255,31 @@ afterEach(() => {
 });
 
 describe('miyoushe:login-via-browser device recovery', () => {
+  function makeSessionStoresStateful(deps: ReturnType<typeof setup>) {
+    const opaqueSessions = new Map<string, string>();
+    const rosterCookies = new Map<string, string>();
+    let nextSessionId = 0;
+    deps.loginSessions.put.mockImplementation((cookie: string) => {
+      nextSessionId += 1;
+      const sessionId = `login-session-${nextSessionId}`;
+      opaqueSessions.set(sessionId, cookie);
+      return sessionId;
+    });
+    deps.loginSessions.consume.mockImplementation((sessionId: string) => {
+      const cookie = opaqueSessions.get(sessionId);
+      opaqueSessions.delete(sessionId);
+      return cookie;
+    });
+    deps.loginSessions.clear.mockImplementation(() => opaqueSessions.clear());
+    deps.rosterSessions.put.mockImplementation((uid: string, cookie: string) => {
+      rosterCookies.set(uid, cookie);
+    });
+    deps.rosterSessions.peek.mockImplementation((uid: string) => rosterCookies.get(uid));
+    deps.rosterSessions.hasCookie.mockImplementation((uid: string) => rosterCookies.has(uid));
+    deps.rosterSessions.clear.mockImplementation(() => rosterCookies.clear());
+    return { opaqueSessions, rosterCookies };
+  }
+
   function successfulBind() {
     return {
       ok: true as const,
@@ -543,6 +568,76 @@ describe('miyoushe:login-via-browser device recovery', () => {
     await expect(secondLoginPromise).resolves.toEqual({ ok: false, reason: 'cancelled' });
   });
 
+  it('atomically replaces account A sessions when account B browser login starts', async () => {
+    const deps = setup(undefined);
+    const { opaqueSessions, rosterCookies } = makeSessionStoresStateful(deps);
+    const accountACookie = 'ltoken_v2=account-a; ltuid_v2=account-a; ltmid_v2=member-a';
+    const accountBCookie = 'ltoken_v2=account-b; ltuid_v2=account-b; ltmid_v2=member-b';
+    deps.loginWindow.runOnce
+      .mockResolvedValueOnce({ ok: true, cookie: accountACookie })
+      .mockResolvedValueOnce({ ok: true, cookie: accountBCookie });
+    deps.miyoushe.fetchRoles.mockImplementation(async (cookie: string) => ({
+      ok: true as const,
+      roles: [
+        cookie === accountACookie
+          ? { gameUid: UID, region: 'cn_gf01', nickname: 'Account A', level: 60 }
+          : { gameUid: SECOND_UID, region: 'cn_gf01', nickname: 'Account B', level: 59 }
+      ]
+    }));
+
+    const accountA = (await loginViaBrowser()) as { ok: true; sessionId: string };
+    const accountB = (await loginViaBrowser()) as { ok: true; sessionId: string };
+
+    expect(opaqueSessions.has(accountA.sessionId)).toBe(false);
+    expect(opaqueSessions.has(accountB.sessionId)).toBe(true);
+    expect(rosterCookies.has(UID)).toBe(false);
+    expect(rosterCookies.get(SECOND_UID)).toBe(accountBCookie);
+    await expect(importFromSession(accountA.sessionId)).rejects.toMatchObject({
+      code: 'IPC_UNAUTHORIZED'
+    });
+
+    deps.miyousheGameRecord.fetchPlayerIndex.mockResolvedValue({
+      ok: true,
+      data: { totalCharacters: 2 }
+    });
+    deps.miyousheGameRecord.fetchDetailedRoster.mockResolvedValue({
+      ok: true,
+      data: {
+        characters: [miyousheCharacter(1), miyousheCharacter(2)],
+        coverage: fullCoverageForTwo
+      }
+    });
+    const importedB = (await importFromSession(accountB.sessionId)) as PersistedProfile;
+    expect(importedB.uid).toBe(SECOND_UID);
+    expect(deps.miyousheGameRecord.fetchPlayerIndex).toHaveBeenCalledWith(
+      SECOND_UID,
+      accountBCookie
+    );
+  });
+
+  it('keeps the old account revoked when its replacement login is cancelled', async () => {
+    const deps = setup(undefined);
+    const { opaqueSessions, rosterCookies } = makeSessionStoresStateful(deps);
+    const accountACookie = 'ltoken_v2=account-a; ltuid_v2=account-a; ltmid_v2=member-a';
+    deps.loginWindow.runOnce
+      .mockResolvedValueOnce({ ok: true, cookie: accountACookie })
+      .mockResolvedValueOnce({ ok: false, reason: 'cancelled' });
+    deps.miyoushe.fetchRoles.mockResolvedValue({
+      ok: true,
+      roles: [{ gameUid: UID, region: 'cn_gf01', nickname: 'Account A', level: 60 }]
+    });
+
+    const accountA = (await loginViaBrowser()) as { ok: true; sessionId: string };
+    const replacement = await loginViaBrowser();
+
+    expect(replacement).toEqual({ ok: false, reason: 'cancelled' });
+    expect(opaqueSessions.size).toBe(0);
+    expect(rosterCookies.size).toBe(0);
+    await expect(importFromSession(accountA.sessionId)).rejects.toMatchObject({
+      code: 'IPC_UNAUTHORIZED'
+    });
+  });
+
   it('invalidates every opaque login session when logging out', async () => {
     const deps = setup(undefined);
     deps.loginWindow.runOnce.mockResolvedValue({ ok: true, cookie: COOKIE });
@@ -550,6 +645,7 @@ describe('miyoushe:login-via-browser device recovery', () => {
 
     const loginResult = (await loginViaBrowser()) as { ok: true; sessionId: string };
     deps.miyoushe.fetchRoles.mockClear();
+    deps.loginSessions.clear.mockClear();
 
     await logout();
 
@@ -566,6 +662,7 @@ describe('miyoushe:login-via-browser device recovery', () => {
     deps.miyoushe.fetchRoles.mockResolvedValue(successfulBind());
     const loginResult = (await loginViaBrowser()) as { ok: true; sessionId: string };
     deps.miyoushe.fetchRoles.mockReset();
+    deps.loginSessions.clear.mockClear();
 
     const releaseOlderOperation = deferred<void>();
     const olderOperation = deps.partitionLifecycle.runAt(
@@ -693,6 +790,64 @@ describe('profile:import-from-cookie lifecycle', () => {
   const successfulManualBind = () => ({
     ok: true as const,
     roles: [{ gameUid: UID, region: 'cn_gf01', nickname: 'Traveler', level: 60 }]
+  });
+
+  it('ensures one memory-only device identity and propagates its final Cookie', async () => {
+    const deps = setup(undefined);
+    const generation = deps.partitionLifecycle.capture();
+    deps.deviceFp.ensureForSessionAt.mockResolvedValue({
+      ok: true,
+      cookie: COMPLETED_COOKIE,
+      deviceHash: '0123456789ab',
+      refreshed: true
+    });
+    deps.miyoushe.fetchRoles.mockResolvedValue(successfulManualBind());
+    deps.miyousheGameRecord.fetchPlayerIndex.mockResolvedValue({
+      ok: true,
+      data: { totalCharacters: 2 }
+    });
+    deps.miyousheGameRecord.fetchDetailedRoster.mockResolvedValue({
+      ok: true,
+      data: {
+        characters: [miyousheCharacter(1), miyousheCharacter(2)],
+        coverage: fullCoverageForTwo
+      }
+    });
+
+    await importFromCookie();
+
+    expect(deps.deviceFp.ensureForSessionAt).toHaveBeenCalledOnce();
+    expect(deps.deviceFp.ensureForSessionAt).toHaveBeenCalledWith(generation, COOKIE, {
+      persistence: 'memory-only'
+    });
+    expect(deps.miyoushe.fetchRoles).toHaveBeenCalledWith(COMPLETED_COOKIE);
+    expect(deps.rosterSessions.put).toHaveBeenCalledWith(UID, COMPLETED_COOKIE);
+    expect(deps.miyousheGameRecord.fetchPlayerIndex).toHaveBeenCalledWith(UID, COMPLETED_COOKIE);
+    expect(deps.miyousheGameRecord.fetchDetailedRoster).toHaveBeenCalledWith(
+      UID,
+      COMPLETED_COOKIE,
+      { expectedOwnedCount: 2 }
+    );
+  });
+
+  it('rejects a manual import when device preparation cannot establish a stable identity', async () => {
+    const deps = setup(undefined);
+    deps.deviceFp.ensureForSessionAt.mockResolvedValue({
+      ok: false,
+      cookie: COOKIE,
+      reason: 'profile-invalid'
+    });
+    deps.miyoushe.fetchRoles.mockResolvedValue(successfulManualBind());
+
+    let importError: unknown;
+    await importFromCookie().catch((error: unknown) => {
+      importError = error;
+    });
+
+    expect(importError).toMatchObject({ code: 'IPC_UPSTREAM_UNAVAILABLE' });
+    expect(JSON.stringify(importError)).not.toContain(COOKIE);
+    expect(deps.miyoushe.fetchRoles).not.toHaveBeenCalled();
+    expect(deps.rosterSessions.put).not.toHaveBeenCalled();
   });
 
   it('drains a manual import stopped at fetchRoles without allowing stale work after logout', async () => {
