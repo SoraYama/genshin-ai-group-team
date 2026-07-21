@@ -17,6 +17,7 @@ const DEVICE_FP_ENDPOINT = 'https://public-data-api.mihoyo.com/device-fp/api/get
 const REQUEST_TIMEOUT_MS = 8_000;
 const MAX_RESPONSE_BODY_BYTES = 64 * 1024;
 const DEFAULT_RECENT_REFRESH_MS = 5 * 60_000;
+const PARTITION_PREPARATION_KEY = 'partition';
 const DEVICE_FP_PATTERN = /^[A-Za-z0-9]{10,64}$/;
 const REQUIRED_DEVICE_COOKIES = [
   '_MHYUUID',
@@ -181,7 +182,7 @@ export class MiyousheDeviceFpService {
     { deviceFp: string; refreshedAt: number }
   >();
   private readonly inFlightByDevice = new Map<string, Promise<SharedFingerprintResult>>();
-  private readonly preparationInFlightByCookie = new Map<
+  private readonly preparationInFlightByIdentity = new Map<
     string,
     Promise<SharedPreparationResult>
   >();
@@ -221,22 +222,46 @@ export class MiyousheDeviceFpService {
   }
 
   async ensureForSession(cookie: string): Promise<DeviceFpResult> {
-    const appliedCookie = this.applyKnownFingerprint(cookie);
-    const prepared = await this.prepareProfile(appliedCookie);
+    const originalCookies = parseCookies(cookie);
+    const prepared = await this.prepareProfile(cookie);
     if (!prepared.ok) return prepared.result;
 
     const { cookie: preparedCookie, profile, wasComplete } = prepared.value;
+    const key = internalProfileKey(profile.deviceId, profile.seedId, profile.seedTime);
     if (wasComplete) {
-      this.latestFingerprintByDevice.set(
-        internalProfileKey(profile.deviceId, profile.seedId, profile.seedTime),
-        profile.deviceFp
-      );
+      const cachedFingerprint = this.latestFingerprintByDevice.get(key);
+      this.latestFingerprintByDevice.set(key, profile.deviceFp);
+      if (cachedFingerprint !== undefined && cachedFingerprint !== profile.deviceFp) {
+        this.recentRefreshByDevice.delete(key);
+      }
       return {
         ok: true,
         cookie: preparedCookie,
         deviceHash: publicDeviceHash(profile.deviceId),
         refreshed: false
       };
+    }
+
+    const hasOriginalStableIdentity =
+      Boolean(originalCookies.get('_MHYUUID')) &&
+      Boolean(originalCookies.get('DEVICEFP_SEED_ID')) &&
+      Boolean(originalCookies.get('DEVICEFP_SEED_TIME'));
+    if (hasOriginalStableIdentity && !originalCookies.get('DEVICEFP')) {
+      const knownFingerprint = this.latestFingerprintByDevice.get(key);
+      if (knownFingerprint) {
+        try {
+          await this.cookieWriter.writeDeviceCookies({ DEVICEFP: knownFingerprint });
+        } catch {
+          this.safeRecordFailure(profile.deviceId, 'persist');
+          return failureResult(preparedCookie, 'persist', profile.deviceId);
+        }
+        return {
+          ok: true,
+          cookie: mergeDeviceCookies(preparedCookie, { DEVICEFP: knownFingerprint }),
+          deviceHash: publicDeviceHash(profile.deviceId),
+          refreshed: false
+        };
+      }
     }
 
     const cooldownResult = this.inspectCooldown(preparedCookie, profile.deviceId);
@@ -317,20 +342,29 @@ export class MiyousheDeviceFpService {
   }
 
   private prepareStableProfile(cookie: string): Promise<SharedPreparationResult> {
-    const key = fullDeviceHash(cookie);
-    const current = this.preparationInFlightByCookie.get(key);
+    const cookies = parseCookies(cookie);
+    const deviceId = cookies.get('_MHYUUID');
+    const needsInitialization =
+      !deviceId || !cookies.get('DEVICEFP_SEED_ID') || !cookies.get('DEVICEFP_SEED_TIME');
+    if (!needsInitialization) return this.createStableProfile(cookie, false);
+
+    const key = deviceId ? fullDeviceHash(deviceId) : PARTITION_PREPARATION_KEY;
+    const current = this.preparationInFlightByIdentity.get(key);
     if (current) return current;
 
-    const pending = this.createStableProfile(cookie).finally(() => {
-      if (this.preparationInFlightByCookie.get(key) === pending) {
-        this.preparationInFlightByCookie.delete(key);
+    const pending = this.createStableProfile(cookie, true).finally(() => {
+      if (this.preparationInFlightByIdentity.get(key) === pending) {
+        this.preparationInFlightByIdentity.delete(key);
       }
     });
-    this.preparationInFlightByCookie.set(key, pending);
+    this.preparationInFlightByIdentity.set(key, pending);
     return pending;
   }
 
-  private async createStableProfile(cookie: string): Promise<SharedPreparationResult> {
+  private async createStableProfile(
+    cookie: string,
+    includeFullStableUpdates: boolean
+  ): Promise<SharedPreparationResult> {
     const knownDeviceId = parseCookies(cookie).get('_MHYUUID');
     let ensured: ReturnType<typeof ensureStableDeviceProfile>;
     let recordableDeviceId = knownDeviceId;
@@ -355,17 +389,24 @@ export class MiyousheDeviceFpService {
       };
     }
 
-    const hasStableUpdates = Object.keys(ensured.updates).length > 0;
+    const updates: DeviceCookieUpdates = includeFullStableUpdates
+      ? {
+          _MHYUUID: ensured.profile.deviceId,
+          DEVICEFP_SEED_ID: ensured.profile.seedId,
+          DEVICEFP_SEED_TIME: ensured.profile.seedTime
+        }
+      : ensured.updates;
+    const hasStableUpdates = Object.keys(updates).length > 0;
     if (hasStableUpdates) {
       try {
-        await this.cookieWriter.writeDeviceCookies(ensured.updates);
+        await this.cookieWriter.writeDeviceCookies(updates);
       } catch {
         this.safeRecordFailure(ensured.profile.deviceId, 'persist');
         return {
           ok: false,
           reason: 'persist',
           deviceId: ensured.profile.deviceId,
-          updates: ensured.updates
+          updates
         };
       }
     }
@@ -373,7 +414,7 @@ export class MiyousheDeviceFpService {
     return {
       ok: true,
       profile: ensured.profile,
-      updates: ensured.updates
+      updates
     };
   }
 

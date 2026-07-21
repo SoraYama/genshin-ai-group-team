@@ -26,6 +26,7 @@ const SEED_TIME = String(NOW);
 const OLD_FP = 'OLDFP1234567';
 const NEW_FP = 'NEWFP1234567890';
 const SECOND_FP = 'SECOND1234567890';
+const THIRD_FP = 'THIRDFP12345678';
 
 function shortHash(value: string): string {
   return createHash('sha256').update(value).digest('hex').slice(0, 12);
@@ -175,8 +176,16 @@ describe('MiyousheDeviceFpService', () => {
 
     const result = await service.ensureForSession(cookie);
 
-    expect(events).toEqual(['write:_MHYUUID', 'transport', 'write:DEVICEFP']);
-    expect(writer.writeDeviceCookies).toHaveBeenNthCalledWith(1, { _MHYUUID: DEVICE_ID });
+    expect(events).toEqual([
+      'write:_MHYUUID,DEVICEFP_SEED_ID,DEVICEFP_SEED_TIME',
+      'transport',
+      'write:DEVICEFP'
+    ]);
+    expect(writer.writeDeviceCookies).toHaveBeenNthCalledWith(1, {
+      _MHYUUID: DEVICE_ID,
+      DEVICEFP_SEED_ID: 'seed',
+      DEVICEFP_SEED_TIME: '1'
+    });
     expect(writer.writeDeviceCookies).toHaveBeenNthCalledWith(2, { DEVICEFP: NEW_FP });
     expect(result).toMatchObject({
       ok: true,
@@ -734,6 +743,124 @@ describe('MiyousheDeviceFpService', () => {
     expect(second.cookie).toContain('_MHYUUID=generated-device-1');
   });
 
+  it('shares missing seed initialization across different auth Cookies for one device', async () => {
+    let resolveStableWrite: (() => void) | undefined;
+    const stableWriteGate = new Promise<void>((resolve) => {
+      resolveStableWrite = resolve;
+    });
+    const writer: DeviceFpCookieWriter & {
+      writeDeviceCookies: ReturnType<typeof vi.fn>;
+    } = {
+      writeDeviceCookies: vi.fn(async (updates: Readonly<Record<string, string>>) => {
+        if (!updates.DEVICEFP) await stableWriteGate;
+      })
+    };
+    const randomHex = vi
+      .fn<() => string>()
+      .mockReturnValueOnce('generated-seed-1')
+      .mockReturnValueOnce('generated-seed-2');
+    const profileNow = vi.fn(() => NOW);
+    const profileDependencies: DeviceProfileDependencies = {
+      now: profileNow,
+      randomUuid: vi.fn(() => {
+        throw new Error('existing device ID must be reused');
+      }),
+      randomHex
+    };
+    const transport = vi.fn<DeviceFpTransport>(async () => validResponse());
+    const service = new MiyousheDeviceFpService({
+      cookieWriter: writer,
+      cooldown: createCooldown(),
+      transport,
+      profileDependencies
+    });
+    const firstCookie = `ltoken_v2=account-a-secret; _MHYUUID=${DEVICE_ID}; DEVICEFP=${OLD_FP}`;
+    const secondCookie = `ltoken_v2=account-b-secret; _MHYUUID=${DEVICE_ID}; DEVICEFP=${OLD_FP}`;
+
+    const firstPromise = service.ensureForSession(firstCookie);
+    const secondPromise = service.ensureForSession(secondCookie);
+    await vi.waitFor(() => expect(writer.writeDeviceCookies).toHaveBeenCalled());
+    resolveStableWrite?.();
+    const [first, second] = await Promise.all([firstPromise, secondPromise]);
+
+    expect(randomHex).toHaveBeenCalledTimes(1);
+    expect(profileNow).toHaveBeenCalledTimes(1);
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(writer.writeDeviceCookies.mock.calls).toEqual([
+      [
+        {
+          _MHYUUID: DEVICE_ID,
+          DEVICEFP_SEED_ID: 'generated-seed-1',
+          DEVICEFP_SEED_TIME: SEED_TIME
+        }
+      ],
+      [{ DEVICEFP: NEW_FP }]
+    ]);
+    expect(first.cookie).toContain('ltoken_v2=account-a-secret');
+    expect(second.cookie).toContain('ltoken_v2=account-b-secret');
+    expect(first.cookie).toContain('DEVICEFP_SEED_ID=generated-seed-1');
+    expect(second.cookie).toContain('DEVICEFP_SEED_ID=generated-seed-1');
+  });
+
+  it('uses one partition initialization across different auth Cookies without a device ID', async () => {
+    let resolveStableWrite: (() => void) | undefined;
+    const stableWriteGate = new Promise<void>((resolve) => {
+      resolveStableWrite = resolve;
+    });
+    const writer: DeviceFpCookieWriter & {
+      writeDeviceCookies: ReturnType<typeof vi.fn>;
+    } = {
+      writeDeviceCookies: vi.fn(async (updates: Readonly<Record<string, string>>) => {
+        if (!updates.DEVICEFP) await stableWriteGate;
+      })
+    };
+    const randomUuid = vi
+      .fn<() => string>()
+      .mockReturnValueOnce('generated-device-1')
+      .mockReturnValueOnce('generated-device-2');
+    const randomHex = vi
+      .fn<() => string>()
+      .mockReturnValueOnce('generated-seed-1')
+      .mockReturnValueOnce('generated-seed-2');
+    const profileNow = vi.fn(() => NOW);
+    const transport = vi.fn<DeviceFpTransport>(async () => validResponse());
+    const service = new MiyousheDeviceFpService({
+      cookieWriter: writer,
+      cooldown: createCooldown(),
+      transport,
+      profileDependencies: {
+        now: profileNow,
+        randomUuid,
+        randomHex
+      }
+    });
+
+    const firstPromise = service.ensureForSession('ltoken_v2=account-a-secret');
+    const secondPromise = service.ensureForSession('ltoken_v2=account-b-secret');
+    await vi.waitFor(() => expect(writer.writeDeviceCookies).toHaveBeenCalled());
+    resolveStableWrite?.();
+    const [first, second] = await Promise.all([firstPromise, secondPromise]);
+
+    expect(randomUuid).toHaveBeenCalledTimes(1);
+    expect(randomHex).toHaveBeenCalledTimes(1);
+    expect(profileNow).toHaveBeenCalledTimes(1);
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(writer.writeDeviceCookies.mock.calls).toEqual([
+      [
+        {
+          _MHYUUID: 'generated-device-1',
+          DEVICEFP_SEED_ID: 'generated-seed-1',
+          DEVICEFP_SEED_TIME: SEED_TIME
+        }
+      ],
+      [{ DEVICEFP: NEW_FP }]
+    ]);
+    expect(first.cookie).toContain('ltoken_v2=account-a-secret');
+    expect(second.cookie).toContain('ltoken_v2=account-b-secret');
+    expect(first.cookie).toContain('_MHYUUID=generated-device-1');
+    expect(second.cookie).toContain('_MHYUUID=generated-device-1');
+  });
+
   it('does not single-flight fingerprints across different seeds on the same device ID', async () => {
     let releaseTransport: (() => void) | undefined;
     const transportGate = new Promise<void>((resolve) => {
@@ -935,6 +1062,108 @@ describe('MiyousheDeviceFpService', () => {
     expect(recovered).toMatchObject({ ok: true, refreshed: true });
     expect(recovered.cookie).toContain(`DEVICEFP=${SECOND_FP}`);
     expect(transport).toHaveBeenCalledTimes(2);
+  });
+
+  it('treats a complete persisted fingerprint as authoritative over cached and recent values', async () => {
+    const transport = vi
+      .fn<DeviceFpTransport>()
+      .mockResolvedValueOnce(validResponse(NEW_FP))
+      .mockResolvedValueOnce(validResponse(THIRD_FP));
+    const writer = createWriter();
+    const cooldown = createCooldown();
+    const service = new MiyousheDeviceFpService({
+      cookieWriter: writer,
+      cooldown,
+      transport,
+      now: () => NOW
+    });
+    const cookieWithoutFp = [
+      'ltoken_v2=auth-token',
+      `_MHYUUID=${DEVICE_ID}`,
+      `DEVICEFP_SEED_ID=${SEED_ID}`,
+      `DEVICEFP_SEED_TIME=${SEED_TIME}`
+    ].join('; ');
+    await service.ensureForSession(cookieWithoutFp);
+    const persistedCookie = completeCookie('auth-token', SECOND_FP);
+
+    const accepted = await service.ensureForSession(persistedCookie);
+
+    expect(accepted).toEqual({
+      ok: true,
+      cookie: persistedCookie,
+      deviceHash: shortHash(DEVICE_ID),
+      refreshed: false
+    });
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(service.applyKnownFingerprint(completeCookie('auth-token', OLD_FP))).toBe(
+      persistedCookie
+    );
+
+    const recovered = await service.recoverFrom5003(persistedCookie);
+    expect(recovered).toMatchObject({ ok: true, refreshed: true });
+    expect(recovered.cookie).toContain(`DEVICEFP=${THIRD_FP}`);
+    expect(transport).toHaveBeenCalledTimes(2);
+  });
+
+  it('restores a known fingerprint to persistent cookies without another getFp request', async () => {
+    const transport = vi.fn<DeviceFpTransport>(async () => validResponse(NEW_FP));
+    const writer = createWriter();
+    const cooldown = createCooldown();
+    const service = new MiyousheDeviceFpService({ cookieWriter: writer, cooldown, transport });
+    const cookieWithoutFp = [
+      'ltoken_v2=auth-token',
+      `_MHYUUID=${DEVICE_ID}`,
+      `DEVICEFP_SEED_ID=${SEED_ID}`,
+      `DEVICEFP_SEED_TIME=${SEED_TIME}`
+    ].join('; ');
+    await service.ensureForSession(cookieWithoutFp);
+    writer.writeDeviceCookies.mockClear();
+
+    const restored = await service.ensureForSession(cookieWithoutFp);
+
+    expect(restored).toMatchObject({ ok: true, refreshed: false });
+    expect(restored.cookie).toContain('ltoken_v2=auth-token');
+    expect(restored.cookie).toContain(`DEVICEFP=${NEW_FP}`);
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(writer.writeDeviceCookies).toHaveBeenCalledTimes(1);
+    expect(writer.writeDeviceCookies).toHaveBeenCalledWith({ DEVICEFP: NEW_FP });
+  });
+
+  it('classifies failure to restore a known persisted fingerprint as persist', async () => {
+    let rejectWrites = false;
+    const writer: DeviceFpCookieWriter & {
+      writeDeviceCookies: ReturnType<typeof vi.fn>;
+    } = {
+      writeDeviceCookies: vi.fn(async () => {
+        if (rejectWrites) throw new Error('private-restore-error');
+      })
+    };
+    const transport = vi.fn<DeviceFpTransport>(async () => validResponse(NEW_FP));
+    const cooldown = createCooldown();
+    const service = new MiyousheDeviceFpService({ cookieWriter: writer, cooldown, transport });
+    const cookieWithoutFp = [
+      'ltoken_v2=auth-token',
+      `_MHYUUID=${DEVICE_ID}`,
+      `DEVICEFP_SEED_ID=${SEED_ID}`,
+      `DEVICEFP_SEED_TIME=${SEED_TIME}`
+    ].join('; ');
+    await service.ensureForSession(cookieWithoutFp);
+    rejectWrites = true;
+    writer.writeDeviceCookies.mockClear();
+
+    const result = await service.ensureForSession(cookieWithoutFp);
+
+    expect(result).toEqual({
+      ok: false,
+      cookie: cookieWithoutFp,
+      deviceHash: shortHash(DEVICE_ID),
+      reason: 'persist'
+    });
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(writer.writeDeviceCookies).toHaveBeenCalledTimes(1);
+    expect(writer.writeDeviceCookies).toHaveBeenCalledWith({ DEVICEFP: NEW_FP });
+    expect(cooldown.recordFailure).toHaveBeenCalledWith(DEVICE_ID, 'persist');
+    expect(JSON.stringify(result)).not.toContain('private-restore-error');
   });
 
   it('overwrites a stale known-device fingerprint but leaves unknown or ID-less Cookies unchanged', async () => {
