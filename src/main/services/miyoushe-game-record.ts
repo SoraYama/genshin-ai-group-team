@@ -15,6 +15,7 @@ import {
   MIYOUSHE_RECORD_TOOL_VERSION,
   signDsV2
 } from './miyoushe/ds-token.js';
+import type { DeviceFpFailureKind } from './miyoushe/device-fp-recovery-store.js';
 import type { DeviceFpResult } from './miyoushe/device-fp.js';
 import { MIYOUSHE_UA } from './miyoushe-client.js';
 
@@ -66,7 +67,13 @@ export interface MiyousheGameRecordClientOptions {
   userAgent?: string;
   browserTransport?: MiyousheBrowserTransport;
   deviceFp?: MiyousheDeviceFpRecovery;
+  onDeviceRecoveryEvent?: (event: MiyousheDeviceRecoveryEvent) => void;
 }
+
+export type MiyousheDeviceRecoveryEvent =
+  | { phase: 'detected'; retcode: 5003 }
+  | { phase: 'skipped'; reason: DeviceFpFailureKind | 'cooldown'; retryAt?: number }
+  | { phase: 'replayed'; final: 'success' | '5003' | 'other-error' };
 
 export interface MiyousheDeviceFpRecovery {
   applyKnownFingerprint(cookie: string): string;
@@ -555,6 +562,7 @@ export class MiyousheGameRecordClient {
   private readonly userAgent: string;
   private readonly browserTransport?: MiyousheBrowserTransport;
   private readonly deviceFp?: MiyousheDeviceFpRecovery;
+  private readonly onDeviceRecoveryEvent?: (event: MiyousheDeviceRecoveryEvent) => void;
 
   constructor(options: MiyousheGameRecordClientOptions = {}) {
     this.baseUrlCn = options.baseUrlCn ?? DEFAULT_BASE_CN;
@@ -563,6 +571,15 @@ export class MiyousheGameRecordClient {
     this.userAgent = options.userAgent ?? MIYOUSHE_UA;
     this.browserTransport = options.browserTransport;
     this.deviceFp = options.deviceFp;
+    this.onDeviceRecoveryEvent = options.onDeviceRecoveryEvent;
+  }
+
+  private emitDeviceRecoveryEvent(event: MiyousheDeviceRecoveryEvent): void {
+    try {
+      this.onDeviceRecoveryEvent?.(event);
+    } catch {
+      // Diagnostics must never alter the request or recovery result.
+    }
   }
 
   /**
@@ -983,13 +1000,21 @@ export class MiyousheGameRecordClient {
         !useBrowserTransport &&
         !deviceRecoveryAttempted
       ) {
+        this.emitDeviceRecoveryEvent({ phase: 'detected', retcode: 5003 });
         let recovered: DeviceFpResult;
         try {
           recovered = await this.deviceFp.recoverFrom5003(effectiveCookie);
         } catch {
           return { ok: false, error: classified };
         }
-        if (!recovered.ok) return { ok: false, error: classified };
+        if (!recovered.ok) {
+          this.emitDeviceRecoveryEvent({
+            phase: 'skipped',
+            reason: recovered.reason,
+            ...(recovered.retryAt === undefined ? {} : { retryAt: recovered.retryAt })
+          });
+          return { ok: false, error: classified };
+        }
 
         let replay: MiyousheFetchResult<T>;
         try {
@@ -1016,6 +1041,7 @@ export class MiyousheGameRecordClient {
         } catch {
           // Third-party replay bookkeeping must not change the request result.
         }
+        this.emitDeviceRecoveryEvent({ phase: 'replayed', final: outcome });
         return replay;
       }
 

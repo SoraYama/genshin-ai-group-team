@@ -188,6 +188,105 @@ describe('device fingerprint application boundaries', () => {
 });
 
 describe('CN 5003 device fingerprint recovery', () => {
+  it('emits only sanitized detected and replayed events for a successful recovery', async () => {
+    const { MiyousheGameRecordClient } =
+      await import('../../../src/main/services/miyoushe-game-record.js');
+    requestMock.mockResolvedValueOnce(mockJson(200, { retcode: 5003, message: 'secret upstream' }));
+    const browserTransport = vi.fn().mockResolvedValue(mockBrowserJson(200, indexSuccess));
+    const deviceFp = {
+      applyKnownFingerprint: vi.fn((cookie: string) => cookie),
+      recoverFrom5003: vi.fn(async () => ({
+        ok: true as const,
+        cookie: NEW_COOKIE,
+        deviceHash: 'private-device-hash',
+        refreshed: true
+      })),
+      finishReplay: vi.fn()
+    };
+    const events: unknown[] = [];
+
+    const result = await new MiyousheGameRecordClient({
+      browserTransport,
+      deviceFp,
+      onDeviceRecoveryEvent: (event: unknown) => events.push(event)
+    }).ping('100000001', OLD_COOKIE);
+
+    expect(result.ok).toBe(true);
+    expect(events).toEqual([
+      { phase: 'detected', retcode: 5003 },
+      { phase: 'replayed', final: 'success' }
+    ]);
+    expect(JSON.stringify(events)).not.toMatch(
+      /private-auth-token|device-id|device-fingerprint|seed-id|private-device-hash|secret upstream|https?:\/\//
+    );
+  });
+
+  it('emits a sanitized skipped event when recovery is in cooldown', async () => {
+    const { MiyousheGameRecordClient } =
+      await import('../../../src/main/services/miyoushe-game-record.js');
+    requestMock.mockResolvedValueOnce(mockJson(200, { retcode: 5003, message: 'secret upstream' }));
+    const browserTransport = vi.fn();
+    const deviceFp = {
+      applyKnownFingerprint: vi.fn((cookie: string) => cookie),
+      recoverFrom5003: vi.fn(async () => ({
+        ok: false as const,
+        cookie: OLD_COOKIE,
+        deviceHash: 'private-device-hash',
+        reason: 'cooldown' as const,
+        retryAt: 1_800_000_000_000
+      })),
+      finishReplay: vi.fn()
+    };
+    const events: unknown[] = [];
+
+    const result = await new MiyousheGameRecordClient({
+      browserTransport,
+      deviceFp,
+      onDeviceRecoveryEvent: (event: unknown) => events.push(event)
+    }).ping('100000001', OLD_COOKIE);
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { kind: 'captcha-required', retcode: 5003 }
+    });
+    expect(events).toEqual([
+      { phase: 'detected', retcode: 5003 },
+      { phase: 'skipped', reason: 'cooldown', retryAt: 1_800_000_000_000 }
+    ]);
+    expect(JSON.stringify(events)).not.toMatch(
+      /private-auth-token|device-id|device-fingerprint|seed-id|private-device-hash|secret upstream|https?:\/\//
+    );
+  });
+
+  it('does not let a throwing recovery event callback alter the request result', async () => {
+    const { MiyousheGameRecordClient } =
+      await import('../../../src/main/services/miyoushe-game-record.js');
+    requestMock.mockResolvedValueOnce(mockJson(200, { retcode: 5003, message: 'initial' }));
+    const browserTransport = vi.fn().mockResolvedValue(mockBrowserJson(200, indexSuccess));
+    const deviceFp = {
+      applyKnownFingerprint: vi.fn((cookie: string) => cookie),
+      recoverFrom5003: vi.fn(async () => ({
+        ok: true as const,
+        cookie: NEW_COOKIE,
+        deviceHash: 'device-hash',
+        refreshed: true
+      })),
+      finishReplay: vi.fn()
+    };
+    const onDeviceRecoveryEvent = vi.fn(() => {
+      throw new Error('private callback failure');
+    });
+
+    const result = await new MiyousheGameRecordClient({
+      browserTransport,
+      deviceFp,
+      onDeviceRecoveryEvent
+    }).ping('100000001', OLD_COOKIE);
+
+    expect(result.ok).toBe(true);
+    expect(onDeviceRecoveryEvent).toHaveBeenCalledTimes(2);
+  });
+
   it('recovers once and replays the same index request through Chromium with the new fingerprint', async () => {
     const { MiyousheGameRecordClient } =
       await import('../../../src/main/services/miyoushe-game-record.js');
@@ -519,9 +618,11 @@ describe('CN 5003 device fingerprint recovery', () => {
       finishReplay: vi.fn()
     };
 
+    const onDeviceRecoveryEvent = vi.fn();
     const result = await new MiyousheGameRecordClient({
       browserTransport,
-      deviceFp
+      deviceFp,
+      onDeviceRecoveryEvent
     }).ping('100000001', OLD_COOKIE);
 
     expect(result).toEqual({
@@ -531,6 +632,7 @@ describe('CN 5003 device fingerprint recovery', () => {
     expect(deviceFp.recoverFrom5003).not.toHaveBeenCalled();
     expect(deviceFp.finishReplay).not.toHaveBeenCalled();
     expect(browserTransport).toHaveBeenCalledTimes(1);
+    expect(onDeviceRecoveryEvent).not.toHaveBeenCalled();
   });
 
   it('keeps the existing browser fallback for global UID 5003 without recovery', async () => {
@@ -544,15 +646,18 @@ describe('CN 5003 device fingerprint recovery', () => {
       finishReplay: vi.fn()
     };
 
+    const onDeviceRecoveryEvent = vi.fn();
     const result = await new MiyousheGameRecordClient({
       browserTransport,
-      deviceFp
+      deviceFp,
+      onDeviceRecoveryEvent
     }).ping('800000001', OLD_COOKIE);
 
     expect(result.ok).toBe(true);
     expect(deviceFp.applyKnownFingerprint).not.toHaveBeenCalled();
     expect(deviceFp.recoverFrom5003).not.toHaveBeenCalled();
     expect(browserTransport).toHaveBeenCalledTimes(1);
+    expect(onDeviceRecoveryEvent).not.toHaveBeenCalled();
   });
 
   it('keeps the existing browser fallback for CN 5003 without a device service', async () => {
@@ -560,14 +665,16 @@ describe('CN 5003 device fingerprint recovery', () => {
       await import('../../../src/main/services/miyoushe-game-record.js');
     requestMock.mockResolvedValueOnce(mockJson(200, { retcode: 5003, message: 'CN risk' }));
     const browserTransport = vi.fn().mockResolvedValue(mockBrowserJson(200, indexSuccess));
+    const onDeviceRecoveryEvent = vi.fn();
 
-    const result = await new MiyousheGameRecordClient({ browserTransport }).ping(
-      '100000001',
-      OLD_COOKIE
-    );
+    const result = await new MiyousheGameRecordClient({
+      browserTransport,
+      onDeviceRecoveryEvent
+    }).ping('100000001', OLD_COOKIE);
 
     expect(result.ok).toBe(true);
     expect(browserTransport).toHaveBeenCalledTimes(1);
+    expect(onDeviceRecoveryEvent).not.toHaveBeenCalled();
   });
 
   it.each([
