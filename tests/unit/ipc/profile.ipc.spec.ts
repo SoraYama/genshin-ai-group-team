@@ -38,6 +38,20 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+async function settlesWithin(promise: Promise<unknown>, timeoutMs = 150): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise.then(() => true),
+      new Promise<false>((resolve) => {
+        timer = setTimeout(() => resolve(false), timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 const fullCoverageForTwo: MiyousheRosterCoverage = {
   expectedOwnedCount: 2,
   listedCount: 2,
@@ -510,6 +524,66 @@ describe('miyoushe:login-via-browser device recovery', () => {
     expect(partitionClearedBeforeImportSettled).toBe(false);
     expect(importError).toMatchObject({ code: 'IPC_UNAUTHORIZED' });
     expect(deps.rosterSessions.put).not.toHaveBeenCalled();
+    expect(deps.store.upsert).not.toHaveBeenCalled();
+    expect(deps.store.setActive).not.toHaveBeenCalled();
+  });
+
+  it('does not deadlock when an in-flight import enters nested device recovery during logout', async () => {
+    const deps = setup(undefined);
+    deps.loginWindow.runOnce.mockResolvedValue({ ok: true, cookie: COOKIE });
+    deps.miyoushe.fetchRoles.mockResolvedValue(successfulBind());
+    const loginResult = (await loginViaBrowser()) as { ok: true; sessionId: string };
+    deps.rosterSessions.put.mockClear();
+    deps.rosterSessions.clear.mockClear();
+    deps.miyoushe.fetchRoles.mockClear();
+
+    const initial5003Reached = deferred<void>();
+    const continueRecovery = deferred<void>();
+    const persistedDeviceCookie = vi.fn().mockResolvedValue(undefined);
+    const guardedWriter = deps.partitionLifecycle.guardCookieWriter({
+      writeDeviceCookies: persistedDeviceCookie
+    });
+    deps.miyoushe.fetchRoles.mockResolvedValue(successfulBind());
+    deps.miyousheGameRecord.fetchPlayerIndex.mockImplementation(async () => {
+      initial5003Reached.resolve();
+      await continueRecovery.promise;
+      try {
+        await deps.partitionLifecycle.runCurrent(() =>
+          guardedWriter.writeDeviceCookies({ DEVICEFP: 'stale-fingerprint' })
+        );
+      } catch {
+        // Mirrors GameRecord's non-fatal recovery containment.
+      }
+      return {
+        ok: false,
+        error: { kind: 'captcha-required', retcode: 5003, message: 'risk control' }
+      };
+    });
+
+    const importGeneration = deps.partitionLifecycle.capture();
+    const importPromise = importFromSession(loginResult.sessionId);
+    await initial5003Reached.promise;
+    const rosterPutsBeforeLogout = deps.rosterSessions.put.mock.calls.length;
+
+    const logoutPromise = logout();
+    await vi.waitFor(() => expect(deps.partitionLifecycle.isCurrent(importGeneration)).toBe(false));
+    continueRecovery.resolve();
+
+    let importError: unknown;
+    const completed = settlesWithin(
+      Promise.all([
+        importPromise.catch((error: unknown) => {
+          importError = error;
+        }),
+        logoutPromise
+      ])
+    );
+
+    expect(await completed).toBe(true);
+    expect(importError).toMatchObject({ code: 'IPC_UNAUTHORIZED' });
+    expect(persistedDeviceCookie).not.toHaveBeenCalled();
+    expect(deps.rosterSessions.put).toHaveBeenCalledTimes(rosterPutsBeforeLogout);
+    expect(deps.rosterSessions.clear).toHaveBeenCalledTimes(2);
     expect(deps.store.upsert).not.toHaveBeenCalled();
     expect(deps.store.setActive).not.toHaveBeenCalled();
   });

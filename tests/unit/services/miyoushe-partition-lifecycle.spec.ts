@@ -19,6 +19,20 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+async function settlesWithin(promise: Promise<unknown>, timeoutMs = 100): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise.then(() => true),
+      new Promise<false>((resolve) => {
+        timer = setTimeout(() => resolve(false), timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 describe('createMiyousheDeviceFpCooldown', () => {
   it('falls back to an in-memory cooldown when the persistent store constructor throws', () => {
     const secret = 'corrupt-store-secret';
@@ -40,6 +54,53 @@ describe('createMiyousheDeviceFpCooldown', () => {
 });
 
 describe('MiyoushePartitionLifecycle', () => {
+  it('runs nested runCurrent calls directly in the same generation', async () => {
+    const lifecycle = new MiyoushePartitionLifecycle();
+    const generation = lifecycle.capture();
+    const nestedOperation = vi.fn().mockResolvedValue('nested-result');
+
+    const result = await lifecycle.runAt(generation, () => lifecycle.runCurrent(nestedOperation));
+
+    expect(result).toBe('nested-result');
+    expect(nestedOperation).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a nested runCurrent call when its inherited generation is stale', async () => {
+    const lifecycle = new MiyoushePartitionLifecycle();
+    const generation = lifecycle.capture();
+    const outerStarted = deferred<void>();
+    const continueOuter = deferred<void>();
+    const nestedOperation = vi.fn().mockResolvedValue(undefined);
+    const nestedErrors: unknown[] = [];
+    const outer = lifecycle.runAt(generation, async () => {
+      outerStarted.resolve();
+      await continueOuter.promise;
+      try {
+        await lifecycle.runCurrent(nestedOperation);
+      } catch (error) {
+        nestedErrors.push(error);
+      }
+      try {
+        await lifecycle.runAt(generation, nestedOperation);
+      } catch (error) {
+        nestedErrors.push(error);
+      }
+    });
+    await outerStarted.promise;
+
+    const logout = lifecycle.transition();
+    await vi.waitFor(() => expect(lifecycle.isCurrent(generation)).toBe(false));
+    continueOuter.resolve();
+
+    expect(await settlesWithin(Promise.all([outer, logout]))).toBe(true);
+    expect(nestedErrors).toHaveLength(2);
+    expect(nestedErrors).toEqual([
+      expect.objectContaining({ name: 'MiyoushePartitionStaleError' }),
+      expect.objectContaining({ name: 'MiyoushePartitionStaleError' })
+    ]);
+    expect(nestedOperation).not.toHaveBeenCalled();
+  });
+
   it('suppresses a stale device-cookie write that finishes after a newer login starts', async () => {
     const lifecycle = new MiyoushePartitionLifecycle();
     const writer = { writeDeviceCookies: vi.fn().mockResolvedValue(undefined) };

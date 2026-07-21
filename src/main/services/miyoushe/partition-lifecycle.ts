@@ -34,6 +34,14 @@ export function createMiyousheDeviceFpCooldown(
   }
 }
 
+export class MiyoushePartitionStaleError extends Error {
+  override readonly name = 'MiyoushePartitionStaleError';
+
+  constructor() {
+    super('Miyoushe partition operation belongs to a stale generation');
+  }
+}
+
 /**
  * Coordinates every mutation of the persistent miyoushe partition. Device-FP
  * operations run inside a captured generation; a newer login/logout makes an
@@ -57,13 +65,28 @@ export class MiyoushePartitionLifecycle {
   }
 
   runAt<T>(generation: number, operation: () => Promise<T>): Promise<T | undefined> {
+    const inheritedGeneration = this.operationGeneration.getStore();
+    if (inheritedGeneration !== undefined) {
+      if (inheritedGeneration !== generation || !this.isCurrent(inheritedGeneration)) {
+        return Promise.reject(new MiyoushePartitionStaleError());
+      }
+      return operation();
+    }
     if (this.transitioning || !this.isCurrent(generation)) return Promise.resolve(undefined);
     return this.trackOperation(this.operationGeneration.run(generation, operation));
   }
 
   async runCurrent<T>(operation: () => Promise<T>): Promise<T> {
+    const inheritedGeneration = this.operationGeneration.getStore();
+    if (inheritedGeneration !== undefined) {
+      if (!this.isCurrent(inheritedGeneration)) {
+        throw new MiyoushePartitionStaleError();
+      }
+      return operation();
+    }
+
     await this.transitionTail;
-    const generation = this.operationGeneration.getStore() ?? this.capture();
+    const generation = this.capture();
     return this.trackOperation(this.operationGeneration.run(generation, operation));
   }
 
