@@ -15,6 +15,7 @@ import {
   MIYOUSHE_RECORD_TOOL_VERSION,
   signDsV2
 } from './miyoushe/ds-token.js';
+import type { DeviceFpResult } from './miyoushe/device-fp.js';
 import { MIYOUSHE_UA } from './miyoushe-client.js';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -64,6 +65,13 @@ export interface MiyousheGameRecordClientOptions {
   timeoutMs?: number;
   userAgent?: string;
   browserTransport?: MiyousheBrowserTransport;
+  deviceFp?: MiyousheDeviceFpRecovery;
+}
+
+export interface MiyousheDeviceFpRecovery {
+  applyKnownFingerprint(cookie: string): string;
+  recoverFrom5003(cookie: string): Promise<DeviceFpResult>;
+  finishReplay(cookie: string, outcome: 'success' | '5003' | 'other-error'): void;
 }
 
 export interface MiyousheBrowserTransportRequest {
@@ -546,6 +554,7 @@ export class MiyousheGameRecordClient {
   private readonly timeoutMs: number;
   private readonly userAgent: string;
   private readonly browserTransport?: MiyousheBrowserTransport;
+  private readonly deviceFp?: MiyousheDeviceFpRecovery;
 
   constructor(options: MiyousheGameRecordClientOptions = {}) {
     this.baseUrlCn = options.baseUrlCn ?? DEFAULT_BASE_CN;
@@ -553,6 +562,7 @@ export class MiyousheGameRecordClient {
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.userAgent = options.userAgent ?? MIYOUSHE_UA;
     this.browserTransport = options.browserTransport;
+    this.deviceFp = options.deviceFp;
   }
 
   /**
@@ -875,6 +885,7 @@ export class MiyousheGameRecordClient {
     body: string;
     isRetry?: boolean;
     useBrowserTransport?: boolean;
+    deviceRecoveryAttempted?: boolean;
   }): Promise<MiyousheFetchResult<T>> {
     const {
       method,
@@ -884,11 +895,13 @@ export class MiyousheGameRecordClient {
       query,
       body,
       isRetry,
-      useBrowserTransport
+      useBrowserTransport,
+      deviceRecoveryAttempted
     } = args;
+    const effectiveCookie = this.deviceFp?.applyKnownFingerprint(cookie) ?? cookie;
     const token = signDsV2({ query, body, clientType: CLIENT_TYPE_WEB });
     const url = `${this.resolveBase(region)}${path}${query ? `?${query}` : ''}`;
-    const headers = this.buildHeaders(method, region, cookie, token.header);
+    const headers = this.buildHeaders(method, region, effectiveCookie, token.header);
 
     const requestMaterial = `${query}\n${body}`;
     logInfo(
@@ -953,6 +966,41 @@ export class MiyousheGameRecordClient {
       });
       if (classified.kind === 'captcha-required') {
         logInfo(`risk-context transport=${useBrowserTransport ? 'chromium' : 'node'}`);
+      }
+
+      if (
+        retcode === 5003 &&
+        !region.isGlobal &&
+        this.deviceFp &&
+        this.browserTransport &&
+        !deviceRecoveryAttempted
+      ) {
+        let recovered: DeviceFpResult;
+        try {
+          recovered = await this.deviceFp.recoverFrom5003(effectiveCookie);
+        } catch {
+          return { ok: false, error: classified };
+        }
+        if (!recovered.ok) return { ok: false, error: classified };
+
+        const replay = await this.doSignedRequest<T>({
+          ...args,
+          cookie: recovered.cookie,
+          isRetry: false,
+          useBrowserTransport: true,
+          deviceRecoveryAttempted: true
+        });
+        const outcome = replay.ok
+          ? 'success'
+          : 'retcode' in replay.error && replay.error.retcode === 5003
+            ? '5003'
+            : 'other-error';
+        try {
+          this.deviceFp.finishReplay(recovered.cookie, outcome);
+        } catch {
+          // Third-party replay bookkeeping must not change the request result.
+        }
+        return replay;
       }
 
       // 5003/1034 can be tied to the Node HTTP/TLS fingerprint even when the
