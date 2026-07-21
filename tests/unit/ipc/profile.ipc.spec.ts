@@ -30,6 +30,15 @@ const SECOND_UID = '100000002';
 const FETCHED_AT = '2026-01-01T00:00:00.000Z';
 const COOKIE = 'ltoken_v2=test; ltuid_v2=test; ltmid_v2=test';
 const COMPLETED_COOKIE = `${COOKIE}; _MHYUUID=device; DEVICEFP=fingerprint`;
+const MANUAL_B_COOKIE =
+  'ltoken_v2=manual-b; ltuid_v2=manual-b; ltmid_v2=manual-b; ' +
+  '_MHYUUID=device-b; DEVICEFP=fingerprint-b; DEVICEFP_SEED_ID=seed-b; DEVICEFP_SEED_TIME=2';
+const PARTITION_A_COOKIE =
+  'ltoken_v2=partition-a; ltuid_v2=partition-a; ltmid_v2=partition-a; ' +
+  '_MHYUUID=device-a; DEVICEFP=fingerprint-a; DEVICEFP_SEED_ID=seed-a; DEVICEFP_SEED_TIME=1';
+const UPDATED_PARTITION_COOKIE =
+  'ltoken_v2=partition-new; ltuid_v2=partition-new; ltmid_v2=partition-new; ' +
+  '_MHYUUID=device-new; DEVICEFP=fingerprint-new; DEVICEFP_SEED_ID=seed-new; DEVICEFP_SEED_TIME=3';
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -249,10 +258,16 @@ async function ping(): Promise<unknown> {
   return handler({ uid: UID });
 }
 
-async function importFromCookie(): Promise<PersistedProfile> {
+async function importFromCookie(cookie = COOKIE): Promise<PersistedProfile> {
   const handler = handlers.get('profile:import-from-cookie');
   if (!handler) throw new Error('profile:import-from-cookie handler was not registered');
-  return (await handler({ uid: UID, cookie: COOKIE })) as PersistedProfile;
+  return (await handler({ uid: UID, cookie })) as PersistedProfile;
+}
+
+async function importFromSessionRequest(sessionId: string): Promise<PersistedProfile> {
+  const handler = handlers.get('profile:import-from-session');
+  if (!handler) throw new Error('profile:import-from-session handler was not registered');
+  return (await handler({ sessionId, uid: UID })) as PersistedProfile;
 }
 
 async function logoutRequest(): Promise<unknown> {
@@ -346,11 +361,7 @@ describe('miyoushe:login-via-browser device recovery', () => {
     expect(deps.deviceFp.ensureForSession).toHaveBeenCalledWith(COOKIE);
     expect(deps.miyoushe.fetchRoles).toHaveBeenCalledWith(COMPLETED_COOKIE);
     expect(deps.rosterSessions.put).toHaveBeenCalledWith(UID, COMPLETED_COOKIE, 'partition');
-    expect(deps.rosterSessions.put).toHaveBeenCalledWith(
-      SECOND_UID,
-      COMPLETED_COOKIE,
-      'partition'
-    );
+    expect(deps.rosterSessions.put).toHaveBeenCalledWith(SECOND_UID, COMPLETED_COOKIE, 'partition');
     expect(deps.loginSessions.put).toHaveBeenCalledWith(COMPLETED_COOKIE);
     expect(result).toEqual({
       ok: true,
@@ -388,11 +399,7 @@ describe('miyoushe:login-via-browser device recovery', () => {
     expect(events).toEqual(['partition-cleared', 'run-once:empty']);
     expect(persistedCookie).toBe(accountBCookie);
     expect(result).toMatchObject({ ok: true });
-    expect(deps.rosterSessions.put).toHaveBeenCalledWith(
-      SECOND_UID,
-      accountBCookie,
-      'partition'
-    );
+    expect(deps.rosterSessions.put).toHaveBeenCalledWith(SECOND_UID, accountBCookie, 'partition');
   });
 
   it('cannot revive account A after its replacement login is cancelled', async () => {
@@ -447,11 +454,7 @@ describe('miyoushe:login-via-browser device recovery', () => {
 
     expect(deps.miyoushe.fetchRoles).toHaveBeenCalledWith(COMPLETED_COOKIE);
     expect(deps.rosterSessions.put).toHaveBeenCalledWith(UID, COMPLETED_COOKIE, 'partition');
-    expect(deps.rosterSessions.put).toHaveBeenCalledWith(
-      SECOND_UID,
-      COMPLETED_COOKIE,
-      'partition'
-    );
+    expect(deps.rosterSessions.put).toHaveBeenCalledWith(SECOND_UID, COMPLETED_COOKIE, 'partition');
     expect(deps.loginSessions.put).toHaveBeenCalledWith(COMPLETED_COOKIE);
     expect(result).toMatchObject({ ok: true, sessionId: 'login-session-id' });
     expect(JSON.stringify(result)).not.toContain('cooldown');
@@ -923,11 +926,7 @@ describe('profile:import-from-cookie lifecycle', () => {
       persistence: 'memory-only'
     });
     expect(deps.miyoushe.fetchRoles).toHaveBeenCalledWith(COMPLETED_COOKIE);
-    expect(deps.rosterSessions.put).toHaveBeenCalledWith(
-      UID,
-      COMPLETED_COOKIE,
-      'memory-only'
-    );
+    expect(deps.rosterSessions.put).toHaveBeenCalledWith(UID, COMPLETED_COOKIE, 'memory-only');
     expect(deps.miyousheGameRecord.fetchPlayerIndex).toHaveBeenCalledWith(UID, COMPLETED_COOKIE);
     expect(deps.miyousheGameRecord.fetchDetailedRoster).toHaveBeenCalledWith(
       UID,
@@ -943,11 +942,7 @@ describe('profile:import-from-cookie lifecycle', () => {
       { cookie: string; persistence: 'partition' | 'memory-only' }
     >();
     deps.rosterSessions.put.mockImplementation(
-      (
-        uid: string,
-        cookie: string,
-        persistence: 'partition' | 'memory-only' = 'partition'
-      ) => {
+      (uid: string, cookie: string, persistence: 'partition' | 'memory-only' = 'partition') => {
         rosterEntries.set(uid, { cookie, persistence });
       }
     );
@@ -1027,6 +1022,132 @@ describe('profile:import-from-cookie lifecycle', () => {
     expect(JSON.stringify(importError)).not.toContain(COMPLETED_COOKIE);
     expect(deps.miyoushe.fetchRoles).not.toHaveBeenCalled();
     expect(deps.rosterSessions.put).not.toHaveBeenCalled();
+  });
+
+  it('never exposes a manual account B import to account A persistent browser state', async () => {
+    const deps = setup(undefined);
+    const rosterEntries = new Map<
+      string,
+      { cookie: string; persistence: 'partition' | 'memory-only' }
+    >();
+    deps.rosterSessions.put.mockImplementation(
+      (uid: string, cookie: string, persistence: 'partition' | 'memory-only') => {
+        rosterEntries.set(uid, { cookie, persistence });
+      }
+    );
+    deps.deviceFp.ensureForSessionAt.mockResolvedValue({
+      ok: true,
+      cookie: MANUAL_B_COOKIE,
+      deviceHash: 'manual-b-hash',
+      refreshed: false
+    });
+    deps.miyoushe.fetchRoles.mockResolvedValue(successfulManualBind());
+    deps.miyousheGameRecord.fetchPlayerIndex.mockResolvedValue({
+      ok: true,
+      data: { totalCharacters: 2 }
+    });
+    deps.miyousheGameRecord.fetchDetailedRoster.mockImplementation(
+      async (_uid: string, cookie: string) =>
+        cookie === MANUAL_B_COOKIE
+          ? {
+              ok: false as const,
+              error: { kind: 'upstream' as const, retcode: -1, message: 'direct unavailable' }
+            }
+          : {
+              ok: true as const,
+              data: {
+                characters: [miyousheCharacter(1), miyousheCharacter(2)],
+                coverage: fullCoverageForTwo
+              }
+            }
+    );
+    deps.miyousheBridge.fetchRoster
+      .mockResolvedValueOnce({
+        ok: false,
+        reason: 'navigation',
+        message: 'hidden bridge unavailable'
+      })
+      .mockResolvedValueOnce({ ok: true, mode: 'warmup', indexCalled: true });
+    deps.loginWindow.readPersistedCookie.mockResolvedValue(PARTITION_A_COOKIE);
+
+    const imported = await importFromCookie(MANUAL_B_COOKIE);
+
+    expect(deps.miyousheGameRecord.fetchPlayerIndex.mock.calls).toEqual([[UID, MANUAL_B_COOKIE]]);
+    expect(deps.miyousheGameRecord.fetchDetailedRoster.mock.calls).toEqual([
+      [UID, MANUAL_B_COOKIE, { expectedOwnedCount: 2 }]
+    ]);
+    expect(deps.miyousheCalculator.fetchOwnedRoster).toHaveBeenCalledWith(UID, MANUAL_B_COOKIE);
+    expect(deps.miyousheBridge.fetchRoster).not.toHaveBeenCalled();
+    expect(deps.loginWindow.readPersistedCookie).not.toHaveBeenCalled();
+    expect(rosterEntries.get(UID)).toEqual({
+      cookie: MANUAL_B_COOKIE,
+      persistence: 'memory-only'
+    });
+    expect(JSON.stringify([...rosterEntries.values()])).not.toContain(PARTITION_A_COOKIE);
+    expect(imported.coverage.partial).toBe(true);
+  });
+
+  it('still lets a partition import adopt its refreshed persistent Cookie after bridge warmup', async () => {
+    const deps = setup(undefined);
+    const rosterEntries = new Map<
+      string,
+      { cookie: string; persistence: 'partition' | 'memory-only' }
+    >();
+    deps.rosterSessions.put.mockImplementation(
+      (uid: string, cookie: string, persistence: 'partition' | 'memory-only') => {
+        rosterEntries.set(uid, { cookie, persistence });
+      }
+    );
+    deps.miyoushe.fetchRoles.mockResolvedValue(successfulManualBind());
+    deps.miyousheGameRecord.fetchPlayerIndex.mockResolvedValue({
+      ok: true,
+      data: { totalCharacters: 2 }
+    });
+    deps.miyousheGameRecord.fetchDetailedRoster.mockImplementation(
+      async (_uid: string, cookie: string) =>
+        cookie === UPDATED_PARTITION_COOKIE
+          ? {
+              ok: true as const,
+              data: {
+                characters: [miyousheCharacter(1), miyousheCharacter(2)],
+                coverage: fullCoverageForTwo
+              }
+            }
+          : {
+              ok: false as const,
+              error: { kind: 'upstream' as const, retcode: -1, message: 'direct unavailable' }
+            }
+    );
+    deps.miyousheBridge.fetchRoster
+      .mockResolvedValueOnce({
+        ok: false,
+        reason: 'navigation',
+        message: 'hidden bridge unavailable'
+      })
+      .mockResolvedValueOnce({ ok: true, mode: 'warmup', indexCalled: true });
+    deps.loginWindow.readPersistedCookie.mockResolvedValue(UPDATED_PARTITION_COOKIE);
+    const sessionId = deps.loginSessions.put(PARTITION_A_COOKIE);
+
+    const imported = await importFromSessionRequest(sessionId);
+
+    expect(deps.miyousheBridge.fetchRoster.mock.calls).toEqual([
+      [{ visible: false, uid: UID }],
+      [{ visible: true, uid: UID }]
+    ]);
+    expect(deps.loginWindow.readPersistedCookie).toHaveBeenCalledOnce();
+    expect(deps.miyousheGameRecord.fetchPlayerIndex.mock.calls).toEqual([
+      [UID, PARTITION_A_COOKIE],
+      [UID, UPDATED_PARTITION_COOKIE]
+    ]);
+    expect(deps.miyousheGameRecord.fetchDetailedRoster.mock.calls).toEqual([
+      [UID, PARTITION_A_COOKIE, { expectedOwnedCount: 2 }],
+      [UID, UPDATED_PARTITION_COOKIE, { expectedOwnedCount: 2 }]
+    ]);
+    expect(rosterEntries.get(UID)).toEqual({
+      cookie: UPDATED_PARTITION_COOKIE,
+      persistence: 'partition'
+    });
+    expect(imported.coverage.partial).toBe(false);
   });
 
   it('drains a manual import stopped at fetchRoles without allowing stale work after logout', async () => {

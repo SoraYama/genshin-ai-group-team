@@ -56,10 +56,7 @@ export interface ProfileIpcDeps {
   miyousheGameRecord: MiyousheGameRecordClient;
   miyousheCalculator: MiyousheCalculatorClient;
   miyousheBridge: MiyousheBrowserBridge;
-  deviceFp: Pick<
-    LifecycleMiyousheDeviceFp,
-    'ensureForSessionAt' | 'runWithPersistence'
-  >;
+  deviceFp: Pick<LifecycleMiyousheDeviceFp, 'ensureForSessionAt' | 'runWithPersistence'>;
   partitionLifecycle: Pick<
     MiyoushePartitionLifecycle,
     'capture' | 'transition' | 'isCurrent' | 'runAt'
@@ -89,7 +86,7 @@ export function registerProfileIpc({
    *   1. Battle Chronicle HTTP for the richest official detail payload.
    *   2. Enhancement-calculator sync for authoritative ownership when the
    *      Battle Chronicle endpoint is pinned at 5003.
-   *   3. BrowserBridge only for non-captcha transport/page failures.
+   *   3. BrowserBridge only for persistent-partition, non-captcha failures.
    *
    * Auth/rate-limit errors short-circuit because another transport cannot
    * repair the account session or IP limit. A direct 5003 never opens a
@@ -155,6 +152,17 @@ export function registerProfileIpc({
     }
     if (direct.error.kind === 'captcha-required') {
       return { ok: false, via: 'http', failure: calculator.error };
+    }
+    if (persistence === 'memory-only') {
+      return {
+        ok: false,
+        via: 'http',
+        failure: {
+          kind: 'bridge',
+          message:
+            '手动 Cookie 模式不使用共享浏览器登录分区；HTTP 与计算器数据源均不可用，已保留可用的部分数据'
+        }
+      };
     }
 
     const hidden = await miyousheBridge.fetchRoster({ visible: false, uid });
@@ -446,9 +454,7 @@ export function registerProfileIpc({
       rosterSessions.put(uid, cookie, persistence);
     }
     const result = await partitionLifecycle.runAt(generation, () =>
-      deviceFp.runWithPersistence(persistence, () =>
-        fetchMiyousheRoster(uid, cookie, persistence)
-      )
+      deviceFp.runWithPersistence(persistence, () => fetchMiyousheRoster(uid, cookie, persistence))
     );
     if (!result || !partitionLifecycle.isCurrent(generation)) {
       throw staleMiyousheRequestError();
@@ -621,11 +627,7 @@ export function registerProfileIpc({
     }
 
     // Pull full roster (game_record HTTP → calculator sync → bridge).
-    const recordResult = await fetchMiyousheRoster(
-      target.gameUid,
-      input.cookie,
-      input.persistence
-    );
+    const recordResult = await fetchMiyousheRoster(target.gameUid, input.cookie, input.persistence);
     assertCurrent();
     const miyousheCharacters = recordResult.ok ? recordResult.characters : undefined;
 
