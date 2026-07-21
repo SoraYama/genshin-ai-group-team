@@ -14,7 +14,8 @@ import {
 } from '../services/miyoushe-login-window.js';
 import { createMiyousheBrowserTransport } from '../services/miyoushe/browser-transport.js';
 import { MiyousheDeviceFpRecoveryStore } from '../services/miyoushe/device-fp-recovery-store.js';
-import { MiyousheDeviceFpService, type DeviceFpResult } from '../services/miyoushe/device-fp.js';
+import { MiyousheDeviceFpService } from '../services/miyoushe/device-fp.js';
+import { MiyousheDetailGateDeviceFpCoordinator } from './miyoushe-detail-recovery.js';
 
 // `electron dist/main/miyoushe-detail-gate.mjs` does not load package.json as
 // the application entry, so Electron otherwise uses the shared "Electron"
@@ -148,16 +149,17 @@ async function run(): Promise<number> {
     session.fromPartition(MIYOUSHE_LOGIN_PARTITION)
   );
   const cooldown = new MiyousheDeviceFpRecoveryStore();
-  const deviceFp = new MiyousheDeviceFpService({
-    cookieWriter: loginWindow,
-    cooldown
-  });
+  const deviceFp = new MiyousheDetailGateDeviceFpCoordinator(
+    new MiyousheDeviceFpService({
+      cookieWriter: loginWindow,
+      cooldown
+    })
+  );
 
   let effectiveCookie = cookie;
   let ensure: SafeEnsureOutcome = 'failed';
-  let ensureResult: DeviceFpResult | undefined;
   try {
-    ensureResult = await deviceFp.ensureForSession(cookie);
+    const ensureResult = await deviceFp.ensureForSession(cookie);
     effectiveCookie = ensureResult.cookie;
     ensure = ensureResult.ok
       ? ensureResult.refreshed
@@ -173,22 +175,6 @@ async function run(): Promise<number> {
     profileComplete: hasCompleteDeviceProfile(effectiveCookie),
     ensure,
     recoveryEvents
-  };
-  let recoveryInFlight: Promise<DeviceFpResult> | undefined;
-  const gateDeviceFp = {
-    applyKnownFingerprint: (requestCookie: string) => deviceFp.applyKnownFingerprint(requestCookie),
-    recoverFrom5003: (requestCookie: string): Promise<DeviceFpResult> => {
-      if (ensureResult && !ensureResult.ok) return Promise.resolve(ensureResult);
-      if (!ensureResult) {
-        return Promise.resolve({ ok: false, cookie: effectiveCookie, reason: 'network' });
-      }
-      // Memoize success and failure alike: one gate process may inspect several
-      // UIDs, but it is allowed to start at most one recovery after startup ensure.
-      recoveryInFlight ??= deviceFp.recoverFrom5003(requestCookie);
-      return recoveryInFlight;
-    },
-    finishReplay: (requestCookie: string, outcome: 'success' | '5003' | 'other-error') =>
-      deviceFp.finishReplay(requestCookie, outcome)
   };
 
   const rolesResult = await new MiyousheClient().fetchRoles(effectiveCookie);
@@ -210,7 +196,7 @@ async function run(): Promise<number> {
 
   const client = new MiyousheGameRecordClient({
     browserTransport,
-    deviceFp: gateDeviceFp,
+    deviceFp,
     onDeviceRecoveryEvent: (event) => recoveryEvents.push(event)
   });
   const calculator = new MiyousheCalculatorClient();
