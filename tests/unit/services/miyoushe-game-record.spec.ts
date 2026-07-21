@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CLIENT_TYPE_WEB, resolveSalt } from '../../../src/main/services/miyoushe/ds-token.js';
 
 const requestMock = vi.fn();
@@ -91,6 +91,10 @@ beforeEach(() => {
   requestMock.mockReset();
 });
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe('regionFromUid', () => {
   it('maps UID prefixes to expected servers', async () => {
     const { regionFromUid } = await import('../../../src/main/services/miyoushe-game-record.js');
@@ -145,6 +149,42 @@ describe('Chromium transport fallback', () => {
     expect(browserTransport).toHaveBeenCalledTimes(1);
     expect(browserTransport.mock.calls[0]?.[1].headers).toHaveProperty('DS');
   });
+});
+
+describe('device fingerprint application boundaries', () => {
+  it.each([
+    ['ping', indexSuccess],
+    ['fetchDetailedRoster', { retcode: 0, data: { list: [] } }]
+  ] as const)(
+    'falls back to the original cookie when apply throws during %s',
+    async (api, payload) => {
+      const { MiyousheGameRecordClient } =
+        await import('../../../src/main/services/miyoushe-game-record.js');
+      requestMock.mockResolvedValueOnce(mockJson(200, payload));
+      const deviceFp = {
+        applyKnownFingerprint: vi.fn(() => {
+          throw new Error('secret device fingerprint material');
+        }),
+        recoverFrom5003: vi.fn(),
+        finishReplay: vi.fn()
+      };
+      const client = new MiyousheGameRecordClient({ deviceFp });
+
+      const pending =
+        api === 'ping'
+          ? client.ping('100000001', OLD_COOKIE)
+          : client.fetchDetailedRoster('100000001', OLD_COOKIE);
+      await expect(pending).resolves.toMatchObject({ ok: true });
+      const result = await pending;
+
+      expect(JSON.stringify(result)).not.toContain('secret device fingerprint material');
+      expect(deviceFp.applyKnownFingerprint).toHaveBeenCalledTimes(1);
+      expect(deviceFp.recoverFrom5003).not.toHaveBeenCalled();
+      const headers = (requestMock.mock.calls[0]?.[1] as { headers: Record<string, string> })
+        .headers;
+      expect(headers.cookie).toBe(OLD_COOKIE);
+    }
+  );
 });
 
 describe('CN 5003 device fingerprint recovery', () => {
@@ -204,6 +244,137 @@ describe('CN 5003 device fingerprint recovery', () => {
     expect(browserDs).not.toBe(nodeDs);
   });
 
+  it('preserves POST bytes and business headers when replaying character/list with a fresh DS', async () => {
+    const { MiyousheGameRecordClient } =
+      await import('../../../src/main/services/miyoushe-game-record.js');
+    vi.spyOn(Math, 'random').mockReturnValueOnce(0).mockReturnValueOnce(0.5);
+    requestMock.mockResolvedValueOnce(mockJson(200, { retcode: 5003, message: 'original 5003' }));
+    const browserTransport = vi
+      .fn()
+      .mockResolvedValue(mockBrowserJson(200, { retcode: 0, data: { list: [] } }));
+    const deviceFp = {
+      applyKnownFingerprint: vi.fn((cookie: string) => cookie),
+      recoverFrom5003: vi.fn(async () => ({
+        ok: true as const,
+        cookie: NEW_COOKIE,
+        deviceHash: 'device-hash',
+        refreshed: true
+      })),
+      finishReplay: vi.fn()
+    };
+
+    const result = await new MiyousheGameRecordClient({
+      browserTransport,
+      deviceFp
+    }).fetchDetailedRoster('100000001', OLD_COOKIE);
+
+    expect(result.ok).toBe(true);
+    const nodeUrl = String(requestMock.mock.calls[0]?.[0]);
+    const nodeRequest = requestMock.mock.calls[0]?.[1] as {
+      method: string;
+      body: string;
+      headers: Record<string, string>;
+    };
+    const browserUrl = String(browserTransport.mock.calls[0]?.[0]);
+    const browserRequest = browserTransport.mock.calls[0]?.[1];
+    const exactBody = JSON.stringify({ role_id: '100000001', server: 'cn_gf01' });
+    expect(browserTransport).toHaveBeenCalledTimes(1);
+    expect(browserUrl).toBe(nodeUrl);
+    expect(browserUrl).not.toContain('?');
+    expect(browserRequest.method).toBe('POST');
+    expect(nodeRequest.body).toBe(exactBody);
+    expect(browserRequest.body).toBe(exactBody);
+    for (const headerName of [
+      'content-type',
+      'x-rpc-app_version',
+      'x-rpc-client_type',
+      'x-rpc-language',
+      'x-rpc-page',
+      'x-rpc-tool_verison',
+      'Referer',
+      'Origin'
+    ]) {
+      expect(browserRequest.headers[headerName]).toBe(nodeRequest.headers[headerName]);
+    }
+    expect(browserRequest.headers['x-rpc-device_id']).toBe('device-id');
+    expect(browserRequest.headers['x-rpc-device_fp']).toBe(NEW_FP);
+    const nodeDs = expectValidDs(nodeRequest.headers.DS, '', exactBody);
+    const browserDs = expectValidDs(browserRequest.headers.DS, '', exactBody);
+    expect(browserDs).not.toBe(nodeDs);
+    expect(deviceFp.finishReplay).toHaveBeenCalledTimes(1);
+    expect(deviceFp.finishReplay).toHaveBeenCalledWith(NEW_COOKIE, 'success');
+  });
+
+  it('falls back to the recovered cookie when apply throws during replay', async () => {
+    const { MiyousheGameRecordClient } =
+      await import('../../../src/main/services/miyoushe-game-record.js');
+    requestMock.mockResolvedValueOnce(mockJson(200, { retcode: 5003, message: 'initial' }));
+    const browserTransport = vi.fn().mockResolvedValue(mockBrowserJson(200, indexSuccess));
+    const deviceFp = {
+      applyKnownFingerprint: vi
+        .fn<(cookie: string) => string>()
+        .mockImplementationOnce((cookie) => cookie)
+        .mockImplementationOnce(() => {
+          throw new Error('secret replay device material');
+        }),
+      recoverFrom5003: vi.fn(async () => ({
+        ok: true as const,
+        cookie: NEW_COOKIE,
+        deviceHash: 'device-hash',
+        refreshed: true
+      })),
+      finishReplay: vi.fn()
+    };
+
+    const pending = new MiyousheGameRecordClient({ browserTransport, deviceFp }).ping(
+      '100000001',
+      OLD_COOKIE
+    );
+    await expect(pending).resolves.toMatchObject({ ok: true });
+    const result = await pending;
+
+    expect(JSON.stringify(result)).not.toContain('secret replay device material');
+    expect(deviceFp.applyKnownFingerprint).toHaveBeenCalledTimes(2);
+    expect(browserTransport).toHaveBeenCalledTimes(1);
+    expect(browserTransport.mock.calls[0]?.[1].headers.cookie).toBe(NEW_COOKIE);
+    expect(deviceFp.finishReplay).toHaveBeenCalledTimes(1);
+    expect(deviceFp.finishReplay).toHaveBeenCalledWith(NEW_COOKIE, 'success');
+  });
+
+  it('settles a redacted network result and finishReplay when replay recursion throws', async () => {
+    const { MiyousheGameRecordClient } =
+      await import('../../../src/main/services/miyoushe-game-record.js');
+    vi.spyOn(Math, 'random')
+      .mockReturnValueOnce(0)
+      .mockImplementationOnce(() => {
+        throw new Error('secret recursive signing material');
+      });
+    requestMock.mockResolvedValueOnce(mockJson(200, { retcode: 5003, message: 'initial' }));
+    const browserTransport = vi.fn();
+    const deviceFp = {
+      applyKnownFingerprint: vi.fn((cookie: string) => cookie),
+      recoverFrom5003: vi.fn(async () => ({
+        ok: true as const,
+        cookie: NEW_COOKIE,
+        deviceHash: 'device-hash',
+        refreshed: true
+      })),
+      finishReplay: vi.fn()
+    };
+
+    const pending = new MiyousheGameRecordClient({ browserTransport, deviceFp }).ping(
+      '100000001',
+      OLD_COOKIE
+    );
+    await expect(pending).resolves.toMatchObject({ ok: false, error: { kind: 'network' } });
+    const result = await pending;
+
+    expect(JSON.stringify(result)).not.toContain('secret recursive signing material');
+    expect(browserTransport).not.toHaveBeenCalled();
+    expect(deviceFp.finishReplay).toHaveBeenCalledTimes(1);
+    expect(deviceFp.finishReplay).toHaveBeenCalledWith(NEW_COOKIE, 'other-error');
+  });
+
   it('returns a second 5003 without another recovery or transport loop', async () => {
     const { MiyousheGameRecordClient } =
       await import('../../../src/main/services/miyoushe-game-record.js');
@@ -236,6 +407,45 @@ describe('CN 5003 device fingerprint recovery', () => {
     expect(requestMock).toHaveBeenCalledTimes(1);
     expect(deviceFp.finishReplay).toHaveBeenCalledWith(NEW_COOKIE, '5003');
   });
+
+  it.each([
+    ['parse', async () => ({ statusCode: 200, headers: {}, bodyText: 'not-json' }), 'parse'],
+    [
+      'network',
+      async () => {
+        throw new Error('browser transport unavailable');
+      },
+      'network'
+    ]
+  ] as const)(
+    'settles replay %s errors as other-error',
+    async (_case, replayTransport, expectedKind) => {
+      const { MiyousheGameRecordClient } =
+        await import('../../../src/main/services/miyoushe-game-record.js');
+      requestMock.mockResolvedValueOnce(mockJson(200, { retcode: 5003, message: 'initial' }));
+      const browserTransport = vi.fn(replayTransport);
+      const deviceFp = {
+        applyKnownFingerprint: vi.fn((cookie: string) => cookie),
+        recoverFrom5003: vi.fn(async () => ({
+          ok: true as const,
+          cookie: NEW_COOKIE,
+          deviceHash: 'device-hash',
+          refreshed: true
+        })),
+        finishReplay: vi.fn()
+      };
+
+      const result = await new MiyousheGameRecordClient({
+        browserTransport,
+        deviceFp
+      }).ping('100000001', OLD_COOKIE);
+
+      expect(result).toMatchObject({ ok: false, error: { kind: expectedKind } });
+      expect(browserTransport).toHaveBeenCalledTimes(1);
+      expect(deviceFp.finishReplay).toHaveBeenCalledTimes(1);
+      expect(deviceFp.finishReplay).toHaveBeenCalledWith(NEW_COOKIE, 'other-error');
+    }
+  );
 
   it('returns the original classified 5003 when recovery fails without browser fallback', async () => {
     const { MiyousheGameRecordClient } =
@@ -340,6 +550,7 @@ describe('CN 5003 device fingerprint recovery', () => {
     }).ping('800000001', OLD_COOKIE);
 
     expect(result.ok).toBe(true);
+    expect(deviceFp.applyKnownFingerprint).not.toHaveBeenCalled();
     expect(deviceFp.recoverFrom5003).not.toHaveBeenCalled();
     expect(browserTransport).toHaveBeenCalledTimes(1);
   });

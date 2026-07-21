@@ -898,7 +898,14 @@ export class MiyousheGameRecordClient {
       useBrowserTransport,
       deviceRecoveryAttempted
     } = args;
-    const effectiveCookie = this.deviceFp?.applyKnownFingerprint(cookie) ?? cookie;
+    let effectiveCookie = cookie;
+    if (!region.isGlobal && this.deviceFp) {
+      try {
+        effectiveCookie = this.deviceFp.applyKnownFingerprint(cookie) ?? cookie;
+      } catch {
+        // Device profile helpers are advisory; the original cookie remains usable.
+      }
+    }
     const token = signDsV2({ query, body, clientType: CLIENT_TYPE_WEB });
     const url = `${this.resolveBase(region)}${path}${query ? `?${query}` : ''}`;
     const headers = this.buildHeaders(method, region, effectiveCookie, token.header);
@@ -984,13 +991,21 @@ export class MiyousheGameRecordClient {
         }
         if (!recovered.ok) return { ok: false, error: classified };
 
-        const replay = await this.doSignedRequest<T>({
-          ...args,
-          cookie: recovered.cookie,
-          isRetry: false,
-          useBrowserTransport: true,
-          deviceRecoveryAttempted: true
-        });
+        let replay: MiyousheFetchResult<T>;
+        try {
+          replay = await this.doSignedRequest<T>({
+            ...args,
+            cookie: recovered.cookie,
+            isRetry: false,
+            useBrowserTransport: true,
+            deviceRecoveryAttempted: true
+          });
+        } catch {
+          replay = {
+            ok: false,
+            error: { kind: 'network', message: '米游社请求失败' }
+          };
+        }
         const outcome = replay.ok
           ? 'success'
           : 'retcode' in replay.error && replay.error.retcode === 5003
