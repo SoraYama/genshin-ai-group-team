@@ -1059,7 +1059,12 @@ export class MiyousheGameRecordClient {
 
       // Retry once on transient 5xx with a fresh DS. Auth/captcha/signature
       // failures are not transient and retrying them only increases risk-control.
-      if (!isRetry && response.statusCode >= 500 && response.statusCode < 600) {
+      if (
+        !isRetry &&
+        !deviceRecoveryAttempted &&
+        response.statusCode >= 500 &&
+        response.statusCode < 600
+      ) {
         return this.doSignedRequest<T>({ ...args, isRetry: true });
       }
 

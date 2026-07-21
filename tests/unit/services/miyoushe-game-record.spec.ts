@@ -976,18 +976,13 @@ describe('CN 5003 device fingerprint recovery', () => {
     }
   });
 
-  it('preserves the recovery guard across a Chromium 5xx retry with a fresh DS', async () => {
+  it('does not retry a Chromium 5xx after the single recovery replay', async () => {
     const { MiyousheGameRecordClient } =
       await import('../../../src/main/services/miyoushe-game-record.js');
-    vi.spyOn(Math, 'random')
-      .mockReturnValueOnce(0)
-      .mockReturnValueOnce(0.25)
-      .mockReturnValueOnce(0.75);
     requestMock.mockResolvedValueOnce(mockJson(200, { retcode: 5003, message: 'initial' }));
     const browserTransport = vi
       .fn()
-      .mockResolvedValueOnce(mockBrowserJson(503, { retcode: -1, message: 'temporary' }))
-      .mockResolvedValueOnce(mockBrowserJson(200, { retcode: 5003, message: 'still blocked' }));
+      .mockResolvedValueOnce(mockBrowserJson(503, { retcode: -1, message: 'temporary' }));
     const deviceFp = {
       applyKnownFingerprint: vi.fn((cookie: string) => cookie),
       recoverFrom5003: vi.fn(async () => ({
@@ -998,24 +993,29 @@ describe('CN 5003 device fingerprint recovery', () => {
       })),
       finishReplay: vi.fn()
     };
+    const events: unknown[] = [];
 
     const result = await new MiyousheGameRecordClient({
       browserTransport,
-      deviceFp
+      deviceFp,
+      onDeviceRecoveryEvent: (event) => events.push(event)
     }).ping('100000001', OLD_COOKIE);
 
     expect(result).toEqual({
       ok: false,
-      error: { kind: 'captcha-required', retcode: 5003, message: 'still blocked' }
+      error: { kind: 'upstream', retcode: -1, httpStatus: 503, message: 'temporary' }
     });
     expect(deviceFp.recoverFrom5003).toHaveBeenCalledTimes(1);
-    expect(browserTransport).toHaveBeenCalledTimes(2);
+    expect(browserTransport).toHaveBeenCalledTimes(1);
     expect(requestMock).toHaveBeenCalledTimes(1);
-    expect(deviceFp.finishReplay).toHaveBeenCalledWith(NEW_COOKIE, '5003');
-    const query = 'role_id=100000001&server=cn_gf01';
-    const firstDs = expectValidDs(browserTransport.mock.calls[0]?.[1].headers.DS, query, '');
-    const retryDs = expectValidDs(browserTransport.mock.calls[1]?.[1].headers.DS, query, '');
-    expect(retryDs).not.toBe(firstDs);
+    expect(deviceFp.finishReplay).toHaveBeenCalledTimes(1);
+    expect(deviceFp.finishReplay).toHaveBeenCalledWith(NEW_COOKIE, 'other-error');
+    expect(events).toEqual([
+      { phase: 'detected', retcode: 5003 },
+      { phase: 'replayed', final: 'other-error' }
+    ]);
+    expect(JSON.stringify(events)).not.toContain(NEW_COOKIE);
+    expect(JSON.stringify(events)).not.toContain('device-hash');
   });
 });
 
