@@ -1,5 +1,27 @@
 import { createHash } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const electronStoreOptions = vi.hoisted(() => [] as Array<{ name?: string; defaults?: unknown }>);
+
+vi.mock('electron-store', () => ({
+  default: class MockElectronStore {
+    private value: unknown;
+
+    constructor(options: { name?: string; defaults?: unknown }) {
+      electronStoreOptions.push(options);
+      this.value = options.defaults;
+    }
+
+    get store(): unknown {
+      return this.value;
+    }
+
+    set store(value: unknown) {
+      this.value = value;
+    }
+  }
+}));
+
 import {
   MiyousheDeviceFpRecoveryStore,
   type DeviceFpRecoveryBackend,
@@ -36,7 +58,42 @@ function createStore(backend: MemoryBackend, now: number): MiyousheDeviceFpRecov
   });
 }
 
+beforeEach(() => {
+  electronStoreOptions.length = 0;
+  vi.restoreAllMocks();
+});
+
 describe('MiyousheDeviceFpRecoveryStore', () => {
+  it('uses Date.now and a 72-hour cooldown by default', () => {
+    const failedAt = 1_720_000_000_000;
+    const backend = new MemoryBackend();
+    vi.spyOn(Date, 'now')
+      .mockReturnValueOnce(failedAt)
+      .mockReturnValueOnce(failedAt + COOLDOWN_MS - 1)
+      .mockReturnValueOnce(failedAt + COOLDOWN_MS);
+    const store = new MiyousheDeviceFpRecoveryStore({ backend });
+
+    store.recordFailure('plain-device-id', 'upstream');
+    expect(store.inspect('plain-device-id')).toEqual({
+      active: true,
+      reason: 'upstream',
+      retryAt: failedAt + COOLDOWN_MS
+    });
+    expect(store.inspect('plain-device-id')).toEqual({ active: false });
+    expect(backend.value.failuresByDevice).not.toHaveProperty(deviceHash('plain-device-id'));
+  });
+
+  it('configures the default electron-store backend without opening userData', () => {
+    new MiyousheDeviceFpRecoveryStore();
+
+    expect(electronStoreOptions).toEqual([
+      {
+        name: 'miyoushe-device-recovery',
+        defaults: { schemaVersion: 1, failuresByDevice: {} }
+      }
+    ]);
+  });
+
   it('activates the cooldown after an upstream failure', () => {
     const now = 1_720_000_000_000;
     const backend = new MemoryBackend();
