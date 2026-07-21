@@ -66,9 +66,15 @@ export interface LoginWindowOptions {
 
 export class MiyousheLoginWindow {
   private readonly partition: string;
+  private cancelActiveLoginRequest: (() => void) | undefined;
 
   constructor(partition: string = MIYOUSHE_LOGIN_PARTITION) {
     this.partition = partition;
+  }
+
+  /** Force-close the current login window so it cannot mutate the partition later. */
+  cancelActiveLogin(): void {
+    this.cancelActiveLoginRequest?.();
   }
 
   /**
@@ -129,6 +135,7 @@ export class MiyousheLoginWindow {
   }
 
   async runOnce(options: LoginWindowOptions = {}): Promise<LoginOutcome> {
+    this.cancelActiveLogin();
     const ses = session.fromPartition(this.partition);
 
     const win = new BrowserWindow({
@@ -173,22 +180,34 @@ export class MiyousheLoginWindow {
 
     return new Promise<LoginOutcome>((resolve) => {
       let settled = false;
+      let pollTimer: ReturnType<typeof setInterval> | undefined;
+      let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
+      let cancelCurrentLogin!: () => void;
 
-      const settle = (outcome: LoginOutcome) => {
+      const settle = (outcome: LoginOutcome, forceDestroy = false) => {
         if (settled) {
           return;
         }
         settled = true;
-        clearInterval(pollTimer);
-        clearTimeout(timeoutTimer);
+        if (pollTimer) clearInterval(pollTimer);
+        if (timeoutTimer) clearTimeout(timeoutTimer);
+        if (this.cancelActiveLoginRequest === cancelCurrentLogin) {
+          this.cancelActiveLoginRequest = undefined;
+        }
         if (!win.isDestroyed()) {
           win.removeAllListeners('closed');
-          win.close();
+          if (forceDestroy) win.destroy();
+          else win.close();
         }
         resolve(outcome);
       };
 
-      const pollTimer = setInterval(() => {
+      cancelCurrentLogin = () => {
+        settle({ ok: false, reason: 'cancelled' }, true);
+      };
+      this.cancelActiveLoginRequest = cancelCurrentLogin;
+
+      pollTimer = setInterval(() => {
         void (async () => {
           if (win.isDestroyed()) {
             return;
@@ -201,7 +220,7 @@ export class MiyousheLoginWindow {
         })();
       }, POLL_INTERVAL_MS);
 
-      const timeoutTimer = setTimeout(() => {
+      timeoutTimer = setTimeout(() => {
         settle({ ok: false, reason: 'timeout', message: '登录超时（5 分钟未完成）' });
       }, MAX_WAIT_MS);
 

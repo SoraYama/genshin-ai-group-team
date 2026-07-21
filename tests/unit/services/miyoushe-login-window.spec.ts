@@ -1,21 +1,76 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { getCookies, setCookie, flushStore, fromPartition } = vi.hoisted(() => {
-  const getCookies = vi.fn();
-  const setCookie = vi.fn();
-  const flushStore = vi.fn();
-  return {
-    getCookies,
-    setCookie,
-    flushStore,
-    fromPartition: vi.fn(() => ({
-      cookies: { get: getCookies, set: setCookie, flushStore }
-    }))
-  };
-});
+interface MockBrowserWindowView {
+  destroy: ReturnType<typeof vi.fn>;
+  isDestroyed(): boolean;
+}
+
+const { getCookies, setCookie, flushStore, clearStorageData, fromPartition, browserWindows } =
+  vi.hoisted(() => {
+    const getCookies = vi.fn();
+    const setCookie = vi.fn();
+    const flushStore = vi.fn();
+    const clearStorageData = vi.fn();
+    return {
+      getCookies,
+      setCookie,
+      flushStore,
+      clearStorageData,
+      browserWindows: [] as MockBrowserWindowView[],
+      fromPartition: vi.fn(() => ({
+        cookies: { get: getCookies, set: setCookie, flushStore },
+        clearStorageData,
+        setPermissionCheckHandler: vi.fn(),
+        setPermissionRequestHandler: vi.fn()
+      }))
+    };
+  });
 
 vi.mock('electron', () => ({
-  BrowserWindow: class {},
+  BrowserWindow: class MockBrowserWindow {
+    private destroyed = false;
+    private readonly listeners = new Map<string, Array<(...args: unknown[]) => void>>();
+    readonly destroy = vi.fn(() => {
+      this.destroyed = true;
+      this.emit('closed');
+    });
+    readonly webContents = {
+      setUserAgent: vi.fn(),
+      setWindowOpenHandler: vi.fn(),
+      on: vi.fn(),
+      executeJavaScript: vi.fn().mockResolvedValue(undefined)
+    };
+
+    constructor() {
+      browserWindows.push(this);
+    }
+
+    isDestroyed(): boolean {
+      return this.destroyed;
+    }
+
+    on(event: string, listener: (...args: unknown[]) => void): void {
+      const listeners = this.listeners.get(event) ?? [];
+      listeners.push(listener);
+      this.listeners.set(event, listeners);
+    }
+
+    removeAllListeners(event: string): void {
+      this.listeners.delete(event);
+    }
+
+    close(): void {
+      this.destroy();
+    }
+
+    loadURL(): Promise<void> {
+      return Promise.resolve();
+    }
+
+    private emit(event: string, ...args: unknown[]): void {
+      for (const listener of this.listeners.get(event) ?? []) listener(...args);
+    }
+  },
   session: {
     fromPartition
   }
@@ -28,7 +83,9 @@ describe('MiyousheLoginWindow persisted cookie projection', () => {
     getCookies.mockReset();
     setCookie.mockReset();
     flushStore.mockReset();
+    clearStorageData.mockReset();
     fromPartition.mockClear();
+    browserWindows.length = 0;
   });
 
   it('keeps verification credentials in main while excluding unrelated cookies', async () => {
@@ -175,5 +232,17 @@ describe('MiyousheLoginWindow persisted cookie projection', () => {
 
     expect(setCookie).not.toHaveBeenCalled();
     expect(flushStore).not.toHaveBeenCalled();
+  });
+
+  it('destroys an active login window and settles it as cancelled', async () => {
+    const loginWindow = new MiyousheLoginWindow('persist:cancel-test');
+    const login = loginWindow.runOnce();
+    const activeWindow = browserWindows[0];
+
+    loginWindow.cancelActiveLogin();
+
+    await expect(login).resolves.toEqual({ ok: false, reason: 'cancelled' });
+    expect(activeWindow?.destroy).toHaveBeenCalledOnce();
+    expect(activeWindow?.isDestroyed()).toBe(true);
   });
 });

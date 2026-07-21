@@ -123,6 +123,7 @@ function existingProfile(): PersistedProfile {
 
 function setup(existing: PersistedProfile | undefined) {
   const partitionLifecycle = new MiyoushePartitionLifecycle();
+  const loginSessionEntries = new Map<string, string>();
   const ensureForSession = vi.fn().mockImplementation(async (cookie: string) => ({
     ok: true,
     cookie,
@@ -162,12 +163,22 @@ function setup(existing: PersistedProfile | undefined) {
     partitionLifecycle,
     loginWindow: {
       runOnce: vi.fn(),
+      cancelActiveLogin: vi.fn(),
       readPersistedCookie: vi.fn(),
       clearPersistedCookie: vi.fn()
     },
     loginSessions: {
-      put: vi.fn(),
-      consume: vi.fn()
+      put: vi.fn().mockImplementation((cookie: string) => {
+        const sessionId = 'login-session-id';
+        loginSessionEntries.set(sessionId, cookie);
+        return sessionId;
+      }),
+      consume: vi.fn().mockImplementation((sessionId: string) => {
+        const cookie = loginSessionEntries.get(sessionId);
+        loginSessionEntries.delete(sessionId);
+        return cookie;
+      }),
+      clear: vi.fn().mockImplementation(() => loginSessionEntries.clear())
     },
     rosterSessions: {
       peek: vi.fn(),
@@ -238,6 +249,12 @@ describe('miyoushe:login-via-browser device recovery', () => {
     const handler = handlers.get('miyoushe:logout');
     if (!handler) throw new Error('miyoushe:logout handler was not registered');
     return handler(undefined);
+  }
+
+  async function importFromSession(sessionId: string): Promise<unknown> {
+    const handler = handlers.get('profile:import-from-session');
+    if (!handler) throw new Error('profile:import-from-session handler was not registered');
+    return handler({ sessionId, uid: UID });
   }
 
   it('uses the completed Cookie everywhere without exposing device recovery details', async () => {
@@ -378,6 +395,64 @@ describe('miyoushe:login-via-browser device recovery', () => {
     expect(deps.miyoushe.fetchRoles).not.toHaveBeenCalled();
     expect(deps.rosterSessions.put).not.toHaveBeenCalled();
     expect(deps.loginSessions.put).not.toHaveBeenCalled();
+  });
+
+  it('cancels and drains an active login window before logout clears the partition', async () => {
+    const deps = setup(undefined);
+    const pendingLogin = deferred<{
+      ok: false;
+      reason: 'cancelled';
+    }>();
+    const events: string[] = [];
+    let loginWindowClosed = false;
+    let loginWindowActive = false;
+    deps.loginWindow.runOnce.mockImplementation(() => {
+      loginWindowActive = true;
+      return pendingLogin.promise;
+    });
+    deps.loginWindow.cancelActiveLogin.mockImplementation(() => {
+      if (!loginWindowActive) return;
+      events.push('login-window-closed');
+      loginWindowActive = false;
+      loginWindowClosed = true;
+      pendingLogin.resolve({ ok: false, reason: 'cancelled' });
+    });
+    deps.loginWindow.clearPersistedCookie.mockImplementation(async () => {
+      events.push('partition-cleared');
+    });
+
+    const loginPromise = loginViaBrowser();
+    await vi.waitFor(() => expect(deps.loginWindow.runOnce).toHaveBeenCalledOnce());
+    deps.loginWindow.cancelActiveLogin.mockClear();
+
+    const logoutResult = await logout();
+    expect(deps.loginWindow.cancelActiveLogin).toHaveBeenCalledOnce();
+    const loginResult = await loginPromise;
+    if (!loginWindowClosed) events.push('late-browser-cookie-write');
+
+    expect(logoutResult).toEqual({ ok: true });
+    expect(loginResult).toEqual({ ok: false, reason: 'cancelled' });
+    expect(events).toEqual(['login-window-closed', 'partition-cleared']);
+    expect(deps.deviceFp.ensureForSession).not.toHaveBeenCalled();
+    expect(deps.rosterSessions.put).not.toHaveBeenCalled();
+    expect(deps.loginSessions.put).not.toHaveBeenCalled();
+  });
+
+  it('invalidates every opaque login session when logging out', async () => {
+    const deps = setup(undefined);
+    deps.loginWindow.runOnce.mockResolvedValue({ ok: true, cookie: COOKIE });
+    deps.miyoushe.fetchRoles.mockResolvedValue(successfulBind());
+
+    const loginResult = (await loginViaBrowser()) as { ok: true; sessionId: string };
+    deps.miyoushe.fetchRoles.mockClear();
+
+    await logout();
+
+    await expect(importFromSession(loginResult.sessionId)).rejects.toMatchObject({
+      code: 'IPC_UNAUTHORIZED'
+    });
+    expect(deps.loginSessions.clear).toHaveBeenCalledOnce();
+    expect(deps.miyoushe.fetchRoles).not.toHaveBeenCalled();
   });
 });
 

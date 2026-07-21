@@ -56,7 +56,7 @@ export interface ProfileIpcDeps {
   miyousheCalculator: MiyousheCalculatorClient;
   miyousheBridge: MiyousheBrowserBridge;
   deviceFp: Pick<LifecycleMiyousheDeviceFp, 'ensureForSessionAt'>;
-  partitionLifecycle: Pick<MiyoushePartitionLifecycle, 'transition' | 'isCurrent'>;
+  partitionLifecycle: Pick<MiyoushePartitionLifecycle, 'transition' | 'isCurrent' | 'runAt'>;
   loginWindow: MiyousheLoginWindow;
   loginSessions: LoginSessionStore;
   rosterSessions: RosterSessionStore;
@@ -237,13 +237,14 @@ export function registerProfileIpc({
   });
 
   registerHandler('miyoushe:login-via-browser', async () => {
+    loginWindow.cancelActiveLogin();
     const { generation } = await partitionLifecycle.transition();
-    const outcome = await loginWindow.runOnce();
+    const outcome = await partitionLifecycle.runAt(generation, () => loginWindow.runOnce());
+    if (!outcome || !partitionLifecycle.isCurrent(generation)) {
+      return { ok: false, reason: 'cancelled' as const };
+    }
     if (!outcome.ok) {
       return { ok: false, reason: outcome.reason, message: outcome.message };
-    }
-    if (!partitionLifecycle.isCurrent(generation)) {
-      return { ok: false, reason: 'cancelled' as const };
     }
 
     let cookie = outcome.cookie;
@@ -285,7 +286,9 @@ export function registerProfileIpc({
   });
 
   registerHandler('miyoushe:logout', async () => {
+    loginWindow.cancelActiveLogin();
     await partitionLifecycle.transition(() => loginWindow.clearPersistedCookie());
+    loginSessions.clear();
     rosterSessions.clear();
     return { ok: true } as const;
   });
