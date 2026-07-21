@@ -514,15 +514,22 @@ export class MiyousheDeviceFpService {
     const pending = this.enqueueFingerprintMutation<SharedFingerprintResult>(
       profileKey,
       async () => {
-        const latestFingerprint =
+        let fingerprintToPersist =
           this.latestFingerprintByDevice.get(profileKey) ?? requestedFingerprint;
-        try {
-          await this.cookieWriter.writeDeviceCookies({ DEVICEFP: latestFingerprint });
-        } catch {
-          this.safeRecordFailure(profile.deviceId, 'persist');
-          return { ok: false, reason: 'persist' };
+        while (true) {
+          try {
+            await this.cookieWriter.writeDeviceCookies({ DEVICEFP: fingerprintToPersist });
+          } catch {
+            this.safeRecordFailure(profile.deviceId, 'persist');
+            return { ok: false, reason: 'persist' };
+          }
+          const latestFingerprint =
+            this.latestFingerprintByDevice.get(profileKey) ?? fingerprintToPersist;
+          if (latestFingerprint === fingerprintToPersist) {
+            return { ok: true, deviceFp: fingerprintToPersist };
+          }
+          fingerprintToPersist = latestFingerprint;
         }
-        return { ok: true, deviceFp: latestFingerprint };
       }
     ).finally(() => {
       if (this.restoreInFlightByProfile.get(restoreKey) === pending) {
