@@ -12,7 +12,10 @@ import {
   MiyoushePartitionLifecycle,
   seedRosterSessionsFromPersistedCookie
 } from '../../../src/main/services/miyoushe/partition-lifecycle.js';
-import { RosterSessionStore } from '../../../src/main/services/login-session-store.js';
+import {
+  LoginSessionStore,
+  RosterSessionStore
+} from '../../../src/main/services/login-session-store.js';
 
 const { handlers } = vi.hoisted(() => ({
   handlers: new Map<string, (payload: unknown) => Promise<unknown> | unknown>()
@@ -315,6 +318,12 @@ function useRosterStore(deps: ReturnType<typeof setup>, rosterSessions: RosterSe
   deps.rosterSessions.hasCookie.mockImplementation((uid) => rosterSessions.hasCookie(uid));
   deps.rosterSessions.revoke.mockImplementation((uid) => rosterSessions.revoke(uid));
   deps.rosterSessions.clear.mockImplementation(() => rosterSessions.clear());
+}
+
+function useLoginStore(deps: ReturnType<typeof setup>, loginSessions: LoginSessionStore): void {
+  deps.loginSessions.put.mockImplementation((cookie) => loginSessions.put(cookie));
+  deps.loginSessions.consume.mockImplementation((sessionId) => loginSessions.consume(sessionId));
+  deps.loginSessions.clear.mockImplementation(() => loginSessions.clear());
 }
 
 async function refresh(uid = UID): Promise<RefreshOutcome> {
@@ -1369,6 +1378,35 @@ describe('profile:import-from-cookie lifecycle', () => {
 });
 
 describe('profile:refresh roster integrity', () => {
+  function deferVisibleBridgeRefresh(deps: ReturnType<typeof setup>) {
+    const visible = deferred<{ ok: true; mode: 'warmup'; indexCalled: true }>();
+    deps.miyousheGameRecord.fetchPlayerIndex.mockResolvedValue({
+      ok: false,
+      error: {
+        kind: 'upstream',
+        httpStatus: 503,
+        message: 'temporary upstream failure'
+      }
+    });
+    deps.miyousheBridge.fetchRoster
+      .mockResolvedValueOnce({
+        ok: false,
+        reason: 'navigation',
+        message: 'hidden bridge unavailable'
+      })
+      .mockReturnValueOnce(visible.promise);
+    return visible;
+  }
+
+  function clearMiyousheNetworkCalls(deps: ReturnType<typeof setup>): void {
+    deps.loginWindow.readPersistedCookie.mockClear();
+    deps.miyousheGameRecord.fetchPlayerIndex.mockClear();
+    deps.miyousheGameRecord.fetchDetailedRoster.mockClear();
+    deps.miyousheGameRecord.ping.mockClear();
+    deps.miyousheCalculator.fetchOwnedRoster.mockClear();
+    deps.miyousheBridge.fetchRoster.mockClear();
+  }
+
   function configurePartitionNetworkSuccess(deps: ReturnType<typeof setup>): void {
     deps.miyousheGameRecord.fetchPlayerIndex.mockResolvedValue({
       ok: true,
@@ -1528,6 +1566,193 @@ describe('profile:refresh roster integrity', () => {
     expect(profiles.get(UID)?.credentialSource).toBeUndefined();
     expect(deps.store.reconcilePartitionCredentialSources).toHaveBeenCalledOnce();
     expect(deps.store.reconcilePartitionCredentialSources).toHaveBeenCalledWith([]);
+  });
+
+  it.each(['cancelled', 'bind-failed', 'success'] as const)(
+    'clears stale visible-bridge sessions after a browser replacement is %s',
+    async (replacementOutcome) => {
+      const accountA = withCredentialSource(existingProfile(), 'partition');
+      const accountB = { ...existingProfile(), uid: SECOND_UID };
+      const deps = setup(undefined);
+      const profiles = makeProfileStoreStateful(deps, [accountA, accountB]);
+      const rosterSessions = new RosterSessionStore();
+      const loginSessions = new LoginSessionStore();
+      useRosterStore(deps, rosterSessions);
+      useLoginStore(deps, loginSessions);
+      rosterSessions.put(UID, PARTITION_A_COOKIE, 'partition');
+
+      let persistedCookie: string | undefined = PARTITION_A_COOKIE;
+      deps.loginWindow.readPersistedCookie.mockImplementation(async () => persistedCookie);
+      deps.loginWindow.clearPersistedCookie.mockImplementation(async () => {
+        persistedCookie = undefined;
+      });
+      deps.loginWindow.runOnce.mockImplementation(async () => {
+        if (replacementOutcome === 'cancelled') {
+          return { ok: false as const, reason: 'cancelled' as const };
+        }
+        persistedCookie = UPDATED_PARTITION_COOKIE;
+        return { ok: true as const, cookie: UPDATED_PARTITION_COOKIE };
+      });
+      deps.miyoushe.fetchRoles.mockImplementation(async () =>
+        replacementOutcome === 'bind-failed'
+          ? {
+              ok: false as const,
+              retcode: -100,
+              message: 'replacement role validation failed',
+              roles: []
+            }
+          : {
+              ok: true as const,
+              roles: [
+                {
+                  gameUid: SECOND_UID,
+                  region: 'os_usa',
+                  nickname: 'Browser B',
+                  level: 60
+                }
+              ]
+            }
+      );
+      const visible = deferVisibleBridgeRefresh(deps);
+      const releaseLateOpaquePut = deferred<void>();
+      let lateOpaqueSessionId: string | undefined;
+      const lateOpaquePut = deps.partitionLifecycle.runAt(
+        deps.partitionLifecycle.capture(),
+        async () => {
+          await releaseLateOpaquePut.promise;
+          lateOpaqueSessionId = deps.loginSessions.put(PARTITION_A_COOKIE);
+        }
+      );
+
+      const oldRefresh = refresh(UID);
+      await vi.waitFor(() =>
+        expect(deps.miyousheBridge.fetchRoster).toHaveBeenCalledWith({ visible: true, uid: UID })
+      );
+      const replacement = loginViaBrowserRequest();
+      await vi.waitFor(() => expect(deps.rosterSessions.clear).toHaveBeenCalledOnce());
+      expect(rosterSessions.hasCookie(UID)).toBe(false);
+
+      releaseLateOpaquePut.resolve();
+      visible.resolve({ ok: true, mode: 'warmup', indexCalled: true });
+      const outcomes = Promise.all([
+        oldRefresh.catch((error: unknown) => error),
+        replacement,
+        lateOpaquePut
+      ]);
+
+      expect(await settlesWithin(outcomes)).toBe(true);
+      const [oldRefreshError, replacementResult] = await outcomes;
+      expect(oldRefreshError).toMatchObject({ code: 'IPC_UNAUTHORIZED' });
+      expect(deps.rosterSessions.put).toHaveBeenCalledWith(UID, PARTITION_A_COOKIE, 'partition');
+      expect(lateOpaqueSessionId).toBeDefined();
+      expect(loginSessions.consume(lateOpaqueSessionId!)).toBeUndefined();
+      expect(rosterSessions.hasCookie(UID)).toBe(false);
+      expect(deps.rosterSessions.clear).toHaveBeenCalledTimes(2);
+      expect(deps.loginSessions.clear).toHaveBeenCalledTimes(2);
+      expect(profiles.get(UID)?.credentialSource).toBeUndefined();
+
+      if (replacementOutcome === 'cancelled') {
+        expect(replacementResult).toEqual({ ok: false, reason: 'cancelled' });
+      } else if (replacementOutcome === 'bind-failed') {
+        expect(replacementResult).toEqual({
+          ok: false,
+          reason: 'bind-failed',
+          message: 'replacement role validation failed'
+        });
+      } else {
+        expect(replacementResult).toMatchObject({ ok: true });
+        expect(rosterSessions.peek(SECOND_UID)).toBe(UPDATED_PARTITION_COOKIE);
+        expect(profiles.get(SECOND_UID)?.credentialSource).toBe('partition');
+      }
+
+      clearMiyousheNetworkCalls(deps);
+      const staleAPing = await ping(UID);
+      const staleARefresh = await refresh(UID);
+      expect(staleAPing).toEqual({
+        ok: false,
+        reason: '没有可用的米游社登录态，请先登录'
+      });
+      expect(staleARefresh.summary.miyoushe).toBe('no-cookie');
+      expectNoMiyousheNetwork(deps);
+
+      if (replacementOutcome === 'success') {
+        configurePartitionNetworkSuccess(deps);
+        const browserBRefresh = await refresh(SECOND_UID);
+        const browserBPing = await ping(SECOND_UID);
+        expect(browserBRefresh.summary.miyoushe).toBe('ok');
+        expect(browserBPing).toMatchObject({ ok: true });
+        expect(deps.miyousheGameRecord.fetchPlayerIndex).toHaveBeenCalledWith(
+          SECOND_UID,
+          UPDATED_PARTITION_COOKIE
+        );
+        expect(deps.miyousheGameRecord.ping).toHaveBeenCalledWith(
+          SECOND_UID,
+          UPDATED_PARTITION_COOKIE
+        );
+      }
+    }
+  );
+
+  it('clears sessions reinserted during drain even when partition clearing fails', async () => {
+    const accountA = withCredentialSource(existingProfile(), 'partition');
+    const deps = setup(undefined);
+    const profiles = makeProfileStoreStateful(deps, [accountA]);
+    const rosterSessions = new RosterSessionStore();
+    const loginSessions = new LoginSessionStore();
+    useRosterStore(deps, rosterSessions);
+    useLoginStore(deps, loginSessions);
+    rosterSessions.put(UID, PARTITION_A_COOKIE, 'partition');
+    deps.loginWindow.readPersistedCookie.mockResolvedValue(PARTITION_A_COOKIE);
+    deps.loginWindow.clearPersistedCookie.mockRejectedValue(new Error('partition clear failed'));
+    const visible = deferVisibleBridgeRefresh(deps);
+    const releaseLateOpaquePut = deferred<void>();
+    let lateOpaqueSessionId: string | undefined;
+    const lateOpaquePut = deps.partitionLifecycle.runAt(
+      deps.partitionLifecycle.capture(),
+      async () => {
+        await releaseLateOpaquePut.promise;
+        lateOpaqueSessionId = deps.loginSessions.put(PARTITION_A_COOKIE);
+      }
+    );
+
+    const oldRefresh = refresh(UID);
+    await vi.waitFor(() =>
+      expect(deps.miyousheBridge.fetchRoster).toHaveBeenCalledWith({ visible: true, uid: UID })
+    );
+    const replacement = loginViaBrowserRequest();
+    await vi.waitFor(() => expect(deps.rosterSessions.clear).toHaveBeenCalledOnce());
+    releaseLateOpaquePut.resolve();
+    visible.resolve({ ok: true, mode: 'warmup', indexCalled: true });
+    const outcomes = Promise.all([
+      oldRefresh.catch((error: unknown) => error),
+      replacement.catch((error: unknown) => error),
+      lateOpaquePut
+    ]);
+
+    expect(await settlesWithin(outcomes)).toBe(true);
+    const [oldRefreshError, replacementError] = await outcomes;
+    expect(oldRefreshError).toMatchObject({ code: 'IPC_UNAUTHORIZED' });
+    expect(replacementError).toEqual(
+      expect.objectContaining({ message: 'partition clear failed' })
+    );
+    expect(deps.rosterSessions.put).toHaveBeenCalledWith(UID, PARTITION_A_COOKIE, 'partition');
+    expect(lateOpaqueSessionId).toBeDefined();
+    expect(loginSessions.consume(lateOpaqueSessionId!)).toBeUndefined();
+    expect(rosterSessions.hasCookie(UID)).toBe(false);
+    expect(deps.rosterSessions.clear).toHaveBeenCalledTimes(2);
+    expect(deps.loginSessions.clear).toHaveBeenCalledTimes(2);
+    expect(profiles.get(UID)?.credentialSource).toBeUndefined();
+    expect(deps.loginWindow.runOnce).not.toHaveBeenCalled();
+
+    clearMiyousheNetworkCalls(deps);
+    const staleAPing = await ping(UID);
+    const staleARefresh = await refresh(UID);
+    expect(staleAPing).toEqual({
+      ok: false,
+      reason: '没有可用的米游社登录态，请先登录'
+    });
+    expect(staleARefresh.summary.miyoushe).toBe('no-cookie');
+    expectNoMiyousheNetwork(deps);
   });
 
   it('keeps manual B disconnected after browser account A replaces its roster sessions', async () => {

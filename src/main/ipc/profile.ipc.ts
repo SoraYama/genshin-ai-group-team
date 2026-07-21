@@ -255,7 +255,17 @@ export function registerProfileIpc({
 
   registerHandler('miyoushe:login-via-browser', async () => {
     const { generation } = await partitionLifecycle.transition(
-      () => loginWindow.clearPersistedCookie(),
+      async () => {
+        try {
+          await loginWindow.clearPersistedCookie();
+        } finally {
+          // Stale tracked work can reinsert an old in-memory session while the
+          // transition drains. Revoke it again after drain/mutation and before
+          // the replacement window starts, including when partition clearing fails.
+          loginSessions.clear();
+          rosterSessions.clear();
+        }
+      },
       {
         beforeDrain: () => {
           loginWindow.cancelActiveLogin();
