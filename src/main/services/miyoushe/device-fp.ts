@@ -67,7 +67,7 @@ function parseCookies(cookie: string): Map<string, string> {
     if (separator <= 0) continue;
     const name = part.slice(0, separator).trim();
     const value = part.slice(separator + 1).trim();
-    if (name && value) values.set(name, value);
+    if (name) values.set(name, value);
   }
   return values;
 }
@@ -82,7 +82,7 @@ function publicDeviceHash(deviceId: string): string {
 
 function hasCompleteDeviceProfile(cookie: string): boolean {
   const cookies = parseCookies(cookie);
-  return REQUIRED_DEVICE_COOKIES.every((name) => cookies.has(name));
+  return REQUIRED_DEVICE_COOKIES.every((name) => Boolean(cookies.get(name)));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -249,8 +249,9 @@ export class MiyousheDeviceFpService {
       };
     }
 
-    const wasComplete = hasCompleteDeviceProfile(cookie);
-    if (Object.keys(ensured.updates).length > 0) {
+    const hasStableUpdates = Object.keys(ensured.updates).length > 0;
+    const wasComplete = hasCompleteDeviceProfile(cookie) && !hasStableUpdates;
+    if (hasStableUpdates) {
       try {
         await this.cookieWriter.writeDeviceCookies(ensured.updates);
       } catch {

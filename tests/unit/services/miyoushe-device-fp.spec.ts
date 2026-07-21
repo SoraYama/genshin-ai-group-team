@@ -119,6 +119,81 @@ describe('MiyousheDeviceFpService', () => {
     expect(transport).not.toHaveBeenCalled();
   });
 
+  it('refreshes after a trailing empty duplicate forces a new device ID', async () => {
+    const events: string[] = [];
+    const writer: DeviceFpCookieWriter = {
+      writeDeviceCookies: vi.fn(async (updates: Readonly<Record<string, string>>) => {
+        events.push(`write:${Object.keys(updates).join(',')}`);
+      })
+    };
+    const cooldown = createCooldown();
+    const expectedPayload = buildDeviceFpPayload({
+      deviceId: DEVICE_ID,
+      deviceFp: 'OLDFP123456',
+      seedId: 'seed',
+      seedTime: '1'
+    });
+    const transport = vi.fn<DeviceFpTransport>(async (payload) => {
+      events.push('transport');
+      expect(payload).toEqual(expectedPayload);
+      return validResponse();
+    });
+    const service = new MiyousheDeviceFpService({
+      cookieWriter: writer,
+      cooldown,
+      transport,
+      profileDependencies: fixedProfileDependencies()
+    });
+    const cookie =
+      'ltoken_v2=auth; _MHYUUID=old; _MHYUUID=; DEVICEFP=OLDFP123456; ' +
+      'DEVICEFP_SEED_ID=seed; DEVICEFP_SEED_TIME=1';
+
+    const result = await service.ensureForSession(cookie);
+
+    expect(events).toEqual(['write:_MHYUUID', 'transport', 'write:DEVICEFP']);
+    expect(writer.writeDeviceCookies).toHaveBeenNthCalledWith(1, { _MHYUUID: DEVICE_ID });
+    expect(writer.writeDeviceCookies).toHaveBeenNthCalledWith(2, { DEVICEFP: NEW_FP });
+    expect(result).toMatchObject({
+      ok: true,
+      deviceHash: shortHash(DEVICE_ID),
+      refreshed: true
+    });
+    expect(result.cookie).toContain('ltoken_v2=auth');
+    expect(result.cookie).toContain(`_MHYUUID=${DEVICE_ID}`);
+    expect(result.cookie).toContain(`DEVICEFP=${NEW_FP}`);
+  });
+
+  it.each([
+    ['DEVICEFP', `DEVICEFP=${OLD_FP}; DEVICEFP=`],
+    ['DEVICEFP_SEED_ID', `DEVICEFP_SEED_ID=${SEED_ID}; DEVICEFP_SEED_ID=`],
+    ['DEVICEFP_SEED_TIME', `DEVICEFP_SEED_TIME=${SEED_TIME}; DEVICEFP_SEED_TIME=`]
+  ])('does not treat a trailing empty duplicate %s as a complete profile', async (name, field) => {
+    const writer = createWriter();
+    const cooldown = createCooldown();
+    const transport = vi.fn<DeviceFpTransport>(async () => validResponse());
+    const service = new MiyousheDeviceFpService({
+      cookieWriter: writer,
+      cooldown,
+      transport,
+      profileDependencies: fixedProfileDependencies()
+    });
+    const cookie = [
+      'ltoken_v2=auth-token',
+      `_MHYUUID=${DEVICE_ID}`,
+      field,
+      ...(name === 'DEVICEFP' ? [] : [`DEVICEFP=${OLD_FP}`]),
+      ...(name === 'DEVICEFP_SEED_ID' ? [] : [`DEVICEFP_SEED_ID=${SEED_ID}`]),
+      ...(name === 'DEVICEFP_SEED_TIME' ? [] : [`DEVICEFP_SEED_TIME=${SEED_TIME}`])
+    ].join('; ');
+
+    const result = await service.ensureForSession(cookie);
+
+    expect(result).toMatchObject({ ok: true, refreshed: true });
+    expect(result.cookie).toContain(`DEVICEFP=${NEW_FP}`);
+    expect(cooldown.inspect).toHaveBeenCalledWith(DEVICE_ID);
+    expect(transport).toHaveBeenCalledTimes(1);
+  });
+
   it('persists generated stable fields before getFp, sends the exact payload, then persists only DEVICEFP', async () => {
     const events: string[] = [];
     const writer: DeviceFpCookieWriter = {
