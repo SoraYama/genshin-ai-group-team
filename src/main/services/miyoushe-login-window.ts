@@ -1,4 +1,5 @@
 import { BrowserWindow, session } from 'electron';
+import { DEVICE_COOKIE_NAMES, type MiyousheDeviceCookieName } from './miyoushe/device-profile.js';
 
 const REQUIRED_COOKIE_NAMES = ['ltoken_v2', 'ltuid_v2', 'ltmid_v2'] as const;
 const AUTH_CONTEXT_COOKIE_NAMES = [
@@ -10,18 +11,17 @@ const AUTH_CONTEXT_COOKIE_NAMES = [
   'ltoken',
   'ltuid'
 ] as const;
-const OPTIONAL_CONTEXT_COOKIE_NAMES = [
-  '_MHYUUID',
-  'DEVICEFP',
-  'DEVICEFP_SEED_ID',
-  'DEVICEFP_SEED_TIME'
-] as const;
 const SESSION_COOKIE_NAMES = [
   ...REQUIRED_COOKIE_NAMES,
   ...AUTH_CONTEXT_COOKIE_NAMES,
-  ...OPTIONAL_CONTEXT_COOKIE_NAMES
+  ...DEVICE_COOKIE_NAMES
 ] as const;
 const COOKIE_DOMAINS = ['.miyoushe.com', '.mihoyo.com'];
+const DEVICE_COOKIE_TARGETS = [
+  { url: 'https://www.miyoushe.com/', domain: '.miyoushe.com' },
+  { url: 'https://api-takumi.mihoyo.com/', domain: '.mihoyo.com' }
+] as const;
+const DEVICE_COOKIE_EXPIRY_SECONDS = 365 * 24 * 60 * 60;
 const LOGIN_URL = 'https://www.miyoushe.com/ys/';
 const POLL_INTERVAL_MS = 800;
 const MAX_WAIT_MS = 5 * 60 * 1000;
@@ -91,6 +91,40 @@ export class MiyousheLoginWindow {
     await ses.clearStorageData({ storages: ['cookies'] });
   }
 
+  /** Persist only device-identification cookies needed by miyoushe risk controls. */
+  async writeDeviceCookies(values: Readonly<Record<string, string>>): Promise<void> {
+    const entries = Object.entries(values);
+    const validatedEntries: Array<[MiyousheDeviceCookieName, string]> = [];
+
+    for (const [name, value] of entries) {
+      if (
+        !(DEVICE_COOKIE_NAMES as readonly string[]).includes(name) ||
+        typeof value !== 'string' ||
+        !value.trim()
+      ) {
+        throw new Error(`Rejected device cookie outside device cookie whitelist: ${name}`);
+      }
+      validatedEntries.push([name as MiyousheDeviceCookieName, value]);
+    }
+
+    const ses = session.fromPartition(this.partition);
+    const expirationDate = Math.floor(Date.now() / 1000) + DEVICE_COOKIE_EXPIRY_SECONDS;
+    for (const [name, value] of validatedEntries) {
+      for (const target of DEVICE_COOKIE_TARGETS) {
+        await ses.cookies.set({
+          ...target,
+          name,
+          value,
+          path: '/',
+          secure: true,
+          httpOnly: false,
+          sameSite: 'no_restriction',
+          expirationDate
+        });
+      }
+    }
+  }
+
   async runOnce(options: LoginWindowOptions = {}): Promise<LoginOutcome> {
     const ses = session.fromPartition(this.partition);
 
@@ -118,8 +152,12 @@ export class MiyousheLoginWindow {
     win.webContents.on('will-navigate', (event, targetUrl) => {
       try {
         const host = new URL(targetUrl).hostname;
-        if (!host.endsWith('.miyoushe.com') && host !== 'miyoushe.com' &&
-            !host.endsWith('.mihoyo.com') && host !== 'mihoyo.com') {
+        if (
+          !host.endsWith('.miyoushe.com') &&
+          host !== 'miyoushe.com' &&
+          !host.endsWith('.mihoyo.com') &&
+          host !== 'mihoyo.com'
+        ) {
           event.preventDefault();
         }
       } catch {
