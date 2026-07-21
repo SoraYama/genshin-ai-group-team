@@ -310,9 +310,17 @@ describe('MiyousheDeviceFpService', () => {
       now: () => NOW
     });
 
-    const ensured = await service.ensureForSession(
-      'ltoken_v2=manual; ltuid_v2=manual-account; ltmid_v2=manual-member',
-      { persistence: 'memory-only' }
+    const { ensured, first5003, second5003 } = await service.runWithPersistence(
+      'memory-only',
+      async () => {
+        const ensured = await service.ensureForSession(
+          'ltoken_v2=manual; ltuid_v2=manual-account; ltmid_v2=manual-member'
+        );
+        const first5003 = await service.recoverFrom5003(ensured.cookie);
+        service.finishReplay(first5003.cookie, '5003');
+        const second5003 = await service.recoverFrom5003(first5003.cookie);
+        return { ensured, first5003, second5003 };
+      }
     );
     expect(ensured).toMatchObject({
       ok: true,
@@ -324,14 +332,11 @@ describe('MiyousheDeviceFpService', () => {
     expect(transport).toHaveBeenCalledOnce();
     expect(writer.writeDeviceCookies).not.toHaveBeenCalled();
 
-    const first5003 = await service.recoverFrom5003(ensured.cookie);
     expect(first5003).toMatchObject({
       ok: true,
       deviceHash: shortHash(DEVICE_ID),
       refreshed: false
     });
-    service.finishReplay(first5003.cookie, '5003');
-    const second5003 = await service.recoverFrom5003(first5003.cookie);
 
     expect(second5003).toEqual({
       ok: false,
@@ -344,6 +349,65 @@ describe('MiyousheDeviceFpService', () => {
     expect(cooldown.recordFailure).toHaveBeenCalledWith(DEVICE_ID, 'upstream');
     expect(transport).toHaveBeenCalledOnce();
     expect(writer.writeDeviceCookies).not.toHaveBeenCalled();
+  });
+
+  it('isolates concurrent manual and partition persistence for the same device profile', async () => {
+    const writer = createWriter();
+    const cooldown = createCooldown();
+    const transport = vi.fn<DeviceFpTransport>(async () => validResponse());
+    const service = new MiyousheDeviceFpService({
+      cookieWriter: writer,
+      cooldown,
+      transport,
+      profileDependencies: fixedProfileDependencies()
+    });
+    const cookie = 'ltoken_v2=same-profile; ltuid_v2=123456789; ltmid_v2=same-member';
+
+    const [manual, partition] = await Promise.all([
+      service.runWithPersistence('memory-only', () => service.ensureForSession(cookie)),
+      service.runWithPersistence('partition', () => service.ensureForSession(cookie))
+    ]);
+
+    expect(manual).toMatchObject({ ok: true, refreshed: true });
+    expect(partition).toMatchObject({ ok: true, refreshed: true });
+    expect(transport).toHaveBeenCalledTimes(2);
+    expect(writer.writeDeviceCookies).toHaveBeenCalledTimes(2);
+    expect(writer.writeDeviceCookies).toHaveBeenNthCalledWith(1, {
+      _MHYUUID: DEVICE_ID,
+      DEVICEFP_SEED_ID: SEED_ID,
+      DEVICEFP_SEED_TIME: SEED_TIME
+    });
+    expect(writer.writeDeviceCookies).toHaveBeenNthCalledWith(2, { DEVICEFP: NEW_FP });
+  });
+
+  it('persists a browser request for a profile previously used by a manual request', async () => {
+    const writer = createWriter();
+    const cooldown = createCooldown();
+    const transport = vi.fn<DeviceFpTransport>(async () => validResponse());
+    const service = new MiyousheDeviceFpService({
+      cookieWriter: writer,
+      cooldown,
+      transport,
+      profileDependencies: fixedProfileDependencies()
+    });
+    const cookie = 'ltoken_v2=same-profile; ltuid_v2=123456789; ltmid_v2=same-member';
+
+    await service.runWithPersistence('memory-only', () => service.ensureForSession(cookie));
+    expect(writer.writeDeviceCookies).not.toHaveBeenCalled();
+
+    const browser = await service.runWithPersistence('partition', () =>
+      service.ensureForSession(cookie)
+    );
+
+    expect(browser).toMatchObject({ ok: true, refreshed: true });
+    expect(transport).toHaveBeenCalledTimes(2);
+    expect(writer.writeDeviceCookies).toHaveBeenCalledTimes(2);
+    expect(writer.writeDeviceCookies).toHaveBeenNthCalledWith(1, {
+      _MHYUUID: DEVICE_ID,
+      DEVICEFP_SEED_ID: SEED_ID,
+      DEVICEFP_SEED_TIME: SEED_TIME
+    });
+    expect(writer.writeDeviceCookies).toHaveBeenNthCalledWith(2, { DEVICEFP: NEW_FP });
   });
 
   it('uses an 8-second total deadline and streams the default transport response', async () => {

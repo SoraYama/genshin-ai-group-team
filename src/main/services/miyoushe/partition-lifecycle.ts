@@ -10,6 +10,7 @@ import {
 import type {
   DeviceFpCookieWriter,
   DeviceFpEnsureOptions,
+  DeviceFpPersistence,
   DeviceFpResult,
   MiyousheDeviceFpService
 } from './device-fp.js';
@@ -173,6 +174,10 @@ export class MiyoushePartitionLifecycle {
 
 export interface LifecycleMiyousheDeviceFp extends MiyousheDeviceFpRecovery {
   ensureForSession(cookie: string): Promise<DeviceFpResult>;
+  runWithPersistence<T>(
+    persistence: DeviceFpPersistence,
+    operation: () => Promise<T>
+  ): Promise<T>;
   ensureForSessionAt(
     generation: number,
     cookie: string,
@@ -183,13 +188,19 @@ export interface LifecycleMiyousheDeviceFp extends MiyousheDeviceFpRecovery {
 export function bindDeviceFpToPartitionLifecycle(
   service: Pick<
     MiyousheDeviceFpService,
-    'applyKnownFingerprint' | 'ensureForSession' | 'recoverFrom5003' | 'finishReplay'
+    | 'applyKnownFingerprint'
+    | 'ensureForSession'
+    | 'recoverFrom5003'
+    | 'finishReplay'
+    | 'runWithPersistence'
   >,
   lifecycle: MiyoushePartitionLifecycle
 ): LifecycleMiyousheDeviceFp {
   return {
     applyKnownFingerprint: (cookie) => service.applyKnownFingerprint(cookie),
     ensureForSession: (cookie) => lifecycle.runCurrent(() => service.ensureForSession(cookie)),
+    runWithPersistence: (persistence, operation) =>
+      service.runWithPersistence(persistence, operation),
     ensureForSessionAt: (generation, cookie, options) =>
       lifecycle.runAt(generation, () => service.ensureForSession(cookie, options)),
     recoverFrom5003: (cookie) => lifecycle.runCurrent(() => service.recoverFrom5003(cookie)),
@@ -226,7 +237,7 @@ export async function seedRosterSessionsFromPersistedCookie(deps: {
       return;
     }
     for (const role of bind.roles) {
-      deps.rosterSessions.put(role.gameUid, effectiveCookie);
+      deps.rosterSessions.put(role.gameUid, effectiveCookie, 'partition');
     }
     console.info(
       `[miyoushe] restored login session for ${bind.roles.length} UID(s) from persistent partition`

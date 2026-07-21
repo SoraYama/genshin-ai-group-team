@@ -17,6 +17,7 @@ import type {
   MiyousheRosterCoverage
 } from '../services/miyoushe-game-record.js';
 import type { MiyousheBrowserBridge } from '../services/miyoushe/browser-bridge.js';
+import type { DeviceFpPersistence } from '../services/miyoushe/device-fp.js';
 import type {
   LifecycleMiyousheDeviceFp,
   MiyoushePartitionLifecycle
@@ -55,7 +56,10 @@ export interface ProfileIpcDeps {
   miyousheGameRecord: MiyousheGameRecordClient;
   miyousheCalculator: MiyousheCalculatorClient;
   miyousheBridge: MiyousheBrowserBridge;
-  deviceFp: Pick<LifecycleMiyousheDeviceFp, 'ensureForSessionAt'>;
+  deviceFp: Pick<
+    LifecycleMiyousheDeviceFp,
+    'ensureForSessionAt' | 'runWithPersistence'
+  >;
   partitionLifecycle: Pick<
     MiyoushePartitionLifecycle,
     'capture' | 'transition' | 'isCurrent' | 'runAt'
@@ -94,7 +98,8 @@ export function registerProfileIpc({
    */
   async function fetchMiyousheRoster(
     uid: string,
-    cookie: string | undefined
+    cookie: string | undefined,
+    persistence: DeviceFpPersistence
   ): Promise<
     | {
         ok: true;
@@ -192,7 +197,7 @@ export function registerProfileIpc({
       // Warmup completed (user closed window / we saw /index 200). Retry HTTP.
       const refreshedCookie = (await loginWindow.readPersistedCookie()) ?? cookie;
       if (refreshedCookie) {
-        rosterSessions.put(uid, refreshedCookie);
+        rosterSessions.put(uid, refreshedCookie, persistence);
         const index = await miyousheGameRecord.fetchPlayerIndex(uid, refreshedCookie);
         const retry = index.ok
           ? await miyousheGameRecord.fetchDetailedRoster(uid, refreshedCookie, {
@@ -240,16 +245,19 @@ export function registerProfileIpc({
   });
 
   registerHandler('miyoushe:login-via-browser', async () => {
-    const { generation } = await partitionLifecycle.transition(undefined, {
-      beforeDrain: () => {
-        loginWindow.cancelActiveLogin();
-        // Acquiring a browser-login generation is the atomic account
-        // replacement boundary. Old credentials never revive if the new
-        // window is later cancelled or fails.
-        loginSessions.clear();
-        rosterSessions.clear();
+    const { generation } = await partitionLifecycle.transition(
+      () => loginWindow.clearPersistedCookie(),
+      {
+        beforeDrain: () => {
+          loginWindow.cancelActiveLogin();
+          // Acquiring a browser-login generation is the atomic account
+          // replacement boundary. Old credentials never revive if the new
+          // window is later cancelled or fails.
+          loginSessions.clear();
+          rosterSessions.clear();
+        }
       }
-    });
+    );
     const outcome = await partitionLifecycle.runAt(generation, () => loginWindow.runOnce());
     if (!outcome || !partitionLifecycle.isCurrent(generation)) {
       return { ok: false, reason: 'cancelled' as const };
@@ -289,7 +297,7 @@ export function registerProfileIpc({
     // in-memory roster store for every UID the account owns so refreshes
     // work immediately.
     for (const role of bind.roles) {
-      rosterSessions.put(role.gameUid, cookie);
+      rosterSessions.put(role.gameUid, cookie, 'partition');
     }
 
     const sessionId = loginSessions.put(cookie);
@@ -332,8 +340,10 @@ export function registerProfileIpc({
       return { ok: false, reason: formatIssues(parsed.error.issues) };
     }
     const generation = partitionLifecycle.capture();
-    const cookie =
-      rosterSessions.peek(parsed.data.uid) ?? (await loginWindow.readPersistedCookie());
+    const rosterSession = rosterSessions.peekSession(parsed.data.uid);
+    const persistedCookie = rosterSession ? undefined : await loginWindow.readPersistedCookie();
+    const cookie = rosterSession?.cookie ?? persistedCookie;
+    const persistence = rosterSession?.persistence ?? 'partition';
     if (!partitionLifecycle.isCurrent(generation)) {
       return staleMiyousheRequestResult();
     }
@@ -341,7 +351,9 @@ export function registerProfileIpc({
       return { ok: false, reason: '没有可用的米游社登录态，请先登录' };
     }
     const result = await partitionLifecycle.runAt(generation, () =>
-      miyousheGameRecord.ping(parsed.data.uid, cookie)
+      deviceFp.runWithPersistence(persistence, () =>
+        miyousheGameRecord.ping(parsed.data.uid, cookie)
+      )
     );
     if (!result || !partitionLifecycle.isCurrent(generation)) {
       return staleMiyousheRequestResult();
@@ -425,13 +437,18 @@ export function registerProfileIpc({
     let miyousheCharacters: MiyousheCharacterDetail[] | undefined;
     let miyousheCoverage: MiyousheRosterCoverage | undefined;
     let miyousheFailure: MiyousheFetchError | { kind: 'bridge'; message: string } | undefined;
-    const cookie = rosterSessions.peek(uid) ?? (await loginWindow.readPersistedCookie());
+    const rosterSession = rosterSessions.peekSession(uid);
+    const persistedCookie = rosterSession ? undefined : await loginWindow.readPersistedCookie();
+    const cookie = rosterSession?.cookie ?? persistedCookie;
+    const persistence = rosterSession?.persistence ?? 'partition';
     assertCurrent();
     if (cookie && !rosterSessions.hasCookie(uid)) {
-      rosterSessions.put(uid, cookie);
+      rosterSessions.put(uid, cookie, persistence);
     }
     const result = await partitionLifecycle.runAt(generation, () =>
-      fetchMiyousheRoster(uid, cookie)
+      deviceFp.runWithPersistence(persistence, () =>
+        fetchMiyousheRoster(uid, cookie, persistence)
+      )
     );
     if (!result || !partitionLifecycle.isCurrent(generation)) {
       throw staleMiyousheRequestError();
@@ -521,10 +538,17 @@ export function registerProfileIpc({
       throw new IpcError(IpcErrorCodes.ValidationFailed, formatIssues(parsed.error.issues));
     }
     const generation = partitionLifecycle.capture();
-    const imported = await partitionLifecycle.runAt(generation, async () => {
-      const cookie = await ensureManualDeviceCookie(generation, parsed.data.cookie);
-      return importWithCookie({ cookie, uid: parsed.data.uid, generation });
-    });
+    const imported = await partitionLifecycle.runAt(generation, () =>
+      deviceFp.runWithPersistence('memory-only', async () => {
+        const cookie = await ensureManualDeviceCookie(generation, parsed.data.cookie);
+        return importWithCookie({
+          cookie,
+          uid: parsed.data.uid,
+          generation,
+          persistence: 'memory-only'
+        });
+      })
+    );
     if (!imported) throw staleMiyousheRequestError();
     return imported;
   });
@@ -542,7 +566,14 @@ export function registerProfileIpc({
     }
 
     const imported = await partitionLifecycle.runAt(generation, () =>
-      importWithCookie({ cookie, uid: parsed.data.uid, generation })
+      deviceFp.runWithPersistence('partition', () =>
+        importWithCookie({
+          cookie,
+          uid: parsed.data.uid,
+          generation,
+          persistence: 'partition'
+        })
+      )
     );
     if (!imported) throw expiredLoginSessionError();
     return imported;
@@ -552,6 +583,7 @@ export function registerProfileIpc({
     cookie: string;
     uid?: string;
     generation: number;
+    persistence: DeviceFpPersistence;
   }): Promise<PersistedProfile> {
     const assertCurrent = () => {
       if (!partitionLifecycle.isCurrent(input.generation)) {
@@ -585,11 +617,15 @@ export function registerProfileIpc({
     // partition) sees the right state.
     assertCurrent();
     for (const role of bind.roles) {
-      rosterSessions.put(role.gameUid, input.cookie);
+      rosterSessions.put(role.gameUid, input.cookie, input.persistence);
     }
 
     // Pull full roster (game_record HTTP → calculator sync → bridge).
-    const recordResult = await fetchMiyousheRoster(target.gameUid, input.cookie);
+    const recordResult = await fetchMiyousheRoster(
+      target.gameUid,
+      input.cookie,
+      input.persistence
+    );
     assertCurrent();
     const miyousheCharacters = recordResult.ok ? recordResult.characters : undefined;
 
@@ -643,6 +679,9 @@ export function registerProfileIpc({
       });
       if (!deviceResult || !partitionLifecycle.isCurrent(generation)) {
         throw staleMiyousheRequestError();
+      }
+      if (!deviceResult.ok && deviceResult.reason === 'profile-invalid') {
+        throw new IpcError(IpcErrorCodes.UpstreamUnavailable, '设备身份初始化失败，请重试');
       }
       if (!deviceResult.deviceHash) {
         throw new IpcError(IpcErrorCodes.UpstreamUnavailable, '设备身份初始化失败，请重试');

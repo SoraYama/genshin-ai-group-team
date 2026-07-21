@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 import { request } from 'undici';
 import {
@@ -46,8 +47,10 @@ export interface DeviceFpCookieWriter {
   writeDeviceCookies(values: Readonly<Record<string, string>>): Promise<void>;
 }
 
+export type DeviceFpPersistence = 'partition' | 'memory-only';
+
 export interface DeviceFpEnsureOptions {
-  persistence?: 'partition' | 'memory-only';
+  persistence?: DeviceFpPersistence;
 }
 
 export interface DeviceFpCooldown {
@@ -196,7 +199,7 @@ export class MiyousheDeviceFpService {
     string,
     Promise<SharedPreparationResult>
   >();
-  private readonly memoryOnlyProfileKeys = new Set<string>();
+  private readonly persistenceScope = new AsyncLocalStorage<DeviceFpPersistence>();
 
   constructor(options: {
     cookieWriter: DeviceFpCookieWriter;
@@ -226,7 +229,10 @@ export class MiyousheDeviceFpService {
     if (!deviceId || !seedId || !seedTime) return cookie;
 
     const knownFingerprint = this.latestFingerprintByDevice.get(
-      internalProfileKey(deviceId, seedId, seedTime)
+      this.scopedProfileKey(
+        this.currentPersistence(),
+        internalProfileKey(deviceId, seedId, seedTime)
+      )
     );
     if (!knownFingerprint || cookies.get('DEVICEFP') === knownFingerprint) return cookie;
     return mergeDeviceCookies(cookie, { DEVICEFP: knownFingerprint });
@@ -236,14 +242,16 @@ export class MiyousheDeviceFpService {
     cookie: string,
     options: DeviceFpEnsureOptions = {}
   ): Promise<DeviceFpResult> {
-    const persistence = options.persistence ?? 'partition';
+    const persistence = this.currentPersistence(options.persistence);
     const originalCookies = parseCookies(cookie);
     const prepared = await this.prepareProfile(cookie, persistence);
     if (!prepared.ok) return prepared.result;
 
     const { cookie: preparedCookie, profile, wasComplete } = prepared.value;
-    const key = internalProfileKey(profile.deviceId, profile.seedId, profile.seedTime);
-    if (persistence === 'memory-only') this.memoryOnlyProfileKeys.add(key);
+    const key = this.scopedProfileKey(
+      persistence,
+      internalProfileKey(profile.deviceId, profile.seedId, profile.seedTime)
+    );
     if (wasComplete) {
       const cachedFingerprint = this.latestFingerprintByDevice.get(key);
       this.latestFingerprintByDevice.set(key, profile.deviceFp);
@@ -265,7 +273,12 @@ export class MiyousheDeviceFpService {
     if (hasOriginalStableIdentity && !originalCookies.get('DEVICEFP')) {
       const knownFingerprint = this.latestFingerprintByDevice.get(key);
       if (knownFingerprint) {
-        const restored = await this.restoreKnownFingerprint(profile, key, knownFingerprint);
+        const restored = await this.restoreKnownFingerprint(
+          profile,
+          key,
+          knownFingerprint,
+          persistence
+        );
         if (!restored.ok) return failureResult(preparedCookie, restored.reason, profile.deviceId);
         return {
           ok: true,
@@ -278,15 +291,20 @@ export class MiyousheDeviceFpService {
 
     const cooldownResult = this.inspectCooldown(preparedCookie, profile.deviceId);
     if (cooldownResult) return cooldownResult;
-    return this.refreshFingerprint(preparedCookie, profile);
+    return this.refreshFingerprint(preparedCookie, profile, persistence);
+  }
+
+  runWithPersistence<T>(
+    persistence: DeviceFpPersistence,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    return this.persistenceScope.run(persistence, operation);
   }
 
   async recoverFrom5003(cookie: string): Promise<DeviceFpResult> {
+    const persistence = this.currentPersistence();
     const appliedCookie = this.applyKnownFingerprint(cookie);
-    const prepared = await this.prepareProfile(
-      appliedCookie,
-      this.persistenceForCookie(appliedCookie)
-    );
+    const prepared = await this.prepareProfile(appliedCookie, persistence);
     if (!prepared.ok) return prepared.result;
 
     const { cookie: preparedCookie, profile } = prepared.value;
@@ -294,7 +312,10 @@ export class MiyousheDeviceFpService {
     if (cooldownResult) return cooldownResult;
 
     const recent = this.recentRefreshByDevice.get(
-      internalProfileKey(profile.deviceId, profile.seedId, profile.seedTime)
+      this.scopedProfileKey(
+        persistence,
+        internalProfileKey(profile.deviceId, profile.seedId, profile.seedTime)
+      )
     );
     const recentAge = recent ? this.now() - recent.refreshedAt : undefined;
     if (recent && recentAge !== undefined && recentAge >= 0 && recentAge < this.recentRefreshMs) {
@@ -306,7 +327,7 @@ export class MiyousheDeviceFpService {
       };
     }
 
-    return this.refreshFingerprint(preparedCookie, profile);
+    return this.refreshFingerprint(preparedCookie, profile, persistence);
   }
 
   finishReplay(cookie: string, outcome: 'success' | '5003' | 'other-error'): void {
@@ -473,9 +494,10 @@ export class MiyousheDeviceFpService {
 
   private async refreshFingerprint(
     cookie: string,
-    profile: StableDeviceProfile
+    profile: StableDeviceProfile,
+    persistence: DeviceFpPersistence
   ): Promise<DeviceFpResult> {
-    const refreshed = await this.runFingerprintRefresh(profile);
+    const refreshed = await this.runFingerprintRefresh(profile, persistence);
     if (!refreshed.ok) return failureResult(cookie, refreshed.reason, profile.deviceId);
 
     return {
@@ -486,12 +508,18 @@ export class MiyousheDeviceFpService {
     };
   }
 
-  private runFingerprintRefresh(profile: StableDeviceProfile): Promise<SharedFingerprintResult> {
-    const key = internalProfileKey(profile.deviceId, profile.seedId, profile.seedTime);
+  private runFingerprintRefresh(
+    profile: StableDeviceProfile,
+    persistence: DeviceFpPersistence
+  ): Promise<SharedFingerprintResult> {
+    const key = this.scopedProfileKey(
+      persistence,
+      internalProfileKey(profile.deviceId, profile.seedId, profile.seedTime)
+    );
     const current = this.inFlightByDevice.get(key);
     if (current) return current;
 
-    const pending = this.performFingerprintRefresh(profile, key).finally(() => {
+    const pending = this.performFingerprintRefresh(profile, key, persistence).finally(() => {
       if (this.inFlightByDevice.get(key) === pending) this.inFlightByDevice.delete(key);
     });
     this.inFlightByDevice.set(key, pending);
@@ -500,7 +528,8 @@ export class MiyousheDeviceFpService {
 
   private async performFingerprintRefresh(
     profile: StableDeviceProfile,
-    key: string
+    key: string,
+    persistence: DeviceFpPersistence
   ): Promise<SharedFingerprintResult> {
     const fetched = await this.requestFingerprint(profile);
     if (!fetched.ok) {
@@ -509,7 +538,7 @@ export class MiyousheDeviceFpService {
     }
 
     return this.enqueueFingerprintMutation(key, async () => {
-      if (!this.memoryOnlyProfileKeys.has(key)) {
+      if (persistence === 'partition') {
         try {
           await this.cookieWriter.writeDeviceCookies({ DEVICEFP: fetched.deviceFp });
         } catch {
@@ -530,7 +559,8 @@ export class MiyousheDeviceFpService {
   private restoreKnownFingerprint(
     profile: StableDeviceProfile,
     profileKey: string,
-    requestedFingerprint: string
+    requestedFingerprint: string,
+    persistence: DeviceFpPersistence
   ): Promise<SharedFingerprintResult> {
     const restoreKey = internalRestoreKey(profileKey, requestedFingerprint);
     const current = this.restoreInFlightByProfile.get(restoreKey);
@@ -541,7 +571,7 @@ export class MiyousheDeviceFpService {
       async () => {
         let fingerprintToPersist =
           this.latestFingerprintByDevice.get(profileKey) ?? requestedFingerprint;
-        if (this.memoryOnlyProfileKeys.has(profileKey)) {
+        if (persistence === 'memory-only') {
           return { ok: true, deviceFp: fingerprintToPersist };
         }
         while (true) {
@@ -568,15 +598,15 @@ export class MiyousheDeviceFpService {
     return pending;
   }
 
-  private persistenceForCookie(cookie: string): 'partition' | 'memory-only' {
-    const cookies = parseCookies(cookie);
-    const deviceId = cookies.get('_MHYUUID');
-    const seedId = cookies.get('DEVICEFP_SEED_ID');
-    const seedTime = cookies.get('DEVICEFP_SEED_TIME');
-    if (!deviceId || !seedId || !seedTime) return 'partition';
-    return this.memoryOnlyProfileKeys.has(internalProfileKey(deviceId, seedId, seedTime))
-      ? 'memory-only'
-      : 'partition';
+  private currentPersistence(explicit?: DeviceFpPersistence): DeviceFpPersistence {
+    return explicit ?? this.persistenceScope.getStore() ?? 'partition';
+  }
+
+  private scopedProfileKey(
+    persistence: DeviceFpPersistence,
+    profileKey: string
+  ): string {
+    return `${persistence}:${profileKey}`;
   }
 
   private enqueueFingerprintMutation<T>(

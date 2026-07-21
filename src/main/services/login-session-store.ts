@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { DeviceFpPersistence } from './miyoushe/device-fp.js';
 
 interface SessionEntry {
   cookie: string;
@@ -49,9 +50,10 @@ export class LoginSessionStore {
   }
 }
 
-interface RosterSession {
+export interface RosterSession {
   uid: string;
   cookie: string;
+  persistence: DeviceFpPersistence;
   expiresAt: number;
 }
 
@@ -74,11 +76,12 @@ export class RosterSessionStore {
     this.ttlMs = ttlMs;
   }
 
-  put(uid: string, cookie: string): void {
+  put(uid: string, cookie: string, persistence: DeviceFpPersistence = 'partition'): void {
     this.gc();
     this.entries.set(uid, {
       uid,
       cookie,
+      persistence,
       expiresAt: Date.now() + this.ttlMs
     });
   }
@@ -86,6 +89,13 @@ export class RosterSessionStore {
   peek(uid: string): string | undefined {
     this.gc();
     return this.entries.get(uid)?.cookie;
+  }
+
+  peekSession(uid: string): Readonly<Pick<RosterSession, 'cookie' | 'persistence'>> | undefined {
+    this.gc();
+    const entry = this.entries.get(uid);
+    if (!entry) return undefined;
+    return { cookie: entry.cookie, persistence: entry.persistence };
   }
 
   hasCookie(uid: string): boolean {
