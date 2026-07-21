@@ -291,6 +291,38 @@ describe('CN 5003 device fingerprint recovery', () => {
     expect(browserTransport).toHaveBeenCalledTimes(1);
   });
 
+  it('does not recover a browser 5003 reached through the 1034 fallback', async () => {
+    const { MiyousheGameRecordClient } =
+      await import('../../../src/main/services/miyoushe-game-record.js');
+    requestMock.mockResolvedValueOnce(mockJson(200, { retcode: 1034, message: 'captcha' }));
+    const browserTransport = vi
+      .fn()
+      .mockResolvedValueOnce(mockBrowserJson(200, { retcode: 5003, message: 'browser risk' }));
+    const deviceFp = {
+      applyKnownFingerprint: vi.fn((cookie: string) => cookie),
+      recoverFrom5003: vi.fn(async () => ({
+        ok: true as const,
+        cookie: NEW_COOKIE,
+        deviceHash: 'device-hash',
+        refreshed: true
+      })),
+      finishReplay: vi.fn()
+    };
+
+    const result = await new MiyousheGameRecordClient({
+      browserTransport,
+      deviceFp
+    }).ping('100000001', OLD_COOKIE);
+
+    expect(result).toEqual({
+      ok: false,
+      error: { kind: 'captcha-required', retcode: 5003, message: 'browser risk' }
+    });
+    expect(deviceFp.recoverFrom5003).not.toHaveBeenCalled();
+    expect(deviceFp.finishReplay).not.toHaveBeenCalled();
+    expect(browserTransport).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps the existing browser fallback for global UID 5003 without recovery', async () => {
     const { MiyousheGameRecordClient } =
       await import('../../../src/main/services/miyoushe-game-record.js');

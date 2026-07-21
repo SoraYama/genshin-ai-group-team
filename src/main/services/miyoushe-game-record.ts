@@ -973,6 +973,7 @@ export class MiyousheGameRecordClient {
         !region.isGlobal &&
         this.deviceFp &&
         this.browserTransport &&
+        !useBrowserTransport &&
         !deviceRecoveryAttempted
       ) {
         let recovered: DeviceFpResult;
