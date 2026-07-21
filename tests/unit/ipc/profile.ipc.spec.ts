@@ -8,6 +8,7 @@ import type {
   MiyousheCharacterDetail,
   MiyousheRosterCoverage
 } from '../../../src/main/services/miyoushe-game-record.js';
+import { MiyoushePartitionLifecycle } from '../../../src/main/services/miyoushe/partition-lifecycle.js';
 
 const { handlers } = vi.hoisted(() => ({
   handlers: new Map<string, (payload: unknown) => Promise<unknown> | unknown>()
@@ -26,6 +27,16 @@ const SECOND_UID = '100000002';
 const FETCHED_AT = '2026-01-01T00:00:00.000Z';
 const COOKIE = 'ltoken_v2=test; ltuid_v2=test; ltmid_v2=test';
 const COMPLETED_COOKIE = `${COOKIE}; _MHYUUID=device; DEVICEFP=fingerprint`;
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
 
 const fullCoverageForTwo: MiyousheRosterCoverage = {
   expectedOwnedCount: 2,
@@ -111,6 +122,13 @@ function existingProfile(): PersistedProfile {
 }
 
 function setup(existing: PersistedProfile | undefined) {
+  const partitionLifecycle = new MiyoushePartitionLifecycle();
+  const ensureForSession = vi.fn().mockImplementation(async (cookie: string) => ({
+    ok: true,
+    cookie,
+    deviceHash: '0123456789ab',
+    refreshed: false
+  }));
   const deps = {
     miyoushe: {
       fetchRoles: vi.fn()
@@ -134,13 +152,14 @@ function setup(existing: PersistedProfile | undefined) {
       })
     },
     deviceFp: {
-      ensureForSession: vi.fn().mockImplementation(async (cookie: string) => ({
-        ok: true,
-        cookie,
-        deviceHash: '0123456789ab',
-        refreshed: false
-      }))
+      ensureForSession,
+      ensureForSessionAt: vi
+        .fn()
+        .mockImplementation(async (generation: number, cookie: string) =>
+          partitionLifecycle.runAt(generation, () => ensureForSession(cookie))
+        )
     },
+    partitionLifecycle,
     loginWindow: {
       runOnce: vi.fn(),
       readPersistedCookie: vi.fn(),
@@ -212,6 +231,12 @@ describe('miyoushe:login-via-browser device recovery', () => {
   async function loginViaBrowser(): Promise<unknown> {
     const handler = handlers.get('miyoushe:login-via-browser');
     if (!handler) throw new Error('miyoushe:login-via-browser handler was not registered');
+    return handler(undefined);
+  }
+
+  async function logout(): Promise<unknown> {
+    const handler = handlers.get('miyoushe:logout');
+    if (!handler) throw new Error('miyoushe:logout handler was not registered');
     return handler(undefined);
   }
 
@@ -312,6 +337,45 @@ describe('miyoushe:login-via-browser device recovery', () => {
       reason: 'bind-failed',
       message: 'Cookie expired'
     });
+    expect(deps.rosterSessions.put).not.toHaveBeenCalled();
+    expect(deps.loginSessions.put).not.toHaveBeenCalled();
+  });
+
+  it('does not commit a browser login whose device recovery finishes after logout', async () => {
+    const deps = setup(undefined);
+    const pendingEnsure = deferred<{
+      ok: true;
+      cookie: string;
+      deviceHash: string;
+      refreshed: boolean;
+    }>();
+    deps.loginWindow.runOnce.mockResolvedValue({ ok: true, cookie: COOKIE });
+    deps.deviceFp.ensureForSession.mockReturnValue(pendingEnsure.promise);
+    deps.miyoushe.fetchRoles.mockResolvedValue(successfulBind());
+
+    const loginPromise = loginViaBrowser();
+    await vi.waitFor(() => {
+      expect(
+        deps.deviceFp.ensureForSession.mock.calls.length +
+          deps.deviceFp.ensureForSessionAt.mock.calls.length
+      ).toBeGreaterThan(0);
+    });
+
+    const logoutPromise = logout();
+    await Promise.resolve();
+    expect(deps.loginWindow.clearPersistedCookie).not.toHaveBeenCalled();
+
+    pendingEnsure.resolve({
+      ok: true,
+      cookie: COMPLETED_COOKIE,
+      deviceHash: '0123456789ab',
+      refreshed: true
+    });
+    const [result] = await Promise.all([loginPromise, logoutPromise]);
+
+    expect(result).toEqual({ ok: false, reason: 'cancelled' });
+    expect(deps.loginWindow.clearPersistedCookie).toHaveBeenCalledOnce();
+    expect(deps.miyoushe.fetchRoles).not.toHaveBeenCalled();
     expect(deps.rosterSessions.put).not.toHaveBeenCalled();
     expect(deps.loginSessions.put).not.toHaveBeenCalled();
   });

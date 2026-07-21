@@ -17,7 +17,10 @@ import type {
   MiyousheRosterCoverage
 } from '../services/miyoushe-game-record.js';
 import type { MiyousheBrowserBridge } from '../services/miyoushe/browser-bridge.js';
-import type { MiyousheDeviceFpService } from '../services/miyoushe/device-fp.js';
+import type {
+  LifecycleMiyousheDeviceFp,
+  MiyoushePartitionLifecycle
+} from '../services/miyoushe/partition-lifecycle.js';
 import type { MiyousheLoginWindow } from '../services/miyoushe-login-window.js';
 import type { ProfileStore } from '../services/profile-store.js';
 import { mergeProfile } from '../services/profile-merger.js';
@@ -52,7 +55,8 @@ export interface ProfileIpcDeps {
   miyousheGameRecord: MiyousheGameRecordClient;
   miyousheCalculator: MiyousheCalculatorClient;
   miyousheBridge: MiyousheBrowserBridge;
-  deviceFp: Pick<MiyousheDeviceFpService, 'ensureForSession'>;
+  deviceFp: Pick<LifecycleMiyousheDeviceFp, 'ensureForSessionAt'>;
+  partitionLifecycle: Pick<MiyoushePartitionLifecycle, 'transition' | 'isCurrent'>;
   loginWindow: MiyousheLoginWindow;
   loginSessions: LoginSessionStore;
   rosterSessions: RosterSessionStore;
@@ -66,6 +70,7 @@ export function registerProfileIpc({
   miyousheCalculator,
   miyousheBridge,
   deviceFp,
+  partitionLifecycle,
   loginWindow,
   loginSessions,
   rosterSessions,
@@ -232,21 +237,34 @@ export function registerProfileIpc({
   });
 
   registerHandler('miyoushe:login-via-browser', async () => {
+    const { generation } = await partitionLifecycle.transition();
     const outcome = await loginWindow.runOnce();
     if (!outcome.ok) {
       return { ok: false, reason: outcome.reason, message: outcome.message };
     }
+    if (!partitionLifecycle.isCurrent(generation)) {
+      return { ok: false, reason: 'cancelled' as const };
+    }
 
     let cookie = outcome.cookie;
     try {
-      const deviceResult = await deviceFp.ensureForSession(cookie);
+      const deviceResult = await deviceFp.ensureForSessionAt(generation, cookie);
+      if (!deviceResult || !partitionLifecycle.isCurrent(generation)) {
+        return { ok: false, reason: 'cancelled' as const };
+      }
       cookie = deviceResult.cookie;
     } catch {
+      if (!partitionLifecycle.isCurrent(generation)) {
+        return { ok: false, reason: 'cancelled' as const };
+      }
       // Device recovery is best-effort. Keep the authenticated browser Cookie
       // and do not log a potentially sensitive rejection.
     }
 
     const bind = await miyoushe.fetchRoles(cookie);
+    if (!partitionLifecycle.isCurrent(generation)) {
+      return { ok: false, reason: 'cancelled' as const };
+    }
     if (!bind.ok || bind.roles.length === 0) {
       return {
         ok: false,
@@ -267,7 +285,7 @@ export function registerProfileIpc({
   });
 
   registerHandler('miyoushe:logout', async () => {
-    await loginWindow.clearPersistedCookie();
+    await partitionLifecycle.transition(() => loginWindow.clearPersistedCookie());
     rosterSessions.clear();
     return { ok: true } as const;
   });

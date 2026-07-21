@@ -18,8 +18,13 @@ import { MiyousheCalculatorClient } from './services/miyoushe-calculator.js';
 import { MiyousheGameRecordClient } from './services/miyoushe-game-record.js';
 import { MiyousheBrowserBridge } from './services/miyoushe/browser-bridge.js';
 import { createMiyousheBrowserTransport } from './services/miyoushe/browser-transport.js';
-import { MiyousheDeviceFpRecoveryStore } from './services/miyoushe/device-fp-recovery-store.js';
 import { MiyousheDeviceFpService } from './services/miyoushe/device-fp.js';
+import {
+  bindDeviceFpToPartitionLifecycle,
+  createMiyousheDeviceFpCooldown,
+  MiyoushePartitionLifecycle,
+  seedRosterSessionsFromPersistedCookie
+} from './services/miyoushe/partition-lifecycle.js';
 import { MIYOUSHE_LOGIN_PARTITION, MiyousheLoginWindow } from './services/miyoushe-login-window.js';
 import { LoginSessionStore, RosterSessionStore } from './services/login-session-store.js';
 import { AvatarMetadataService } from './services/avatar-metadata.js';
@@ -69,11 +74,13 @@ async function bootstrapServices(): Promise<void> {
   const miyoushe = new MiyousheClient();
   const miyousheCalculator = new MiyousheCalculatorClient();
   const loginWindow = new MiyousheLoginWindow();
-  const deviceFpCooldown = new MiyousheDeviceFpRecoveryStore();
-  const deviceFp = new MiyousheDeviceFpService({
-    cookieWriter: loginWindow,
+  const partitionLifecycle = new MiyoushePartitionLifecycle();
+  const deviceFpCooldown = createMiyousheDeviceFpCooldown();
+  const deviceFpService = new MiyousheDeviceFpService({
+    cookieWriter: partitionLifecycle.guardCookieWriter(loginWindow),
     cooldown: deviceFpCooldown
   });
+  const deviceFp = bindDeviceFpToPartitionLifecycle(deviceFpService, partitionLifecycle);
   const miyousheSession = session.fromPartition(MIYOUSHE_LOGIN_PARTITION);
   const browserTransport = createMiyousheBrowserTransport(miyousheSession);
   // Keep a Chromium-network retry for ordinary transport differences. Risk
@@ -108,6 +115,7 @@ async function bootstrapServices(): Promise<void> {
     miyousheCalculator,
     miyousheBridge,
     deviceFp,
+    partitionLifecycle,
     loginWindow,
     loginSessions,
     rosterSessions,
@@ -133,43 +141,12 @@ async function bootstrapServices(): Promise<void> {
   // Recover the previous miyoushe login (if any) from the persistent partition.
   // Fire-and-forget — window creation should not wait on this.
   void seedRosterSessionsFromPersistedCookie({
+    lifecycle: partitionLifecycle,
     loginWindow,
     deviceFp,
     miyoushe,
     rosterSessions
   });
-}
-
-async function seedRosterSessionsFromPersistedCookie(deps: {
-  loginWindow: MiyousheLoginWindow;
-  deviceFp: Pick<MiyousheDeviceFpService, 'ensureForSession'>;
-  miyoushe: MiyousheClient;
-  rosterSessions: RosterSessionStore;
-}): Promise<void> {
-  try {
-    const cookie = await deps.loginWindow.readPersistedCookie();
-    if (!cookie) return;
-    let effectiveCookie = cookie;
-    try {
-      const deviceResult = await deps.deviceFp.ensureForSession(cookie);
-      effectiveCookie = deviceResult.cookie;
-    } catch {
-      // Device recovery is best-effort and may reject with sensitive context.
-    }
-    const bind = await deps.miyoushe.fetchRoles(effectiveCookie);
-    if (!bind.ok || bind.roles.length === 0) {
-      console.warn('[miyoushe] persisted cookie failed re-validation; skipping seed');
-      return;
-    }
-    for (const role of bind.roles) {
-      deps.rosterSessions.put(role.gameUid, effectiveCookie);
-    }
-    console.info(
-      `[miyoushe] restored login session for ${bind.roles.length} UID(s) from persistent partition`
-    );
-  } catch {
-    console.warn('[miyoushe] seed from persisted cookie failed');
-  }
 }
 
 function applyContentSecurityPolicy(): void {
@@ -307,23 +284,29 @@ async function runPackagedSdkSmoke(baseUrl: string): Promise<void> {
   }
 }
 
-app.whenReady().then(async () => {
-  if (packagedSdkSmokeUrl) {
-    await runPackagedSdkSmoke(packagedSdkSmokeUrl);
-    return;
-  }
-  const iconProxy = new IconProxyService();
-  await iconProxy.init();
-  await bootstrapServices();
-  applyContentSecurityPolicy();
-  createWindow();
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
+void app
+  .whenReady()
+  .then(async () => {
+    if (packagedSdkSmokeUrl) {
+      await runPackagedSdkSmoke(packagedSdkSmokeUrl);
+      return;
     }
+    const iconProxy = new IconProxyService();
+    await iconProxy.init();
+    await bootstrapServices();
+    applyContentSecurityPolicy();
+    createWindow();
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow();
+      }
+    });
+  })
+  .catch(() => {
+    console.error('[bootstrap] application startup failed');
+    app.exit(1);
   });
-});
 
 app.on('before-quit', () => {
   scenarioRefresher?.stop();
