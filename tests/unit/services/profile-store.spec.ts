@@ -222,6 +222,21 @@ describe('ProfileStore', () => {
     );
   });
 
+  it('migrates persisted calculator image URLs to the trusted proxy', async () => {
+    const profile = makeProfile('444444444', 1);
+    profile.characters[0]!.imageUrl =
+      'https://act-webstatic.mihoyo.com/hk4e/e20200928calculate/item_icon/rev/avatar.png';
+    profile.characters[0]!.provenance.ownership.source = 'miyoushe-list';
+    electronStoreState.set('profilesByUid', { '444444444': profile });
+
+    const { ProfileStore } = await import('../../../src/main/services/profile-store.js');
+    const store = new ProfileStore();
+
+    expect(store.get('444444444')?.characters[0]?.imageUrl).toMatch(
+      /^gtai-img:\/\/remote\//
+    );
+  });
+
   it('repairs persisted Enka-only v2 profiles that were marked complete', async () => {
     const profile = makeProfile('333333333', 12);
     profile.source = 'miyoushe+enka';

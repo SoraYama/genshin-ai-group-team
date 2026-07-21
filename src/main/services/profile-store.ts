@@ -10,7 +10,7 @@ import type {
   ProfileSource,
   ProfileStateView
 } from '../../shared/domain.js';
-import { rewriteEnkaToProxyUrl } from './icon-proxy.js';
+import { rewriteIconToProxyUrl } from './icon-proxy.js';
 import { describeBuild } from './profile-merger.js';
 
 interface ProfileStoreSchema {
@@ -160,7 +160,7 @@ function migrateLegacyProfile(value: unknown): PersistedProfile {
       name: character.name,
       element: character.element,
       rarity: character.rarity,
-      imageUrl: rewriteEnkaToProxyUrl(character.imageUrl),
+      imageUrl: rewriteIconToProxyUrl(character.imageUrl),
       level:
         typeof character.stats?.level === 'number' && character.stats.level > 0
           ? character.stats.level
@@ -223,7 +223,7 @@ export class ProfileStore {
         if (isV2Profile(value)) {
           const characters = value.characters.map((character) => ({
             ...character,
-            imageUrl: rewriteEnkaToProxyUrl(character.imageUrl)
+            imageUrl: rewriteIconToProxyUrl(character.imageUrl)
           }));
           const imageChanged = characters.some(
             (character, index) => character.imageUrl !== value.characters[index]?.imageUrl

@@ -14,6 +14,7 @@ import {
   MIYOUSHE_APP_VERSION_WEB,
   signDsV1
 } from './miyoushe/ds-token.js';
+import { rewriteIconToProxyUrl } from './icon-proxy.js';
 
 const DEFAULT_BASE_CN =
   'https://api-takumi.mihoyo.com/event/e20200928calculate/v1';
@@ -117,7 +118,7 @@ function mapWeapon(raw: RawCalculatorWeapon | undefined): CharacterWeapon | unde
   return {
     id: raw.id,
     name: raw.name,
-    iconUrl: raw.icon ?? '',
+    iconUrl: rewriteIconToProxyUrl(raw.icon ?? ''),
     level: raw.level_current,
     rarity: raw.weapon_level
   };
@@ -178,7 +179,7 @@ export function mapCalculatorRoster(data: unknown): MiyousheDetailedRoster | und
           : '',
       level: item.level_current ?? 0,
       rarity: item.avatar_level ?? 0,
-      iconUrl: item.icon ?? '',
+      iconUrl: rewriteIconToProxyUrl(item.icon ?? ''),
       constellation: item.constellation_num ?? 0,
       friendship: item.fetter_level ?? 0,
       weapon: mapWeapon(item.weapon),

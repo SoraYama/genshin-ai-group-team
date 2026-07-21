@@ -11,13 +11,15 @@ const rawCharacters = [
     element_attr_id: 1,
     avatar_level: 5,
     level_current: 90,
-    icon: 'character-a.png',
+    icon:
+      'https://act-webstatic.mihoyo.com/hk4e/e20200928calculate/item_icon/rev/character-a.png',
     constellation_num: 2,
     fetter_level: 10,
     weapon: {
       id: 11501,
       name: 'Weapon A',
-      icon: 'weapon-a.png',
+      icon:
+        'https://act-webstatic.mihoyo.com/hk4e/e20200928calculate/item_icon/rev/weapon-a.png',
       level_current: 90,
       weapon_level: 5
     },
@@ -60,6 +62,8 @@ describe('mapCalculatorRoster', () => {
       },
       talents: { normalAttack: 10, elementalSkill: 9, elementalBurst: 8 }
     });
+    expect(result?.characters[0]?.iconUrl).toMatch(/^gtai-img:\/\/remote\//);
+    expect(result?.characters[0]?.weapon?.iconUrl).toMatch(/^gtai-img:\/\/remote\//);
     expect(result?.characters[0]?.weapon).not.toHaveProperty('refinement');
     expect(result?.characters[0]?.artifacts).toEqual([]);
     expect(result?.coverage).toMatchObject({
