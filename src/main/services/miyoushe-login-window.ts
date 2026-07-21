@@ -184,26 +184,25 @@ export class MiyousheLoginWindow {
       let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
       let cancelCurrentLogin!: () => void;
 
-      const settle = (outcome: LoginOutcome, forceDestroy = false) => {
+      const settle = (outcome: LoginOutcome) => {
         if (settled) {
           return;
         }
         settled = true;
         if (pollTimer) clearInterval(pollTimer);
         if (timeoutTimer) clearTimeout(timeoutTimer);
-        if (this.cancelActiveLoginRequest === cancelCurrentLogin) {
-          this.cancelActiveLoginRequest = undefined;
-        }
         if (!win.isDestroyed()) {
           win.removeAllListeners('closed');
-          if (forceDestroy) win.destroy();
-          else win.close();
+          win.destroy();
+        }
+        if (win.isDestroyed() && this.cancelActiveLoginRequest === cancelCurrentLogin) {
+          this.cancelActiveLoginRequest = undefined;
         }
         resolve(outcome);
       };
 
       cancelCurrentLogin = () => {
-        settle({ ok: false, reason: 'cancelled' }, true);
+        settle({ ok: false, reason: 'cancelled' });
       };
       this.cancelActiveLoginRequest = cancelCurrentLogin;
 

@@ -228,6 +228,12 @@ async function refresh(): Promise<RefreshOutcome> {
   return (await handler({ uid: UID })) as RefreshOutcome;
 }
 
+async function ping(): Promise<unknown> {
+  const handler = handlers.get('miyoushe:ping');
+  if (!handler) throw new Error('miyoushe:ping handler was not registered');
+  return handler({ uid: UID });
+}
+
 async function importFromCookie(): Promise<PersistedProfile> {
   const handler = handlers.get('profile:import-from-cookie');
   if (!handler) throw new Error('profile:import-from-cookie handler was not registered');
@@ -452,6 +458,85 @@ describe('miyoushe:login-via-browser device recovery', () => {
     expect(deps.loginSessions.put).not.toHaveBeenCalled();
   });
 
+  it('cancels a login that was queued behind another transition before logout drains it', async () => {
+    const deps = setup(undefined);
+    const priorTransitionStarted = deferred<void>();
+    const releasePriorTransition = deferred<void>();
+    const pendingLogin = deferred<{ ok: false; reason: 'cancelled' }>();
+    let loginWindowActive = false;
+    let loginWindowDestroyed = false;
+    deps.loginWindow.runOnce.mockImplementation(() => {
+      loginWindowActive = true;
+      return pendingLogin.promise;
+    });
+    deps.loginWindow.cancelActiveLogin.mockImplementation(() => {
+      if (!loginWindowActive) return;
+      loginWindowActive = false;
+      loginWindowDestroyed = true;
+      pendingLogin.resolve({ ok: false, reason: 'cancelled' });
+    });
+
+    const priorTransition = deps.partitionLifecycle.transition(async () => {
+      priorTransitionStarted.resolve();
+      await releasePriorTransition.promise;
+    });
+    await priorTransitionStarted.promise;
+
+    const loginPromise = loginViaBrowser();
+    const logoutPromise = logout();
+    releasePriorTransition.resolve();
+
+    const settled = settlesWithin(Promise.all([priorTransition, loginPromise, logoutPromise]));
+
+    expect(await settled).toBe(true);
+    expect(loginWindowDestroyed).toBe(true);
+    await expect(loginPromise).resolves.toEqual({ ok: false, reason: 'cancelled' });
+    await expect(logoutPromise).resolves.toEqual({ ok: true });
+    expect(deps.loginWindow.clearPersistedCookie).toHaveBeenCalledOnce();
+  });
+
+  it('cancels the active window when a queued browser login transition starts', async () => {
+    const deps = setup(undefined);
+    const priorTransitionStarted = deferred<void>();
+    const releasePriorTransition = deferred<void>();
+    const firstLogin = deferred<{ ok: false; reason: 'cancelled' }>();
+    let runCount = 0;
+    let loginWindowActive = false;
+    let firstWindowDestroyed = false;
+    deps.loginWindow.runOnce.mockImplementation(() => {
+      runCount += 1;
+      if (runCount === 1) {
+        loginWindowActive = true;
+        return firstLogin.promise;
+      }
+      return Promise.resolve({ ok: false, reason: 'cancelled' as const });
+    });
+    deps.loginWindow.cancelActiveLogin.mockImplementation(() => {
+      if (!loginWindowActive) return;
+      loginWindowActive = false;
+      firstWindowDestroyed = true;
+      firstLogin.resolve({ ok: false, reason: 'cancelled' });
+    });
+
+    const priorTransition = deps.partitionLifecycle.transition(async () => {
+      priorTransitionStarted.resolve();
+      await releasePriorTransition.promise;
+    });
+    await priorTransitionStarted.promise;
+
+    const firstLoginPromise = loginViaBrowser();
+    const secondLoginPromise = loginViaBrowser();
+    releasePriorTransition.resolve();
+
+    expect(
+      await settlesWithin(Promise.all([priorTransition, firstLoginPromise, secondLoginPromise]))
+    ).toBe(true);
+    expect(firstWindowDestroyed).toBe(true);
+    expect(deps.loginWindow.runOnce).toHaveBeenCalledTimes(2);
+    await expect(firstLoginPromise).resolves.toEqual({ ok: false, reason: 'cancelled' });
+    await expect(secondLoginPromise).resolves.toEqual({ ok: false, reason: 'cancelled' });
+  });
+
   it('invalidates every opaque login session when logging out', async () => {
     const deps = setup(undefined);
     deps.loginWindow.runOnce.mockResolvedValue({ ok: true, cookie: COOKIE });
@@ -494,6 +579,15 @@ describe('miyoushe:login-via-browser device recovery', () => {
     expect(importError).toMatchObject({ code: 'IPC_UNAUTHORIZED' });
     expect(deps.loginSessions.clear).toHaveBeenCalledOnce();
     expect(deps.miyoushe.fetchRoles).not.toHaveBeenCalled();
+  });
+
+  it('clears roster sessions again when clearing the persisted partition fails', async () => {
+    const deps = setup(undefined);
+    deps.loginWindow.clearPersistedCookie.mockRejectedValue(new Error('partition clear failed'));
+
+    await expect(logout()).rejects.toThrow('partition clear failed');
+
+    expect(deps.rosterSessions.clear).toHaveBeenCalledTimes(2);
   });
 
   it('drains an in-flight session import without allowing stale commits after logout', async () => {
@@ -590,6 +684,118 @@ describe('miyoushe:login-via-browser device recovery', () => {
 });
 
 describe('profile:refresh roster integrity', () => {
+  it('does not restore a persisted Cookie read that finishes after logout', async () => {
+    const deps = setup(existingProfile());
+    const pendingCookie = deferred<string | undefined>();
+    deps.rosterSessions.peek.mockReturnValue(undefined);
+    deps.loginWindow.readPersistedCookie.mockReturnValue(pendingCookie.promise);
+
+    const refreshPromise = refresh();
+    await vi.waitFor(() => expect(deps.loginWindow.readPersistedCookie).toHaveBeenCalledOnce());
+    const logoutHandler = handlers.get('miyoushe:logout');
+    if (!logoutHandler) throw new Error('miyoushe:logout handler was not registered');
+    await logoutHandler(undefined);
+    pendingCookie.resolve(COOKIE);
+
+    await expect(refreshPromise).rejects.toMatchObject({ code: 'IPC_UNAUTHORIZED' });
+    expect(deps.rosterSessions.put).not.toHaveBeenCalled();
+    expect(deps.miyousheGameRecord.fetchPlayerIndex).not.toHaveBeenCalled();
+  });
+
+  it('keeps a deferred 5003 recovery stale after logout without persisting or committing', async () => {
+    const deps = setup(existingProfile());
+    const initial5003Reached = deferred<void>();
+    const continueRecovery = deferred<void>();
+    const persistedDeviceCookie = vi.fn().mockResolvedValue(undefined);
+    const guardedWriter = deps.partitionLifecycle.guardCookieWriter({
+      writeDeviceCookies: persistedDeviceCookie
+    });
+    deps.rosterSessions.peek.mockReturnValue(COOKIE);
+    deps.miyousheGameRecord.fetchPlayerIndex.mockImplementation(async () => {
+      initial5003Reached.resolve();
+      await continueRecovery.promise;
+      try {
+        await deps.partitionLifecycle.runCurrent(() =>
+          guardedWriter.writeDeviceCookies({ DEVICEFP: 'stale-refresh-fingerprint' })
+        );
+      } catch {
+        // Mirrors GameRecord's non-fatal recovery containment.
+      }
+      return {
+        ok: false,
+        error: { kind: 'captcha-required', retcode: 5003, message: 'risk control' }
+      };
+    });
+    const requestGeneration = deps.partitionLifecycle.capture();
+
+    const refreshPromise = refresh();
+    await initial5003Reached.promise;
+    const logoutHandler = handlers.get('miyoushe:logout');
+    if (!logoutHandler) throw new Error('miyoushe:logout handler was not registered');
+    const logoutPromise = Promise.resolve(logoutHandler(undefined));
+    await vi.waitFor(() =>
+      expect(deps.partitionLifecycle.isCurrent(requestGeneration)).toBe(false)
+    );
+    continueRecovery.resolve();
+
+    let refreshError: unknown;
+    expect(
+      await settlesWithin(
+        Promise.all([
+          refreshPromise.catch((error: unknown) => {
+            refreshError = error;
+          }),
+          logoutPromise
+        ])
+      )
+    ).toBe(true);
+    expect(refreshError).toMatchObject({ code: 'IPC_UNAUTHORIZED' });
+    expect(persistedDeviceCookie).not.toHaveBeenCalled();
+    expect(deps.store.upsert).not.toHaveBeenCalled();
+    expect(deps.store.setActive).not.toHaveBeenCalled();
+  });
+
+  it('keeps ping device recovery in its request generation after logout', async () => {
+    const deps = setup(existingProfile());
+    const initial5003Reached = deferred<void>();
+    const continueRecovery = deferred<void>();
+    const persistedDeviceCookie = vi.fn().mockResolvedValue(undefined);
+    const guardedWriter = deps.partitionLifecycle.guardCookieWriter({
+      writeDeviceCookies: persistedDeviceCookie
+    });
+    deps.rosterSessions.peek.mockReturnValue(COOKIE);
+    deps.miyousheGameRecord.ping.mockImplementation(async () => {
+      initial5003Reached.resolve();
+      await continueRecovery.promise;
+      try {
+        await deps.partitionLifecycle.runCurrent(() =>
+          guardedWriter.writeDeviceCookies({ DEVICEFP: 'stale-ping-fingerprint' })
+        );
+      } catch {
+        // Mirrors GameRecord's non-fatal recovery containment.
+      }
+      return {
+        ok: false,
+        error: { kind: 'captcha-required', retcode: 5003, message: 'risk control' }
+      };
+    });
+    const requestGeneration = deps.partitionLifecycle.capture();
+
+    const pingPromise = ping();
+    await initial5003Reached.promise;
+    const logoutHandler = handlers.get('miyoushe:logout');
+    if (!logoutHandler) throw new Error('miyoushe:logout handler was not registered');
+    const logoutPromise = Promise.resolve(logoutHandler(undefined));
+    await vi.waitFor(() =>
+      expect(deps.partitionLifecycle.isCurrent(requestGeneration)).toBe(false)
+    );
+    continueRecovery.resolve();
+
+    expect(await settlesWithin(Promise.all([pingPromise, logoutPromise]))).toBe(true);
+    await expect(pingPromise).resolves.toMatchObject({ ok: false });
+    expect(persistedDeviceCookie).not.toHaveBeenCalled();
+  });
+
   it('recovers a persisted Cookie before fetching the authoritative roster', async () => {
     const deps = setup(undefined);
     deps.rosterSessions.peek.mockReturnValue(undefined);

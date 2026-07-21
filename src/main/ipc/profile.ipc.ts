@@ -240,8 +240,9 @@ export function registerProfileIpc({
   });
 
   registerHandler('miyoushe:login-via-browser', async () => {
-    loginWindow.cancelActiveLogin();
-    const { generation } = await partitionLifecycle.transition();
+    const { generation } = await partitionLifecycle.transition(undefined, {
+      beforeDrain: () => loginWindow.cancelActiveLogin()
+    });
     const outcome = await partitionLifecycle.runAt(generation, () => loginWindow.runOnce());
     if (!outcome || !partitionLifecycle.isCurrent(generation)) {
       return { ok: false, reason: 'cancelled' as const };
@@ -291,11 +292,15 @@ export function registerProfileIpc({
   registerHandler('miyoushe:logout', async () => {
     loginSessions.clear();
     rosterSessions.clear();
-    loginWindow.cancelActiveLogin();
-    await partitionLifecycle.transition(() => loginWindow.clearPersistedCookie());
-    // A stale import may have reached an internal roster fallback before its
-    // generation check. Clear once more after every tracked operation drains.
-    rosterSessions.clear();
+    try {
+      await partitionLifecycle.transition(() => loginWindow.clearPersistedCookie(), {
+        beforeDrain: () => loginWindow.cancelActiveLogin()
+      });
+    } finally {
+      // A stale request may have reached an internal roster fallback before
+      // its generation check. Clear after tracked operations drain or fail.
+      rosterSessions.clear();
+    }
     return { ok: true } as const;
   });
 
@@ -319,12 +324,21 @@ export function registerProfileIpc({
     if (!parsed.success) {
       return { ok: false, reason: formatIssues(parsed.error.issues) };
     }
+    const generation = partitionLifecycle.capture();
     const cookie =
       rosterSessions.peek(parsed.data.uid) ?? (await loginWindow.readPersistedCookie());
+    if (!partitionLifecycle.isCurrent(generation)) {
+      return staleMiyousheRequestResult();
+    }
     if (!cookie) {
       return { ok: false, reason: '没有可用的米游社登录态，请先登录' };
     }
-    const result = await miyousheGameRecord.ping(parsed.data.uid, cookie);
+    const result = await partitionLifecycle.runAt(generation, () =>
+      miyousheGameRecord.ping(parsed.data.uid, cookie)
+    );
+    if (!result || !partitionLifecycle.isCurrent(generation)) {
+      return staleMiyousheRequestResult();
+    }
     if (!result.ok) {
       return {
         ok: false,
@@ -372,6 +386,10 @@ export function registerProfileIpc({
       throw new IpcError(IpcErrorCodes.ValidationFailed, formatIssues(parsed.error.issues));
     }
 
+    const generation = partitionLifecycle.capture();
+    const assertCurrent = () => {
+      if (!partitionLifecycle.isCurrent(generation)) throw staleMiyousheRequestError();
+    };
     const uid = parsed.data.uid;
     const existing = store.get(uid);
 
@@ -391,18 +409,26 @@ export function registerProfileIpc({
     } catch (error) {
       enkaError = error instanceof Error ? error.message : 'Enka request failed';
       if (!existing) {
+        assertCurrent();
         throw new IpcError(IpcErrorCodes.UpstreamUnavailable, enkaError, error);
       }
     }
+    assertCurrent();
 
     let miyousheCharacters: MiyousheCharacterDetail[] | undefined;
     let miyousheCoverage: MiyousheRosterCoverage | undefined;
     let miyousheFailure: MiyousheFetchError | { kind: 'bridge'; message: string } | undefined;
     const cookie = rosterSessions.peek(uid) ?? (await loginWindow.readPersistedCookie());
+    assertCurrent();
     if (cookie && !rosterSessions.hasCookie(uid)) {
       rosterSessions.put(uid, cookie);
     }
-    const result = await fetchMiyousheRoster(uid, cookie);
+    const result = await partitionLifecycle.runAt(generation, () =>
+      fetchMiyousheRoster(uid, cookie)
+    );
+    if (!result || !partitionLifecycle.isCurrent(generation)) {
+      throw staleMiyousheRequestError();
+    }
     if (result.ok) {
       miyousheCharacters = result.characters;
       miyousheCoverage = result.coverage;
@@ -453,6 +479,7 @@ export function registerProfileIpc({
       characters: merged.characters,
       coverage: merged.coverage
     };
+    assertCurrent();
     store.upsert(profile);
 
     const summary: RefreshSummary = {
@@ -595,6 +622,14 @@ export function registerProfileIpc({
 
 function expiredLoginSessionError(): IpcError {
   return new IpcError(IpcErrorCodes.Unauthorized, '登录会话已过期，请重新登录');
+}
+
+function staleMiyousheRequestError(): IpcError {
+  return new IpcError(IpcErrorCodes.Unauthorized, '米游社登录状态已变更，请重试');
+}
+
+function staleMiyousheRequestResult(): { ok: false; reason: string } {
+  return { ok: false, reason: '米游社登录状态已变更，请重试' };
 }
 
 function stripCookieFromBind(bind: BindCookieResult): BindCookieResult {

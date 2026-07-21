@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 interface MockBrowserWindowView {
+  close: ReturnType<typeof vi.fn>;
   destroy: ReturnType<typeof vi.fn>;
   isDestroyed(): boolean;
 }
@@ -59,9 +60,7 @@ vi.mock('electron', () => ({
       this.listeners.delete(event);
     }
 
-    close(): void {
-      this.destroy();
-    }
+    readonly close = vi.fn();
 
     loadURL(): Promise<void> {
       return Promise.resolve();
@@ -244,5 +243,34 @@ describe('MiyousheLoginWindow persisted cookie projection', () => {
     await expect(login).resolves.toEqual({ ok: false, reason: 'cancelled' });
     expect(activeWindow?.destroy).toHaveBeenCalledOnce();
     expect(activeWindow?.isDestroyed()).toBe(true);
+  });
+
+  it('destroys a successful login window even when close would be vetoed', async () => {
+    vi.useFakeTimers();
+    try {
+      getCookies.mockResolvedValue([
+        { name: 'ltoken_v2', value: 'token-v2' },
+        { name: 'ltuid_v2', value: 'uid-v2' },
+        { name: 'ltmid_v2', value: 'mid-v2' }
+      ]);
+      const loginWindow = new MiyousheLoginWindow('persist:close-veto-test');
+      const login = loginWindow.runOnce();
+      const activeWindow = browserWindows[0];
+
+      await vi.advanceTimersByTimeAsync(800);
+
+      await expect(login).resolves.toMatchObject({ ok: true });
+      expect(activeWindow?.close).not.toHaveBeenCalled();
+      expect(activeWindow?.destroy).toHaveBeenCalledOnce();
+      expect(activeWindow?.isDestroyed()).toBe(true);
+
+      const readsAfterSettle = getCookies.mock.calls.length;
+      loginWindow.cancelActiveLogin();
+      await vi.advanceTimersByTimeAsync(1_600);
+      expect(getCookies).toHaveBeenCalledTimes(readsAfterSettle);
+      expect(activeWindow?.destroy).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

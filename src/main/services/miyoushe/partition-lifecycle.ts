@@ -42,6 +42,10 @@ export class MiyoushePartitionStaleError extends Error {
   }
 }
 
+export interface MiyoushePartitionTransitionOptions {
+  beforeDrain?: () => void;
+}
+
 /**
  * Coordinates every mutation of the persistent miyoushe partition. Device-FP
  * operations run inside a captured generation; a newer login/logout makes an
@@ -91,9 +95,10 @@ export class MiyoushePartitionLifecycle {
   }
 
   transition<T = undefined>(
-    mutation?: () => Promise<T>
+    mutation?: () => Promise<T>,
+    options: MiyoushePartitionTransitionOptions = {}
   ): Promise<{ generation: number; value: T | undefined }> {
-    const transition = this.transitionTail.then(() => this.performTransition(mutation));
+    const transition = this.transitionTail.then(() => this.performTransition(mutation, options));
     this.transitionTail = transition.then(
       () => undefined,
       () => undefined
@@ -122,7 +127,8 @@ export class MiyoushePartitionLifecycle {
   }
 
   private async performTransition<T>(
-    mutation?: () => Promise<T>
+    mutation: (() => Promise<T>) | undefined,
+    options: MiyoushePartitionTransitionOptions
   ): Promise<{ generation: number; value: T | undefined }> {
     this.transitioning = true;
     this.generation += 1;
@@ -134,6 +140,7 @@ export class MiyoushePartitionLifecycle {
 
     let value: T | undefined;
     try {
+      options.beforeDrain?.();
       while (this.activeOperations.size > 0) {
         await Promise.allSettled([...this.activeOperations]);
       }
