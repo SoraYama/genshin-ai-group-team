@@ -76,6 +76,44 @@ function makeProfile(uid: string, characterCount = 0): PersistedProfile {
 }
 
 describe('ProfileStore', () => {
+  it('repairs persisted v2 completeness when only secondary stats were stored', async () => {
+    const profile = makeProfile('111111111', 1);
+    profile.characters[0]!.build!.stats = {
+      critRate: 61.2,
+      critDmg: 184,
+      energyRecharge: 135,
+      elementalMastery: 80
+    };
+    profile.characters[0]!.completeness = 'detailed';
+    profile.characters[0]!.missingFields = [];
+    profile.characters[0]!.source = 'miyoushe';
+    profile.characters[0]!.provenance = {
+      ownership: { source: 'miyoushe-list', fetchedAt: '2026-01-01T00:00:00.000Z' },
+      stats: { source: 'miyoushe-detail', fetchedAt: '2026-01-01T00:00:00.000Z' }
+    };
+    profile.source = 'miyoushe';
+    profile.coverage = {
+      ...profile.coverage,
+      detailedCount: 1,
+      statsCount: 1,
+      missingDetailCount: 0,
+      partial: false
+    };
+    electronStoreState.set('profilesByUid', { [profile.uid]: profile });
+
+    const { ProfileStore } = await import('../../../src/main/services/profile-store.js');
+    const repaired = new ProfileStore().get(profile.uid)!;
+
+    expect(repaired.characters[0]?.completeness).toBe('basic');
+    expect(repaired.characters[0]?.missingFields).toContain('stats');
+    expect(repaired.coverage).toMatchObject({
+      statsCount: 0,
+      detailedCount: 0,
+      missingDetailCount: 0,
+      partial: false
+    });
+  });
+
   it('persists an explicit credential source while leaving migrated profiles unknown by default', async () => {
     const legacyV2 = makeProfile('111111111', 2) as PersistedProfile & {
       credentialSource?: 'manual' | 'partition';

@@ -1,3 +1,4 @@
+import { hasCoreCharacterStats } from '../../shared/domain.js';
 import type {
   BuildField,
   CharacterBuildSnapshot,
@@ -38,7 +39,7 @@ export function describeBuild(build: CharacterBuildSnapshot | undefined): {
   missingFields: BuildField[];
 } {
   const missingFields: BuildField[] = [];
-  if (!build?.stats || Object.keys(build.stats).length === 0) missingFields.push('stats');
+  if (!hasCoreCharacterStats(build?.stats)) missingFields.push('stats');
   if (!build?.weapon) missingFields.push('weapon');
   if (!build?.artifacts || build.artifacts.length === 0) missingFields.push('artifacts');
   if (!build?.talents) missingFields.push('talents');
@@ -98,8 +99,8 @@ export function mergeProfile(input: ProfileMergeInput): ProfileMergeOutput {
 
   const detailedCount = merged.filter((character) => character.completeness === 'detailed').length;
   const buildCount = merged.filter((character) => character.completeness !== 'basic').length;
-  const statsCount = merged.filter(
-    (character) => character.build?.stats && Object.keys(character.build.stats).length > 0
+  const statsCount = merged.filter((character) =>
+    hasCoreCharacterStats(character.build?.stats)
   ).length;
   const expectedOwnedCount =
     input.miyousheCoverage?.expectedOwnedCount ?? cachedProfile?.coverage.expectedOwnedCount;

@@ -120,6 +120,27 @@ describe('mergeProfile', () => {
     expect(character.missingFields).toContain('stats');
   });
 
+  it('does not treat secondary-only stats as a complete character panel', () => {
+    const { characters, coverage } = mergeProfile({
+      enkaCharacters: [],
+      miyousheCharacters: [
+        miyousheChar({
+          stats: {
+            critRate: 61.2,
+            critDmg: 184,
+            energyRecharge: 135,
+            elementalMastery: 80
+          }
+        })
+      ],
+      fetchedAt: FETCHED_AT
+    });
+
+    expect(characters[0]?.completeness).toBe('build');
+    expect(characters[0]?.missingFields).toContain('stats');
+    expect(coverage).toMatchObject({ statsCount: 0, detailedCount: 0 });
+  });
+
   it('marks Enka-only showcase data as partial ownership', () => {
     const { characters, source, coverage } = mergeProfile({
       enkaCharacters: [enkaChar()],

@@ -1166,6 +1166,37 @@ describe('browser bridge payload mappers', () => {
     });
     expect(mapMiyousheCharacterDetailData({ wrong: [] })).toBeUndefined();
   });
+
+  it('maps the current Battle Chronicle core-stat property types', async () => {
+    const { mapMiyousheCharacterDetailData } =
+      await import('../../../src/main/services/miyoushe-game-record.js');
+
+    const detailed = mapMiyousheCharacterDetailData({
+      list: [
+        {
+          base: list[0],
+          relics: [],
+          base_properties: [
+            { property_type: 2000, final: '32123' },
+            { property_type: 2001, final: '1987' },
+            { property_type: 2002, final: '876' }
+          ],
+          selected_properties: [
+            { property_type: 20, final: '0.612' },
+            { property_type: 22, final: '1.84' }
+          ]
+        }
+      ]
+    });
+
+    expect(detailed?.[0]?.stats).toEqual({
+      hp: 32123,
+      atk: 1987,
+      def: 876,
+      critRate: 61.2,
+      critDmg: 184
+    });
+  });
 });
 
 describe('MiyousheGameRecordClient.fetchDetailedRoster', () => {
@@ -1235,9 +1266,9 @@ describe('MiyousheGameRecordClient.fetchDetailedRoster', () => {
                   { skill_type: 3, level: 8 }
                 ],
                 base_properties: [
-                  { property_type: 1, final: '32000' },
-                  { property_type: 4, final: '1800' },
-                  { property_type: 7, final: '900' }
+                  { property_type: 2000, final: '32000' },
+                  { property_type: 2001, final: '1800' },
+                  { property_type: 2002, final: '900' }
                 ]
               }
             ]
@@ -1254,6 +1285,7 @@ describe('MiyousheGameRecordClient.fetchDetailedRoster', () => {
 
     expect(result.data.characters.map((character) => character.id)).toEqual([10000046, 10000037]);
     expect(result.data.characters[0]?.weapon?.name).toBe('Weapon A');
+    expect(result.data.characters[0]?.stats).toEqual({ hp: 32000, atk: 1800, def: 900 });
     expect(result.data.characters[1]?.artifacts[0]).toMatchObject({
       slot: 'sands',
       setName: 'Test Set',
@@ -1274,7 +1306,7 @@ describe('MiyousheGameRecordClient.fetchDetailedRoster', () => {
       listedCount: 2,
       detailedCount: 2,
       partial: false,
-      fields: { weapon: 2, artifacts: 1, talents: 2, stats: 2 }
+      fields: { weapon: 2, artifacts: 1, talents: 2, stats: 1 }
     });
 
     expect(requestMock).toHaveBeenCalledTimes(2);

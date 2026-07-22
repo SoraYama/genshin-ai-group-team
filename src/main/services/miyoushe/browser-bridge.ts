@@ -1,4 +1,5 @@
 import { app, BrowserWindow, session } from 'electron';
+import { hasCoreCharacterStats } from '../../../shared/domain.js';
 import { MIYOUSHE_LOGIN_PARTITION } from '../miyoushe-login-window.js';
 import {
   mapMiyousheCharacterDetailData,
@@ -236,7 +237,7 @@ function buildBridgeResult(state: BridgeInterceptState): BrowserBridgeResult | u
     weapon: characters.filter((character) => character.weapon !== undefined).length,
     artifacts: characters.filter((character) => character.artifacts.length > 0).length,
     talents: characters.filter((character) => character.talents !== undefined).length,
-    stats: characters.filter((character) => character.stats !== undefined).length
+    stats: characters.filter((character) => hasCoreCharacterStats(character.stats)).length
   };
   return {
     ok: true,

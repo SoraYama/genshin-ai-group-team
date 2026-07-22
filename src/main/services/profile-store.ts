@@ -1,6 +1,7 @@
 import { copyFileSync, existsSync } from 'node:fs';
 import Store from 'electron-store';
 import { z } from 'zod';
+import { hasCoreCharacterStats } from '../../shared/domain.js';
 import type {
   CharacterProfile,
   CharacterStats,
@@ -133,7 +134,8 @@ function coverageFromCharacters(characters: CharacterProfile[]): ProfileCoverage
     ownedCount: characters.length,
     detailedCount,
     buildCount: characters.filter((character) => character.completeness !== 'basic').length,
-    statsCount: characters.filter((character) => character.build?.stats !== undefined).length,
+    statsCount: characters.filter((character) => hasCoreCharacterStats(character.build?.stats))
+      .length,
     enkaShowcaseCount: characters.filter(
       (character) => character.provenance.stats?.source === 'enka'
     ).length,
@@ -222,34 +224,46 @@ export class ProfileStore {
         if (isV2Profile(value)) {
           const characters = value.characters.map((character) => ({
             ...character,
-            imageUrl: rewriteIconToProxyUrl(character.imageUrl)
+            imageUrl: rewriteIconToProxyUrl(character.imageUrl),
+            ...describeBuild(character.build)
           }));
           const imageChanged = characters.some(
             (character, index) => character.imageUrl !== value.characters[index]?.imageUrl
           );
+          const shapeChanged = characters.some((character, index) => {
+            const previous = value.characters[index];
+            return (
+              character.completeness !== previous?.completeness ||
+              character.missingFields.join(',') !== previous.missingFields.join(',')
+            );
+          });
           const enkaOnly =
             characters.length > 0 &&
             characters.every((character) => character.provenance.ownership.source === 'enka');
-          const coverageChanged =
-            enkaOnly &&
-            (value.source !== 'enka' ||
-              !value.coverage.partial ||
-              value.coverage.expectedOwnedCount !== undefined);
-          const changed = imageChanged || coverageChanged;
+          const derivedCoverage = coverageFromCharacters(characters);
+          const expectedOwnedCount = enkaOnly ? undefined : value.coverage.expectedOwnedCount;
+          const coverage = {
+            ...value.coverage,
+            ownedCount: characters.length,
+            detailedCount: derivedCoverage.detailedCount,
+            buildCount: derivedCoverage.buildCount,
+            statsCount: derivedCoverage.statsCount,
+            enkaShowcaseCount: derivedCoverage.enkaShowcaseCount,
+            expectedOwnedCount,
+            partial:
+              enkaOnly ||
+              value.coverage.partial ||
+              (expectedOwnedCount !== undefined && expectedOwnedCount !== characters.length)
+          };
+          const coverageChanged = JSON.stringify(coverage) !== JSON.stringify(value.coverage);
+          const sourceChanged = enkaOnly && value.source !== 'enka';
+          const changed = imageChanged || shapeChanged || coverageChanged || sourceChanged;
           migrated[uid] = changed
             ? {
                 ...value,
                 source: enkaOnly ? 'enka' : value.source,
                 characters,
-                coverage: enkaOnly
-                  ? {
-                      ...value.coverage,
-                      expectedOwnedCount: undefined,
-                      ownedCount: characters.length,
-                      enkaShowcaseCount: characters.length,
-                      partial: true
-                    }
-                  : value.coverage
+                coverage
               }
             : value;
           dirty ||= changed;

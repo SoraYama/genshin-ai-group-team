@@ -64,6 +64,14 @@ export interface CharacterStats {
   elementalMastery?: number;
 }
 
+export function hasCoreCharacterStats(
+  stats: CharacterStats | undefined
+): stats is CharacterStats & Required<Pick<CharacterStats, 'hp' | 'atk' | 'def'>> {
+  return [stats?.hp, stats?.atk, stats?.def].every(
+    (value) => typeof value === 'number' && Number.isFinite(value) && value > 0
+  );
+}
+
 export type DataCompleteness = 'basic' | 'build' | 'detailed';
 export type BuildField = 'stats' | 'weapon' | 'artifacts' | 'talents';
 export type FieldSource = 'miyoushe-index' | 'miyoushe-list' | 'miyoushe-detail' | 'enka';

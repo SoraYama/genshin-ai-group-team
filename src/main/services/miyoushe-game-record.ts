@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { request } from 'undici';
+import { hasCoreCharacterStats } from '../../shared/domain.js';
 import type {
   ArtifactPiece,
   ArtifactSlot,
@@ -444,7 +445,10 @@ const CORE_STAT_BY_PROPERTY_TYPE: Record<number, keyof Omit<CharacterStats, 'lev
   20: 'critRate',
   22: 'critDmg',
   23: 'energyRecharge',
-  28: 'elementalMastery'
+  28: 'elementalMastery',
+  2000: 'hp',
+  2001: 'atk',
+  2002: 'def'
 };
 
 function mapCoreStats(
@@ -702,7 +706,7 @@ export class MiyousheGameRecordClient {
       weapon: characters.filter((character) => character.weapon !== undefined).length,
       artifacts: characters.filter((character) => character.artifacts.length > 0).length,
       talents: characters.filter((character) => character.talents !== undefined).length,
-      stats: characters.filter((character) => character.stats !== undefined).length
+      stats: characters.filter((character) => hasCoreCharacterStats(character.stats)).length
     };
     const listedCount = uniqueList.length;
     const expectedMismatch =
