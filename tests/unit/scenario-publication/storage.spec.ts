@@ -11,6 +11,14 @@ import { makeScenario } from './fixtures.js';
 
 const roots: string[] = [];
 
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 async function temporaryRoot(): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'scenario-publication-'));
   roots.push(root);
@@ -124,5 +132,57 @@ describe('FileScenarioPublicationStorage', () => {
     });
     await expect(fs.readFile(path.join(scopedDirectory, foreign), 'utf8')).resolves.toBe('foreign');
     expect(events).toEqual(['rename:spiral-abyss.json', `sync:${scopedDirectory}`]);
+  });
+
+  it('serializes concurrent saves so temp cleanup cannot delete an in-flight write', async () => {
+    const root = await temporaryRoot();
+    const scopedDirectory = path.join(root, 'production');
+    await fs.mkdir(scopedDirectory, { recursive: true });
+    const foreign = path.join(scopedDirectory, '.foreign.tmp');
+    await fs.writeFile(foreign, 'foreign');
+    const firstSyncStarted = deferred();
+    const releaseFirstSync = deferred();
+    let openCount = 0;
+    const fileSystem: AtomicFileSystem = {
+      mkdir: fs.mkdir.bind(fs),
+      readFile: fs.readFile.bind(fs),
+      readdir: fs.readdir.bind(fs),
+      open: async (filePath, flags, mode) => {
+        const handle = await fs.open(filePath, flags, mode);
+        openCount += 1;
+        const ordinal = openCount;
+        return {
+          writeFile: handle.writeFile.bind(handle),
+          sync: async () => {
+            if (ordinal === 1) {
+              firstSyncStarted.resolve();
+              await releaseFirstSync.promise;
+            }
+            await handle.sync();
+          },
+          close: handle.close.bind(handle)
+        };
+      },
+      rename: fs.rename.bind(fs),
+      unlink: fs.unlink.bind(fs),
+      syncDirectory: async () => undefined
+    };
+    const storage = new FileScenarioPublicationStorage(root, fileSystem);
+    const secondStorage = new FileScenarioPublicationStorage(root, fileSystem);
+
+    const firstSave = storage.save('spiral-abyss', 'production', stored('concurrent-first'));
+    await firstSyncStarted.promise;
+    const secondValue = stored('concurrent-second');
+    const secondSave = secondStorage.save('spiral-abyss', 'production', secondValue);
+    await Promise.resolve();
+    await Promise.resolve();
+    const observedOpenCount = openCount;
+    releaseFirstSync.resolve();
+    const results = await Promise.allSettled([firstSave, secondSave]);
+
+    expect(observedOpenCount).toBe(1);
+    expect(results.every(({ status }) => status === 'fulfilled')).toBe(true);
+    await expect(storage.load('spiral-abyss', 'production')).resolves.toEqual(secondValue);
+    await expect(fs.readFile(foreign, 'utf8')).resolves.toBe('foreign');
   });
 });

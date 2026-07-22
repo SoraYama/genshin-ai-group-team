@@ -10,6 +10,7 @@ import {
 } from 'node:crypto';
 
 import {
+  hasForbiddenIdentityControlCharacter,
   publicationIntegritySchema,
   scenarioV2Schema,
   type PublicationIntegrity,
@@ -156,7 +157,12 @@ export function createScenarioPublication(
   options: PublicationSigningOptions
 ): ScenarioPublicationEnvelope {
   const parsed = scenarioV2Schema.safeParse(input);
-  if (!parsed.success || options.keyId.trim().length === 0) {
+  if (
+    !parsed.success ||
+    options.keyId.trim().length === 0 ||
+    options.keyId !== options.keyId.trim() ||
+    hasForbiddenIdentityControlCharacter(options.keyId)
+  ) {
     throw new ScenarioPublicationError('schema-invalid', {
       cause: parsed.success ? undefined : parsed.error
     });

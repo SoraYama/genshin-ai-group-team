@@ -17,6 +17,7 @@ import { ScenarioPublicationMigratorRegistry } from './migration.js';
 import type { ScenarioPublicKeyRing } from './publication.js';
 
 const DEFAULT_EXPIRING_WINDOW_MS = 24 * 60 * 60 * 1000;
+const refreshQueues = new Map<string, Promise<void>>();
 
 export function calculateScenarioFreshness(
   meta: Pick<VersionedMeta, 'effectiveFrom' | 'effectiveTo'>,
@@ -64,7 +65,25 @@ export class ScenePublicationService {
     this.expiringWindowMs = options.expiringWindowMs ?? DEFAULT_EXPIRING_WINDOW_MS;
   }
 
-  async refresh(mode: ScenarioModeV2): Promise<ScenarioPublicationSnapshot> {
+  refresh(mode: ScenarioModeV2): Promise<ScenarioPublicationSnapshot> {
+    const queueKey = JSON.stringify([this.expectedUse, mode]);
+    const previous = refreshQueues.get(queueKey) ?? Promise.resolve();
+    const run = previous.then(
+      () => this.refreshOnce(mode),
+      () => this.refreshOnce(mode)
+    );
+    const tail = run.then(
+      () => undefined,
+      () => undefined
+    );
+    refreshQueues.set(queueKey, tail);
+    void tail.then(() => {
+      if (refreshQueues.get(queueKey) === tail) refreshQueues.delete(queueKey);
+    });
+    return run;
+  }
+
+  private async refreshOnce(mode: ScenarioModeV2): Promise<ScenarioPublicationSnapshot> {
     const checkedAtDate = this.now();
     const checkedAt = checkedAtDate.toISOString();
     let lastKnownGood: StoredScenarioPublication | undefined;

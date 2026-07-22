@@ -94,6 +94,14 @@ class MemoryStorage implements ScenarioPublicationStorage {
   }
 }
 
+function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 function setup(payload = makeScenario(mode), storage = new MemoryStorage()) {
   const keys = generateKeyPairSync('ed25519');
   const publication = createScenarioPublication(payload, {
@@ -159,6 +167,14 @@ describe('scenario publication manifest', () => {
       current: conflicting,
       history: [conflicting]
     };
+
+    expect(scenarioPublicationManifestSchema.safeParse(manifest).success).toBe(false);
+  });
+
+  it('rejects control characters in manifest identity tuples', () => {
+    const manifest = manifestFor(makeScenario(mode));
+    manifest.modes[mode].current!.scenarioId = 'ambiguous\u0000scenario';
+    manifest.modes[mode].history[0]!.scenarioId = 'ambiguous\u0000scenario';
 
     expect(scenarioPublicationManifestSchema.safeParse(manifest).success).toBe(false);
   });
@@ -442,6 +458,77 @@ describe('ScenePublicationService', () => {
       refreshErrorCode: 'storage-write-failed'
     });
     expect(storage.value).toBeUndefined();
+  });
+
+  it('serializes concurrent refreshes per trusted use and mode so an older save cannot finish last', async () => {
+    const keys = generateKeyPairSync('ed25519');
+    const firstPublication = createScenarioPublication(makeScenario(mode, 'first', '2026.01'), {
+      keyId: 'test-key',
+      privateKey: keys.privateKey
+    });
+    const secondPublication = createScenarioPublication(makeScenario(mode, 'second', '2026.02'), {
+      keyId: 'test-key',
+      privateKey: keys.privateKey
+    });
+    const firstManifest = manifestFor(firstPublication.payload);
+    const secondManifest = manifestFor(secondPublication.payload);
+    const firstDescriptor = firstManifest.modes[mode].current!;
+    const secondDescriptor = secondManifest.modes[mode].current!;
+    let manifestReads = 0;
+    const documents = {
+      [firstDescriptor.payloadPath]: firstPublication.payload,
+      [firstDescriptor.integrityPath]: firstPublication.integrity,
+      [secondDescriptor.payloadPath]: secondPublication.payload,
+      [secondDescriptor.integrityPath]: secondPublication.integrity
+    };
+    const reader: ScenarioPublicationReader = {
+      readManifest: async () => (manifestReads++ === 0 ? firstManifest : secondManifest),
+      readJson: async (publicationPath) => documents[publicationPath as keyof typeof documents]
+    };
+    const firstSaveStarted = deferred();
+    const releaseFirstSave = deferred();
+    const savedVersions: string[] = [];
+    let finalVersion: string | undefined;
+    const storage: ScenarioPublicationStorage = {
+      load: async () => undefined,
+      save: async (_mode, _use, value) => {
+        const version = value.publication.payload.meta.dataVersion;
+        savedVersions.push(version);
+        if (savedVersions.length === 1) {
+          firstSaveStarted.resolve();
+          await releaseFirstSave.promise;
+        }
+        finalVersion = version;
+      }
+    };
+    const service = new ScenePublicationService({
+      reader,
+      storage,
+      publicKeys: { 'test-key': keys.publicKey },
+      expectedUse: 'production'
+    });
+    const secondService = new ScenePublicationService({
+      reader,
+      storage: {
+        load: storage.load.bind(storage),
+        save: storage.save.bind(storage)
+      },
+      publicKeys: { 'test-key': keys.publicKey },
+      expectedUse: 'production'
+    });
+
+    const firstRefresh = service.refresh(mode);
+    await firstSaveStarted.promise;
+    const secondRefresh = secondService.refresh(mode);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(manifestReads).toBe(1);
+    expect(savedVersions).toEqual(['2026.01']);
+
+    releaseFirstSave.resolve();
+    await expect(Promise.all([firstRefresh, secondRefresh])).resolves.toHaveLength(2);
+    expect(savedVersions).toEqual(['2026.01', '2026.02']);
+    expect(finalVersion).toBe('2026.02');
   });
 });
 

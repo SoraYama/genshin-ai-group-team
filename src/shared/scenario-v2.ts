@@ -1,7 +1,22 @@
 import { z } from 'zod';
 
+export function hasForbiddenIdentityControlCharacter(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = value.charCodeAt(index);
+    if (codeUnit <= 0x1f || codeUnit === 0x7f) return true;
+  }
+  return false;
+}
+
 const isoDateTimeSchema = z.iso.datetime({ offset: true });
-const nonEmptyIdSchema = z.string().trim().min(1);
+const nonEmptyIdSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .refine(
+    (value) => !hasForbiddenIdentityControlCharacter(value),
+    'Control characters are forbidden'
+  );
 
 export const dataSourceKindSchema = z.enum([
   'official-announcement',
@@ -182,7 +197,7 @@ export const publicationIntegritySchema = z
 export const versionedMetaSchema = z
   .object({
     schemaVersion: z.literal(2),
-    dataVersion: z.string().trim().min(1),
+    dataVersion: nonEmptyIdSchema,
     effectiveFrom: isoDateTimeSchema,
     effectiveTo: isoDateTimeSchema.optional(),
     sourceRefs: z.array(publishedSourceReferenceSchema).min(1),
@@ -740,7 +755,7 @@ export const teamAssignmentSchema = z
 const planCommonShape = {
   schemaVersion: z.literal(2),
   scenarioId: nonEmptyIdSchema,
-  dataVersion: z.string().trim().min(1),
+  dataVersion: nonEmptyIdSchema,
   confidence: z.enum(['low', 'medium', 'high']),
   warnings: z.array(z.string().trim().min(1)),
   assumptions: z.array(z.string().trim().min(1))

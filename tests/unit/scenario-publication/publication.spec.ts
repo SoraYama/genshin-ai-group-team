@@ -166,4 +166,20 @@ describe('RFC 8785 publication primitives', () => {
       ScenarioPublicationError
     );
   });
+
+  it('rejects NUL and control characters in publication identity fields', () => {
+    const { privateKey } = generateKeyPairSync('ed25519');
+    expect(() =>
+      createScenarioPublication(
+        { ...makeScenario('spiral-abyss'), id: 'ambiguous\u0000scenario' },
+        { keyId: 'test-key', privateKey }
+      )
+    ).toThrowError(expect.objectContaining({ code: 'schema-invalid' }));
+    expect(() =>
+      createScenarioPublication(makeScenario('spiral-abyss'), {
+        keyId: 'test\u0000key',
+        privateKey
+      })
+    ).toThrowError(expect.objectContaining({ code: 'schema-invalid' }));
+  });
 });

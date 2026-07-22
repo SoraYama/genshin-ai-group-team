@@ -1,17 +1,24 @@
-import { randomUUID, type KeyLike, type KeyObject } from 'node:crypto';
+import { createPublicKey, randomUUID, type KeyLike, type KeyObject } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import type { Stats } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 
+import { publicationIntegritySchema } from '../../shared/scenario-v2.js';
 import {
   scenarioPublicationManifestSchema,
   type ScenarioPublicationDescriptor,
   type ScenarioPublicationManifest
 } from './contracts.js';
 import { ScenarioPublicationError } from './errors.js';
-import { createScenarioPublicationBundle, type ScenarioPublicationCandidate } from './publisher.js';
+import { durableDirectorySync } from './durable-directory-sync.js';
+import { verifyScenarioPublication, type ScenarioPublicKeyRing } from './publication.js';
+import {
+  createScenarioPublicationBundle,
+  scenarioPublicationPaths,
+  type ScenarioPublicationCandidate
+} from './publisher.js';
 
 const safeInputFileSchema = z
   .string()
@@ -67,14 +74,7 @@ const nodeFileSystem: PublisherFileSystem = {
   link: (existingPath, newPath) => fs.link(existingPath, newPath),
   rename: (oldPath, newPath) => fs.rename(oldPath, newPath),
   unlink: (filePath) => fs.unlink(filePath),
-  syncDirectory: async (directoryPath) => {
-    const handle = await fs.open(directoryPath, 'r');
-    try {
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
-  }
+  syncDirectory: durableDirectorySync
 };
 
 export interface PublishScenarioInputDirectoryOptions {
@@ -83,6 +83,7 @@ export interface PublishScenarioInputDirectoryOptions {
   keyId: string;
   privateKey: KeyLike | KeyObject;
   publishedAt: string;
+  trustedHistoricalPublicKeys?: ScenarioPublicKeyRing;
   fileSystem?: PublisherFileSystem;
 }
 
@@ -91,11 +92,19 @@ function isMissing(error: unknown): boolean {
 }
 
 function descriptorIdentity(descriptor: ScenarioPublicationDescriptor): string {
-  return `${descriptor.mode}\u0000${descriptor.scenarioId}\u0000${descriptor.dataVersion}`;
+  return JSON.stringify([descriptor.mode, descriptor.scenarioId, descriptor.dataVersion]);
 }
 
 function descriptorFingerprint(descriptor: ScenarioPublicationDescriptor): string {
-  return JSON.stringify(descriptor);
+  return JSON.stringify([
+    descriptor.mode,
+    descriptor.schemaVersion,
+    descriptor.scenarioId,
+    descriptor.dataVersion,
+    descriptor.payloadPath,
+    descriptor.integrityPath,
+    descriptor.channel
+  ]);
 }
 
 async function secureRoot(
@@ -331,6 +340,41 @@ function mergeManifest(
   return result.data;
 }
 
+async function validateRetainedPublications(
+  outputRoot: string,
+  manifest: ScenarioPublicationManifest,
+  publicKeys: ScenarioPublicKeyRing,
+  fileSystem: PublisherFileSystem
+): Promise<void> {
+  const descriptors = Object.values(manifest.modes).flatMap(({ history }) => history);
+  if (descriptors.some(({ channel }) => channel !== 'production')) {
+    throw new ScenarioPublicationError('channel-mismatch');
+  }
+
+  for (const descriptor of descriptors) {
+    const [payloadInput, integrityInput] = await Promise.all([
+      readJsonFile(outputRoot, descriptor.payloadPath, fileSystem),
+      readJsonFile(outputRoot, descriptor.integrityPath, fileSystem)
+    ]);
+    const integrityResult = publicationIntegritySchema.safeParse(integrityInput);
+    if (!integrityResult.success) {
+      throw new ScenarioPublicationError('schema-invalid', { cause: integrityResult.error });
+    }
+    const payload = verifyScenarioPublication(payloadInput, integrityResult.data, publicKeys);
+    const expectedPaths = scenarioPublicationPaths(payload, integrityResult.data);
+    if (
+      descriptor.mode !== payload.mode ||
+      descriptor.schemaVersion !== payload.meta.schemaVersion ||
+      descriptor.scenarioId !== payload.id ||
+      descriptor.dataVersion !== payload.meta.dataVersion ||
+      descriptor.payloadPath !== expectedPaths.payloadPath ||
+      descriptor.integrityPath !== expectedPaths.integrityPath
+    ) {
+      throw new ScenarioPublicationError('identity-mismatch');
+    }
+  }
+}
+
 export async function publishScenarioInputDirectory(
   options: PublishScenarioInputDirectoryOptions
 ): Promise<ScenarioPublicationManifest> {
@@ -360,6 +404,23 @@ export async function publishScenarioInputDirectory(
     existingManifest = result.data;
   } catch (error) {
     if (!(error instanceof ScenarioPublicationError) || error.code !== 'not-found') throw error;
+  }
+  if (existingManifest) {
+    let currentPublicKey: KeyObject;
+    try {
+      currentPublicKey = createPublicKey(options.privateKey);
+    } catch (error) {
+      throw new ScenarioPublicationError('invalid-signing-key', { cause: error });
+    }
+    await validateRetainedPublications(
+      outputRoot,
+      existingManifest,
+      {
+        ...options.trustedHistoricalPublicKeys,
+        [options.keyId]: currentPublicKey
+      },
+      fileSystem
+    );
   }
   const manifest = mergeManifest(existingManifest, bundle.manifest);
 

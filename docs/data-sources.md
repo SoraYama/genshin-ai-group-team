@@ -41,7 +41,7 @@
 
 ## 生效日期、版本与严格兼容
 
-- 场景 payload 的 `schemaVersion` 描述结构兼容性；`dataVersion` 唯一标识一份已发布业务数据。
+- 场景 payload 的 `schemaVersion` 描述结构兼容性；`dataVersion` 唯一标识一份已发布业务数据。scenario ID、dataVersion、key ID 等身份字段拒绝 C0/DEL 控制字符，内部 tuple key 使用 JSON 数组序列化，不能用 NUL 拼接制造歧义。
 - `effectiveFrom` 必填，`effectiveTo` 可选但不得早于开始时间。有效区间按半开区间 `[effectiveFrom, effectiveTo)` 解释，因此检查时刻等于 `effectiveTo` 已是 stale。它们属于经审核、被签名的 payload。
 - 推荐计划拥有独立的 `schemaVersion: 2`，以便历史记录与场景数据分别迁移；同时回显所用 `dataVersion`。
 - 外部发布 envelope、场景 payload、推荐计划和玩家干预的所有对象层级均以 Zod `.strict()` 递归拒绝未知字段，避免嵌套 producer drift 被静默丢弃。

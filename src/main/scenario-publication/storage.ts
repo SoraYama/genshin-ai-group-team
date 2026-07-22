@@ -11,6 +11,7 @@ import {
   type StoredScenarioPublication
 } from './contracts.js';
 import { ScenarioPublicationError } from './errors.js';
+import { durableDirectorySync } from './durable-directory-sync.js';
 
 type WritableFileHandle = Pick<FileHandle, 'writeFile' | 'sync' | 'close'>;
 
@@ -31,15 +32,10 @@ const nodeFileSystem: AtomicFileSystem = {
   open: (filePath, flags, mode) => fs.open(filePath, flags, mode),
   rename: (oldPath, newPath) => fs.rename(oldPath, newPath),
   unlink: (filePath) => fs.unlink(filePath),
-  syncDirectory: async (directoryPath) => {
-    const handle = await fs.open(directoryPath, 'r');
-    try {
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
-  }
+  syncDirectory: durableDirectorySync
 };
+
+const fileStorageOperationQueues = new Map<string, Promise<void>>();
 
 export class FileScenarioPublicationStorage implements ScenarioPublicationStorage {
   constructor(
@@ -47,7 +43,14 @@ export class FileScenarioPublicationStorage implements ScenarioPublicationStorag
     private readonly fileSystem: AtomicFileSystem = nodeFileSystem
   ) {}
 
-  async load(
+  load(
+    mode: ScenarioModeV2,
+    use: ScenarioPublicationUse
+  ): Promise<StoredScenarioPublication | undefined> {
+    return this.runExclusive(mode, use, () => this.loadOnce(mode, use));
+  }
+
+  private async loadOnce(
     mode: ScenarioModeV2,
     use: ScenarioPublicationUse
   ): Promise<StoredScenarioPublication | undefined> {
@@ -64,7 +67,15 @@ export class FileScenarioPublicationStorage implements ScenarioPublicationStorag
     }
   }
 
-  async save(
+  save(
+    mode: ScenarioModeV2,
+    use: ScenarioPublicationUse,
+    value: StoredScenarioPublication
+  ): Promise<void> {
+    return this.runExclusive(mode, use, () => this.saveOnce(mode, use, value));
+  }
+
+  private async saveOnce(
     mode: ScenarioModeV2,
     use: ScenarioPublicationUse,
     value: StoredScenarioPublication
@@ -98,6 +109,27 @@ export class FileScenarioPublicationStorage implements ScenarioPublicationStorag
 
   private cachePath(mode: ScenarioModeV2, use: ScenarioPublicationUse): string {
     return path.join(this.cacheDirectory, use, `${mode}.json`);
+  }
+
+  private runExclusive<T>(
+    mode: ScenarioModeV2,
+    use: ScenarioPublicationUse,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const queueKey = JSON.stringify([path.resolve(this.cacheDirectory), use, mode]);
+    const previous = fileStorageOperationQueues.get(queueKey) ?? Promise.resolve();
+    const run = previous.then(operation, operation);
+    const tail = run.then(
+      () => undefined,
+      () => undefined
+    );
+    fileStorageOperationQueues.set(queueKey, tail);
+    void tail.then(() => {
+      if (fileStorageOperationQueues.get(queueKey) === tail) {
+        fileStorageOperationQueues.delete(queueKey);
+      }
+    });
+    return run;
   }
 
   private async cleanupOwnedTemps(

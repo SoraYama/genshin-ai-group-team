@@ -1,13 +1,21 @@
 import { z } from 'zod';
 
 import {
+  hasForbiddenIdentityControlCharacter,
   scenarioPublicationEnvelopeSchema,
   type ScenarioPublicationEnvelope,
   type ScenarioV2
 } from '../../shared/scenario-v2.js';
 
 const isoDateTimeSchema = z.iso.datetime({ offset: true });
-const nonEmptyIdSchema = z.string().trim().min(1);
+const nonEmptyIdSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .refine(
+    (value) => !hasForbiddenIdentityControlCharacter(value),
+    'Control characters are forbidden'
+  );
 const scenarioModeSchema = z.enum(['spiral-abyss', 'stygian-onslaught', 'imaginarium-theater']);
 const relativePublicationPathSchema = z
   .string()
@@ -42,7 +50,7 @@ const modePublicationIndexSchema = z
 function descriptorFingerprint(
   descriptor: z.infer<typeof scenarioPublicationDescriptorSchema>
 ): string {
-  return [
+  return JSON.stringify([
     descriptor.mode,
     descriptor.schemaVersion,
     descriptor.scenarioId,
@@ -50,7 +58,7 @@ function descriptorFingerprint(
     descriptor.payloadPath,
     descriptor.integrityPath,
     descriptor.channel
-  ].join('\u0000');
+  ]);
 }
 
 export const scenarioPublicationManifestSchema = z
@@ -79,8 +87,8 @@ export const scenarioPublicationManifestSchema = z
           });
         }
       });
-      const historyIds = index.history.map(
-        ({ scenarioId, dataVersion }) => `${scenarioId}\u0000${dataVersion}`
+      const historyIds = index.history.map(({ scenarioId, dataVersion }) =>
+        JSON.stringify([scenarioId, dataVersion])
       );
       if (new Set(historyIds).size !== historyIds.length) {
         context.addIssue({

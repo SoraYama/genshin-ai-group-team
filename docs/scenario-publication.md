@@ -42,7 +42,9 @@ App 按以下顺序处理：
 5. 比较 manifest 与 payload 的 mode、schemaVersion、scenarioId 和 dataVersion，任何冲突都拒绝；
 6. 只有全部通过后才用同目录临时文件、flush 和 rename 原子替换本地缓存。
 
-manifest 是离线 publisher 的 commit point：payload 使用完整 canonical SHA-256 内容寻址，历史文件不可覆盖；文件和父目录完成 `fsync` 后才最后原子替换 manifest。相同发布可安全重跑，不同内容不得复用 identity 或路径。远端部署也应先上传内容寻址目录，再原子切换 manifest。
+manifest 是离线 publisher 的 commit point：payload 使用完整 canonical SHA-256 内容寻址，历史文件不可覆盖；文件和父目录完成 `fsync` 后才最后原子替换 manifest。Windows 不支持目录 `open/fsync` 时只对已知平台错误安全降级，文件 `fsync` 与 rename 仍是强制步骤，未知错误继续 fail closed。相同发布可安全重跑，不同内容不得复用 identity 或路径。远端部署也应先上传内容寻址目录，再原子切换 manifest。
+
+publisher 不会盲信并拼接磁盘上的旧 manifest。每次保留历史前，它会用当前私钥派生出的公钥和操作员显式提供的历史公钥集合，逐条重读旧 payload/integrity，并重新检查 production channel、raw JCS、digest、Ed25519 signature、descriptor identity 和完整内容寻址路径。缺文件、损坏文件、开发 channel、未知旧 key 或任何路径/身份不一致都会在写新文件前终止。轮换密钥时使用 `--trusted-public-keys <json>` 提供 `{ "old-key-id": "/secure/path/old-public.pem" }`；不提供就不会跨 key 保留历史。
 
 ## 开发样例不是当前事实
 
@@ -61,7 +63,7 @@ manifest 是离线 publisher 的 commit point：payload 使用完整 canonical S
 npm test -- --run tests/unit/scenario-publication/committed-fixtures.spec.ts
 ```
 
-正式发布应运行 `npm run build:scenario-publisher` 后直接调用 `dist-tools/scenario-data/publish.mjs`，显式传入受保护的 Ed25519 私钥路径、key ID、production 输入目录、输出目录和审核后的发布时间。`dist-tools`、`scripts/scenario-data` 与 `resources/scenarios/v2/development-source` 均被桌面安装包配置显式排除。
+正式发布应运行 `npm run build:scenario-publisher` 后直接调用 `dist-tools/scenario-data/publish.mjs`，显式传入受保护的 Ed25519 私钥路径、key ID、production 输入目录、输出目录和审核后的发布时间；密钥轮换时另传 `--trusted-public-keys`。`dist-tools`、`scripts/scenario-data` 与 `resources/scenarios/v2/development-source` 均被桌面安装包配置显式排除。
 
 ## 玩家界面状态语义
 
@@ -73,6 +75,8 @@ npm test -- --run tests/unit/scenario-publication/committed-fixtures.spec.ts
 | `ready/last-known-good + unknown` | 数据有效期尚未开始或缺少结束时间         | 明示无法判断是否为当前期，禁止无提示使用     |
 | `last-known-good`                 | 更新失败，正在使用最近一次验证通过的数据 | 保留数据版本、审核时间和安全的错误类别       |
 | `unavailable`                     | 暂时没有可验证的挑战数据                 | 禁用依赖当前场景的推荐；角色浏览和历史仍可用 |
+
+同一 cache 下相同 `(trustedUse, mode)` 的 refresh、load 和 save 在 Main 进程内串行执行；较早请求不会在较新请求之后落盘，临时文件清理也不会触碰仍在写入的同命名空间文件。不同用途或不同玩法仍可并行。
 
 HTTP reader 默认只接受 HTTPS；明文 HTTP 仅允许调用方显式开启的 loopback 开发地址。单次响应有 `Content-Length` 预检、流式字节上限和覆盖建连到读取结束的总 abort deadline。HTTP 404、超时、响应过大、网络不可用、JSON 损坏、schema drift、digest mismatch、bad signature、identity mismatch、未知 schema 和原子写失败都有稳定 typed code。对玩家只展示可行动的中文说明；日志不得拼接响应正文、请求头、Cookie、API Key 或 Authorization。
 

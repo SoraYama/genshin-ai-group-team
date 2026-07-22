@@ -1,5 +1,6 @@
 export * from './contracts.js';
 export * from './development-fixture.js';
+export * from './durable-directory-sync.js';
 export * from './errors.js';
 export * from './file-publisher.js';
 export * from './migration.js';

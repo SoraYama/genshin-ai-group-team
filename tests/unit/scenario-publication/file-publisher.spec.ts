@@ -10,6 +10,7 @@ import {
 } from '../../../src/main/scenario-publication/file-publisher.js';
 import { FileScenarioPublicationReader } from '../../../src/main/scenario-publication/readers.js';
 import { scenarioPublicationManifestSchema } from '../../../src/main/scenario-publication/contracts.js';
+import { createScenarioPublication } from '../../../src/main/scenario-publication/publication.js';
 import { makeScenario } from './fixtures.js';
 
 const roots: string[] = [];
@@ -129,18 +130,20 @@ describe('offline directory publisher', () => {
       outputDirectory,
       first.modes['spiral-abyss'].current!.payloadPath
     );
+    const originalImmutablePayload = await fs.readFile(immutablePayloadPath, 'utf8');
     await fs.writeFile(immutablePayloadPath, '{}\n', 'utf8');
     const committedBeforeConflict = await fs.readFile(
       path.join(outputDirectory, 'manifest.json'),
       'utf8'
     );
     await expect(publishScenarioInputDirectory(options)).rejects.toMatchObject({
-      code: 'immutable-path-conflict'
+      code: 'schema-invalid'
     });
     await expect(fs.readFile(immutablePayloadPath, 'utf8')).resolves.toBe('{}\n');
     await expect(fs.readFile(path.join(outputDirectory, 'manifest.json'), 'utf8')).resolves.toBe(
       committedBeforeConflict
     );
+    await fs.writeFile(immutablePayloadPath, originalImmutablePayload, 'utf8');
 
     await writeSingleInput(inputDirectory, {
       ...payload,
@@ -270,5 +273,110 @@ describe('offline directory publisher', () => {
     await expect(fs.readFile(path.join(outputDirectory, 'manifest.json'), 'utf8')).resolves.toBe(
       priorManifest
     );
+  });
+
+  it.each([
+    ['missing old document', 'not-found'],
+    ['corrupt old document', 'invalid-json'],
+    ['bad old signature', 'bad-signature'],
+    ['old identity mismatch', 'identity-mismatch'],
+    ['old content-address path mismatch', 'identity-mismatch'],
+    ['old development channel', 'channel-mismatch']
+  ] as const)('rejects %s before merging retained history', async (fault, expectedCode) => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'scenario-offline-publisher-'));
+    roots.push(root);
+    const inputDirectory = path.join(root, 'input');
+    const outputDirectory = path.join(root, 'output');
+    await writeSingleInput(inputDirectory);
+    const keys = generateKeyPairSync('ed25519');
+    const options = {
+      inputDirectory,
+      outputDirectory,
+      keyId: 'local-test-key',
+      privateKey: keys.privateKey,
+      publishedAt: '2026-01-01T02:00:00.000Z'
+    };
+    const oldManifest = await publishScenarioInputDirectory(options);
+    const oldDescriptor = oldManifest.modes['spiral-abyss'].current!;
+    const payloadPath = path.join(outputDirectory, oldDescriptor.payloadPath);
+    const integrityPath = path.join(outputDirectory, oldDescriptor.integrityPath);
+    const manifestPath = path.join(outputDirectory, 'manifest.json');
+
+    if (fault === 'missing old document') {
+      await fs.unlink(integrityPath);
+    } else if (fault === 'corrupt old document') {
+      await fs.writeFile(payloadPath, '{broken', 'utf8');
+    } else if (fault === 'bad old signature') {
+      const integrity = JSON.parse(await fs.readFile(integrityPath, 'utf8')) as {
+        signature: { value: string };
+      };
+      integrity.signature.value = `${'A'.repeat(86)}==`;
+      await fs.writeFile(integrityPath, JSON.stringify(integrity), 'utf8');
+    } else if (fault === 'old identity mismatch') {
+      const replacement = createScenarioPublication(
+        makeScenario('spiral-abyss', 'different-id', 'different-version'),
+        { keyId: 'local-test-key', privateKey: keys.privateKey }
+      );
+      await fs.writeFile(payloadPath, JSON.stringify(replacement.payload), 'utf8');
+      await fs.writeFile(integrityPath, JSON.stringify(replacement.integrity), 'utf8');
+    } else if (fault === 'old content-address path mismatch') {
+      const alternateDirectory = path.join(outputDirectory, 'publications', 'alternate');
+      await fs.mkdir(alternateDirectory, { recursive: true });
+      const alternatePayload = path.join(alternateDirectory, 'payload.json');
+      const alternateIntegrity = path.join(alternateDirectory, 'integrity.json');
+      await fs.copyFile(payloadPath, alternatePayload);
+      await fs.copyFile(integrityPath, alternateIntegrity);
+      oldManifest.modes['spiral-abyss'].current!.payloadPath =
+        'publications/alternate/payload.json';
+      oldManifest.modes['spiral-abyss'].current!.integrityPath =
+        'publications/alternate/integrity.json';
+      oldManifest.modes['spiral-abyss'].history[0] = oldManifest.modes['spiral-abyss'].current!;
+      await fs.writeFile(manifestPath, JSON.stringify(oldManifest), 'utf8');
+    } else {
+      oldManifest.modes['spiral-abyss'].current!.channel = 'development-sample';
+      oldManifest.modes['spiral-abyss'].history[0]!.channel = 'development-sample';
+      await fs.writeFile(manifestPath, JSON.stringify(oldManifest), 'utf8');
+    }
+
+    await writeSingleInput(inputDirectory, makeScenario('spiral-abyss', 'next-cycle', '2026.02'));
+    const manifestBeforeAttempt = await fs.readFile(manifestPath, 'utf8');
+    await expect(publishScenarioInputDirectory(options)).rejects.toMatchObject({
+      code: expectedCode
+    });
+    await expect(fs.readFile(manifestPath, 'utf8')).resolves.toBe(manifestBeforeAttempt);
+  });
+
+  it('requires an explicit trusted historical keyring when rotating signing keys', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'scenario-offline-publisher-'));
+    roots.push(root);
+    const inputDirectory = path.join(root, 'input');
+    const outputDirectory = path.join(root, 'output');
+    await writeSingleInput(inputDirectory);
+    const oldKeys = generateKeyPairSync('ed25519');
+    await publishScenarioInputDirectory({
+      inputDirectory,
+      outputDirectory,
+      keyId: 'old-key',
+      privateKey: oldKeys.privateKey,
+      publishedAt: '2026-01-01T02:00:00.000Z'
+    });
+    await writeSingleInput(inputDirectory, makeScenario('spiral-abyss', 'next-cycle', '2026.02'));
+    const newKeys = generateKeyPairSync('ed25519');
+    const rotatedOptions = {
+      inputDirectory,
+      outputDirectory,
+      keyId: 'new-key',
+      privateKey: newKeys.privateKey,
+      publishedAt: '2026-02-01T02:00:00.000Z'
+    };
+
+    await expect(publishScenarioInputDirectory(rotatedOptions)).rejects.toMatchObject({
+      code: 'unknown-signing-key'
+    });
+    const rotated = await publishScenarioInputDirectory({
+      ...rotatedOptions,
+      trustedHistoricalPublicKeys: { 'old-key': oldKeys.publicKey }
+    });
+    expect(rotated.modes['spiral-abyss'].history).toHaveLength(2);
   });
 });
