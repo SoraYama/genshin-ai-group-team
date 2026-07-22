@@ -12,6 +12,12 @@ export const dataSourceKindSchema = z.enum([
   'development-cross-check'
 ]);
 
+export const scenarioPublicationSourceKindSchema = z.enum([
+  'official-announcement',
+  'community-wiki',
+  'genshin-db'
+]);
+
 const sourceReferenceBaseShape = {
   id: nonEmptyIdSchema,
   retrievedAt: isoDateTimeSchema
@@ -157,17 +163,29 @@ export const versionedMetaSchema = z
       }
     });
 
-    const referencedSourceIds = new Set(fieldProvenance.map(({ sourceRefId }) => sourceRefId));
-    const hasPublishedFieldSource = sourceRefs.some(
-      ({ id, source }) => referencedSourceIds.has(id) && source !== 'development-cross-check'
-    );
-    if (!hasPublishedFieldSource) {
-      context.addIssue({
-        code: 'custom',
-        message: 'Published fields require at least one referenced non-development source',
-        path: ['fieldProvenance']
+    const sourceById = new Map(sourceRefs.map((sourceRef) => [sourceRef.id, sourceRef]));
+    const provenanceByFieldPath = new Map<string, typeof fieldProvenance>();
+    fieldProvenance.forEach((provenance) => {
+      const entries = provenanceByFieldPath.get(provenance.fieldPath) ?? [];
+      entries.push(provenance);
+      provenanceByFieldPath.set(provenance.fieldPath, entries);
+    });
+
+    provenanceByFieldPath.forEach((provenanceEntries, fieldPath) => {
+      const hasAllowedSceneSource = provenanceEntries.some(({ sourceRefId }) => {
+        const source = sourceById.get(sourceRefId)?.source;
+        return (
+          source !== undefined && scenarioPublicationSourceKindSchema.safeParse(source).success
+        );
       });
-    }
+      if (!hasAllowedSceneSource) {
+        context.addIssue({
+          code: 'custom',
+          message: `Published field requires an allowed scene source: ${fieldPath}`,
+          path: ['fieldProvenance']
+        });
+      }
+    });
   });
 
 export const localizedEntityReferenceSchema = z.object({
@@ -629,6 +647,7 @@ export const recommendationPlanSchema = z.discriminatedUnion('mode', [
 export const scenarioSchema = scenarioV2Schema;
 
 export type DataSourceKind = z.infer<typeof dataSourceKindSchema>;
+export type ScenarioPublicationSourceKind = z.infer<typeof scenarioPublicationSourceKindSchema>;
 export type CommunityWikiLicense = z.infer<typeof communityWikiLicenseSchema>;
 export type SourceReference = z.infer<typeof sourceReferenceSchema>;
 export type FieldProvenanceV2 = z.infer<typeof fieldProvenanceSchema>;

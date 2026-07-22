@@ -259,6 +259,72 @@ describe('reviewed scenario metadata provenance', () => {
     expect(result.success).toBe(false);
   });
 
+  it('rejects a mixed payload when one field path is supported only by a development source', () => {
+    const developmentSource = {
+      ...sourceRef,
+      id: 'raw-cross-check',
+      source: 'development-cross-check' as const
+    };
+    const result = versionedMetaSchema.safeParse({
+      ...reviewedMeta,
+      sourceRefs: [sourceRef, developmentSource],
+      fieldProvenance: [
+        { fieldPath: 'floors[0]', sourceRefId: sourceRef.id },
+        { fieldPath: 'floors[1]', sourceRefId: developmentSource.id }
+      ]
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts production and development evidence for the same field path', () => {
+    const developmentSource = {
+      ...sourceRef,
+      id: 'raw-cross-check',
+      source: 'development-cross-check' as const
+    };
+    const result = versionedMetaSchema.safeParse({
+      ...reviewedMeta,
+      sourceRefs: [sourceRef, developmentSource],
+      fieldProvenance: [
+        { fieldPath: 'floors', sourceRefId: sourceRef.id },
+        { fieldPath: 'floors', sourceRefId: developmentSource.id }
+      ]
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects a scene-rule field supported only by an Enka profile source', () => {
+    const enkaSource = {
+      ...sourceRef,
+      id: 'enka-player-profile',
+      source: 'enka-profile' as const
+    };
+    const result = versionedMetaSchema.safeParse({
+      ...reviewedMeta,
+      sourceRefs: [enkaSource],
+      fieldProvenance: [{ fieldPath: 'floors', sourceRefId: enkaSource.id }]
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a scene-rule field supported only by Battle Chronicle', () => {
+    const battleChronicleSource = {
+      ...sourceRef,
+      id: 'battle-chronicle-player-state',
+      source: 'battle-chronicle' as const
+    };
+    const result = versionedMetaSchema.safeParse({
+      ...reviewedMeta,
+      sourceRefs: [battleChronicleSource],
+      fieldProvenance: [{ fieldPath: 'floors', sourceRefId: battleChronicleSource.id }]
+    });
+
+    expect(result.success).toBe(false);
+  });
+
   it('rejects runtime freshness and integrity fields inside reviewed metadata', () => {
     expect(versionedMetaSchema.safeParse(legacyReviewedMeta).success).toBe(false);
   });
