@@ -12,30 +12,74 @@ export const dataSourceKindSchema = z.enum([
   'development-cross-check'
 ]);
 
-export const sourceReferenceSchema = z.object({
-  id: nonEmptyIdSchema,
-  source: dataSourceKindSchema,
-  url: z.url().optional(),
-  retrievedAt: isoDateTimeSchema,
-  attribution: z.string().trim().min(1).optional()
-});
+export const sourceReferenceSchema = z
+  .object({
+    id: nonEmptyIdSchema,
+    source: dataSourceKindSchema,
+    url: z.url().optional(),
+    retrievedAt: isoDateTimeSchema,
+    attribution: z.string().trim().min(1).optional()
+  })
+  .strict();
 
-export const fieldProvenanceSchema = z.object({
-  fieldPath: z.string().trim().min(1),
-  sourceRefId: nonEmptyIdSchema,
-  note: z.string().trim().min(1).optional()
-});
+export const fieldProvenanceSchema = z
+  .object({
+    fieldPath: z.string().trim().min(1),
+    sourceRefId: nonEmptyIdSchema,
+    note: z.string().trim().min(1).optional()
+  })
+  .strict();
 
-export const provenanceSchema = z.object({
-  sourceRefs: z.array(sourceReferenceSchema).min(1),
-  fields: z.array(fieldProvenanceSchema).default([])
-});
+export const provenanceSchema = z
+  .object({
+    sourceRefs: z.array(sourceReferenceSchema).min(1),
+    fields: z.array(fieldProvenanceSchema).min(1)
+  })
+  .strict()
+  .superRefine(({ sourceRefs, fields }, context) => {
+    const sourceRefIds = new Set(sourceRefs.map(({ id }) => id));
+    if (sourceRefIds.size !== sourceRefs.length) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Source reference IDs must be unique',
+        path: ['sourceRefs']
+      });
+    }
+    fields.forEach(({ sourceRefId }, index) => {
+      if (!sourceRefIds.has(sourceRefId)) {
+        context.addIssue({
+          code: 'custom',
+          message: `Unknown source reference: ${sourceRefId}`,
+          path: ['fields', index, 'sourceRefId']
+        });
+      }
+    });
+  });
 
-export const dataManifestSchema = z.object({
-  algorithm: z.literal('sha256'),
-  hash: z.string().regex(/^[a-f0-9]{64}$/i),
-  signature: z.string().trim().min(1)
-});
+const sha256Base64Schema = z.string().regex(/^[A-Za-z0-9+/]{43}=$/);
+const ed25519Base64Schema = z.string().regex(/^[A-Za-z0-9+/]{86}==$/);
+
+export const publicationIntegritySchema = z
+  .object({
+    scope: z.literal('payload'),
+    serialization: z.literal('RFC8785-JCS'),
+    hash: z
+      .object({
+        algorithm: z.literal('sha256'),
+        encoding: z.literal('base64'),
+        value: sha256Base64Schema
+      })
+      .strict(),
+    signature: z
+      .object({
+        algorithm: z.literal('ed25519'),
+        keyId: nonEmptyIdSchema,
+        encoding: z.literal('base64'),
+        value: ed25519Base64Schema
+      })
+      .strict()
+  })
+  .strict();
 
 export const versionedMetaSchema = z
   .object({
@@ -44,20 +88,47 @@ export const versionedMetaSchema = z
     effectiveFrom: isoDateTimeSchema,
     effectiveTo: isoDateTimeSchema.optional(),
     sourceRefs: z.array(sourceReferenceSchema).min(1),
-    fieldProvenance: z.array(fieldProvenanceSchema).default([]),
-    staleStatus: z.enum(['fresh', 'stale', 'last-known-good']),
+    fieldProvenance: z.array(fieldProvenanceSchema).min(1),
     reviewedAt: isoDateTimeSchema,
-    reviewedBy: z.string().trim().min(1),
-    manifest: dataManifestSchema
+    reviewedBy: z.string().trim().min(1)
   })
-  .refine(
-    ({ effectiveFrom, effectiveTo }) =>
-      effectiveTo === undefined || Date.parse(effectiveTo) >= Date.parse(effectiveFrom),
-    {
-      message: 'effectiveTo must be greater than or equal to effectiveFrom',
-      path: ['effectiveTo']
+  .strict()
+  .superRefine(({ effectiveFrom, effectiveTo, sourceRefs, fieldProvenance }, context) => {
+    if (effectiveTo !== undefined && Date.parse(effectiveTo) < Date.parse(effectiveFrom)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'effectiveTo must be greater than or equal to effectiveFrom',
+        path: ['effectiveTo']
+      });
     }
-  );
+
+    const sourceRefIds = new Set(sourceRefs.map(({ id }) => id));
+    if (sourceRefIds.size !== sourceRefs.length) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Source reference IDs must be unique',
+        path: ['sourceRefs']
+      });
+    }
+
+    fieldProvenance.forEach(({ sourceRefId }, index) => {
+      if (!sourceRefIds.has(sourceRefId)) {
+        context.addIssue({
+          code: 'custom',
+          message: `Unknown source reference: ${sourceRefId}`,
+          path: ['fieldProvenance', index, 'sourceRefId']
+        });
+      }
+    });
+
+    if (sourceRefs.every(({ source }) => source === 'development-cross-check')) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Published metadata requires at least one non-development source',
+        path: ['sourceRefs']
+      });
+    }
+  });
 
 export const localizedEntityReferenceSchema = z.object({
   id: nonEmptyIdSchema,
@@ -124,15 +195,29 @@ const spiralChamberSchema = z.object({
 
 const spiralFloorSchema = z.object({
   floor: z.number().int().positive(),
-  chambers: z.array(spiralChamberSchema).min(1)
+  chambers: z
+    .array(spiralChamberSchema)
+    .min(1)
+    .refine(
+      (chambers) => new Set(chambers.map(({ chamber }) => chamber)).size === chambers.length,
+      'Chamber numbers must be unique within a floor'
+    )
 });
 
-export const spiralAbyssScenarioSchema = z.object({
-  mode: z.literal('spiral-abyss'),
-  id: nonEmptyIdSchema,
-  meta: versionedMetaSchema,
-  floors: z.array(spiralFloorSchema)
-});
+export const spiralAbyssScenarioSchema = z
+  .object({
+    mode: z.literal('spiral-abyss'),
+    id: nonEmptyIdSchema,
+    meta: versionedMetaSchema,
+    floors: z
+      .array(spiralFloorSchema)
+      .min(1)
+      .refine(
+        (floors) => new Set(floors.map(({ floor }) => floor)).size === floors.length,
+        'Abyss floor numbers must be unique'
+      )
+  })
+  .strict();
 
 export const crossPartyReusePolicySchema = z.discriminatedUnion('rule', [
   z.object({
@@ -170,6 +255,10 @@ const stygianDifficultiesSchema = z
   .refine(
     (difficulties) => new Set(difficulties.map(({ order }) => order)).size === 6,
     'Difficulty orders must contain each configured difficulty exactly once'
+  )
+  .refine(
+    (difficulties) => new Set(difficulties.map(({ id }) => id)).size === difficulties.length,
+    'Difficulty IDs must be unique'
   );
 
 const stygianPhasesSchema = z
@@ -180,14 +269,16 @@ const stygianPhasesSchema = z
     'Phases must contain phase 1, 2, and 3 exactly once'
   );
 
-export const stygianOnslaughtScenarioSchema = z.object({
-  mode: z.literal('stygian-onslaught'),
-  id: nonEmptyIdSchema,
-  meta: versionedMetaSchema,
-  crossPartyReusePolicy: crossPartyReusePolicySchema,
-  difficulties: stygianDifficultiesSchema,
-  phases: stygianPhasesSchema
-});
+export const stygianOnslaughtScenarioSchema = z
+  .object({
+    mode: z.literal('stygian-onslaught'),
+    id: nonEmptyIdSchema,
+    meta: versionedMetaSchema,
+    crossPartyReusePolicy: crossPartyReusePolicySchema,
+    difficulties: stygianDifficultiesSchema,
+    phases: stygianPhasesSchema
+  })
+  .strict();
 
 export const theaterPathNoteSchema = z.discriminatedUnion('kind', [
   z.object({
@@ -239,36 +330,42 @@ const vigorSchema = z
     path: ['initial']
   });
 
-export const imaginariumTheaterScenarioSchema = z.object({
-  mode: z.literal('imaginarium-theater'),
-  id: nonEmptyIdSchema,
-  meta: versionedMetaSchema,
-  eligibility: z.object({
-    elements: z.array(elementalTypeSchema).min(1),
-    minimumLevel: z.number().int().positive(),
-    requiredHeadcount: z.number().int().positive()
-  }),
-  pools: theaterPoolsSchema,
-  vigor: vigorSchema,
-  acts: z
-    .array(theaterActSchema)
-    .min(1)
-    .max(10)
-    .refine(
-      (acts) => new Set(acts.map(({ act }) => act)).size === acts.length,
-      'Theater acts must be unique'
-    ),
-  arcanaNodes: z
-    .array(
-      z.object({
-        id: nonEmptyIdSchema,
-        name: localizedEntityReferenceSchema,
-        description: z.string().trim().min(1),
-        pathNotes: z.array(theaterPathNoteSchema).default([])
-      })
-    )
-    .optional()
-});
+export const imaginariumTheaterScenarioSchema = z
+  .object({
+    mode: z.literal('imaginarium-theater'),
+    id: nonEmptyIdSchema,
+    meta: versionedMetaSchema,
+    eligibility: z.object({
+      elements: z.array(elementalTypeSchema).min(1),
+      minimumLevel: z.number().int().positive(),
+      requiredHeadcount: z.number().int().positive()
+    }),
+    pools: theaterPoolsSchema,
+    vigor: vigorSchema,
+    acts: z
+      .array(theaterActSchema)
+      .min(1)
+      .max(10)
+      .refine(
+        (acts) => new Set(acts.map(({ act }) => act)).size === acts.length,
+        'Theater acts must be unique'
+      ),
+    arcanaNodes: z
+      .array(
+        z.object({
+          id: nonEmptyIdSchema,
+          name: localizedEntityReferenceSchema,
+          description: z.string().trim().min(1),
+          pathNotes: z.array(theaterPathNoteSchema).default([])
+        })
+      )
+      .refine(
+        (nodes) => new Set(nodes.map(({ id }) => id)).size === nodes.length,
+        'Arcana node IDs must be unique'
+      )
+      .optional()
+  })
+  .strict();
 
 export const scenarioV2Schema = z.discriminatedUnion('mode', [
   spiralAbyssScenarioSchema,
@@ -276,14 +373,39 @@ export const scenarioV2Schema = z.discriminatedUnion('mode', [
   imaginariumTheaterScenarioSchema
 ]);
 
+export const scenarioPublicationEnvelopeSchema = z
+  .object({
+    payload: scenarioV2Schema,
+    integrity: publicationIntegritySchema
+  })
+  .strict();
+
+export const scenarioRuntimeStateSchema = z
+  .object({
+    freshness: z.enum(['fresh', 'stale', 'last-known-good', 'refresh-failed']),
+    checkedAt: isoDateTimeSchema,
+    lastRefreshAttemptAt: isoDateTimeSchema.optional(),
+    refreshErrorCode: z.string().trim().min(1).optional()
+  })
+  .strict();
+
+export const scenarioCacheEnvelopeSchema = z
+  .object({
+    publication: scenarioPublicationEnvelopeSchema,
+    runtime: scenarioRuntimeStateSchema
+  })
+  .strict();
+
 const prioritySchema = z.enum(['off', 'low', 'medium', 'high']);
 
-export const playerPreferencesSchema = z.object({
-  comfort: prioritySchema,
-  survival: prioritySchema,
-  lowInvestment: prioritySchema,
-  noBuildChange: z.boolean()
-});
+export const playerPreferencesSchema = z
+  .object({
+    comfort: prioritySchema,
+    survival: prioritySchema,
+    lowInvestment: prioritySchema,
+    noBuildChange: z.boolean()
+  })
+  .strict();
 
 export const recommendationTargetSchema = z.discriminatedUnion('mode', [
   z.object({
@@ -304,11 +426,18 @@ export const recommendationTargetSchema = z.discriminatedUnion('mode', [
 
 export const playerInterventionSchema = z
   .object({
-    lockedCharacterIds: z.array(nonEmptyIdSchema).default([]),
-    excludedCharacterIds: z.array(nonEmptyIdSchema).default([]),
+    lockedCharacterIds: z
+      .array(nonEmptyIdSchema)
+      .refine((ids) => new Set(ids).size === ids.length, 'Locked character IDs must be unique')
+      .default([]),
+    excludedCharacterIds: z
+      .array(nonEmptyIdSchema)
+      .refine((ids) => new Set(ids).size === ids.length, 'Excluded character IDs must be unique')
+      .default([]),
     target: recommendationTargetSchema,
     preferences: playerPreferencesSchema
   })
+  .strict()
   .superRefine(({ lockedCharacterIds, excludedCharacterIds }, context) => {
     const excluded = new Set(excludedCharacterIds);
     const overlap = lockedCharacterIds.filter((id) => excluded.has(id));
@@ -321,17 +450,20 @@ export const playerInterventionSchema = z
     }
   });
 
-export const teamAssignmentSchema = z.object({
-  id: nonEmptyIdSchema,
-  characterIds: z
-    .array(nonEmptyIdSchema)
-    .length(4)
-    .refine((ids) => new Set(ids).size === ids.length, 'A team cannot contain duplicates'),
-  purpose: z.string().trim().min(1),
-  rotationNotes: z.array(z.string().trim().min(1)).default([])
-});
+export const teamAssignmentSchema = z
+  .object({
+    id: nonEmptyIdSchema,
+    characterIds: z
+      .array(nonEmptyIdSchema)
+      .length(4)
+      .refine((ids) => new Set(ids).size === ids.length, 'A team cannot contain duplicates'),
+    purpose: z.string().trim().min(1),
+    rotationNotes: z.array(z.string().trim().min(1)).default([])
+  })
+  .strict();
 
 const planCommonShape = {
+  schemaVersion: z.literal(2),
   scenarioId: nonEmptyIdSchema,
   dataVersion: z.string().trim().min(1),
   confidence: z.enum(['low', 'medium', 'high']),
@@ -356,13 +488,23 @@ const abyssChamberPlanSchema = z
   })
   .strict();
 
-const abyssPlanBaseSchema = z.object({
-  mode: z.literal('spiral-abyss'),
-  ...planCommonShape,
-  firstHalfTeam: teamAssignmentSchema,
-  secondHalfTeam: teamAssignmentSchema,
-  chambers: z.array(abyssChamberPlanSchema).min(1)
-});
+const abyssPlanBaseSchema = z
+  .object({
+    mode: z.literal('spiral-abyss'),
+    ...planCommonShape,
+    firstHalfTeam: teamAssignmentSchema,
+    secondHalfTeam: teamAssignmentSchema,
+    chambers: z
+      .array(abyssChamberPlanSchema)
+      .min(1)
+      .refine(
+        (chambers) =>
+          new Set(chambers.map(({ floor, chamber }) => `${floor}:${chamber}`)).size ===
+          chambers.length,
+        'Abyss plan chamber coordinates must be unique'
+      )
+  })
+  .strict();
 
 export const abyssPlanSchema = abyssPlanBaseSchema.superRefine(
   ({ firstHalfTeam, secondHalfTeam }, context) => {
@@ -378,23 +520,25 @@ export const abyssPlanSchema = abyssPlanBaseSchema.superRefine(
   }
 );
 
-export const stygianPlanSchema = z.object({
-  mode: z.literal('stygian-onslaught'),
-  ...planCommonShape,
-  reusePolicyAcknowledgement: z.enum(['forbidden', 'allowed', 'limited']),
-  phases: z
-    .array(
-      z.object({
-        phase: z.number().int().min(1).max(3),
-        team: teamAssignmentSchema
-      })
-    )
-    .length(3)
-    .refine(
-      (phases) => new Set(phases.map(({ phase }) => phase)).size === 3,
-      'A Stygian plan must cover phases 1, 2, and 3 exactly once'
-    )
-});
+export const stygianPlanSchema = z
+  .object({
+    mode: z.literal('stygian-onslaught'),
+    ...planCommonShape,
+    reusePolicyAcknowledgement: z.enum(['forbidden', 'allowed', 'limited']),
+    phases: z
+      .array(
+        z.object({
+          phase: z.number().int().min(1).max(3),
+          team: teamAssignmentSchema
+        })
+      )
+      .length(3)
+      .refine(
+        (phases) => new Set(phases.map(({ phase }) => phase)).size === 3,
+        'A Stygian plan must cover phases 1, 2, and 3 exactly once'
+      )
+  })
+  .strict();
 
 const theaterPlanPathChoiceSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('fixed'), note: z.string().trim().min(1) }),
@@ -402,30 +546,39 @@ const theaterPlanPathChoiceSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('random'), note: z.string().trim().min(1) })
 ]);
 
-export const theaterPlanSchema = z.object({
-  mode: z.literal('imaginarium-theater'),
-  ...planCommonShape,
-  cast: z.object({
-    openingCharacterIds: z.array(nonEmptyIdSchema),
-    selectedCharacterIds: z.array(nonEmptyIdSchema).min(1),
-    trialCharacterIds: z.array(nonEmptyIdSchema),
-    specialGuestCharacterIds: z.array(nonEmptyIdSchema),
-    supportCharacterIds: z.array(nonEmptyIdSchema)
-  }),
-  acts: z.array(
-    z.object({
-      act: z.number().int().min(1).max(10),
-      candidateCharacterIds: z.array(nonEmptyIdSchema).min(1),
-      plannedVigorSpend: z.array(
+export const theaterPlanSchema = z
+  .object({
+    mode: z.literal('imaginarium-theater'),
+    ...planCommonShape,
+    cast: z.object({
+      openingCharacterIds: z.array(nonEmptyIdSchema),
+      selectedCharacterIds: z.array(nonEmptyIdSchema).min(1),
+      trialCharacterIds: z.array(nonEmptyIdSchema),
+      specialGuestCharacterIds: z.array(nonEmptyIdSchema),
+      supportCharacterIds: z.array(nonEmptyIdSchema)
+    }),
+    acts: z
+      .array(
         z.object({
-          characterId: nonEmptyIdSchema,
-          cost: z.number().int().nonnegative()
+          act: z.number().int().min(1).max(10),
+          candidateCharacterIds: z.array(nonEmptyIdSchema).min(1),
+          plannedVigorSpend: z.array(
+            z.object({
+              characterId: nonEmptyIdSchema,
+              cost: z.number().int().nonnegative()
+            })
+          ),
+          pathChoice: theaterPlanPathChoiceSchema
         })
-      ),
-      pathChoice: theaterPlanPathChoiceSchema
-    })
-  )
-});
+      )
+      .min(1)
+      .max(10)
+      .refine(
+        (acts) => new Set(acts.map(({ act }) => act)).size === acts.length,
+        'Theater plan act numbers must be unique'
+      )
+  })
+  .strict();
 
 export const recommendationPlanSchema = z.discriminatedUnion('mode', [
   abyssPlanSchema,
@@ -439,7 +592,7 @@ export type DataSourceKind = z.infer<typeof dataSourceKindSchema>;
 export type SourceReference = z.infer<typeof sourceReferenceSchema>;
 export type FieldProvenanceV2 = z.infer<typeof fieldProvenanceSchema>;
 export type Provenance = z.infer<typeof provenanceSchema>;
-export type DataManifest = z.infer<typeof dataManifestSchema>;
+export type PublicationIntegrity = z.infer<typeof publicationIntegritySchema>;
 export type VersionedMeta = z.infer<typeof versionedMetaSchema>;
 export type LocalizedEntityReference = z.infer<typeof localizedEntityReferenceSchema>;
 export type EnemyMechanics = z.infer<typeof enemyMechanicsSchema>;
@@ -450,6 +603,9 @@ export type CrossPartyReusePolicy = z.infer<typeof crossPartyReusePolicySchema>;
 export type StygianOnslaughtScenario = z.infer<typeof stygianOnslaughtScenarioSchema>;
 export type ImaginariumTheaterScenario = z.infer<typeof imaginariumTheaterScenarioSchema>;
 export type ScenarioV2 = z.infer<typeof scenarioV2Schema>;
+export type ScenarioPublicationEnvelope = z.infer<typeof scenarioPublicationEnvelopeSchema>;
+export type ScenarioRuntimeState = z.infer<typeof scenarioRuntimeStateSchema>;
+export type ScenarioCacheEnvelope = z.infer<typeof scenarioCacheEnvelopeSchema>;
 export type PlayerPreferences = z.infer<typeof playerPreferencesSchema>;
 export type RecommendationTarget = z.infer<typeof recommendationTargetSchema>;
 export type PlayerIntervention = z.infer<typeof playerInterventionSchema>;

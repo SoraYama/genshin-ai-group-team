@@ -5,11 +5,14 @@ import {
   imaginariumTheaterScenarioSchema,
   playerInterventionSchema,
   recommendationPlanSchema,
+  scenarioCacheEnvelopeSchema,
+  scenarioPublicationEnvelopeSchema,
   scenarioV2Schema,
   spiralAbyssScenarioSchema,
   stygianOnslaughtScenarioSchema,
   stygianPlanSchema,
-  theaterPlanSchema
+  theaterPlanSchema,
+  versionedMetaSchema
 } from '../../../src/shared/scenario-v2';
 
 const sourceRef = {
@@ -19,7 +22,7 @@ const sourceRef = {
   retrievedAt: '2026-07-01T00:00:00.000Z'
 };
 
-const meta = {
+const legacyReviewedMeta = {
   schemaVersion: 2 as const,
   dataVersion: '2026.07.1',
   effectiveFrom: '2026-07-01T00:00:00.000Z',
@@ -34,6 +37,19 @@ const meta = {
     signature: 'release-signature'
   }
 };
+
+const reviewedMeta = {
+  schemaVersion: 2 as const,
+  dataVersion: '2026.07.1',
+  effectiveFrom: '2026-07-01T00:00:00.000Z',
+  effectiveTo: '2026-08-01T00:00:00.000Z',
+  sourceRefs: [sourceRef],
+  fieldProvenance: [{ fieldPath: 'floors', sourceRefId: sourceRef.id }],
+  reviewedAt: '2026-07-01T01:00:00.000Z',
+  reviewedBy: 'content-reviewer'
+};
+
+const meta = reviewedMeta;
 
 const entity = (id: string, zhName: string) => ({
   id,
@@ -61,12 +77,144 @@ const team = (id: string, characterIds: string[]) => ({
 });
 
 const commonPlan = {
+  schemaVersion: 2 as const,
   scenarioId: 'scenario.current',
   dataVersion: meta.dataVersion,
   confidence: 'high' as const,
   warnings: [],
   assumptions: ['角色状态以最近一次本地资料为准']
 };
+
+const spiralPayload = {
+  mode: 'spiral-abyss' as const,
+  id: 'abyss.2026-07',
+  meta,
+  floors: [
+    {
+      floor: 12,
+      chambers: [
+        {
+          chamber: 1,
+          firstHalf: { waves: [wave('12-1-a-1')] },
+          secondHalf: { waves: [wave('12-1-b-1')] }
+        }
+      ]
+    }
+  ]
+};
+
+const integrity = {
+  scope: 'payload' as const,
+  serialization: 'RFC8785-JCS' as const,
+  hash: {
+    algorithm: 'sha256' as const,
+    encoding: 'base64' as const,
+    value: `${'A'.repeat(43)}=`
+  },
+  signature: {
+    algorithm: 'ed25519' as const,
+    keyId: 'release-key-2026',
+    encoding: 'base64' as const,
+    value: `${'A'.repeat(86)}==`
+  }
+};
+
+describe('scenario publication and runtime envelopes', () => {
+  it('accepts a reviewed payload with detached integrity metadata', () => {
+    const result = scenarioPublicationEnvelopeSchema.safeParse({
+      payload: spiralPayload,
+      integrity
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects malformed hash and signature encodings', () => {
+    const result = scenarioPublicationEnvelopeSchema.safeParse({
+      payload: spiralPayload,
+      integrity: {
+        ...integrity,
+        hash: { ...integrity.hash, value: 'not-a-sha256-digest' },
+        signature: { ...integrity.signature, value: 'not-an-ed25519-signature' }
+      }
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects integrity metadata embedded in the signed payload', () => {
+    const result = scenarioPublicationEnvelopeSchema.safeParse({
+      payload: { ...spiralPayload, integrity },
+      integrity
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('keeps refresh failure state in the runtime cache envelope', () => {
+    const result = scenarioCacheEnvelopeSchema.safeParse({
+      publication: { payload: spiralPayload, integrity },
+      runtime: {
+        freshness: 'refresh-failed',
+        checkedAt: '2026-07-02T00:00:00.000Z',
+        lastRefreshAttemptAt: '2026-07-02T00:00:00.000Z',
+        refreshErrorCode: 'network-unavailable'
+      }
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects unknown publication envelope keys', () => {
+    const result = scenarioPublicationEnvelopeSchema.safeParse({
+      payload: spiralPayload,
+      integrity,
+      producerDrift: true
+    });
+
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('reviewed scenario metadata provenance', () => {
+  it('rejects duplicate source reference IDs', () => {
+    const result = versionedMetaSchema.safeParse({
+      ...legacyReviewedMeta,
+      sourceRefs: [sourceRef, { ...sourceRef }],
+      fieldProvenance: [{ fieldPath: 'floors', sourceRefId: sourceRef.id }]
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects field provenance that references an unknown source', () => {
+    const result = versionedMetaSchema.safeParse({
+      ...legacyReviewedMeta,
+      fieldProvenance: [{ fieldPath: 'floors', sourceRefId: 'missing-source' }]
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects publication metadata supported only by development cross-check sources', () => {
+    const developmentSource = {
+      ...sourceRef,
+      id: 'raw-cross-check',
+      source: 'development-cross-check' as const
+    };
+    const result = versionedMetaSchema.safeParse({
+      ...legacyReviewedMeta,
+      sourceRefs: [developmentSource],
+      fieldProvenance: [{ fieldPath: 'floors', sourceRefId: developmentSource.id }]
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects runtime freshness and integrity fields inside reviewed metadata', () => {
+    expect(versionedMetaSchema.safeParse(legacyReviewedMeta).success).toBe(false);
+  });
+});
 
 describe('scenario v2 mode schemas', () => {
   it('accepts arbitrary configured Spiral Abyss floors with halves and waves', () => {
@@ -309,7 +457,7 @@ describe('scenario v2 recommendation plan schemas', () => {
     expect(result.success).toBe(false);
   });
 
-  it('rejects an Abyss plan that moves a character from first half to second half across chambers', () => {
+  it('rejects legacy per-chamber roster keys that move a character across halves', () => {
     const result = abyssPlanSchema.safeParse({
       mode: 'spiral-abyss',
       ...commonPlan,
@@ -319,14 +467,26 @@ describe('scenario v2 recommendation plan schemas', () => {
         {
           floor: 12,
           chamber: 1,
-          firstHalf: team('first-1', ['a', 'b', 'c', 'd']),
-          secondHalf: team('second-1', ['e', 'f', 'g', 'h'])
+          firstHalf: {
+            tactics: ['处理上半'],
+            roster: team('first-1', ['a', 'b', 'c', 'd'])
+          },
+          secondHalf: {
+            tactics: ['处理下半'],
+            roster: team('second-1', ['e', 'f', 'g', 'h'])
+          }
         },
         {
           floor: 12,
           chamber: 2,
-          firstHalf: team('first-2', ['i', 'j', 'k', 'l']),
-          secondHalf: team('second-2', ['a', 'm', 'n', 'o'])
+          firstHalf: {
+            tactics: ['处理上半'],
+            roster: team('first-2', ['i', 'j', 'k', 'l'])
+          },
+          secondHalf: {
+            tactics: ['处理下半'],
+            roster: team('second-2', ['a', 'm', 'n', 'o'])
+          }
         }
       ]
     });
@@ -334,7 +494,7 @@ describe('scenario v2 recommendation plan schemas', () => {
     expect(result.success).toBe(false);
   });
 
-  it('rejects an Abyss plan whose team roster changes between chambers', () => {
+  it('rejects legacy per-chamber roster keys that change a fixed team', () => {
     const result = abyssPlanSchema.safeParse({
       mode: 'spiral-abyss',
       ...commonPlan,
@@ -344,16 +504,256 @@ describe('scenario v2 recommendation plan schemas', () => {
         {
           floor: 12,
           chamber: 1,
-          firstHalf: team('first-1', ['a', 'b', 'c', 'd']),
-          secondHalf: team('second-1', ['e', 'f', 'g', 'h'])
+          firstHalf: {
+            tactics: ['处理上半'],
+            roster: team('first-1', ['a', 'b', 'c', 'd'])
+          },
+          secondHalf: {
+            tactics: ['处理下半'],
+            roster: team('second-1', ['e', 'f', 'g', 'h'])
+          }
         },
         {
           floor: 12,
           chamber: 2,
-          firstHalf: team('first-2', ['a', 'b', 'c', 'i']),
-          secondHalf: team('second-2', ['e', 'f', 'g', 'h'])
+          firstHalf: {
+            tactics: ['处理上半'],
+            roster: team('first-2', ['a', 'b', 'c', 'i'])
+          },
+          secondHalf: {
+            tactics: ['处理下半'],
+            roster: team('second-2', ['e', 'f', 'g', 'h'])
+          }
         }
       ]
+    });
+
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('scenario and plan identity collections', () => {
+  it('rejects duplicate Abyss floor numbers', () => {
+    const floor = spiralPayload.floors[0];
+    const result = spiralAbyssScenarioSchema.safeParse({
+      ...spiralPayload,
+      floors: [floor, floor]
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects duplicate chamber numbers within an Abyss floor', () => {
+    const chamber = spiralPayload.floors[0]?.chambers[0];
+    const result = spiralAbyssScenarioSchema.safeParse({
+      ...spiralPayload,
+      floors: [{ floor: 12, chambers: [chamber, chamber] }]
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects duplicate floor and chamber coordinates in an Abyss plan', () => {
+    const chamberPlan = {
+      floor: 12,
+      chamber: 1,
+      firstHalf: { tactics: ['处理上半'] },
+      secondHalf: { tactics: ['处理下半'] }
+    };
+    const result = abyssPlanSchema.safeParse({
+      mode: 'spiral-abyss',
+      ...commonPlan,
+      firstHalfTeam: team('first', ['a', 'b', 'c', 'd']),
+      secondHalfTeam: team('second', ['e', 'f', 'g', 'h']),
+      chambers: [chamberPlan, chamberPlan]
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects duplicate Stygian difficulty IDs while preserving six ordered difficulties', () => {
+    const result = stygianOnslaughtScenarioSchema.safeParse({
+      mode: 'stygian-onslaught',
+      id: 'stygian.duplicate-difficulty-id',
+      meta,
+      crossPartyReusePolicy: { rule: 'forbidden' },
+      difficulties: Array.from({ length: 6 }, (_, index) => ({
+        id: index < 2 ? 'duplicate' : `difficulty-${index + 1}`,
+        order: index + 1,
+        name: entity(`difficulty.${index + 1}`, `难度 ${index + 1}`),
+        modifiers: []
+      })),
+      phases: Array.from({ length: 3 }, (_, index) => ({
+        phase: index + 1,
+        boss: enemy,
+        phaseModifiers: [],
+        bossModifiers: []
+      }))
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects duplicate Stygian phase numbers', () => {
+    const result = stygianOnslaughtScenarioSchema.safeParse({
+      mode: 'stygian-onslaught',
+      id: 'stygian.duplicate-phase',
+      meta,
+      crossPartyReusePolicy: { rule: 'forbidden' },
+      difficulties: Array.from({ length: 6 }, (_, index) => ({
+        id: `difficulty-${index + 1}`,
+        order: index + 1,
+        name: entity(`difficulty.${index + 1}`, `难度 ${index + 1}`),
+        modifiers: []
+      })),
+      phases: [1, 1, 2].map((phase) => ({
+        phase,
+        boss: enemy,
+        phaseModifiers: [],
+        bossModifiers: []
+      }))
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects duplicate Theater act numbers', () => {
+    const act = {
+      act: 1,
+      encounters: [{ id: 'encounter-1', waves: [wave('theater-wave')] }],
+      pathNotes: []
+    };
+    const result = imaginariumTheaterScenarioSchema.safeParse({
+      mode: 'imaginarium-theater',
+      id: 'theater.duplicate-acts',
+      meta,
+      eligibility: { elements: ['pyro'], minimumLevel: 70, requiredHeadcount: 10 },
+      pools: { opening: [], trial: [], specialGuest: [], support: [] },
+      vigor: { initial: 2, max: 4, actCosts: [] },
+      acts: [act, act]
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects duplicate Theater Arcana node IDs', () => {
+    const arcana = {
+      id: 'arcana-duplicate',
+      name: entity('arcana.duplicate', '重复秘法'),
+      description: '测试节点'
+    };
+    const result = imaginariumTheaterScenarioSchema.safeParse({
+      mode: 'imaginarium-theater',
+      id: 'theater.duplicate-arcana',
+      meta,
+      eligibility: { elements: ['pyro'], minimumLevel: 70, requiredHeadcount: 10 },
+      pools: { opening: [], trial: [], specialGuest: [], support: [] },
+      vigor: { initial: 2, max: 4, actCosts: [] },
+      acts: [
+        {
+          act: 1,
+          encounters: [{ id: 'encounter-1', waves: [wave('theater-wave')] }],
+          pathNotes: []
+        }
+      ],
+      arcanaNodes: [arcana, arcana]
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects an empty Theater plan act list', () => {
+    const result = theaterPlanSchema.safeParse({
+      mode: 'imaginarium-theater',
+      ...commonPlan,
+      cast: {
+        openingCharacterIds: ['a'],
+        selectedCharacterIds: ['a'],
+        trialCharacterIds: [],
+        specialGuestCharacterIds: [],
+        supportCharacterIds: []
+      },
+      acts: []
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects duplicate act numbers in a Theater plan', () => {
+    const act = {
+      act: 1,
+      candidateCharacterIds: ['a'],
+      plannedVigorSpend: [],
+      pathChoice: { kind: 'fixed', note: '按固定路线推进' }
+    };
+    const result = theaterPlanSchema.safeParse({
+      mode: 'imaginarium-theater',
+      ...commonPlan,
+      cast: {
+        openingCharacterIds: ['a'],
+        selectedCharacterIds: ['a'],
+        trialCharacterIds: [],
+        specialGuestCharacterIds: [],
+        supportCharacterIds: []
+      },
+      acts: [act, act]
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects recommendation plans without their own schema version', () => {
+    const unversionedCommonPlan: Record<string, unknown> = { ...commonPlan };
+    delete unversionedCommonPlan.schemaVersion;
+    const result = abyssPlanSchema.safeParse({
+      mode: 'spiral-abyss',
+      ...unversionedCommonPlan,
+      firstHalfTeam: team('first', ['a', 'b', 'c', 'd']),
+      secondHalfTeam: team('second', ['e', 'f', 'g', 'h']),
+      chambers: [
+        {
+          floor: 12,
+          chamber: 1,
+          firstHalf: { tactics: ['处理上半'] },
+          secondHalf: { tactics: ['处理下半'] }
+        }
+      ]
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects unknown recommendation plan keys', () => {
+    const result = abyssPlanSchema.safeParse({
+      mode: 'spiral-abyss',
+      ...commonPlan,
+      firstHalfTeam: team('first', ['a', 'b', 'c', 'd']),
+      secondHalfTeam: team('second', ['e', 'f', 'g', 'h']),
+      chambers: [
+        {
+          floor: 12,
+          chamber: 1,
+          firstHalf: { tactics: ['处理上半'] },
+          secondHalf: { tactics: ['处理下半'] }
+        }
+      ],
+      producerDrift: true
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects duplicate character IDs within lock or exclude collections', () => {
+    const result = playerInterventionSchema.safeParse({
+      lockedCharacterIds: ['character.raiden', 'character.raiden'],
+      excludedCharacterIds: [],
+      target: { mode: 'spiral-abyss', floor: 12 },
+      preferences: {
+        comfort: 'medium',
+        survival: 'high',
+        lowInvestment: 'low',
+        noBuildChange: false
+      }
     });
 
     expect(result.success).toBe(false);
