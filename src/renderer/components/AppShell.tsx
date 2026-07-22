@@ -61,7 +61,7 @@ export function AppShell({ activeUid, children, onNavigate, view }: AppShellProp
 
   const navigateFromMenu = (next: AppView) => {
     onNavigate(next);
-    closeMenu();
+    closeMenu(true);
   };
 
   const handleTriggerKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
@@ -192,7 +192,7 @@ export function AppShell({ activeUid, children, onNavigate, view }: AppShellProp
                   tabIndex={-1}
                   onClick={() => {
                     setLocale(locale === 'zh-CN' ? 'en-US' : 'zh-CN');
-                    closeMenu();
+                    closeMenu(true);
                   }}
                 >
                   {t('app.languageSwitch', {

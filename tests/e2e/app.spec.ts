@@ -14,6 +14,60 @@ let page: Page;
 let userDataDir: string;
 let launchDurationMs = 0;
 const rendererErrors: string[] = [];
+const FORBIDDEN_PLAYER_TERMS =
+  /LLM|Enka|API Key|Base URL|\bpartial\b|\bfallback\b|team-composer|下一阶段接入|开发中/iu;
+const REQUIRED_VIEWPORTS = [
+  { width: 1024, height: 768 },
+  { width: 1280, height: 800 },
+  { width: 1600, height: 1000 }
+] as const;
+
+async function expectNoForbiddenPlayerTerms(): Promise<void> {
+  const content = (await page.locator('main').textContent()) ?? '';
+  expect(content).not.toMatch(FORBIDDEN_PLAYER_TERMS);
+}
+
+async function expectPageFitsEveryViewport(label: string): Promise<void> {
+  for (const viewport of REQUIRED_VIEWPORTS) {
+    await page.setViewportSize(viewport);
+    const measurements = await page.evaluate<{
+      overflowX: string;
+      scrollWidth: number;
+      clientWidth: number;
+      viewportWidth: number;
+      escapedControls: Array<{ name: string; left: number; right: number }>;
+    }>(`(() => {
+      const shell = document.querySelector('.app-shell');
+      if (!shell) throw new Error('Missing app shell');
+      const controls = Array.from(document.querySelectorAll('header button, header select, main button, main input, main textarea, main select, main summary'));
+      const escapedControls = controls.flatMap((element) => {
+        const style = getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        if (style.display === 'none' || style.visibility === 'hidden' || rect.width === 0 || rect.height === 0) return [];
+        return rect.left < -0.5 || rect.right > window.innerWidth + 0.5
+          ? [{ name: element.getAttribute('aria-label') || element.textContent?.trim() || element.tagName, left: rect.left, right: rect.right }]
+          : [];
+      });
+      return {
+        overflowX: getComputedStyle(shell).overflowX,
+        scrollWidth: shell.scrollWidth,
+        clientWidth: shell.clientWidth,
+        viewportWidth: window.innerWidth,
+        escapedControls
+      };
+    })()`);
+    expect(
+      measurements.overflowX,
+      `${label} ${viewport.width}px must not hide content overflow`
+    ).not.toBe('hidden');
+    expect(
+      measurements.scrollWidth,
+      `${label} ${viewport.width}px shell width`
+    ).toBeLessThanOrEqual(measurements.clientWidth);
+    expect(measurements.clientWidth).toBeLessThanOrEqual(measurements.viewportWidth);
+    expect(measurements.escapedControls, `${label} ${viewport.width}px control bounds`).toEqual([]);
+  }
+}
 
 async function launchApp(): Promise<void> {
   const startedAt = Date.now();
@@ -75,10 +129,11 @@ test('boots with isolated data and navigates through preload-backed pages', asyn
 
   await accountButton.click();
   await accountMenu.getByRole('menuitem', { name: '设置' }).click();
-  await expect(page.getByRole('heading', { name: /LLM 配置/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /智能服务设置/ })).toBeVisible();
   await expect(page.getByText('未配置', { exact: true })).toBeVisible();
+  await expectNoForbiddenPlayerTerms();
 
-  await page.getByLabel('API Key').fill('e2e-api-secret');
+  await page.getByLabel('服务密钥').fill('e2e-api-secret');
   await page.getByLabel('本次保存时替换自定义请求头').check();
   await page.getByLabel('自定义请求头', { exact: true }).fill('X-E2E-Key: e2e-header-secret');
   await page.getByRole('button', { name: '保存配置' }).click();
@@ -92,9 +147,10 @@ test('boots with isolated data and navigates through preload-backed pages', asyn
   await page.getByRole('button', { name: '账号与设置' }).click();
   await page.getByRole('menuitem', { name: '切换语言，当前：中文' }).click();
   await expect(page.getByRole('navigation', { name: 'Primary navigation' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: /LLM Configuration/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /Smart service settings/ })).toBeVisible();
   await expect(page.getByText('Configured (encrypted)', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Clear key' }).click();
+  await expectNoForbiddenPlayerTerms();
+  await page.getByRole('button', { name: 'Clear service key' }).click();
   await expect(page.getByText('Not configured', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Account and settings' }).click();
   await page.getByRole('menuitem', { name: 'Switch language, current: English' }).click();
@@ -147,6 +203,47 @@ test('supports the complete keyboard model for the account menu', async () => {
   await expect(accountButton).toBeFocused();
 });
 
+test('does not conceal horizontal content overflow', async () => {
+  await expectPageFitsEveryViewport('Onboarding');
+});
+
+test('keeps focus on the account trigger after every menu command', async () => {
+  let accountButton = page.getByRole('button', { name: '账号与设置' });
+
+  await accountButton.focus();
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('heading', { name: /绑定米游社账号/ })).toBeVisible();
+  await expect(accountButton).toBeFocused();
+
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await expect(accountButton).toBeFocused();
+  await expect(page.getByRole('heading', { name: /智能服务设置/ })).toBeVisible();
+
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  accountButton = page.getByRole('button', { name: 'Account and settings' });
+  await expect(accountButton).toBeFocused();
+
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  accountButton = page.getByRole('button', { name: '账号与设置' });
+  await expect(accountButton).toBeFocused();
+
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('dialog', { name: '关于原神配队助手' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(accountButton).toBeFocused();
+});
+
 test('traps modal focus and restores it to the connected opener', async () => {
   const accountButton = page.getByRole('button', { name: '账号与设置' });
   await accountButton.click();
@@ -155,6 +252,10 @@ test('traps modal focus and restores it to the connected opener', async () => {
   const dialog = page.getByRole('dialog', { name: '关于原神配队助手' });
   const closeButton = dialog.getByRole('button', { name: '关闭对话框' });
   await expect(dialog).toBeVisible();
+  const titleId = await dialog.getAttribute('aria-labelledby');
+  expect(titleId).toBeTruthy();
+  expect(titleId).not.toBe('gta-dialog-title');
+  await expect(dialog.locator(`[id="${titleId}"]`)).toHaveText('关于原神配队助手');
   await expect(closeButton).toBeFocused();
 
   await page.keyboard.press('Tab');
@@ -168,6 +269,7 @@ test('traps modal focus and restores it to the connected opener', async () => {
 });
 
 test('renders profile coverage and known build fields without fake zero values', async () => {
+  test.setTimeout(60_000);
   await electronApp.close();
   const fetchedAt = '2026-07-16T00:00:00.000Z';
   await writeFile(
@@ -239,17 +341,28 @@ test('renders profile coverage and known build fields without fake zero values',
   );
   await launchApp();
 
-  await expect(page.getByTestId('profile-coverage-summary')).toContainText('部分数据');
+  await expect(page.getByTestId('profile-coverage-summary')).toContainText('资料不完整');
+  await expect(page.getByText('米游社 + 展示柜资料融合', { exact: true })).toBeVisible();
   await expect(page.getByText('测试武器 · Lv 90 · 精2')).toBeVisible();
   await expect(page.getByText('6 / 9 / 10')).toBeVisible();
   await expect(page.getByText(/测试套装×1/)).toBeVisible();
   await expect(page.getByText('未知', { exact: true }).first()).toBeVisible();
+  await expectNoForbiddenPlayerTerms();
+  await expectPageFitsEveryViewport('Roster');
 
   await page.getByRole('button', { name: '挑战配队' }).click();
   await expect(page.getByRole('heading', { name: '选择挑战' })).toBeVisible();
   await expect(page.getByRole('button', { name: /深境螺旋/ })).toContainText('上下半两队');
   await expect(page.getByRole('button', { name: /幻想真境剧诗/ })).toContainText('演员池与活力');
   await expect(page.getByRole('button', { name: /幽境危战/ })).toContainText('三阶段首领');
+  const abyssEntry = page.getByRole('button', { name: /深境螺旋/ });
+  const theaterEntry = page.getByRole('button', { name: /幻想真境剧诗/ });
+  await expect(abyssEntry).toHaveAttribute('aria-pressed', 'true');
+  await theaterEntry.focus();
+  await page.keyboard.press('Space');
+  await expect(theaterEntry).toHaveAttribute('aria-pressed', 'true');
+  await expect(abyssEntry).toHaveAttribute('aria-pressed', 'false');
+
   const legacyEnemyInput = page.locator('.gta-advisor-advanced textarea').first();
   await expect(legacyEnemyInput).toHaveValue('abyss-mage, ruin-guard');
   await expect(legacyEnemyInput).toBeHidden();
@@ -266,36 +379,42 @@ test('renders profile coverage and known build fields without fake zero values',
   expect(modeBackgrounds.join(' ')).toContain('imaginarium-theater');
   expect(modeBackgrounds.join(' ')).toContain('stygian-onslaught');
 
+  await page.locator('.gta-advisor-advanced > summary').click();
+  const drillModeGroup = page.getByRole('group', { name: '自定义演练模式' });
+  const singleModeButton = drillModeGroup.getByRole('button', { name: '单环境' });
+  const compareModeButton = drillModeGroup.getByRole('button', { name: '双环境对比' });
+  await expect(singleModeButton).toHaveAttribute('aria-pressed', 'true');
+  await expect(compareModeButton).toHaveAttribute('aria-pressed', 'false');
+  await compareModeButton.click();
+  await expect(compareModeButton).toHaveAttribute('aria-pressed', 'true');
+  await expect(singleModeButton).toHaveAttribute('aria-pressed', 'false');
+  await singleModeButton.click();
+  await expect(singleModeButton).toHaveAttribute('aria-pressed', 'true');
+  await expect(legacyEnemyInput).toBeVisible();
+
+  await page.getByRole('button', { name: '生成建议' }).click();
+  await expect(page.locator('.gta-tag.is-fallback')).toContainText('本地规则', {
+    timeout: 10_000
+  });
+  await expectNoForbiddenPlayerTerms();
+  await expectPageFitsEveryViewport('Advisor details');
+
   await page.setViewportSize({ width: 1024, height: 768 });
-  const viewportWidths = await page.evaluate<{ body: number; root: number; viewport: number }>(
-    '({ body: document.body.scrollWidth, root: document.documentElement.scrollWidth, viewport: window.innerWidth })'
-  );
-  expect(viewportWidths.body).toBeLessThanOrEqual(viewportWidths.viewport);
-  expect(viewportWidths.root).toBeLessThanOrEqual(viewportWidths.viewport);
   await page.waitForTimeout(550);
   await page.screenshot({ path: path.join(tmpdir(), 'gta-m2-challenge-1024x768.png') });
 
-  await page.setViewportSize({ width: 1280, height: 800 });
-  const standardViewportWidths = await page.evaluate<{
-    body: number;
-    root: number;
-    viewport: number;
-  }>(
-    '({ body: document.body.scrollWidth, root: document.documentElement.scrollWidth, viewport: window.innerWidth })'
-  );
-  expect(standardViewportWidths.body).toBeLessThanOrEqual(standardViewportWidths.viewport);
-  expect(standardViewportWidths.root).toBeLessThanOrEqual(standardViewportWidths.viewport);
-
   await page.setViewportSize({ width: 1600, height: 1000 });
-  const wideViewportWidths = await page.evaluate<{
-    body: number;
-    root: number;
-    viewport: number;
-  }>(
-    '({ body: document.body.scrollWidth, root: document.documentElement.scrollWidth, viewport: window.innerWidth })'
-  );
-  expect(wideViewportWidths.body).toBeLessThanOrEqual(wideViewportWidths.viewport);
-  expect(wideViewportWidths.root).toBeLessThanOrEqual(wideViewportWidths.viewport);
   await page.screenshot({ path: path.join(tmpdir(), 'gta-m2-challenge-1600x1000.png') });
+
+  await page.getByRole('button', { name: '历史记录' }).click();
+  await expect(page.getByRole('heading', { name: '推荐历史' })).toBeVisible();
+  await expectNoForbiddenPlayerTerms();
+  await expectPageFitsEveryViewport('History');
+
+  await page.getByRole('button', { name: '账号与设置' }).click();
+  await page.getByRole('menuitem', { name: '设置' }).click();
+  await expect(page.getByRole('heading', { name: /智能服务设置/ })).toBeVisible();
+  await expectNoForbiddenPlayerTerms();
+  await expectPageFitsEveryViewport('Settings');
   expect(rendererErrors).toEqual([]);
 });

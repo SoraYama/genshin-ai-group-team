@@ -23,7 +23,6 @@
   z-index: 1;
   width: 100%;
   height: 100svh;
-  overflow-x: hidden;
   overflow-y: auto;
   padding: 18px clamp(20px, 3.4vw, 54px) 56px;
 }

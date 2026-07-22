@@ -117,13 +117,13 @@ export function SettingsPage() {
           <StatusStrip
             items={[
               {
-                label: 'API Key',
+                label: t('settings.serviceKey'),
                 value: config.llm.hasApiKey
                   ? t('settings.key.configured')
                   : t('settings.key.missing')
               },
-              { label: 'Base URL', value: config.llm.baseUrl },
-              { label: 'Model', value: config.llm.model },
+              { label: t('settings.serviceAddress'), value: config.llm.baseUrl },
+              { label: t('settings.model'), value: config.llm.model },
               {
                 label: t('settings.headers'),
                 value:
@@ -133,10 +133,13 @@ export function SettingsPage() {
                       })
                     : t('settings.headers.none')
               },
-              { label: 'App Version', value: config.appVersion },
+              { label: t('settings.appVersion'), value: config.appVersion },
               {
                 label: t('settings.usage'),
-                value: `${config.monthlyUsage.inputTokens.toLocaleString()} in / ${config.monthlyUsage.outputTokens.toLocaleString()} out`
+                value: t('settings.usageValue', {
+                  input: config.monthlyUsage.inputTokens.toLocaleString(),
+                  output: config.monthlyUsage.outputTokens.toLocaleString()
+                })
               },
               {
                 label: t('settings.cost'),
@@ -158,7 +161,7 @@ export function SettingsPage() {
           >
             <div className="gta-form-grid">
               <label className="gta-field">
-                <span className="gta-field-label">API Key</span>
+                <span className="gta-field-label">{t('settings.serviceKey')}</span>
                 <input
                   type="password"
                   className="gta-input is-mono"
@@ -170,7 +173,7 @@ export function SettingsPage() {
               </label>
 
               <label className="gta-field">
-                <span className="gta-field-label">Base URL</span>
+                <span className="gta-field-label">{t('settings.serviceAddress')}</span>
                 <input
                   type="url"
                   className="gta-input is-mono"
@@ -181,7 +184,7 @@ export function SettingsPage() {
               </label>
 
               <label className="gta-field">
-                <span className="gta-field-label">Model</span>
+                <span className="gta-field-label">{t('settings.model')}</span>
                 <input
                   type="text"
                   className="gta-input is-mono"

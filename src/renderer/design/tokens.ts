@@ -1,10 +1,10 @@
 /**
- * Design tokens — source-of-truth for runtime style access from TS.
- * All values mirror the CSS custom properties defined in global.css.
+ * Design-token fallbacks for TypeScript consumers that cannot resolve CSS variables.
  *
  * Visual language: cool blue-gray canvas, mist-green surfaces, ivory text and
  * one restrained gold accent. CSS custom properties in styles/tokens.css are
- * the rendered source of truth; this module serves data-driven TS consumers.
+ * the rendered source of truth, including translucent surfaces. The panel values
+ * below are deliberately opaque fallbacks for data-driven SVG and canvas consumers.
  */
 
 export const elements = ['pyro', 'hydro', 'electro', 'anemo', 'geo', 'cryo', 'dendro'] as const;
@@ -25,7 +25,8 @@ export const elementPalette: Record<
 };
 
 /**
- * Normalize element names returned from Enka (Fire / Water / Rock / Wind / Ice / ...)
+ * Normalize element names returned from external profile sources
+ * (Fire / Water / Rock / Wind / Ice / ...)
  * to our element keys. Defaults to 'pyro' on miss (with stable color so layout works).
  */
 export function normalizeElement(raw: string): Element {
@@ -50,11 +51,12 @@ export const palette = {
   strokeCreamSoft: '#a9bebb',
   textOnLight: '#14222c',
   textOnLightSoft: '#3f5360',
-  textOnLightFaint: '#5d7078',
+  textOnLightFaint: '#4a5e66',
   textOnDark: '#f7f5ec',
   textOnDarkSoft: '#cbd7d8',
   gold: '#bda775',
   goldSoft: 'rgba(189, 167, 117, 0.3)',
+  accentSoft: 'rgba(189, 167, 117, 0.46)',
   goldIcon: '#d8c58d',
   blueIcon: '#4b95ba',
   danger: '#9f4c4f',

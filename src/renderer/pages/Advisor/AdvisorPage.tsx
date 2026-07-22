@@ -237,10 +237,11 @@ export function AdvisorPage({ state, onGotoOnboarding }: AdvisorPageProps) {
           <p className="gta-hint">{t('advisor.advancedHelp')}</p>
           <div className="gta-page-head gta-advisor-legacy-head">
             <h3 className="gta-card-title">{t('advisor.title')}</h3>
-            <div className="gta-segment">
+            <div className="gta-segment" role="group" aria-label={t('advisor.advancedModeLabel')}>
               <button
                 type="button"
                 className={mode === 'single' ? 'is-active' : ''}
+                aria-pressed={mode === 'single'}
                 onClick={() => setMode('single')}
               >
                 {t('advisor.single')}
@@ -248,6 +249,7 @@ export function AdvisorPage({ state, onGotoOnboarding }: AdvisorPageProps) {
               <button
                 type="button"
                 className={mode === 'compare' ? 'is-active' : ''}
+                aria-pressed={mode === 'compare'}
                 onClick={() => setMode('compare')}
               >
                 {t('advisor.compare')}
@@ -446,7 +448,7 @@ interface SidePanelProps {
 }
 
 function SidePanel({ title, sideState, scrollRef }: SidePanelProps) {
-  const { locale, t } = useI18n();
+  const { t } = useI18n();
   if (!sideState.stage && !sideState.result) {
     return null;
   }
@@ -460,7 +462,7 @@ function SidePanel({ title, sideState, scrollRef }: SidePanelProps) {
           </h3>
           {sideState.result && (
             <span className={isLlm ? 'gta-tag is-llm' : 'gta-tag is-fallback'}>
-              {isLlm ? 'LLM' : t('advisor.localHeuristic')} ·{' '}
+              {isLlm ? t('advisor.smartService') : t('advisor.localHeuristic')} ·{' '}
               {t('advisor.teamCount', { count: sideState.result.teams.length })}
             </span>
           )}
@@ -469,17 +471,9 @@ function SidePanel({ title, sideState, scrollRef }: SidePanelProps) {
         {sideState.stage && (
           <div className="gta-stream-wrap">
             <p className="gta-progress-line">
-              <span className="gta-team-line-label">{t('advisor.stage')}</span>
-              <code>{sideState.stage}</code>
-              {(progressLabel(sideState.stage, t) || sideState.message) && (
-                <span style={{ color: 'var(--gta-text-on-light-faint)' }}>
-                  ·{' '}
-                  {progressLabel(sideState.stage, t) ||
-                    (locale === 'en-US' && /[\u3400-\u9fff]/u.test(sideState.message)
-                      ? t('common.error.internal')
-                      : sideState.message)}
-                </span>
-              )}
+              <span style={{ color: 'var(--gta-text-on-light-faint)' }}>
+                {progressLabel(sideState.stage, t)}
+              </span>
             </p>
             {sideState.streamText && (
               <pre ref={scrollRef} className="gta-stream">
@@ -568,7 +562,7 @@ function progressLabel(stage: string, t: ReturnType<typeof useI18n>['t']): strin
     'done-fallback': t('advisor.progress.done-fallback'),
     cancelled: t('advisor.progress.cancelled')
   };
-  return labels[stage] ?? '';
+  return labels[stage] ?? t('advisor.progress.working');
 }
 
 function autoscroll(el: HTMLPreElement | null) {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode, type RefObject } from 'react';
+import { useEffect, useId, useRef, type ReactNode, type RefObject } from 'react';
 
 interface GtaDialogProps {
   open: boolean;
@@ -26,6 +26,7 @@ export function GtaDialog({
   open,
   title
 }: GtaDialogProps) {
+  const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
   const openerRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
@@ -89,14 +90,14 @@ export function GtaDialog({
         className="gta-dialog gta-ornament-panel"
         role="dialog"
         aria-modal="true"
-        aria-labelledby="gta-dialog-title"
+        aria-labelledby={titleId}
         tabIndex={-1}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <span className="gta-corner gta-corner--tl" aria-hidden="true" />
         <span className="gta-corner gta-corner--br" aria-hidden="true" />
         <div className="gta-dialog-head">
-          <h2 id="gta-dialog-title">{title}</h2>
+          <h2 id={titleId}>{title}</h2>
           <button
             type="button"
             className="gta-icon-button"

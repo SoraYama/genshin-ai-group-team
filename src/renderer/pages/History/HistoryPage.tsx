@@ -158,7 +158,7 @@ export function HistoryPage({ state }: HistoryPageProps) {
                 }
               >
                 <option value="all">{t('history.source.all')}</option>
-                <option value="llm">LLM</option>
+                <option value="llm">{t('advisor.smartService')}</option>
                 <option value="fallback">{t('history.source.fallback')}</option>
               </select>
             </label>
@@ -310,7 +310,7 @@ function HistoryListItem({ item, expanded, onToggle, onDelete }: HistoryListItem
       <button type="button" className="gta-history-summary" onClick={onToggle}>
         <span className="gta-history-time">{formatTime(item.createdAt)}</span>
         <span className={isLlm ? 'gta-tag is-llm' : 'gta-tag is-fallback'}>
-          {isLlm ? 'LLM' : t('history.local')}
+          {isLlm ? t('advisor.smartService') : t('history.local')}
         </span>
         {item.side !== 'single' && (
           <span className="gta-tag is-accent">

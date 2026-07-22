@@ -65,7 +65,7 @@ export class AdvisorAgent {
         latencyMs: 0,
         model,
         baseUrl,
-        message: '尚未配置 API Key'
+        message: '智能服务尚未配置'
       };
     }
 
@@ -374,7 +374,7 @@ export function buildFallback(
       {
         name: '基础稳妥队',
         characters: core.map((c) => ({ id: c.id, name: c.name, element: c.element })),
-        reasoning: '本地启发式：以等级、稀有度和已知面板做可解释排序；未知字段只降低置信度。',
+        reasoning: '本地规则：以等级、稀有度和已知面板做可解释排序；未知字段只降低建议把握。',
         rotationTip: '先副 C/辅助挂元素，主 C 输出；充能数据未知时请以实战循环为准。'
       }
     ]
