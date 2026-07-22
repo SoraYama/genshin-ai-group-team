@@ -185,6 +185,7 @@ export interface PersistedProfile {
   credentialSource?: ProfileCredentialSource;
   region?: string;
   nickname?: string;
+  /** Legacy field name retained for schema compatibility; this is Adventure Rank, not World Level. */
   level?: number;
   source: ProfileSource;
   fetchedAt: string;
@@ -195,6 +196,7 @@ export interface PersistedProfile {
 export interface ProfileListItem {
   uid: string;
   nickname?: string;
+  /** Legacy field name retained for schema compatibility; this is Adventure Rank, not World Level. */
   level?: number;
   source: ProfileSource;
   fetchedAt: string;

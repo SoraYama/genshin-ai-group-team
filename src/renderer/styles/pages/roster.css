@@ -313,6 +313,7 @@
 .gta-character-list {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
   gap: 10px;
 }
 
@@ -420,6 +421,15 @@
   color: #8a733d;
 }
 
+.gta-neutral-element {
+  display: inline-grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  color: var(--gta-text-on-light-faint);
+  font-size: 15px;
+}
+
 .gta-character-expand {
   display: grid;
   width: 44px;
@@ -438,9 +448,65 @@
   outline: 3px solid var(--gta-gold-soft);
 }
 
+.gta-character-team-layer {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+  border-top: 1px solid var(--gta-stroke-soft);
+  background: rgba(231, 238, 236, 0.7);
+}
+
+.gta-character-team-fact {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  padding: 10px 14px;
+  border-right: 1px solid var(--gta-stroke-soft);
+  border-bottom: 1px solid var(--gta-stroke-soft);
+}
+
+.gta-character-team-fact:nth-child(even) {
+  border-right: 0;
+}
+
+.gta-character-team-fact:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+  border-right: 0;
+}
+
+.gta-character-team-fact > span {
+  color: var(--gta-text-on-light-faint);
+  font-size: 11px;
+}
+
+.gta-character-team-fact > strong {
+  overflow-wrap: anywhere;
+  font-size: var(--gta-text-xs);
+  line-height: 1.5;
+}
+
+.gta-character-reactions > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.gta-character-reactions em {
+  padding: 2px 6px;
+  border: 1px solid rgba(157, 178, 177, 0.72);
+  color: var(--gta-text-on-light-soft);
+  background: rgba(247, 249, 247, 0.62);
+  font-size: 11px;
+  font-style: normal;
+}
+
 .gta-character-detail {
   display: grid;
   grid-template-columns: minmax(260px, 1.1fr) minmax(220px, 0.9fr);
+  grid-template-areas:
+    'stats build'
+    'artifacts artifacts'
+    'provenance provenance';
   gap: 16px;
   padding: 15px;
   border-top: 1px solid var(--gta-stroke-soft);
@@ -450,6 +516,7 @@
 
 .gta-character-stats {
   display: grid;
+  grid-area: stats;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px 14px;
   margin: 0;
@@ -484,6 +551,7 @@
 
 .gta-character-build {
   display: grid;
+  grid-area: build;
   gap: 7px;
   align-content: start;
 }
@@ -501,6 +569,70 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.gta-character-artifact-detail,
+.gta-character-provenance {
+  padding-top: 13px;
+  border-top: 1px solid var(--gta-stroke-soft);
+}
+
+.gta-character-artifact-detail {
+  grid-area: artifacts;
+}
+
+.gta-character-provenance {
+  grid-area: provenance;
+}
+
+.gta-character-artifact-detail h4,
+.gta-character-provenance h4 {
+  margin: 0 0 9px;
+  color: var(--gta-text-on-light-soft);
+  font-size: var(--gta-text-xs);
+}
+
+.gta-character-artifact-detail ul,
+.gta-character-provenance ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gta-character-artifact-detail ul {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.gta-character-artifact-detail li {
+  display: grid;
+  gap: 3px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--gta-gold);
+  background: rgba(247, 249, 247, 0.56);
+  font-size: var(--gta-text-xs);
+}
+
+.gta-character-artifact-detail li span {
+  overflow-wrap: anywhere;
+  font-family: var(--gta-font-mono);
+}
+
+.gta-character-artifact-detail li small {
+  color: var(--gta-text-on-light-faint);
+}
+
+.gta-character-provenance li {
+  display: grid;
+  grid-template-columns: minmax(88px, 0.3fr) minmax(0, 1fr);
+  gap: 9px;
+  color: var(--gta-text-on-light-faint);
+  font-size: 11px;
+}
+
+.gta-character-provenance li strong {
+  color: var(--gta-text-on-light-soft);
 }
 
 .gta-roster-empty,
@@ -579,6 +711,11 @@
   }
   .gta-character-detail {
     grid-template-columns: 1fr;
+    grid-template-areas:
+      'stats'
+      'build'
+      'artifacts'
+      'provenance';
   }
   .gta-character-stats {
     grid-template-columns: 1fr;

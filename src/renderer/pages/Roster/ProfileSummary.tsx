@@ -18,7 +18,7 @@ export function ProfileSummary({ loading, onRefresh, profile }: ProfileSummaryPr
         <p>
           <span className="gta-mono">UID {profile.uid}</span>
           <span aria-hidden="true"> · </span>
-          {t('roster.worldLevelValue', { level: profile.level ?? '—' })}
+          {t('roster.adventureRankValue', { level: profile.level ?? '—' })}
         </p>
       </div>
       <div className="gta-profile-summary-status" data-testid="profile-coverage-summary">

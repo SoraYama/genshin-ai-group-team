@@ -366,6 +366,7 @@ test('renders profile coverage and known build fields without fake zero values',
           schemaVersion: 2,
           uid: '100000001',
           nickname: '脱敏测试账号',
+          level: 58,
           credentialSource: 'partition',
           source: 'merged',
           fetchedAt,
@@ -378,7 +379,13 @@ test('renders profile coverage and known build fields without fake zero values',
               imageUrl: 'gtai-img://official-looking-portrait-should-never-render',
               level: 90,
               build: {
-                stats: { hp: 18800, atk: 1800, def: 780, critRate: 61.2 },
+                stats: {
+                  hp: 18800,
+                  atk: 1800,
+                  def: 780,
+                  critRate: 61.2,
+                  energyRecharge: 119.9
+                },
                 weapon: {
                   id: 1,
                   name: '测试武器',
@@ -396,6 +403,15 @@ test('renders profile coverage and known build fields without fake zero values',
                     rarity: 5,
                     mainStat: { key: 'atkPct', value: 46.6 },
                     subStats: []
+                  },
+                  {
+                    slot: 'circlet',
+                    setId: 1,
+                    setName: '测试套装',
+                    level: 20,
+                    rarity: 5,
+                    mainStat: { key: 'new_stat\n<script>', value: 7.7 },
+                    subStats: []
                   }
                 ],
                 talents: { normalAttack: 6, elementalSkill: 9, elementalBurst: 10 }
@@ -408,11 +424,23 @@ test('renders profile coverage and known build fields without fake zero values',
                 build: { source: 'miyoushe-detail', fetchedAt },
                 stats: { source: 'enka', fetchedAt }
               }
+            },
+            {
+              id: 10000999,
+              name: '未知角色',
+              element: 'Void',
+              rarity: 0,
+              imageUrl: '',
+              completeness: 'basic',
+              missingFields: ['stats', 'weapon', 'artifacts', 'talents'],
+              provenance: {
+                ownership: { source: 'miyoushe-list', fetchedAt }
+              }
             }
           ],
           coverage: {
             expectedOwnedCount: 2,
-            ownedCount: 1,
+            ownedCount: 2,
             detailedCount: 1,
             buildCount: 1,
             statsCount: 1,
@@ -432,8 +460,10 @@ test('renders profile coverage and known build fields without fake zero values',
       name: /更换米游社账号|连接诊断|退出米游社登录|绑定新 UID|删除本机角色资料/
     })
   ).toHaveCount(0);
-  await expect(page.getByTestId('profile-coverage-summary')).toContainText('已读取 1 名角色');
+  await expect(page.getByTestId('profile-coverage-summary')).toContainText('已读取 2 名角色');
   await expect(page.getByTestId('profile-coverage-summary')).toContainText('1 名有完整装备面板');
+  await expect(page.getByText('冒险等阶 58')).toBeVisible();
+  await expect(page.getByText(/世界等级/)).toHaveCount(0);
   await expect(page.getByText(/融合|Enka|缓存/)).toHaveCount(0);
 
   const maintenanceButton = page.getByRole('button', { name: '账号维护' });
@@ -503,9 +533,25 @@ test('renders profile coverage and known build fields without fake zero values',
   await expect(characterCard).toContainText('1命');
   await expect(characterCard).toContainText('火元素');
   await expect(characterCard).toContainText('5星');
+  await expect(characterCard).toContainText('测试武器 · Lv 90 · 精2');
+  await expect(characterCard).toContainText('定位需结合队伍判断');
+  await expect(characterCard).toContainText('可参与反应');
+  await expect(characterCard).toContainText('蒸发');
+  await expect(characterCard).toContainText('融化');
+  await expect(characterCard).not.toContainText('主要反应');
+  await expect(characterCard).toContainText('面板充能偏低');
+  await expect(characterCard).toContainText('实战循环仍需结合队伍产球验证');
   await expect(characterCard.getByTitle('命座')).toBeVisible();
   await expect(characterCard.getByTitle('元素')).toBeVisible();
   await expect(characterCard.getByTitle('稀有度')).toBeVisible();
+
+  const unknownCard = page.locator('article').filter({ hasText: '未知角色' });
+  await expect(unknownCard).toContainText('元素未知');
+  await expect(unknownCard).toContainText('稀有度未知');
+  await expect(unknownCard).not.toContainText('火元素');
+  await expect(unknownCard).not.toContainText('1星');
+  await expect(unknownCard.getByText('可参与反应')).toHaveCount(0);
+  await expect(unknownCard).toContainText('充能资料不足');
 
   await characterCard.getByRole('button', { name: '查看测试角色详细资料' }).click();
   for (const title of [
@@ -522,22 +568,37 @@ test('renders profile coverage and known build fields without fake zero values',
   ]) {
     await expect(characterCard.getByTitle(title, { exact: true })).toBeVisible();
   }
-  await expect(characterCard.getByText('测试武器 · Lv 90 · 精2')).toBeVisible();
+  await expect(characterCard.getByText('测试武器 · Lv 90 · 精2')).toHaveCount(2);
   await expect(characterCard.getByText('6 / 9 / 10')).toBeVisible();
-  await expect(characterCard.getByText(/测试套装×1/)).toBeVisible();
+  await expect(characterCard.getByText(/测试套装×2/)).toBeVisible();
+  await expect(characterCard).toContainText('时之沙');
+  await expect(characterCard).toContainText('攻击力 46.6%');
+  await expect(characterCard).toContainText('理之冠');
+  await expect(characterCard).toContainText('new_stat script 7.7');
+  await expect(characterCard).toContainText('持有与等级');
+  await expect(characterCard).toContainText('米游社角色清单');
+  await expect(characterCard).toContainText('装备资料');
+  await expect(characterCard).toContainText('米游社养成资料');
+  await expect(characterCard).toContainText('面板数值');
+  await expect(characterCard).toContainText('UID 展示柜');
+  await expect(characterCard).toContainText('资料更新时间');
   await expect(characterCard.getByText('—', { exact: true }).first()).toBeVisible();
   await expect(characterCard).not.toContainText(/(^|\D)0($|\D)/);
 
   const searchInput = page.getByRole('searchbox', { name: '搜索角色' });
   await searchInput.fill('不存在');
-  await expect(page.getByText('显示 0 / 1 名角色')).toBeVisible();
+  await expect(page.getByText('显示 0 / 2 名角色')).toBeVisible();
   await expect(characterCard).toBeHidden();
   await searchInput.fill('测试');
-  await expect(page.getByText('显示 1 / 1 名角色')).toBeVisible();
+  await expect(page.getByText('显示 1 / 2 名角色')).toBeVisible();
   await page.getByRole('button', { name: '水元素' }).click();
   await expect(characterCard).toBeHidden();
   await page.getByRole('button', { name: '火元素' }).click();
   await expect(characterCard).toBeVisible();
+  await searchInput.fill('');
+  await expect(unknownCard).toBeHidden();
+  await page.getByRole('button', { name: '全部', exact: true }).click();
+  await expect(unknownCard).toBeVisible();
   await expectNoForbiddenPlayerTerms();
   await characterCard.getByRole('button', { name: '查看测试角色详细资料' }).click();
   await expectPageFitsEveryViewport('Roster expanded detail');

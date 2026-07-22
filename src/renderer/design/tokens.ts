@@ -27,9 +27,9 @@ export const elementPalette: Record<
 /**
  * Normalize element names returned from external profile sources
  * (Fire / Water / Rock / Wind / Ice / ...)
- * to our element keys. Defaults to 'pyro' on miss (with stable color so layout works).
+ * to our element keys. Unknown values remain unknown so the UI cannot invent Pyro data.
  */
-export function normalizeElement(raw: string): Element {
+export function normalizeElement(raw: string): Element | undefined {
   const lower = raw.toLowerCase();
   if (lower === 'fire' || lower === 'pyro') return 'pyro';
   if (lower === 'water' || lower === 'hydro') return 'hydro';
@@ -38,7 +38,7 @@ export function normalizeElement(raw: string): Element {
   if (lower === 'rock' || lower === 'geo') return 'geo';
   if (lower === 'ice' || lower === 'cryo') return 'cryo';
   if (lower === 'grass' || lower === 'dendro') return 'dendro';
-  return 'pyro';
+  return undefined;
 }
 
 export const palette = {

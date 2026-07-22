@@ -1,8 +1,19 @@
-import { useState } from 'react';
-import type { CharacterProfile, CharacterStats } from '../../../shared/domain';
+import { useState, type CSSProperties } from 'react';
+import type {
+  ArtifactPiece,
+  CharacterProfile,
+  CharacterStats,
+  FieldProvenance
+} from '../../../shared/domain';
 import { BuildIcon, ElementIcon, StarIcon, StatIcon, type StatIconName } from '../../design/Icons';
 import { elementPalette, normalizeElement, type Element } from '../../design/tokens';
 import { useI18n, type TranslationKey } from '../../i18n';
+import {
+  artifactStatUsesPercent,
+  classifyEnergyRecharge,
+  presentArtifactStatKey,
+  reactionTagsForElement
+} from './character-presentation';
 
 interface CharacterCardProps {
   character: CharacterProfile;
@@ -29,10 +40,13 @@ const statRows: Array<{
 ];
 
 export function CharacterCard({ character }: CharacterCardProps) {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const element = normalizeElement(character.element);
-  const stars = Math.max(1, Math.min(5, character.rarity));
+  const rarity = normalizeRarity(character.rarity);
+  const reactions = reactionTagsForElement(element);
+  const energyRecharge = character.build?.stats?.energyRecharge;
+  const energyBand = classifyEnergyRecharge(energyRecharge);
   const completenessLabel = {
     basic: t('roster.basic'),
     build: t('roster.build'),
@@ -40,7 +54,10 @@ export function CharacterCard({ character }: CharacterCardProps) {
   }[character.completeness];
 
   return (
-    <article className={`gta-character r${stars}`} data-element={element}>
+    <article
+      className={`gta-character ${rarity ? `r${rarity}` : 'r-unknown'}`}
+      data-element={element ?? 'unknown'}
+    >
       <div className="gta-character-main">
         <IdentityMark name={character.name} element={element} />
         <div className="gta-character-identity">
@@ -55,16 +72,28 @@ export function CharacterCard({ character }: CharacterCardProps) {
               {t('roster.constellationValue', { count: character.constellation ?? '—' })}
             </span>
             <span title={t('roster.element')}>
-              <ElementIcon element={element} size={16} />
-              {t(`roster.element.${element}`)}
+              {element ? (
+                <ElementIcon element={element} size={16} />
+              ) : (
+                <span className="gta-neutral-element" aria-hidden="true">
+                  ◇
+                </span>
+              )}
+              {element ? t(`roster.element.${element}`) : t('roster.element.unknown')}
             </span>
             <span title={t('roster.rarity')}>
-              <span className="gta-character-stars" aria-hidden="true">
-                {Array.from({ length: stars }, (_, index) => (
-                  <StarIcon key={index} />
-                ))}
-              </span>
-              {t('roster.rarityValue', { count: stars })}
+              {rarity ? (
+                <>
+                  <span className="gta-character-stars" aria-hidden="true">
+                    {Array.from({ length: rarity }, (_, index) => (
+                      <StarIcon key={index} />
+                    ))}
+                  </span>
+                  {t('roster.rarityValue', { count: rarity })}
+                </>
+              ) : (
+                t('roster.rarityUnknown')
+              )}
             </span>
           </div>
         </div>
@@ -79,6 +108,27 @@ export function CharacterCard({ character }: CharacterCardProps) {
         >
           <span aria-hidden="true">{expanded ? '−' : '+'}</span>
         </button>
+      </div>
+
+      <div className="gta-character-team-layer">
+        <TeamFact label={t('roster.roleLabel')} value={t('roster.rolePending')} />
+        <TeamFact label={t('roster.currentWeapon')} value={formatWeapon(character, t)} />
+        {reactions.length > 0 && (
+          <div className="gta-character-team-fact gta-character-reactions">
+            <span>{t('roster.availableReactions')}</span>
+            <div>
+              {reactions.map((reaction) => (
+                <em key={reaction}>{t(`roster.reaction.${reaction}`)}</em>
+              ))}
+            </div>
+          </div>
+        )}
+        <TeamFact
+          label={t('roster.energyHintLabel')}
+          value={t(`roster.energyHint.${energyBand}`, {
+            value: energyRecharge ?? '—'
+          })}
+        />
       </div>
 
       {expanded && (
@@ -118,27 +168,38 @@ export function CharacterCard({ character }: CharacterCardProps) {
               value={formatArtifactSummary(character, t)}
             />
           </div>
+          <ArtifactDetails artifacts={character.build?.artifacts} />
+          <ProvenanceDetails character={character} locale={locale} />
         </div>
       )}
     </article>
   );
 }
 
-function IdentityMark({ element, name }: { element: Element; name: string }) {
-  const palette = elementPalette[element];
+function TeamFact({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="gta-character-team-fact">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function IdentityMark({ element, name }: { element: Element | undefined; name: string }) {
+  const palette = element ? elementPalette[element] : undefined;
   return (
     <div
-      className="gta-character-mark"
+      className={element ? 'gta-character-mark' : 'gta-character-mark is-unknown'}
       style={
         {
-          '--character-a': palette.gradientStart,
-          '--character-b': palette.bg
-        } as React.CSSProperties
+          '--character-a': palette?.gradientStart ?? '#71808a',
+          '--character-b': palette?.bg ?? '#3f505c'
+        } as CSSProperties
       }
       aria-label={name}
     >
       <span className="gta-character-mark-rune" aria-hidden="true">
-        {name.trim().slice(0, 1)}
+        {name.trim().slice(0, 1) || '◇'}
       </span>
       <span className="gta-character-mark-orbit" aria-hidden="true" />
     </div>
@@ -165,9 +226,95 @@ function BuildLine({
   );
 }
 
+function ArtifactDetails({ artifacts }: { artifacts: ArtifactPiece[] | undefined }) {
+  const { t } = useI18n();
+  if (!artifacts?.length) return null;
+  return (
+    <section className="gta-character-artifact-detail" aria-label={t('roster.artifactDetails')}>
+      <h4>{t('roster.artifactDetails')}</h4>
+      <ul>
+        {artifacts.map((artifact, index) => {
+          const presented = presentArtifactStatKey(artifact.mainStat.key);
+          const statLabel =
+            presented.kind === 'known'
+              ? t(`roster.artifactStat.${presented.key}`)
+              : presented.label;
+          const suffix = artifactStatUsesPercent(presented) ? '%' : '';
+          return (
+            <li key={`${artifact.slot}-${artifact.setId}-${index}`}>
+              <strong>{t(`roster.artifactSlot.${artifact.slot}`)}</strong>
+              <span>
+                {statLabel} {artifact.mainStat.value}
+                {suffix}
+              </span>
+              <small>
+                {artifact.setName || t('roster.unknownSet')} · +{artifact.level}
+              </small>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+function ProvenanceDetails({ character, locale }: { character: CharacterProfile; locale: string }) {
+  const { t } = useI18n();
+  const rows: Array<{ label: TranslationKey; provenance: FieldProvenance | undefined }> = [
+    { label: 'roster.provenance.ownership', provenance: character.provenance.ownership },
+    { label: 'roster.provenance.build', provenance: character.provenance.build },
+    { label: 'roster.provenance.stats', provenance: character.provenance.stats }
+  ];
+  return (
+    <section className="gta-character-provenance" aria-label={t('roster.provenance.title')}>
+      <h4>{t('roster.provenance.title')}</h4>
+      <ul>
+        {rows.map((row) => (
+          <li key={row.label}>
+            <strong>{t(row.label)}</strong>
+            {row.provenance ? (
+              <span>
+                {provenanceSourceLabel(row.provenance, t)} ·{' '}
+                {t('roster.provenance.updatedAt', {
+                  date: formatTimestamp(row.provenance.fetchedAt, locale)
+                })}
+                {row.provenance.stale ? ` · ${t('roster.provenance.stale')}` : ''}
+              </span>
+            ) : (
+              <span>{t('roster.provenance.unavailable')}</span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function provenanceSourceLabel(
+  provenance: FieldProvenance,
+  t: ReturnType<typeof useI18n>['t']
+): string {
+  if (provenance.source === 'enka') return t('roster.provenance.showcase');
+  if (provenance.source === 'miyoushe-detail') return t('roster.provenance.miyousheBuild');
+  return t('roster.provenance.miyousheRoster');
+}
+
+function formatTimestamp(iso: string, locale: string): string {
+  return new Intl.DateTimeFormat(locale, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(new Date(iso));
+}
+
+function normalizeRarity(rarity: number): number | undefined {
+  return Number.isInteger(rarity) && rarity >= 1 && rarity <= 5 ? rarity : undefined;
+}
+
 function formatWeapon(character: CharacterProfile, t: ReturnType<typeof useI18n>['t']): string {
   const weapon = character.build?.weapon;
-  if (!weapon) return '—';
+  if (!weapon) return t('roster.weaponUnknown');
   return `${weapon.name} · Lv ${weapon.level}${
     weapon.refinement === undefined
       ? ''
@@ -194,7 +341,7 @@ function formatArtifactSummary(
   }
   const setSummary = [...sets.entries()]
     .sort((left, right) => right[1] - left[1])
-    .map(([name, count]) => `${name}×${count}`)
+    .map(([name, count]) => `${name || t('roster.unknownSet')}×${count}`)
     .join(' · ');
   return t('roster.artifactCount', {
     count: artifacts.length,
