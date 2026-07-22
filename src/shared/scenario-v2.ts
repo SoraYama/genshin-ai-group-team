@@ -6,21 +6,57 @@ const nonEmptyIdSchema = z.string().trim().min(1);
 export const dataSourceKindSchema = z.enum([
   'official-announcement',
   'battle-chronicle',
-  'fandom',
+  'community-wiki',
   'genshin-db',
   'enka-profile',
   'development-cross-check'
 ]);
 
-export const sourceReferenceSchema = z
+const sourceReferenceBaseShape = {
+  id: nonEmptyIdSchema,
+  retrievedAt: isoDateTimeSchema
+};
+
+const standardSourceReferenceSchema = z
   .object({
-    id: nonEmptyIdSchema,
-    source: dataSourceKindSchema,
+    ...sourceReferenceBaseShape,
+    source: z.enum([
+      'official-announcement',
+      'battle-chronicle',
+      'genshin-db',
+      'enka-profile',
+      'development-cross-check'
+    ]),
     url: z.url().optional(),
-    retrievedAt: isoDateTimeSchema,
     attribution: z.string().trim().min(1).optional()
   })
   .strict();
+
+export const communityWikiLicenseSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('CC-BY-SA-3.0') }).strict(),
+  z
+    .object({
+      kind: z.literal('source-declared'),
+      notice: z.string().trim().min(1),
+      url: z.url()
+    })
+    .strict()
+]);
+
+export const communityWikiSourceReferenceSchema = z
+  .object({
+    ...sourceReferenceBaseShape,
+    source: z.literal('community-wiki'),
+    url: z.url(),
+    attribution: z.string().trim().min(1),
+    license: communityWikiLicenseSchema
+  })
+  .strict();
+
+export const sourceReferenceSchema = z.discriminatedUnion('source', [
+  standardSourceReferenceSchema,
+  communityWikiSourceReferenceSchema
+]);
 
 export const fieldProvenanceSchema = z
   .object({
@@ -121,11 +157,15 @@ export const versionedMetaSchema = z
       }
     });
 
-    if (sourceRefs.every(({ source }) => source === 'development-cross-check')) {
+    const referencedSourceIds = new Set(fieldProvenance.map(({ sourceRefId }) => sourceRefId));
+    const hasPublishedFieldSource = sourceRefs.some(
+      ({ id, source }) => referencedSourceIds.has(id) && source !== 'development-cross-check'
+    );
+    if (!hasPublishedFieldSource) {
       context.addIssue({
         code: 'custom',
-        message: 'Published metadata requires at least one non-development source',
-        path: ['sourceRefs']
+        message: 'Published fields require at least one referenced non-development source',
+        path: ['fieldProvenance']
       });
     }
   });
@@ -589,6 +629,7 @@ export const recommendationPlanSchema = z.discriminatedUnion('mode', [
 export const scenarioSchema = scenarioV2Schema;
 
 export type DataSourceKind = z.infer<typeof dataSourceKindSchema>;
+export type CommunityWikiLicense = z.infer<typeof communityWikiLicenseSchema>;
 export type SourceReference = z.infer<typeof sourceReferenceSchema>;
 export type FieldProvenanceV2 = z.infer<typeof fieldProvenanceSchema>;
 export type Provenance = z.infer<typeof provenanceSchema>;

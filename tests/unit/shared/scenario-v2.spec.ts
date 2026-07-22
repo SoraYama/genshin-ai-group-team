@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest';
 
 import {
   abyssPlanSchema,
+  communityWikiSourceReferenceSchema,
   imaginariumTheaterScenarioSchema,
   playerInterventionSchema,
   recommendationPlanSchema,
   scenarioCacheEnvelopeSchema,
   scenarioPublicationEnvelopeSchema,
   scenarioV2Schema,
+  sourceReferenceSchema,
   spiralAbyssScenarioSchema,
   stygianOnslaughtScenarioSchema,
   stygianPlanSchema,
@@ -20,6 +22,15 @@ const sourceRef = {
   source: 'official-announcement' as const,
   url: 'https://example.com/announcement',
   retrievedAt: '2026-07-01T00:00:00.000Z'
+};
+
+const communityWikiSourceRef = {
+  id: 'community-wiki-2026-07-01',
+  source: 'community-wiki' as const,
+  url: 'https://example.fandom.com/wiki/Spiral_Abyss',
+  retrievedAt: '2026-07-01T00:30:00.000Z',
+  attribution: 'Example Wiki contributors',
+  license: { kind: 'CC-BY-SA-3.0' as const }
 };
 
 const legacyReviewedMeta = {
@@ -177,6 +188,28 @@ describe('scenario publication and runtime envelopes', () => {
 });
 
 describe('reviewed scenario metadata provenance', () => {
+  it('accepts an attributed community wiki source with its license declaration', () => {
+    expect(sourceReferenceSchema.safeParse(communityWikiSourceRef).success).toBe(true);
+  });
+
+  it('rejects a community wiki source without its URL', () => {
+    const withoutUrl = { ...communityWikiSourceRef, url: undefined };
+
+    expect(communityWikiSourceReferenceSchema.safeParse(withoutUrl).success).toBe(false);
+  });
+
+  it('rejects a community wiki source without attribution', () => {
+    const withoutAttribution = { ...communityWikiSourceRef, attribution: undefined };
+
+    expect(communityWikiSourceReferenceSchema.safeParse(withoutAttribution).success).toBe(false);
+  });
+
+  it('rejects a community wiki source without a license declaration', () => {
+    const withoutLicense = { ...communityWikiSourceRef, license: undefined };
+
+    expect(communityWikiSourceReferenceSchema.safeParse(withoutLicense).success).toBe(false);
+  });
+
   it('rejects duplicate source reference IDs', () => {
     const result = versionedMetaSchema.safeParse({
       ...legacyReviewedMeta,
@@ -205,6 +238,21 @@ describe('reviewed scenario metadata provenance', () => {
     const result = versionedMetaSchema.safeParse({
       ...legacyReviewedMeta,
       sourceRefs: [developmentSource],
+      fieldProvenance: [{ fieldPath: 'floors', sourceRefId: developmentSource.id }]
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects an unused official source that masks development-only field provenance', () => {
+    const developmentSource = {
+      ...sourceRef,
+      id: 'raw-cross-check',
+      source: 'development-cross-check' as const
+    };
+    const result = versionedMetaSchema.safeParse({
+      ...reviewedMeta,
+      sourceRefs: [sourceRef, developmentSource],
       fieldProvenance: [{ fieldPath: 'floors', sourceRefId: developmentSource.id }]
     });
 
