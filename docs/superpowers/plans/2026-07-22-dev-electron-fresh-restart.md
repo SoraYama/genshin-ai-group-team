@@ -4,9 +4,9 @@
 
 **Goal:** Make `npm run dev` wait for a fresh main/preload build and automatically restart Electron after every successful main-process rebuild.
 
-**Architecture:** A shared tsup readiness coordinator writes a dev-only marker after both main and preload targets succeed. Electron waits for that marker and the Vite port, then runs under electronmon; electronmon watches generated main artifacts while Vite continues to own renderer HMR.
+**Architecture:** A shared tsup readiness coordinator writes a dev-only marker after both main and preload targets succeed. Electron waits for that marker and the Vite port, then runs under nodemon; nodemon explicitly watches the generated main and preload entry bundles while Vite continues to own renderer HMR.
 
-**Tech Stack:** TypeScript, tsup watch hooks, Vitest, npm scripts, electronmon 2.0.4, concurrently, wait-on.
+**Tech Stack:** TypeScript, tsup watch hooks, Vitest, npm scripts, nodemon 3.1.14, concurrently, wait-on.
 
 ---
 
@@ -173,9 +173,9 @@ The test reads the actual `package.json` and imports `removeDevReadyMarker` from
 expect(scripts.dev).toContain('npm run dev:prepare');
 expect(scripts['dev:main']).toContain('GTA_DEV_WATCH=1');
 expect(scripts['dev:electron']).toContain('dist/main/.dev-ready');
-expect(scripts['dev:electron']).toContain('electronmon .');
+expect(scripts['dev:electron']).toContain('nodemon --config nodemon.electron.json');
 expect(scripts['dev:electron']).not.toContain('dist/main/index.mjs');
-expect(packageJson.devDependencies.electronmon).toBe('2.0.4');
+expect(packageJson.devDependencies.nodemon).toBe('3.1.14');
 ```
 
 Use a temporary directory to prove `removeDevReadyMarker(path)` removes only the marker and preserves sibling `index.mjs` and `preload.cjs` files.
@@ -188,14 +188,14 @@ Run:
 npx vitest run tests/unit/dev/dev-scripts.spec.ts
 ```
 
-Expected: FAIL because the preparation script and electronmon dependency do not exist and the old script waits on `dist/main/index.mjs`.
+Expected: FAIL because the preparation script and nodemon dependency do not exist and the old script waits on `dist/main/index.mjs`.
 
-- [ ] **Step 3: Install electronmon and implement scripts**
+- [ ] **Step 3: Install nodemon and implement scripts**
 
 Run:
 
 ```bash
-npm install --save-dev --save-exact electronmon@2.0.4
+npm install --save-dev --save-exact nodemon@3.1.14
 ```
 
 Create `scripts/prepare-dev.mjs` with an exported function that calls `rmSync(markerPath, { force: true })`, then calls it for `dist/main/.dev-ready` when run as the entry point.
@@ -207,28 +207,22 @@ Update scripts to this exact topology:
   "dev": "npm run dev:prepare && concurrently -k -n vite,tsup,electron -c blue,magenta,yellow \"npm:dev:renderer\" \"npm:dev:main\" \"npm:dev:electron\"",
   "dev:prepare": "node scripts/prepare-dev.mjs",
   "dev:main": "cross-env GTA_DEV_WATCH=1 tsup --watch",
-  "dev:electron": "wait-on tcp:5294 dist/main/.dev-ready && cross-env NODE_ENV=development electronmon ."
+  "dev:electron": "wait-on tcp:5294 dist/main/.dev-ready && cross-env NODE_ENV=development nodemon --config nodemon.electron.json"
 }
 ```
 
-The three long-running processes do not start until the top-level preparation command has removed the marker. Add this exact electronmon configuration:
+The three long-running processes do not start until the top-level preparation command has removed the marker. Add `nodemon.electron.json`:
 
 ```json
 {
-  "electronmon": {
-    "patterns": [
-      "!src/**",
-      "!dist/renderer/**",
-      "!tests/**",
-      "!docs/**",
-      "!resources/**",
-      "!dist/main/.dev-ready"
-    ]
-  }
+  "watch": ["dist/main/index.mjs", "dist/main/preload.cjs"],
+  "ext": "mjs,cjs",
+  "delay": "200ms",
+  "exec": "electron ."
 }
 ```
 
-Configure electronmon to exclude `src/**`, `dist/renderer/**`, tests, docs, resources, and `.dev-ready`, leaving generated `dist/main/*.mjs` and `*.cjs` as restart triggers.
+The explicit watch set avoids nodemon's default broad source watching and makes only completed main/preload entry writes restart Electron.
 
 - [ ] **Step 4: Run focused tests and verify GREEN**
 
@@ -257,7 +251,7 @@ dev:prepare removes .dev-ready
 tsup main build success
 tsup preload build success
 .dev-ready created
-electronmon launches Electron
+nodemon launches Electron
 ```
 
 There must be no Electron launch between preparation and both successful builds.

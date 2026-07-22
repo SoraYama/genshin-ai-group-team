@@ -15,7 +15,7 @@ The observed result was a current renderer talking to an old main process. The o
 - Keep Vite renderer HMR without restarting Electron for renderer-only edits.
 - Do not clear or replace the developer's Electron userData, cookies, profiles, or caches.
 - A failed main/preload rebuild must not launch a broken or partially deleted bundle.
-- SIGINT/SIGTERM must still terminate Vite, tsup, electronmon, and Electron together.
+- SIGINT/SIGTERM must still terminate Vite, tsup, nodemon, and Electron together.
 
 ## Design
 
@@ -27,9 +27,9 @@ Add a small dev-preparation script that removes only `dist/main/.dev-ready`. The
 
 ### Restart behavior
 
-Use `electronmon` as the Electron process supervisor. It starts Electron only after the startup barrier and watches generated main/preload artifacts. Successful output changes restart the Electron process; renderer source and renderer build output are excluded so Vite remains responsible for renderer HMR.
+Use `nodemon` as the Electron process supervisor. It starts Electron only after the startup barrier and explicitly watches `dist/main/index.mjs` and `dist/main/preload.cjs`. Successful output changes restart the Electron process; renderer files are outside that watch set, so Vite remains responsible for renderer HMR.
 
-In dev-watch mode, tsup does not clean `dist/main` before a rebuild. This prevents a failed rebuild from deleting the last known-good main/preload files and avoids electronmon reacting to an intermediate deletion. Production `npm run build:main` retains the existing clean build behavior and never writes the dev-ready marker.
+In dev-watch mode, tsup does not clean `dist/main` before a rebuild. This prevents a failed rebuild from deleting the last known-good main/preload files and avoids nodemon reacting to an intermediate deletion. Production `npm run build:main` retains the existing clean build behavior and never writes the dev-ready marker.
 
 ### Process topology
 
@@ -41,7 +41,7 @@ npm run dev
        -> GTA_DEV_WATCH=1 tsup --watch
             -> main success ----+
             -> preload success -+-> write .dev-ready
-       -> wait for Vite + .dev-ready -> electronmon .
+       -> wait for Vite + .dev-ready -> nodemon -> electron .
 ```
 
 `concurrently -k` remains the owner of group shutdown.
@@ -50,7 +50,7 @@ npm run dev
 
 - A unit test proves the ready marker is not written after only one tsup target succeeds and is written after both succeed.
 - A configuration test proves dev watch disables `clean`, while production builds keep `clean: true` and no dev callback.
-- A package-script test proves Electron waits on `.dev-ready` and is launched through electronmon rather than the old stale-file `wait-on` command.
+- A package-script test proves Electron waits on `.dev-ready` and is launched through nodemon rather than the old stale-file `wait-on` command.
 - Manual smoke verification starts with stale dist output, confirms the new build succeeds before Electron launches, then touches a main source and confirms Electron restarts.
 
 ## Scope

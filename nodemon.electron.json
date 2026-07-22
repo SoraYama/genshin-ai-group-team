@@ -1,0 +1,6 @@
+{
+  "watch": ["dist/main/index.mjs", "dist/main/preload.cjs"],
+  "ext": "mjs,cjs",
+  "delay": "200ms",
+  "exec": "electron ."
+}
