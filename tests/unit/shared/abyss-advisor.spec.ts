@@ -16,6 +16,7 @@ const preferences = {
 describe('abyss advisor v2 contracts', () => {
   it('accepts a scenario-bound request with explicit player interventions', () => {
     const parsed = abyssAdvisorPlanInputSchema.parse({
+      correlationId: 'contract-test-request',
       uid: '123456789',
       scenarioId: 'abyss.2026-07',
       dataVersion: '2026.07.1',

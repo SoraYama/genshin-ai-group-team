@@ -111,10 +111,12 @@ function service(options: {
   scenarioView?: AbyssScenarioView;
   agentTimeoutMs?: number;
   recordUsage?: ReturnType<typeof vi.fn>;
+  scenarioService?: { getView: () => Promise<AbyssScenarioView> };
 }) {
   return new AbyssAdvisorService({
     runner: options.runner,
-    scenarioService: { getView: async () => options.scenarioView ?? readyScenario() },
+    scenarioService:
+      options.scenarioService ?? ({ getView: async () => options.scenarioView ?? readyScenario() }),
     profiles: { get: () => profile(options.characters) },
     history: { appendAbyss: options.appendAbyss ?? vi.fn() },
     config: {
@@ -136,15 +138,17 @@ describe('AbyssAdvisorService', () => {
     const runner = new FixtureRunner([validAbyssPlan()]);
     const advisor = service({ runner, apiKey: 'secret', appendAbyss, recordUsage });
     const progress: string[] = [];
-    const result = await advisor.recommend(abyssInput(), (step) => progress.push(step));
+    const result = await advisor.recommend(abyssInput(), ({ correlationId, step }) =>
+      progress.push(`${correlationId}:${step}`)
+    );
 
     expect(result).toMatchObject({ status: 'planned', source: 'smart-service' });
     expect(progress).toEqual([
-      'reading-roster',
-      'analyzing-rules',
-      'generating-teams',
-      'checking-conflicts',
-      'writing-tactics'
+      'abyss-test-request:reading-roster',
+      'abyss-test-request:analyzing-rules',
+      'abyss-test-request:generating-teams',
+      'abyss-test-request:checking-conflicts',
+      'abyss-test-request:writing-tactics'
     ]);
     expect(runner.calls).toBe(1);
     expect(recordUsage).toHaveBeenCalledWith(12, 6, 0.02);
@@ -155,6 +159,7 @@ describe('AbyssAdvisorService', () => {
         dataVersion: '2026.07.1',
         mode: 'spiral-abyss',
         source: 'smart-service',
+        scenarioTrust: 'production',
         plan: validAbyssPlan()
       })
     );
@@ -235,5 +240,72 @@ describe('AbyssAdvisorService', () => {
     const result = await advisor.recommend(abyssInput());
     expect(result).toMatchObject({ status: 'planned', source: 'local-rules' });
     expect(result.warnings.join(' ')).toContain('智能服务');
+  });
+
+  it('cancels while scenario data is still loading and never starts generation or history writes', async () => {
+    let resolveScenario!: (view: AbyssScenarioView) => void;
+    const scenarioPromise = new Promise<AbyssScenarioView>((resolve) => {
+      resolveScenario = resolve;
+    });
+    const appendAbyss = vi.fn();
+    const runner = new FixtureRunner([validAbyssPlan()]);
+    const advisor = service({
+      runner,
+      apiKey: 'secret',
+      appendAbyss,
+      scenarioService: { getView: () => scenarioPromise }
+    });
+
+    const pending = advisor.recommend(abyssInput());
+    expect(advisor.cancel()).toBe(true);
+    await expect(pending).rejects.toThrow('cancelled');
+    resolveScenario(readyScenario());
+    expect(runner.calls).toBe(0);
+    expect(appendAbyss).not.toHaveBeenCalled();
+  });
+
+  it('persists development-sample trust so history cannot present rehearsal data as current', async () => {
+    const appendAbyss = vi.fn();
+    const baseScenario = abyssScenario();
+    const development = {
+      status: 'ready' as const,
+      trust: 'development-sample' as const,
+      notCurrent: true as const,
+      freshness: 'unknown' as const,
+      checkedAt: '2026-07-23T00:00:00.000Z',
+      scenario: {
+        mode: baseScenario.mode,
+        id: 'development.spiral-abyss.sample',
+        meta: {
+          schemaVersion: 2 as const,
+          dataVersion: 'development.sample-v1',
+          effectiveFrom: baseScenario.meta.effectiveFrom,
+          reviewedAt: baseScenario.meta.reviewedAt,
+          reviewedBy: baseScenario.meta.reviewedBy,
+          syntheticProvenance: {
+            kind: 'synthetic-development-data' as const,
+            disclaimer: '仅用于演练。',
+            fields: [{ fieldPath: 'scenario.floors' as const, note: '合成敌情。' }]
+          }
+        },
+        blessing: baseScenario.blessing,
+        floors: baseScenario.floors
+      }
+    } satisfies AbyssScenarioView;
+    const result = await service({
+      runner: new FixtureRunner([validAbyssPlan()]),
+      appendAbyss,
+      scenarioView: development
+    }).recommend(
+      abyssInput({
+        scenarioId: development.scenario.id,
+        dataVersion: development.scenario.meta.dataVersion
+      })
+    );
+
+    expect(result.status).toBe('planned');
+    expect(appendAbyss).toHaveBeenCalledWith(
+      expect.objectContaining({ scenarioTrust: 'development-sample' })
+    );
   });
 });

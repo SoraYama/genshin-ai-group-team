@@ -28,6 +28,12 @@ const uniqueCharacterIdsSchema = z
 
 export const abyssAdvisorPlanInputSchema = z
   .object({
+    correlationId: z
+      .string()
+      .trim()
+      .min(1)
+      .max(128)
+      .regex(/^[A-Za-z0-9._-]+$/, 'Correlation ID contains unsupported characters'),
     uid: z.string().regex(/^\d{9}$/, 'UID must contain exactly 9 digits'),
     scenarioId: z.string().trim().min(1),
     dataVersion: z.string().trim().min(1),
@@ -203,7 +209,11 @@ export type AbyssPlanIssue = z.infer<typeof abyssPlanIssueSchema>;
 export type AbyssScenarioView = z.infer<typeof abyssScenarioViewSchema>;
 export type AbyssAdvisorResult = z.infer<typeof abyssAdvisorResultSchema>;
 export type AbyssAdvisorProgressStep = z.infer<typeof abyssAdvisorProgressStepSchema>;
-export type AbyssAdvisorEvent = { type: 'progress'; step: AbyssAdvisorProgressStep };
+export type AbyssAdvisorProgressEvent = {
+  correlationId: string;
+  step: AbyssAdvisorProgressStep;
+};
+export type AbyssAdvisorEvent = { type: 'progress' } & AbyssAdvisorProgressEvent;
 export type DevelopmentAbyssScenario = z.infer<typeof developmentAbyssScenarioSchema>;
 
 // Compile-time anchors documenting the v2 contract reuse expected at IPC boundaries.

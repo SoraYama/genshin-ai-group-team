@@ -218,6 +218,9 @@ describe('HistoryStore', () => {
       mode: 'spiral-abyss',
       target: { floor: input.floor, chamber: input.chamber },
       source: 'local-rules',
+      scenarioTrust: 'production',
+      scenarioFreshness: 'fresh',
+      scenarioNotCurrent: false,
       interventions: {
         lockedCharacterIds: input.lockedCharacterIds,
         excludedCharacterIds: input.excludedCharacterIds,
@@ -250,6 +253,38 @@ describe('HistoryStore', () => {
     expect(store.queryAbyss({ uid: input.uid })).toEqual([]);
   });
 
+  it('normalizes abyss plans written before character snapshots and trust metadata existed', async () => {
+    storeState.set('abyssPlans', [
+      {
+        id: 'legacy-abyss',
+        createdAt: '2026-07-22T00:00:00.000Z',
+        uid: '123456789',
+        scenarioId: 'development.spiral-abyss.sample',
+        schemaVersion: 2,
+        dataVersion: 'development.sample-v1',
+        mode: 'spiral-abyss',
+        target: { floor: 12 },
+        source: 'local-rules',
+        interventions: {
+          lockedCharacterIds: [],
+          excludedCharacterIds: [],
+          preferences: abyssInput().preferences
+        },
+        plan: validAbyssPlan()
+      }
+    ]);
+    const { HistoryStore } = await import('../../../src/main/services/history-store.js');
+    const store = new HistoryStore();
+
+    expect(store.queryAbyss()).toEqual([
+      expect.objectContaining({
+        id: 'legacy-abyss',
+        characters: [],
+        scenarioTrust: 'development-sample'
+      })
+    ]);
+  });
+
   it('keeps legacy recommendation entries readable after abyss history is introduced', async () => {
     const { HistoryStore } = await import('../../../src/main/services/history-store.js');
     const store = new HistoryStore();
@@ -267,6 +302,9 @@ describe('HistoryStore', () => {
       mode: 'spiral-abyss',
       target: { floor: 12 },
       source: 'local-rules',
+      scenarioTrust: 'production',
+      scenarioFreshness: 'fresh',
+      scenarioNotCurrent: false,
       interventions: {
         lockedCharacterIds: [],
         excludedCharacterIds: [],

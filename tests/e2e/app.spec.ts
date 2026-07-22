@@ -823,6 +823,8 @@ test('runs the abyss-specific development-sample flow with accessible interventi
 
   await page.getByRole('button', { name: '历史记录' }).click();
   await expect(page.getByRole('heading', { name: '深境螺旋方案' })).toBeVisible();
+  await expect(page.getByText('演练资料', { exact: true })).toBeVisible();
+  await expect(page.locator('main')).not.toContainText(/development\.|development-sample/);
   const abyssHistory = page.getByRole('button', { name: /UID 123456789.*12 层.*全部房间/ });
   await abyssHistory.click();
   await expect(page.getByRole('button', { name: '删除这条深境螺旋方案' })).toBeVisible();

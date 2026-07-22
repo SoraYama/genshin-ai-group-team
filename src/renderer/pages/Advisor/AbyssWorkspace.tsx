@@ -52,12 +52,12 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
   const [activeStep, setActiveStep] = useState<AbyssAdvisorProgressStep | null>(null);
   const [running, setRunning] = useState(false);
   const requestSequence = useRef(0);
-  const progressAccepted = useRef(false);
+  const activeCorrelation = useRef<string | null>(null);
 
   useEffect(() => {
     let active = true;
     requestSequence.current += 1;
-    progressAccepted.current = false;
+    activeCorrelation.current = null;
     void api.abyssAdvisor.cancel();
     setScenarioView(null);
     setProfile(null);
@@ -83,7 +83,7 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
     return () => {
       active = false;
       requestSequence.current += 1;
-      progressAccepted.current = false;
+      activeCorrelation.current = null;
       void api.abyssAdvisor.cancel();
     };
   }, [uid]);
@@ -91,7 +91,7 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
   useEffect(
     () =>
       api.abyssAdvisor.onEvent((event) => {
-        if (progressAccepted.current) setActiveStep(event.step);
+        if (event.correlationId === activeCorrelation.current) setActiveStep(event.step);
       }),
     []
   );
@@ -125,7 +125,7 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
 
   function invalidatePlan() {
     requestSequence.current += 1;
-    progressAccepted.current = false;
+    activeCorrelation.current = null;
     setResult(null);
     setActiveStep(null);
     if (running) {
@@ -154,13 +154,15 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
   async function generatePlan() {
     if (!scenario || !floor || tooManyLocks || scenarioReadOnly) return;
     const requestId = requestSequence.current + 1;
+    const correlationId = `abyss-${Date.now()}-${requestId}`;
     requestSequence.current = requestId;
-    progressAccepted.current = true;
+    activeCorrelation.current = correlationId;
     setRunning(true);
     setResult(null);
     setActiveStep('reading-roster');
     try {
       const next = await api.abyssAdvisor.recommend({
+        correlationId,
         uid,
         scenarioId: scenario.id,
         dataVersion: scenario.meta.dataVersion,
@@ -177,7 +179,7 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
       }
     } finally {
       if (requestSequence.current === requestId) {
-        progressAccepted.current = false;
+        activeCorrelation.current = null;
         setRunning(false);
       }
     }
@@ -185,7 +187,7 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
 
   function cancelPlan() {
     requestSequence.current += 1;
-    progressAccepted.current = false;
+    activeCorrelation.current = null;
     setRunning(false);
     setActiveStep(null);
     void api.abyssAdvisor.cancel();

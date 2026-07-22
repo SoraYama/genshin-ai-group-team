@@ -288,6 +288,9 @@ export interface AbyssPlanHistoryEntry {
   mode: 'spiral-abyss';
   target: { floor: number; chamber?: number };
   source: 'smart-service' | 'local-rules';
+  scenarioTrust: 'production' | 'development-sample';
+  scenarioFreshness: 'fresh' | 'expiring' | 'stale' | 'unknown';
+  scenarioNotCurrent: boolean;
   interventions: {
     lockedCharacterIds: string[];
     excludedCharacterIds: string[];

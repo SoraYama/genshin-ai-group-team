@@ -29,6 +29,7 @@ export class HistoryStore {
       name: 'history',
       defaults: DEFAULTS
     });
+    this.migrateAbyssPlans();
   }
 
   append(input: Omit<RecommendationHistoryEntry, 'id' | 'createdAt'>): RecommendationHistoryEntry {
@@ -49,25 +50,51 @@ export class HistoryStore {
       createdAt: new Date().toISOString(),
       ...input
     });
-    const next = [entry, ...this.store.get('abyssPlans')].slice(0, MAX_ENTRIES);
+    const next = [entry, ...this.readAbyssPlans()].slice(0, MAX_ENTRIES);
     this.store.set('abyssPlans', next);
     return structuredClone(entry);
   }
 
   queryAbyss(options: { uid?: string } = {}): AbyssPlanHistoryEntry[] {
     return structuredClone(
-      this.store
-        .get('abyssPlans')
-        .filter((entry) => options.uid === undefined || entry.uid === options.uid)
+      this.readAbyssPlans().filter(
+        (entry) => options.uid === undefined || entry.uid === options.uid
+      )
     );
   }
 
   removeAbyssById(id: string): boolean {
-    const entries = this.store.get('abyssPlans');
+    const entries = this.readAbyssPlans();
     const next = entries.filter((entry) => entry.id !== id);
     if (next.length === entries.length) return false;
     this.store.set('abyssPlans', next);
     return true;
+  }
+
+  private readAbyssPlans(): AbyssPlanHistoryEntry[] {
+    const stored = this.store.get('abyssPlans') as unknown;
+    if (!Array.isArray(stored)) return [];
+    return stored.flatMap((entry) => {
+      const normalized = normalizeAbyssPlanHistoryEntry(entry);
+      return normalized ? [normalized] : [];
+    });
+  }
+
+  private migrateAbyssPlans(): void {
+    const stored = this.store.get('abyssPlans') as unknown;
+    if (!Array.isArray(stored)) {
+      this.store.set('abyssPlans', []);
+      return;
+    }
+    const needsMigration = stored.some(
+      (entry) =>
+        !isRecord(entry) ||
+        !Array.isArray(entry.characters) ||
+        !isScenarioTrust(entry.scenarioTrust) ||
+        !isScenarioFreshness(entry.scenarioFreshness) ||
+        typeof entry.scenarioNotCurrent !== 'boolean'
+    );
+    if (needsMigration) this.store.set('abyssPlans', this.readAbyssPlans());
   }
 
   query(options: HistoryQueryOptions = {}): HistoryQueryResult {
@@ -146,4 +173,68 @@ export class HistoryStore {
     this.store.set('entries', next);
     return before.length - next.length;
   }
+}
+
+function normalizeAbyssPlanHistoryEntry(value: unknown): AbyssPlanHistoryEntry | undefined {
+  if (!isRecord(value)) return undefined;
+  if (
+    typeof value.id !== 'string' ||
+    typeof value.createdAt !== 'string' ||
+    typeof value.uid !== 'string' ||
+    typeof value.scenarioId !== 'string' ||
+    typeof value.dataVersion !== 'string' ||
+    !isRecord(value.plan)
+  ) {
+    return undefined;
+  }
+  const inferredDevelopment =
+    value.scenarioId.startsWith('development.') || value.dataVersion.startsWith('development.');
+  const characters = Array.isArray(value.characters)
+    ? value.characters.flatMap((character) => {
+        if (
+          !isRecord(character) ||
+          typeof character.id !== 'string' ||
+          typeof character.name !== 'string' ||
+          typeof character.element !== 'string'
+        ) {
+          return [];
+        }
+        return [
+          {
+            id: character.id,
+            name: character.name,
+            element: character.element,
+            ...(typeof character.level === 'number' ? { level: character.level } : {})
+          }
+        ];
+      })
+    : [];
+  return structuredClone({
+    ...value,
+    characters,
+    scenarioTrust: isScenarioTrust(value.scenarioTrust)
+      ? value.scenarioTrust
+      : inferredDevelopment
+        ? 'development-sample'
+        : 'production',
+    scenarioFreshness: isScenarioFreshness(value.scenarioFreshness)
+      ? value.scenarioFreshness
+      : 'unknown',
+    scenarioNotCurrent:
+      typeof value.scenarioNotCurrent === 'boolean'
+        ? value.scenarioNotCurrent
+        : true
+  }) as AbyssPlanHistoryEntry;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isScenarioTrust(value: unknown): value is AbyssPlanHistoryEntry['scenarioTrust'] {
+  return value === 'production' || value === 'development-sample';
+}
+
+function isScenarioFreshness(value: unknown): value is AbyssPlanHistoryEntry['scenarioFreshness'] {
+  return value === 'fresh' || value === 'expiring' || value === 'stale' || value === 'unknown';
 }

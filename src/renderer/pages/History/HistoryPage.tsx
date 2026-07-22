@@ -353,7 +353,9 @@ function AbyssHistoryListItem({
   onToggle: () => void;
   onDelete: () => void;
 }) {
-  const characters = new Map(entry.characters.map((character) => [character.id, character]));
+  const characters = new Map(
+    (entry.characters ?? []).map((character) => [character.id, character])
+  );
   const teamNames = (ids: string[]) =>
     ids.map((id) => characters.get(id)?.name ?? `角色 ${id}`).join(' · ');
   return (
@@ -365,11 +367,14 @@ function AbyssHistoryListItem({
         >
           {entry.source === 'smart-service' ? '智能服务' : '本地规则'}
         </span>
+        {entry.scenarioTrust === 'development-sample' && (
+          <span className="gta-tag is-accent">演练资料</span>
+        )}
         <span className="gta-history-uid">UID {entry.uid}</span>
         <span className="gta-history-enemies">
           {entry.target.floor} 层 ·{' '}
           {entry.target.chamber ? `第 ${entry.target.chamber} 间` : '全部房间'} ·{' '}
-          {entry.dataVersion}
+          {entry.scenarioTrust === 'development-sample' ? '演练版本' : entry.dataVersion}
         </span>
       </button>
       {expanded && (

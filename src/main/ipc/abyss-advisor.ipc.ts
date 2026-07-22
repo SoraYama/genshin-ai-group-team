@@ -28,10 +28,10 @@ export function registerAbyssAdvisorIpc({
         parsed.error.issues.map(({ message }) => message).join('; ')
       );
     }
-    return advisor.recommend(parsed.data, (step) => {
+    return advisor.recommend(parsed.data, (event) => {
       const window = getMainWindow();
       if (!window || window.isDestroyed()) return;
-      window.webContents.send(ABYSS_ADVISOR_EVENT_CHANNEL, { type: 'progress', step });
+      window.webContents.send(ABYSS_ADVISOR_EVENT_CHANNEL, { type: 'progress', ...event });
     });
   });
 

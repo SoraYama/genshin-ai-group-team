@@ -22,7 +22,7 @@ describe('abyss advisor IPC', () => {
     const scenario = { getView: vi.fn().mockResolvedValue({ status: 'unavailable' }) };
     const advisor = {
       recommend: vi.fn().mockImplementation(async (_input, progress) => {
-        progress('reading-roster');
+        progress({ correlationId: 'abyss-test-request', step: 'reading-roster' });
         return {
           status: 'blocked',
           source: 'local-rules',
@@ -50,6 +50,7 @@ describe('abyss advisor IPC', () => {
     expect(advisor.recommend).toHaveBeenCalledOnce();
     expect(send).toHaveBeenCalledWith(ABYSS_ADVISOR_EVENT_CHANNEL, {
       type: 'progress',
+      correlationId: 'abyss-test-request',
       step: 'reading-roster'
     });
     await expect(handlers.get('advisor-v2:abyss-cancel')?.(undefined)).resolves.toEqual({

@@ -153,6 +153,27 @@ describe('buildLocalAbyssPlan', () => {
     expect(result.plan.firstHalfTeam.characterIds).toContain('2999');
   });
 
+  it('keeps large rosters within a bounded synchronous search budget', () => {
+    const largeRoster = Array.from({ length: 80 }, (_, index) => ({
+      ...ABYSS_CHARACTERS[index % ABYSS_CHARACTERS.length]!,
+      id: 4001 + index,
+      name: `大角色池${index + 1}`,
+      level: index < 8 ? 1 : 90 - (index % 10)
+    }));
+    const startedAt = performance.now();
+    const result = buildLocalAbyssPlan({
+      input: abyssInput({
+        lockedCharacterIds: largeRoster.slice(0, 8).map(({ id }) => String(id))
+      }),
+      scenario: abyssScenario(),
+      characters: largeRoster
+    });
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(result.status).toBe('planned');
+    expect(elapsedMs).toBeLessThan(500);
+  });
+
   it('blocks contradictory, excessive, or unowned locks instead of emitting an invalid plan', () => {
     const result = buildLocalAbyssPlan({
       input: abyssInput({

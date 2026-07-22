@@ -31,6 +31,10 @@ const ELEMENTS: Record<string, string> = {
   cryo: '冰'
 };
 
+// C(16, 4) = 1,820 candidates per half. This hard ceiling keeps the synchronous
+// fallback below a predictable main-process budget even for very large rosters.
+const MAX_JOINT_POOL_SIZE = 16;
+
 export function buildLocalAbyssPlan({
   input,
   scenario,
@@ -161,12 +165,18 @@ function optimizeJointAssignment(
     seenElements.add(normalized);
     return true;
   });
-  const pool = uniqueCharacters([
-    ...lockedCharacters,
-    ...rankedFirst.slice(0, 8),
-    ...rankedSecond.slice(0, 8),
-    ...elementSpecialists
-  ]);
+  const mandatoryPool = uniqueCharacters([...lockedCharacters, ...elementSpecialists]);
+  const pool = mandatoryPool.slice(0, MAX_JOINT_POOL_SIZE);
+  for (let index = 0; pool.length < MAX_JOINT_POOL_SIZE; index += 1) {
+    const additions = [rankedFirst[index], rankedSecond[index]].filter(
+      (character): character is CharacterProfile => character !== undefined
+    );
+    if (additions.length === 0) break;
+    for (const character of additions) {
+      if (pool.length >= MAX_JOINT_POOL_SIZE) break;
+      if (!pool.some(({ id }) => id === character.id)) pool.push(character);
+    }
+  }
   const firstCandidates = buildTeamCandidates(pool, firstEnemies, input);
   const secondCandidates = buildTeamCandidates(pool, secondEnemies, input);
   let best: JointAssignment | undefined;

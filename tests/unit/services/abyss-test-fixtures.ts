@@ -154,6 +154,7 @@ export function abyssScenario(): SpiralAbyssScenario {
 
 export function abyssInput(overrides: Partial<AbyssAdvisorPlanInput> = {}): AbyssAdvisorPlanInput {
   return {
+    correlationId: 'abyss-test-request',
     uid: '123456789',
     scenarioId: 'abyss.2026-07',
     dataVersion: '2026.07.1',
