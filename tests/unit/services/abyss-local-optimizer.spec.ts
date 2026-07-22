@@ -174,6 +174,65 @@ describe('buildLocalAbyssPlan', () => {
     expect(elapsedMs).toBeLessThan(500);
   });
 
+  it('does not lose a feasible twin-counter plan when unrelated high-score characters are added', () => {
+    const scenario = abyssScenario();
+    const chamber = scenario.floors[0]!.chambers[0]!;
+    const geoShieldEnemy = {
+      ...chamber.firstHalf.waves[0]!.enemies[0]!,
+      mechanics: {
+        shields: [{ element: 'geo' as const }],
+        resistances: [],
+        immunities: [],
+        tags: ['需要岩元素破盾']
+      }
+    };
+    scenario.floors[0]!.chambers = [
+      {
+        ...chamber,
+        firstHalf: { waves: [{ id: 'geo-first', enemies: [geoShieldEnemy] }] },
+        secondHalf: { waves: [{ id: 'geo-second', enemies: [geoShieldEnemy] }] }
+      }
+    ];
+    const lockedPyro = Array.from({ length: 6 }, (_, index) => ({
+      ...ABYSS_CHARACTERS[0]!,
+      id: 6001 + index,
+      name: `锁定火角色${index + 1}`,
+      element: 'Pyro',
+      level: 90
+    }));
+    const geoCounters = Array.from({ length: 2 }, (_, index) => ({
+      ...ABYSS_CHARACTERS[3]!,
+      id: 6101 + index,
+      name: `低分岩专才${index + 1}`,
+      element: 'Geo',
+      level: 1
+    }));
+    const unrelatedPyro = Array.from({ length: 24 }, (_, index) => ({
+      ...ABYSS_CHARACTERS[0]!,
+      id: 6201 + index,
+      name: `高分候选火角色${index + 1}`,
+      element: 'Pyro',
+      level: 90
+    }));
+    const input = abyssInput({
+      chamber: 1,
+      lockedCharacterIds: lockedPyro.map(({ id }) => String(id))
+    });
+    const baseline = buildLocalAbyssPlan({
+      input,
+      scenario,
+      characters: [...lockedPyro, ...geoCounters]
+    });
+    const expanded = buildLocalAbyssPlan({
+      input,
+      scenario,
+      characters: [...lockedPyro, ...geoCounters, ...unrelatedPyro]
+    });
+
+    expect(baseline.status).toBe('planned');
+    expect(expanded.status).toBe('planned');
+  });
+
   it('blocks contradictory, excessive, or unowned locks instead of emitting an invalid plan', () => {
     const result = buildLocalAbyssPlan({
       input: abyssInput({

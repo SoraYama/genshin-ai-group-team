@@ -34,6 +34,7 @@ const ELEMENTS: Record<string, string> = {
 // C(16, 4) = 1,820 candidates per half. This hard ceiling keeps the synchronous
 // fallback below a predictable main-process budget even for very large rosters.
 const MAX_JOINT_POOL_SIZE = 16;
+const MECHANIC_ELEMENT_BUCKETS = [...Object.keys(ELEMENTS), 'unknown'] as const;
 
 export function buildLocalAbyssPlan({
   input,
@@ -157,16 +158,15 @@ function optimizeJointAssignment(
     });
   const rankedFirst = rankedFor(firstEnemies);
   const rankedSecond = rankedFor(secondEnemies);
-  const lockedCharacters = characters.filter(({ id }) => locked.has(String(id)));
-  const seenElements = new Set<string>();
-  const elementSpecialists = [...rankedFirst, ...rankedSecond].filter(({ element }) => {
-    const normalized = element.toLowerCase();
-    if (!(normalized in ELEMENTS) || seenElements.has(normalized)) return false;
-    seenElements.add(normalized);
-    return true;
-  });
-  const mandatoryPool = uniqueCharacters([...lockedCharacters, ...elementSpecialists]);
-  const pool = mandatoryPool.slice(0, MAX_JOINT_POOL_SIZE);
+  const feasibleSeed = buildMechanicallyFeasibleSeed(
+    characters,
+    locked,
+    firstEnemies,
+    secondEnemies,
+    input
+  );
+  if (!feasibleSeed) return undefined;
+  const pool = uniqueCharacters([...feasibleSeed.first, ...feasibleSeed.second]);
   for (let index = 0; pool.length < MAX_JOINT_POOL_SIZE; index += 1) {
     const additions = [rankedFirst[index], rankedSecond[index]].filter(
       (character): character is CharacterProfile => character !== undefined
@@ -205,6 +205,185 @@ function optimizeJointAssignment(
     }
   }
   return best;
+}
+
+interface ElementComposition {
+  counts: Record<string, number>;
+  estimate: number;
+  key: string;
+}
+
+function buildMechanicallyFeasibleSeed(
+  characters: CharacterProfile[],
+  locked: Set<string>,
+  firstEnemies: EnemyInstance[],
+  secondEnemies: EnemyInstance[],
+  input: AbyssAdvisorPlanInput
+): Pick<JointAssignment, 'first' | 'second'> | undefined {
+  const buckets = new Map<string, CharacterProfile[]>();
+  for (const key of MECHANIC_ELEMENT_BUCKETS) buckets.set(key, []);
+  for (const character of characters) {
+    buckets.get(mechanicElementBucket(character.element))?.push(character);
+  }
+  const firstCompositions = buildElementCompositions(buckets, firstEnemies, input);
+  const secondCompositions = buildElementCompositions(buckets, secondEnemies, input);
+  const lockedCounts = countElements(
+    characters.filter(({ id }) => locked.has(String(id)))
+  );
+
+  for (const first of firstCompositions) {
+    for (const second of secondCompositions) {
+      const withinRoster = MECHANIC_ELEMENT_BUCKETS.every(
+        (element) =>
+          (first.counts[element] ?? 0) + (second.counts[element] ?? 0) <=
+          (buckets.get(element)?.length ?? 0)
+      );
+      if (!withinRoster) continue;
+      const includesLocks = MECHANIC_ELEMENT_BUCKETS.every(
+        (element) =>
+          (first.counts[element] ?? 0) + (second.counts[element] ?? 0) >=
+          (lockedCounts[element] ?? 0)
+      );
+      if (!includesLocks) continue;
+      const assignment = materializeElementAssignment(
+        buckets,
+        first.counts,
+        second.counts,
+        locked,
+        firstEnemies,
+        secondEnemies,
+        input
+      );
+      if (assignment) return assignment;
+    }
+  }
+  return undefined;
+}
+
+function buildElementCompositions(
+  buckets: Map<string, CharacterProfile[]>,
+  enemies: EnemyInstance[],
+  input: AbyssAdvisorPlanInput
+): ElementComposition[] {
+  const compositions: ElementComposition[] = [];
+  const counts: Record<string, number> = {};
+  const choose = (elementIndex: number, remaining: number): void => {
+    if (elementIndex === MECHANIC_ELEMENT_BUCKETS.length) {
+      if (remaining !== 0) return;
+      const team = MECHANIC_ELEMENT_BUCKETS.flatMap((element) => {
+        const representative = buckets.get(element)?.[0];
+        return representative ? Array(counts[element] ?? 0).fill(representative) : [];
+      });
+      if (findAbyssMechanicCoverageGaps(team, enemies).length > 0) return;
+      const estimate = MECHANIC_ELEMENT_BUCKETS.reduce((total, element) => {
+        const ranked = (buckets.get(element) ?? [])
+          .slice()
+          .sort(
+            (left, right) =>
+              scoreForHalf(right, enemies, input) - scoreForHalf(left, enemies, input) ||
+              left.id - right.id
+          );
+        return (
+          total +
+          ranked
+            .slice(0, counts[element] ?? 0)
+            .reduce((sum, character) => sum + scoreForHalf(character, enemies, input), 0)
+        );
+      }, 0);
+      compositions.push({
+        counts: { ...counts },
+        estimate,
+        key: MECHANIC_ELEMENT_BUCKETS.map((element) => counts[element] ?? 0).join('')
+      });
+      return;
+    }
+    const element = MECHANIC_ELEMENT_BUCKETS[elementIndex];
+    if (!element) return;
+    const maximum = Math.min(remaining, buckets.get(element)?.length ?? 0);
+    for (let count = 0; count <= maximum; count += 1) {
+      counts[element] = count;
+      choose(elementIndex + 1, remaining - count);
+    }
+  };
+  choose(0, 4);
+  return compositions.sort(
+    (left, right) => right.estimate - left.estimate || left.key.localeCompare(right.key)
+  );
+}
+
+function materializeElementAssignment(
+  buckets: Map<string, CharacterProfile[]>,
+  firstCounts: Record<string, number>,
+  secondCounts: Record<string, number>,
+  locked: Set<string>,
+  firstEnemies: EnemyInstance[],
+  secondEnemies: EnemyInstance[],
+  input: AbyssAdvisorPlanInput
+): Pick<JointAssignment, 'first' | 'second'> | undefined {
+  const first: CharacterProfile[] = [];
+  const second: CharacterProfile[] = [];
+  for (const element of MECHANIC_ELEMENT_BUCKETS) {
+    const bucket = buckets.get(element) ?? [];
+    const lockedCharacters = bucket.filter(({ id }) => locked.has(String(id)));
+    const unlockedCharacters = bucket.filter(({ id }) => !locked.has(String(id)));
+    const firstCount = firstCounts[element] ?? 0;
+    const secondCount = secondCounts[element] ?? 0;
+    const minimumFirstLocked = Math.max(0, lockedCharacters.length - secondCount);
+    const maximumFirstLocked = Math.min(lockedCharacters.length, firstCount);
+    if (minimumFirstLocked > maximumFirstLocked) return undefined;
+    const rankedLocked = lockedCharacters.slice().sort((left, right) => {
+      const leftDelta =
+        scoreForHalf(left, firstEnemies, input) - scoreForHalf(left, secondEnemies, input);
+      const rightDelta =
+        scoreForHalf(right, firstEnemies, input) - scoreForHalf(right, secondEnemies, input);
+      return rightDelta - leftDelta || left.id - right.id;
+    });
+    const firstLocked = rankedLocked.slice(0, minimumFirstLocked);
+    const secondLocked = rankedLocked.slice(minimumFirstLocked);
+    const firstUnlockedCount = firstCount - firstLocked.length;
+    const secondUnlockedCount = secondCount - secondLocked.length;
+    const rankedFirstUnlocked = unlockedCharacters.slice().sort(
+      (left, right) =>
+        scoreForHalf(right, firstEnemies, input) - scoreForHalf(left, firstEnemies, input) ||
+        left.id - right.id
+    );
+    const firstUnlocked = rankedFirstUnlocked.slice(0, firstUnlockedCount);
+    const firstUnlockedIds = new Set(firstUnlocked.map(({ id }) => id));
+    const secondUnlocked = unlockedCharacters
+      .filter(({ id }) => !firstUnlockedIds.has(id))
+      .sort(
+        (left, right) =>
+          scoreForHalf(right, secondEnemies, input) - scoreForHalf(left, secondEnemies, input) ||
+          left.id - right.id
+      )
+      .slice(0, secondUnlockedCount);
+    if (
+      firstUnlocked.length !== firstUnlockedCount ||
+      secondUnlocked.length !== secondUnlockedCount
+    ) {
+      return undefined;
+    }
+    first.push(...firstLocked, ...firstUnlocked);
+    second.push(...secondLocked, ...secondUnlocked);
+  }
+  if (first.length !== 4 || second.length !== 4) return undefined;
+  return {
+    first: first.slice().sort((left, right) => left.id - right.id),
+    second: second.slice().sort((left, right) => left.id - right.id)
+  };
+}
+
+function countElements(characters: CharacterProfile[]): Record<string, number> {
+  return characters.reduce<Record<string, number>>((counts, character) => {
+    const element = mechanicElementBucket(character.element);
+    counts[element] = (counts[element] ?? 0) + 1;
+    return counts;
+  }, {});
+}
+
+function mechanicElementBucket(element: string): string {
+  const normalized = element.toLowerCase();
+  return normalized in ELEMENTS ? normalized : 'unknown';
 }
 
 interface TeamCandidate {
