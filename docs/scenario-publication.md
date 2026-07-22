@@ -9,8 +9,9 @@
 - `src/shared/scenario-v2.ts` 冻结三种玩法的 strict Zod 契约；
 - `src/main/scenario-publication/` 提供 RFC 8785 JCS、SHA-256、Ed25519、manifest、reader、版本路由、最近可用版本和原子存储；
 - HTTP 或本地文件 reader 只在 Main 进程使用并由依赖注入，Renderer 不联网；
-- App 只配置可信公钥。生产私钥不得进入应用源码、安装包、日志或 CI 普通变量；
-- 验证通过的 publication 原子写入 `app.getPath('userData')/cache/scenarios`。写入失败、网络失败或校验失败不会覆盖 last-known-good；
+- App 在构造消费服务时必须明确声明 `expectedUse`（`production` 或 `development-sample`），并为该用途注入独立的可信 Ed25519 公钥集合。生产私钥不得进入应用源码、安装包、日志或 CI 普通变量；
+- manifest 的 `channel` 只是 mismatch gate，不是信任根。可信用途来自调用配置，签名可信度来自该用途独立的 keyring；返回给 UI 的 `trustedUse` 也只来自这条可信配置；
+- 验证通过的 publication 按用途分目录原子写入 `app.getPath('userData')/cache/scenarios/<trustedUse>`。生产与开发 last-known-good 不能互相读取；写入失败、网络失败或校验失败不会覆盖 LKG；
 - `fresh`、`expiring`、`stale`、`unknown` 根据本机检查时刻和签名 payload 内的有效期计算，绝不回写到被签名 payload。
 
 M1 新链路与旧 `ScenarioStore` 隔离存在；后续玩法纵切将把 IPC/UI 切到 `ScenePublicationService`。这种并行边界避免旧 v1 数据被误当作已签名的 v2 publication。
@@ -37,7 +38,7 @@ App 按以下顺序处理：
 1. strict 解析 manifest，并找到对应玩法的 `current`；
 2. 分别读取 payload 与 detached integrity；
 3. 先识别 `payload.meta.schemaVersion`。当前只注册 v2；未知新版返回 `unsupported-schema-version`，不以丢弃字段的方式“兼容”；
-4. strict 解析 payload/integrity，对 canonical payload 计算 SHA-256，并用 `keyId` 对应的可信公钥验证 Ed25519；
+4. 检查 descriptor channel 与调用方声明的 `expectedUse`，再从该用途的独立 keyring 选 key；strict 解析 payload/integrity，对 canonical payload 计算 SHA-256，并显式要求签名/验签 key 的 `asymmetricKeyType` 为 `ed25519`；
 5. 比较 manifest 与 payload 的 mode、schemaVersion、scenarioId 和 dataVersion，任何冲突都拒绝；
 6. 只有全部通过后才用同目录临时文件、flush 和 rename 原子替换本地缓存。
 
@@ -45,21 +46,22 @@ manifest 是离线 publisher 的 commit point：所有 payload 和 integrity 文
 
 ## 开发样例不是当前事实
 
-`resources/scenarios/v2/development-source` 和 `resources/scenarios/v2/development` 仅用于开发、测试和 UI 演示：
+`resources/scenarios/v2/development-source` 仅用于开发、测试和 UI 演示：
 
 - 敌人、角色、效果和规则均为原创虚构占位；
 - 固定在 2026-01 的有效期只是测试 freshness 的输入；
-- `channel` 明确为 `development-sample`；
+- 每个文件都是 `fixtureKind: development-only` wrapper；`syntheticProvenance.kind` 固定为 `synthetic-development-data`，逐字段说明是合成测试输入；
+- wrapper 不是 `ScenarioV2` publication，不包含正式 `sourceRefs`，尤其不会把虚构字段标成来自 `genshin-db`、官方公告或社区 wiki；
 - 它们不能在 UI 中显示为“本期”“正式服当前敌人”或作为正式推荐依据；
-- `scripts/scenario-data/development-sample-private.pem` 是公开、无信任价值的测试私钥，只供重现样例。生产环境必须使用另一把不进入仓库的私钥；App 只获得生产公钥。
+- production publisher 只接受 `channel: production` 的 strict `ScenarioV2`。把 development wrapper 或 development channel 交给它会被拒绝，不存在把合成 provenance 转成正式 provenance 的隐式步骤。
 
-重现样例：
+验证三个开发样例及其 current/history 索引：
 
 ```bash
-npm run scenario:publish-development
+npm test -- --run tests/unit/scenario-publication/committed-fixtures.spec.ts
 ```
 
-正式发布应直接调用 `scripts/scenario-data/publish.ts` 的构建产物，显式传入受保护的私钥路径、key ID、输入目录、输出目录和审核后的发布时间。不要复用 development key ID。
+正式发布应直接调用 `scripts/scenario-data/publish.ts` 的构建产物，显式传入受保护的 Ed25519 私钥路径、key ID、production 输入目录、输出目录和审核后的发布时间。
 
 ## 玩家界面状态语义
 

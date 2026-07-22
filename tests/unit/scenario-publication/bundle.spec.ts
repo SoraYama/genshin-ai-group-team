@@ -13,7 +13,7 @@ describe('offline scenario publication bundle', () => {
       makeScenario('spiral-abyss'),
       makeScenario('stygian-onslaught'),
       makeScenario('imaginarium-theater')
-    ].map((payload) => ({ payload, current: true, channel: 'development-sample' as const }));
+    ].map((payload) => ({ payload, current: true, channel: 'production' as const }));
 
     const bundle = createScenarioPublicationBundle(candidates, {
       keyId: 'development-test-key',
@@ -24,7 +24,7 @@ describe('offline scenario publication bundle', () => {
     expect(scenarioPublicationManifestSchema.parse(bundle.manifest)).toEqual(bundle.manifest);
     for (const mode of ['spiral-abyss', 'stygian-onslaught', 'imaginarium-theater'] as const) {
       const index = bundle.manifest.modes[mode];
-      expect(index.current?.channel).toBe('development-sample');
+      expect(index.current?.channel).toBe('production');
       expect(index.history).toHaveLength(1);
       const payload = bundle.documents[index.current!.payloadPath];
       const integrity = bundle.documents[index.current!.integrityPath];
@@ -33,6 +33,27 @@ describe('offline scenario publication bundle', () => {
           .mode
       ).toBe(mode);
     }
+  });
+
+  it('refuses to publish development-channel candidates through the production publisher', () => {
+    const keys = generateKeyPairSync('ed25519');
+
+    expect(() =>
+      createScenarioPublicationBundle(
+        [
+          {
+            payload: makeScenario('spiral-abyss'),
+            current: true,
+            channel: 'development-sample'
+          }
+        ],
+        {
+          keyId: 'production-test-key',
+          privateKey: keys.privateKey,
+          publishedAt: '2026-01-01T02:00:00.000Z'
+        }
+      )
+    ).toThrowError(expect.objectContaining({ code: 'channel-mismatch' }));
   });
 
   it('rejects duplicate identities or more than one current candidate per mode', () => {
@@ -47,8 +68,8 @@ describe('offline scenario publication bundle', () => {
     expect(() =>
       createScenarioPublicationBundle(
         [
-          { payload, current: true, channel: 'development-sample' },
-          { payload, current: false, channel: 'development-sample' }
+          { payload, current: true, channel: 'production' },
+          { payload, current: false, channel: 'production' }
         ],
         options
       )
@@ -56,11 +77,11 @@ describe('offline scenario publication bundle', () => {
     expect(() =>
       createScenarioPublicationBundle(
         [
-          { payload, current: true, channel: 'development-sample' },
+          { payload, current: true, channel: 'production' },
           {
             payload: makeScenario('spiral-abyss', 'other', 'dev.other'),
             current: true,
-            channel: 'development-sample'
+            channel: 'production'
           }
         ],
         options

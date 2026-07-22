@@ -36,6 +36,9 @@ export function createScenarioPublicationBundle(
   candidates: ScenarioPublicationCandidate[],
   options: ScenarioBundleSigningOptions
 ): ScenarioPublicationBundle {
+  if (candidates.some(({ channel }) => channel !== 'production')) {
+    throw new ScenarioPublicationError('channel-mismatch');
+  }
   const manifest: ScenarioPublicationManifest = {
     manifestVersion: 1,
     publishedAt: options.publishedAt,
@@ -78,7 +81,7 @@ export function createScenarioPublicationBundle(
       dataVersion: payload.meta.dataVersion,
       payloadPath: `${directory}/payload.json`,
       integrityPath: `${directory}/integrity.json`,
-      channel: candidate.channel
+      channel: 'production'
     };
     manifest.modes[payload.mode].history.push(descriptor);
     if (candidate.current) manifest.modes[payload.mode].current = descriptor;

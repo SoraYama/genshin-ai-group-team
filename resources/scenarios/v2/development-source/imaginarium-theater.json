@@ -1,97 +1,97 @@
 {
-  "mode": "imaginarium-theater",
-  "id": "development.imaginarium-theater.sample-001",
+  "fixtureKind": "development-only",
+  "notice": "DEVELOPMENT SAMPLE — NOT CURRENT LIVE-SERVICE DATA",
   "meta": {
     "schemaVersion": 2,
     "dataVersion": "development.2026-01.1",
     "effectiveFrom": "2026-01-01T00:00:00.000Z",
     "effectiveTo": "2026-02-01T00:00:00.000Z",
-    "sourceRefs": [
-      {
-        "id": "development-structure-reference",
-        "source": "genshin-db",
-        "retrievedAt": "2026-01-01T00:00:00.000Z",
-        "attribution": "Fictional development-only values shaped for the M0 schema; not live-service facts"
-      }
-    ],
-    "fieldProvenance": [
-      { "fieldPath": "meta.effectiveRange", "sourceRefId": "development-structure-reference" },
-      { "fieldPath": "scenario.eligibility", "sourceRefId": "development-structure-reference" },
-      { "fieldPath": "scenario.cast", "sourceRefId": "development-structure-reference" },
-      { "fieldPath": "scenario.nodes", "sourceRefId": "development-structure-reference" },
-      { "fieldPath": "scenario.vigor", "sourceRefId": "development-structure-reference" }
-    ],
     "reviewedAt": "2026-01-01T01:00:00.000Z",
-    "reviewedBy": "development-fixture-reviewer"
+    "reviewedBy": "development-fixture-reviewer",
+    "syntheticProvenance": {
+      "kind": "synthetic-development-data",
+      "disclaimer": "All names, encounters, and rules in this fixture are fictional test data.",
+      "fields": [
+        { "fieldPath": "meta.effectiveRange", "note": "Synthetic test interval" },
+        { "fieldPath": "scenario.eligibility", "note": "Synthetic eligibility rule" },
+        { "fieldPath": "scenario.cast", "note": "Synthetic cast pools" },
+        { "fieldPath": "scenario.nodes", "note": "Synthetic encounter path" },
+        { "fieldPath": "scenario.vigor", "note": "Synthetic vigor budget" }
+      ]
+    }
   },
-  "eligibility": {
-    "elements": ["anemo", "geo"],
-    "minimumLevel": 70,
-    "requiredHeadcount": 8
-  },
-  "pools": {
-    "opening": [
-      {
-        "id": "development.opening",
-        "names": { "zh-CN": "演示开幕角色", "en": "Demo Opening Character" }
-      }
-    ],
-    "trial": [
-      {
-        "id": "development.trial",
-        "names": { "zh-CN": "演示试用角色", "en": "Demo Trial Character" }
-      }
-    ],
-    "specialGuest": [
-      {
-        "id": "development.guest",
-        "names": { "zh-CN": "演示特邀角色", "en": "Demo Special Guest" }
-      }
-    ],
-    "support": [
-      {
-        "id": "development.support",
-        "names": { "zh-CN": "演示助演角色", "en": "Demo Supporting Character" }
-      }
-    ]
-  },
-  "vigor": {
-    "initial": 2,
-    "max": 4,
-    "actCosts": [{ "act": 1, "cost": 1 }],
-    "nodeCosts": []
-  },
-  "acts": [
-    {
-      "act": 1,
-      "encounters": [
+  "scenario": {
+    "mode": "imaginarium-theater",
+    "id": "development.imaginarium-theater.sample-001",
+    "eligibility": {
+      "elements": ["anemo", "geo"],
+      "minimumLevel": 70,
+      "requiredHeadcount": 8
+    },
+    "pools": {
+      "opening": [
         {
-          "id": "development-act-1",
-          "waves": [
-            {
-              "id": "development-theater-wave",
-              "enemies": [
-                {
-                  "enemy": {
-                    "id": "development.paper-phantom",
-                    "names": { "zh-CN": "纸页幻影", "en": "Paper Phantom" }
-                  },
-                  "level": 100,
-                  "count": 1,
-                  "mechanics": {
-                    "shields": [],
-                    "resistances": [],
-                    "immunities": [],
-                    "tags": ["development-sample"]
-                  }
-                }
-              ]
-            }
-          ]
+          "id": "development.opening",
+          "names": { "zh-CN": "演示开幕角色", "en": "Demo Opening Character" }
         }
       ],
-      "pathNotes": [{ "kind": "random", "text": "原创开发样例中的随机分支" }]
-    }
-  ],
-  "arcanaNodes": []
+      "trial": [
+        {
+          "id": "development.trial",
+          "names": { "zh-CN": "演示试用角色", "en": "Demo Trial Character" }
+        }
+      ],
+      "specialGuest": [
+        {
+          "id": "development.guest",
+          "names": { "zh-CN": "演示特邀角色", "en": "Demo Special Guest" }
+        }
+      ],
+      "support": [
+        {
+          "id": "development.support",
+          "names": { "zh-CN": "演示助演角色", "en": "Demo Supporting Character" }
+        }
+      ]
+    },
+    "vigor": {
+      "initial": 2,
+      "max": 4,
+      "actCosts": [{ "act": 1, "cost": 1 }],
+      "nodeCosts": []
+    },
+    "acts": [
+      {
+        "act": 1,
+        "encounters": [
+          {
+            "id": "development-act-1",
+            "waves": [
+              {
+                "id": "development-theater-wave",
+                "enemies": [
+                  {
+                    "enemy": {
+                      "id": "development.paper-phantom",
+                      "names": { "zh-CN": "纸页幻影", "en": "Paper Phantom" }
+                    },
+                    "level": 100,
+                    "count": 1,
+                    "mechanics": {
+                      "shields": [],
+                      "resistances": [],
+                      "immunities": [],
+                      "tags": ["development-sample"]
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "pathNotes": [{ "kind": "random", "text": "原创开发样例中的随机分支" }]
+      }
+    ],
+    "arcanaNodes": []
+  }
 }

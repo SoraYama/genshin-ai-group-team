@@ -1,4 +1,12 @@
-import { createHash, sign, verify, type KeyLike, type KeyObject } from 'node:crypto';
+import {
+  createHash,
+  createPrivateKey,
+  createPublicKey,
+  KeyObject,
+  sign,
+  verify,
+  type KeyLike
+} from 'node:crypto';
 
 import {
   publicationIntegritySchema,
@@ -72,6 +80,39 @@ function canonicalPayloadBytes(payload: ScenarioV2): Buffer {
   return Buffer.from(canonicalizeJson(payload), 'utf8');
 }
 
+function requireEd25519PrivateKey(key: KeyLike | KeyObject): KeyObject {
+  let parsed: KeyObject;
+  try {
+    parsed = key instanceof KeyObject ? key : createPrivateKey(key);
+  } catch {
+    throw new ScenarioPublicationError('invalid-signing-key');
+  }
+  if (parsed.type !== 'private') {
+    throw new ScenarioPublicationError('invalid-signing-key');
+  }
+  if (parsed.asymmetricKeyType !== 'ed25519') {
+    throw new ScenarioPublicationError('unsupported-key-type');
+  }
+  return parsed;
+}
+
+function requireEd25519PublicKey(key: KeyLike | KeyObject): KeyObject {
+  let parsed: KeyObject;
+  try {
+    if (key instanceof KeyObject && key.type !== 'public') {
+      throw new ScenarioPublicationError('invalid-signing-key');
+    }
+    parsed = key instanceof KeyObject ? key : createPublicKey(key);
+  } catch (error) {
+    if (error instanceof ScenarioPublicationError) throw error;
+    throw new ScenarioPublicationError('invalid-signing-key');
+  }
+  if (parsed.asymmetricKeyType !== 'ed25519') {
+    throw new ScenarioPublicationError('unsupported-key-type');
+  }
+  return parsed;
+}
+
 export function createScenarioPublication(
   input: unknown,
   options: PublicationSigningOptions
@@ -84,6 +125,7 @@ export function createScenarioPublication(
   }
 
   const payloadBytes = canonicalPayloadBytes(parsed.data);
+  const privateKey = requireEd25519PrivateKey(options.privateKey);
   const integrity: PublicationIntegrity = {
     scope: 'payload',
     serialization: 'RFC8785-JCS',
@@ -96,7 +138,7 @@ export function createScenarioPublication(
       algorithm: 'ed25519',
       keyId: options.keyId,
       encoding: 'base64',
-      value: sign(null, payloadBytes, options.privateKey).toString('base64')
+      value: sign(null, payloadBytes, privateKey).toString('base64')
     }
   };
 
@@ -127,8 +169,9 @@ export function verifyScenarioPublication(
   if (!publicKey) {
     throw new ScenarioPublicationError('unknown-signing-key');
   }
+  const ed25519PublicKey = requireEd25519PublicKey(publicKey);
   const signature = Buffer.from(integrityResult.data.signature.value, 'base64');
-  if (!verify(null, payloadBytes, publicKey, signature)) {
+  if (!verify(null, payloadBytes, ed25519PublicKey, signature)) {
     throw new ScenarioPublicationError('bad-signature');
   }
 

@@ -2,6 +2,7 @@ import { publicationIntegritySchema, type VersionedMeta } from '../../shared/sce
 import {
   scenarioPublicationManifestSchema,
   type ScenarioModeV2,
+  type ScenarioPublicationUse,
   type ScenarioPublicationSnapshot,
   type ScenarioPublicationReader,
   type ScenarioPublicationStorage,
@@ -38,6 +39,7 @@ export interface ScenePublicationServiceOptions {
   reader: ScenarioPublicationReader;
   storage: ScenarioPublicationStorage;
   publicKeys: ScenarioPublicKeyRing;
+  expectedUse: ScenarioPublicationUse;
   migrators?: ScenarioPublicationMigratorRegistry;
   now?: () => Date;
   expiringWindowMs?: number;
@@ -47,6 +49,7 @@ export class ScenePublicationService {
   private readonly reader: ScenarioPublicationReader;
   private readonly storage: ScenarioPublicationStorage;
   private readonly publicKeys: ScenarioPublicKeyRing;
+  private readonly expectedUse: ScenarioPublicationUse;
   private readonly migrators: ScenarioPublicationMigratorRegistry;
   private readonly now: () => Date;
   private readonly expiringWindowMs: number;
@@ -55,6 +58,7 @@ export class ScenePublicationService {
     this.reader = options.reader;
     this.storage = options.storage;
     this.publicKeys = options.publicKeys;
+    this.expectedUse = options.expectedUse;
     this.migrators = options.migrators ?? new ScenarioPublicationMigratorRegistry();
     this.now = options.now ?? (() => new Date());
     this.expiringWindowMs = options.expiringWindowMs ?? DEFAULT_EXPIRING_WINDOW_MS;
@@ -65,7 +69,7 @@ export class ScenePublicationService {
     const checkedAt = checkedAtDate.toISOString();
     let lastKnownGood: StoredScenarioPublication | undefined;
     try {
-      const stored = await this.storage.load(mode);
+      const stored = await this.storage.load(mode, this.expectedUse);
       if (stored) {
         const verifiedPayload = this.migrators.consume(
           stored.publication.payload,
@@ -92,6 +96,9 @@ export class ScenePublicationService {
       }
       const descriptor = manifestResult.data.modes[mode].current;
       if (!descriptor) throw new ScenarioPublicationError('not-found');
+      if (descriptor.channel !== this.expectedUse) {
+        throw new ScenarioPublicationError('channel-mismatch');
+      }
 
       const [payloadInput, integrityInput] = await Promise.all([
         this.reader.readJson(descriptor.payloadPath),
@@ -116,10 +123,11 @@ export class ScenePublicationService {
         publication: { payload, integrity: integrityResult.data },
         savedAt: checkedAt
       };
-      await this.storage.save(mode, stored);
+      await this.storage.save(mode, this.expectedUse, stored);
 
       return {
         status: 'ready',
+        trustedUse: this.expectedUse,
         freshness: calculateScenarioFreshness(payload.meta, checkedAtDate, this.expiringWindowMs),
         checkedAt,
         publication: stored.publication
@@ -137,10 +145,17 @@ export class ScenePublicationService {
   ): ScenarioPublicationSnapshot {
     const checkedAt = checkedAtDate.toISOString();
     if (!lastKnownGood) {
-      return { status: 'unavailable', freshness: 'unknown', checkedAt, refreshErrorCode };
+      return {
+        status: 'unavailable',
+        trustedUse: this.expectedUse,
+        freshness: 'unknown',
+        checkedAt,
+        refreshErrorCode
+      };
     }
     return {
       status: 'last-known-good',
+      trustedUse: this.expectedUse,
       freshness: calculateScenarioFreshness(
         lastKnownGood.publication.payload.meta,
         checkedAtDate,

@@ -74,6 +74,29 @@ describe('RFC 8785 publication primitives', () => {
     ).toThrowError(expect.objectContaining({ code: 'bad-signature' }));
   });
 
+  it('rejects non-Ed25519 private and public keys before crypto operations', () => {
+    const signingPair = generateKeyPairSync('ed25519');
+    const rsaPair = generateKeyPairSync('rsa', { modulusLength: 512 });
+    const payload = makeScenario('spiral-abyss');
+
+    expect(() =>
+      createScenarioPublication(payload, {
+        keyId: 'rsa-key',
+        privateKey: rsaPair.privateKey
+      })
+    ).toThrowError(expect.objectContaining({ code: 'unsupported-key-type' }));
+
+    const publication = createScenarioPublication(payload, {
+      keyId: 'release-key',
+      privateKey: signingPair.privateKey
+    });
+    expect(() =>
+      verifyScenarioPublication(publication.payload, publication.integrity, {
+        'release-key': rsaPair.publicKey
+      })
+    ).toThrowError(expect.objectContaining({ code: 'unsupported-key-type' }));
+  });
+
   it('rejects unknown payload fields before signing', () => {
     const { privateKey } = generateKeyPairSync('ed25519');
     const payload = { ...makeScenario('spiral-abyss'), producerDrift: true };

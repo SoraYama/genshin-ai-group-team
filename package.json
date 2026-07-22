@@ -40,7 +40,6 @@
     "gate:provider-contract": "node tests/external/provider-gate.mjs",
     "gate:provider-saved": "npm run build:main && electron dist/main/provider-saved-gate.mjs",
     "gate:local": "npm run lint && npm run typecheck && npm run test && npm run build",
-    "scenario:publish-development": "npm run build:scenario-publisher && node dist/scripts/scenario-data/publish.mjs --input resources/scenarios/v2/development-source --output resources/scenarios/v2/development --private-key scripts/scenario-data/development-sample-private.pem --key-id development-sample-key-v1 --published-at 2026-01-01T02:00:00.000Z",
     "gate:all": "npm run gate:local && npm run test:e2e:run && npm run audit:all",
     "pack": "npm run build && electron-builder --publish never",
     "pack:mac": "npm run build && electron-builder --mac --publish never",

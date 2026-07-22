@@ -5,7 +5,10 @@ export type ScenarioPublicationErrorCode =
   | 'manifest-invalid'
   | 'schema-invalid'
   | 'unsupported-schema-version'
+  | 'channel-mismatch'
   | 'digest-mismatch'
+  | 'invalid-signing-key'
+  | 'unsupported-key-type'
   | 'unknown-signing-key'
   | 'bad-signature'
   | 'identity-mismatch'
@@ -19,7 +22,10 @@ const SAFE_MESSAGES: Record<ScenarioPublicationErrorCode, string> = {
   'manifest-invalid': 'Scenario publication manifest is invalid.',
   'schema-invalid': 'Scenario publication does not match the supported schema.',
   'unsupported-schema-version': 'Scenario publication requires a newer app version.',
+  'channel-mismatch': 'Scenario publication does not match the configured trust channel.',
   'digest-mismatch': 'Scenario publication digest verification failed.',
+  'invalid-signing-key': 'Scenario publication signing key is invalid.',
+  'unsupported-key-type': 'Scenario publication key must use Ed25519.',
   'unknown-signing-key': 'Scenario publication uses an unknown signing key.',
   'bad-signature': 'Scenario publication signature verification failed.',
   'identity-mismatch': 'Scenario publication identity does not match its manifest.',

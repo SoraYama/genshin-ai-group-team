@@ -38,17 +38,19 @@ describe('FileScenarioPublicationStorage', () => {
     const storage = new FileScenarioPublicationStorage(root);
     const value = stored('one');
 
-    await storage.save('spiral-abyss', value);
+    await storage.save('spiral-abyss', 'production', value);
 
-    await expect(storage.load('spiral-abyss')).resolves.toEqual(value);
-    await expect(fs.stat(path.join(root, 'spiral-abyss.json'))).resolves.toBeDefined();
+    await expect(storage.load('spiral-abyss', 'production')).resolves.toEqual(value);
+    await expect(
+      fs.stat(path.join(root, 'production', 'spiral-abyss.json'))
+    ).resolves.toBeDefined();
   });
 
   it('leaves the previous last-known-good intact when rename fails', async () => {
     const root = await temporaryRoot();
     const goodStorage = new FileScenarioPublicationStorage(root);
     const previous = stored('previous');
-    await goodStorage.save('spiral-abyss', previous);
+    await goodStorage.save('spiral-abyss', 'production', previous);
 
     const failingFileSystem: AtomicFileSystem = {
       mkdir: fs.mkdir.bind(fs),
@@ -61,10 +63,27 @@ describe('FileScenarioPublicationStorage', () => {
     };
     const failingStorage = new FileScenarioPublicationStorage(root, failingFileSystem);
 
-    await expect(failingStorage.save('spiral-abyss', stored('replacement'))).rejects.toMatchObject({
+    await expect(
+      failingStorage.save('spiral-abyss', 'production', stored('replacement'))
+    ).rejects.toMatchObject({
       code: 'storage-write-failed'
     });
-    await expect(goodStorage.load('spiral-abyss')).resolves.toEqual(previous);
-    expect((await fs.readdir(root)).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+    await expect(goodStorage.load('spiral-abyss', 'production')).resolves.toEqual(previous);
+    expect(
+      (await fs.readdir(path.join(root, 'production'))).filter((name) => name.endsWith('.tmp'))
+    ).toEqual([]);
+  });
+
+  it('isolates production and development last-known-good namespaces', async () => {
+    const root = await temporaryRoot();
+    const storage = new FileScenarioPublicationStorage(root);
+    const production = stored('production');
+    const development = stored('development');
+
+    await storage.save('spiral-abyss', 'production', production);
+    await storage.save('spiral-abyss', 'development-sample', development);
+
+    await expect(storage.load('spiral-abyss', 'production')).resolves.toEqual(production);
+    await expect(storage.load('spiral-abyss', 'development-sample')).resolves.toEqual(development);
   });
 });

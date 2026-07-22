@@ -90,3 +90,5 @@ M1 已实现本地发布、验签、last-known-good 与原子缓存边界；生�
 - 恢复后只有通过完整校验和人工审核的新 envelope 才能替换旧版本。
 
 “使用旧资料”是可见的产品状态，不得静默处理。错误日志只记录来源 ID、版本与错误类别，不记录 Cookie、API Key 或 Authorization 内容。
+
+仓内合成开发样例不冒充上述任何正式来源。它们使用独立的 `development-only` wrapper 和 `synthetic-development-data` provenance，只能由开发 fixture schema 校验；production publisher 必须拒绝该 wrapper 与 `development-sample` channel，不能把合成字段自动转换成 `official-announcement`、`community-wiki` 或 `genshin-db` 来源。

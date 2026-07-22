@@ -14,6 +14,7 @@ import {
 import type {
   ScenarioPublicationReader,
   ScenarioPublicationStorage,
+  ScenarioPublicationUse,
   StoredScenarioPublication
 } from '../../../src/main/scenario-publication/contracts.js';
 import type { ScenarioV2 } from '../../../src/shared/scenario-v2.js';
@@ -29,7 +30,7 @@ function manifestFor(payload: ScenarioV2): ScenarioPublicationManifest {
     dataVersion: payload.meta.dataVersion,
     payloadPath: `publications/${payload.id}/payload.json`,
     integrityPath: `publications/${payload.id}/integrity.json`,
-    channel: 'development-sample' as const
+    channel: 'production' as const
   };
   const manifest: ScenarioPublicationManifest = {
     manifestVersion: 1,
@@ -64,16 +65,32 @@ class MemoryReader implements ScenarioPublicationReader {
 }
 
 class MemoryStorage implements ScenarioPublicationStorage {
-  value?: StoredScenarioPublication;
+  private readonly values = new Map<ScenarioPublicationUse, StoredScenarioPublication>();
   failSave = false;
 
-  async load(): Promise<StoredScenarioPublication | undefined> {
-    return this.value;
+  get value(): StoredScenarioPublication | undefined {
+    return this.values.get('production');
   }
 
-  async save(_mode: ScenarioV2['mode'], value: StoredScenarioPublication): Promise<void> {
+  set value(value: StoredScenarioPublication | undefined) {
+    if (value) this.values.set('production', value);
+    else this.values.delete('production');
+  }
+
+  async load(
+    _mode: ScenarioV2['mode'],
+    use: ScenarioPublicationUse
+  ): Promise<StoredScenarioPublication | undefined> {
+    return this.values.get(use);
+  }
+
+  async save(
+    _mode: ScenarioV2['mode'],
+    use: ScenarioPublicationUse,
+    value: StoredScenarioPublication
+  ): Promise<void> {
     if (this.failSave) throw new ScenarioPublicationError('storage-write-failed');
-    this.value = value;
+    this.values.set(use, value);
   }
 }
 
@@ -93,6 +110,7 @@ function setup(payload = makeScenario(mode), storage = new MemoryStorage()) {
     reader,
     storage,
     publicKeys: { 'test-release-key': keys.publicKey },
+    expectedUse: 'production',
     now: () => new Date('2026-01-15T00:00:00.000Z')
   });
   return { service, storage, reader, publication, manifest, keys, descriptor };
@@ -122,6 +140,88 @@ describe('scenario publication manifest', () => {
 });
 
 describe('ScenePublicationService', () => {
+  it('derives trusted use from service configuration and rejects manifest channel tampering', async () => {
+    const { storage, publication, manifest, descriptor, keys } = setup();
+    const trustedOptions = {
+      reader: new MemoryReader(manifest, {
+        [descriptor.payloadPath]: publication.payload,
+        [descriptor.integrityPath]: publication.integrity
+      }),
+      storage,
+      publicKeys: { 'test-release-key': keys.publicKey },
+      expectedUse: 'production' as const,
+      now: () => new Date('2026-01-15T00:00:00.000Z')
+    };
+    const trustedService = new ScenePublicationService(trustedOptions);
+
+    await expect(trustedService.refresh(mode)).resolves.toMatchObject({
+      status: 'ready',
+      trustedUse: 'production'
+    });
+
+    const tamperedManifest = structuredClone(manifest);
+    tamperedManifest.modes[mode].current!.channel = 'development-sample';
+    const tamperedService = new ScenePublicationService({
+      ...trustedOptions,
+      reader: new MemoryReader(tamperedManifest, {
+        [descriptor.payloadPath]: publication.payload,
+        [descriptor.integrityPath]: publication.integrity
+      })
+    });
+
+    await expect(tamperedService.refresh(mode)).resolves.toMatchObject({
+      status: 'last-known-good',
+      trustedUse: 'production',
+      refreshErrorCode: 'channel-mismatch'
+    });
+  });
+
+  it('uses a development keyring and cache namespace independently from production', async () => {
+    const developmentKeys = generateKeyPairSync('ed25519');
+    const productionKeys = generateKeyPairSync('ed25519');
+    const payload = makeScenario(mode);
+    const publication = createScenarioPublication(payload, {
+      keyId: 'development-key',
+      privateKey: developmentKeys.privateKey
+    });
+    const manifest = manifestFor(publication.payload);
+    manifest.modes[mode].current!.channel = 'development-sample';
+    manifest.modes[mode].history[0]!.channel = 'development-sample';
+    const descriptor = manifest.modes[mode].current!;
+    const reader = new MemoryReader(manifest, {
+      [descriptor.payloadPath]: publication.payload,
+      [descriptor.integrityPath]: publication.integrity
+    });
+    const storage = new MemoryStorage();
+
+    await expect(
+      new ScenePublicationService({
+        reader,
+        storage,
+        publicKeys: { 'development-key': developmentKeys.publicKey },
+        expectedUse: 'development-sample'
+      }).refresh(mode)
+    ).resolves.toMatchObject({ status: 'ready', trustedUse: 'development-sample' });
+
+    const channelTampered = structuredClone(manifest);
+    channelTampered.modes[mode].current!.channel = 'production';
+    await expect(
+      new ScenePublicationService({
+        reader: new MemoryReader(channelTampered, {
+          [descriptor.payloadPath]: publication.payload,
+          [descriptor.integrityPath]: publication.integrity
+        }),
+        storage,
+        publicKeys: { 'production-key': productionKeys.publicKey },
+        expectedUse: 'production'
+      }).refresh(mode)
+    ).resolves.toMatchObject({
+      status: 'unavailable',
+      trustedUse: 'production',
+      refreshErrorCode: 'unknown-signing-key'
+    });
+  });
+
   it('publishes all three modes through the same verified path', async () => {
     for (const scenarioMode of [
       'spiral-abyss',
@@ -144,6 +244,7 @@ describe('ScenePublicationService', () => {
         reader,
         storage: new MemoryStorage(),
         publicKeys: { 'test-key': keys.publicKey },
+        expectedUse: 'production',
         now: () => new Date('2026-01-15T00:00:00.000Z')
       });
 
@@ -171,7 +272,8 @@ describe('ScenePublicationService', () => {
     const service = new ScenePublicationService({
       reader,
       storage: new MemoryStorage(),
-      publicKeys: { 'test-release-key': keys.publicKey }
+      publicKeys: { 'test-release-key': keys.publicKey },
+      expectedUse: 'production'
     });
 
     await expect(service.refresh(mode)).resolves.toMatchObject({
@@ -203,6 +305,7 @@ describe('ScenePublicationService', () => {
         }),
         storage,
         publicKeys: { 'test-release-key': keys.publicKey },
+        expectedUse: 'production',
         now: () => new Date('2026-01-16T00:00:00.000Z')
       });
 
@@ -234,7 +337,8 @@ describe('ScenePublicationService', () => {
         }
       ),
       storage,
-      publicKeys: { 'test-release-key': keys.publicKey }
+      publicKeys: { 'test-release-key': keys.publicKey },
+      expectedUse: 'production'
     });
 
     await expect(offlineService.refresh(mode)).resolves.toMatchObject({
@@ -270,7 +374,8 @@ describe('ScenePublicationService', () => {
       const result = await new ScenePublicationService({
         reader,
         storage,
-        publicKeys: { 'test-release-key': keys.publicKey }
+        publicKeys: { 'test-release-key': keys.publicKey },
+        expectedUse: 'production'
       }).refresh(mode);
       expect(result).toMatchObject({ status: 'last-known-good', refreshErrorCode: expectedCode });
       expect(storage.value).toEqual(saved);
@@ -292,7 +397,8 @@ describe('ScenePublicationService', () => {
         [descriptor.integrityPath]: publication.integrity
       }),
       storage,
-      publicKeys: { 'test-release-key': keys.publicKey }
+      publicKeys: { 'test-release-key': keys.publicKey },
+      expectedUse: 'production'
     }).refresh(mode);
 
     expect(result).toMatchObject({

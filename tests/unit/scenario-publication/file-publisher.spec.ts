@@ -33,11 +33,11 @@ describe('offline directory publisher', () => {
     await fs.writeFile(
       path.join(inputDirectory, 'index.json'),
       JSON.stringify({
-        notice: 'DEVELOPMENT SAMPLE — NOT CURRENT LIVE-SERVICE DATA',
+        notice: 'Production publisher test input',
         candidates: candidates.map(([inputFile]) => ({
           inputFile,
           current: true,
-          channel: 'development-sample'
+          channel: 'production'
         }))
       }),
       'utf8'

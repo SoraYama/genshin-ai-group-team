@@ -1,20 +1,19 @@
 {
+  "fixtureIndexVersion": 1,
+  "fixtureKind": "development-only",
   "notice": "DEVELOPMENT SAMPLE — NOT CURRENT LIVE-SERVICE DATA",
-  "candidates": [
-    {
-      "inputFile": "spiral-abyss.json",
-      "current": true,
-      "channel": "development-sample"
+  "modes": {
+    "spiral-abyss": {
+      "current": "spiral-abyss.json",
+      "history": ["spiral-abyss.json"]
     },
-    {
-      "inputFile": "stygian-onslaught.json",
-      "current": true,
-      "channel": "development-sample"
+    "stygian-onslaught": {
+      "current": "stygian-onslaught.json",
+      "history": ["stygian-onslaught.json"]
     },
-    {
-      "inputFile": "imaginarium-theater.json",
-      "current": true,
-      "channel": "development-sample"
+    "imaginarium-theater": {
+      "current": "imaginarium-theater.json",
+      "history": ["imaginarium-theater.json"]
     }
-  ]
+  }
 }

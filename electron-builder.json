@@ -15,7 +15,7 @@
     {
       "from": "resources/scenarios",
       "to": "scenarios",
-      "filter": ["**/*.json", "**/*.pem"]
+      "filter": ["**/*.json"]
     },
     {
       "from": "resources/credits.md",

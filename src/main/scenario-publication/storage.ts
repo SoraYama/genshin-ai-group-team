@@ -6,6 +6,7 @@ import path from 'node:path';
 import {
   storedScenarioPublicationSchema,
   type ScenarioModeV2,
+  type ScenarioPublicationUse,
   type ScenarioPublicationStorage,
   type StoredScenarioPublication
 } from './contracts.js';
@@ -35,9 +36,12 @@ export class FileScenarioPublicationStorage implements ScenarioPublicationStorag
     private readonly fileSystem: AtomicFileSystem = nodeFileSystem
   ) {}
 
-  async load(mode: ScenarioModeV2): Promise<StoredScenarioPublication | undefined> {
+  async load(
+    mode: ScenarioModeV2,
+    use: ScenarioPublicationUse
+  ): Promise<StoredScenarioPublication | undefined> {
     try {
-      const raw = await this.fileSystem.readFile(this.cachePath(mode), 'utf8');
+      const raw = await this.fileSystem.readFile(this.cachePath(mode, use), 'utf8');
       const result = storedScenarioPublicationSchema.safeParse(JSON.parse(raw));
       if (!result.success) throw new ScenarioPublicationError('storage-read-failed');
       return result.data;
@@ -48,16 +52,21 @@ export class FileScenarioPublicationStorage implements ScenarioPublicationStorag
     }
   }
 
-  async save(mode: ScenarioModeV2, value: StoredScenarioPublication): Promise<void> {
+  async save(
+    mode: ScenarioModeV2,
+    use: ScenarioPublicationUse,
+    value: StoredScenarioPublication
+  ): Promise<void> {
     const parsed = storedScenarioPublicationSchema.safeParse(value);
     if (!parsed.success) {
       throw new ScenarioPublicationError('storage-write-failed', { cause: parsed.error });
     }
-    const finalPath = this.cachePath(mode);
-    const temporaryPath = path.join(this.cacheDirectory, `.${mode}.${randomUUID()}.tmp`);
+    const scopedDirectory = path.join(this.cacheDirectory, use);
+    const finalPath = this.cachePath(mode, use);
+    const temporaryPath = path.join(scopedDirectory, `.${mode}.${randomUUID()}.tmp`);
     let handle: WritableFileHandle | undefined;
     try {
-      await this.fileSystem.mkdir(this.cacheDirectory, { recursive: true });
+      await this.fileSystem.mkdir(scopedDirectory, { recursive: true });
       handle = await this.fileSystem.open(temporaryPath, 'wx', 0o600);
       await handle.writeFile(`${JSON.stringify(parsed.data, null, 2)}\n`, { encoding: 'utf8' });
       await handle.sync();
@@ -73,7 +82,7 @@ export class FileScenarioPublicationStorage implements ScenarioPublicationStorag
     }
   }
 
-  private cachePath(mode: ScenarioModeV2): string {
-    return path.join(this.cacheDirectory, `${mode}.json`);
+  private cachePath(mode: ScenarioModeV2, use: ScenarioPublicationUse): string {
+    return path.join(this.cacheDirectory, use, `${mode}.json`);
   }
 }

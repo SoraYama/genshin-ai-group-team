@@ -1,58 +1,56 @@
-import { createPublicKey } from 'node:crypto';
+import { generateKeyPairSync } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { scenarioV2Schema } from '../../../src/shared/scenario-v2.js';
-import { scenarioPublicationManifestSchema } from '../../../src/main/scenario-publication/contracts.js';
-import { FileScenarioPublicationReader } from '../../../src/main/scenario-publication/readers.js';
-import { verifyScenarioPublication } from '../../../src/main/scenario-publication/publication.js';
+import {
+  developmentFixtureIndexSchema,
+  developmentScenarioFixtureSchema
+} from '../../../src/main/scenario-publication/development-fixture.js';
+import { createScenarioPublicationBundle } from '../../../src/main/scenario-publication/publisher.js';
 
-const fixtureRoot = path.join(process.cwd(), 'resources', 'scenarios', 'v2');
+const sourceRoot = path.join(process.cwd(), 'resources', 'scenarios', 'v2', 'development-source');
 
 describe('committed development scenario fixtures', () => {
-  it('labels every source fixture as development-only and parses all three modes', async () => {
-    const sourceRoot = path.join(fixtureRoot, 'development-source');
-    const index = JSON.parse(await fs.readFile(path.join(sourceRoot, 'index.json'), 'utf8')) as {
-      notice: string;
-      candidates: Array<{ inputFile: string; channel: string }>;
-    };
+  it('uses synthetic development provenance for all three current/history fixtures', async () => {
+    const index = developmentFixtureIndexSchema.parse(
+      JSON.parse(await fs.readFile(path.join(sourceRoot, 'index.json'), 'utf8'))
+    );
 
     expect(index.notice).toContain('NOT CURRENT LIVE-SERVICE DATA');
-    expect(index.candidates).toHaveLength(3);
-    const parsed = await Promise.all(
-      index.candidates.map(async ({ inputFile, channel }) => {
-        expect(channel).toBe('development-sample');
-        return scenarioV2Schema.parse(
-          JSON.parse(await fs.readFile(path.join(sourceRoot, inputFile), 'utf8'))
-        );
-      })
-    );
-    expect(new Set(parsed.map(({ mode }) => mode))).toEqual(
-      new Set(['spiral-abyss', 'stygian-onslaught', 'imaginarium-theater'])
-    );
+    for (const mode of ['spiral-abyss', 'stygian-onslaught', 'imaginarium-theater'] as const) {
+      const modeIndex = index.modes[mode];
+      expect(modeIndex.history).toContain(modeIndex.current);
+      const rawText = await fs.readFile(path.join(sourceRoot, modeIndex.current), 'utf8');
+      expect(rawText).not.toContain('genshin-db');
+      const fixture = developmentScenarioFixtureSchema.parse(JSON.parse(rawText));
+      expect(fixture.fixtureKind).toBe('development-only');
+      expect(fixture.scenario.mode).toBe(mode);
+      expect(fixture.meta.syntheticProvenance.kind).toBe('synthetic-development-data');
+      expect(fixture.meta.syntheticProvenance.fields.length).toBeGreaterThan(0);
+    }
   });
 
-  it('verifies each signed current fixture and retains a history index', async () => {
-    const publishedRoot = path.join(fixtureRoot, 'development');
-    const reader = new FileScenarioPublicationReader(publishedRoot);
-    const manifest = scenarioPublicationManifestSchema.parse(await reader.readManifest());
-    const publicKey = createPublicKey(
-      await fs.readFile(path.join(fixtureRoot, 'development-public-key.pem'), 'utf8')
+  it('cannot pass a development-only wrapper through the production publisher', async () => {
+    const index = developmentFixtureIndexSchema.parse(
+      JSON.parse(await fs.readFile(path.join(sourceRoot, 'index.json'), 'utf8'))
     );
+    const fixture = developmentScenarioFixtureSchema.parse(
+      JSON.parse(
+        await fs.readFile(path.join(sourceRoot, index.modes['spiral-abyss'].current), 'utf8')
+      )
+    );
+    const keys = generateKeyPairSync('ed25519');
 
-    for (const mode of ['spiral-abyss', 'stygian-onslaught', 'imaginarium-theater'] as const) {
-      const index = manifest.modes[mode];
-      expect(index.current?.channel).toBe('development-sample');
-      expect(index.history.length).toBeGreaterThanOrEqual(1);
-      const descriptor = index.current!;
-      const payload = await reader.readJson(descriptor.payloadPath);
-      const integrity = await reader.readJson(descriptor.integrityPath);
-      expect(
-        verifyScenarioPublication(payload, integrity, {
-          'development-sample-key-v1': publicKey
-        }).mode
-      ).toBe(mode);
-    }
+    expect(() =>
+      createScenarioPublicationBundle(
+        [{ payload: fixture, current: true, channel: 'production' }],
+        {
+          keyId: 'production-test-key',
+          privateKey: keys.privateKey,
+          publishedAt: '2026-01-01T02:00:00.000Z'
+        }
+      )
+    ).toThrowError(expect.objectContaining({ code: 'schema-invalid' }));
   });
 });

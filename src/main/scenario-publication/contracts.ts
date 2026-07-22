@@ -85,6 +85,7 @@ export const storedScenarioPublicationSchema = z
   .strict();
 
 export type ScenarioModeV2 = ScenarioV2['mode'];
+export type ScenarioPublicationUse = 'production' | 'development-sample';
 export type ScenarioPublicationDescriptor = z.infer<typeof scenarioPublicationDescriptorSchema>;
 export type ScenarioPublicationManifest = z.infer<typeof scenarioPublicationManifestSchema>;
 export type StoredScenarioPublication = z.infer<typeof storedScenarioPublicationSchema>;
@@ -95,12 +96,20 @@ export interface ScenarioPublicationReader {
 }
 
 export interface ScenarioPublicationStorage {
-  load(mode: ScenarioModeV2): Promise<StoredScenarioPublication | undefined>;
-  save(mode: ScenarioModeV2, value: StoredScenarioPublication): Promise<void>;
+  load(
+    mode: ScenarioModeV2,
+    use: ScenarioPublicationUse
+  ): Promise<StoredScenarioPublication | undefined>;
+  save(
+    mode: ScenarioModeV2,
+    use: ScenarioPublicationUse,
+    value: StoredScenarioPublication
+  ): Promise<void>;
 }
 
 export interface ScenarioPublicationSnapshot {
   status: 'ready' | 'last-known-good' | 'unavailable';
+  trustedUse: ScenarioPublicationUse;
   freshness: 'fresh' | 'expiring' | 'stale' | 'unknown';
   checkedAt: string;
   publication?: ScenarioPublicationEnvelope;
