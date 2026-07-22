@@ -32,18 +32,19 @@
 - 每条字段来源的 `sourceRefId` 必须指向同一 payload 内存在的来源；
 - `community-wiki` 引用强制记录 URL、attribution 和 `CC-BY-SA-3.0` 或 `source-declared` 许可声明；其他来源记录可访问时的原始 URL、抓取时间和必要署名；
 - 人工修正或多来源裁决写入字段备注；
-- 同一 `fieldPath` 可以有多条 provenance，例如同时记录正式来源与 `development-cross-check`；
-- schema 按 `fieldPath` 分组，要求每组至少引用一个 `official-announcement`、`community-wiki` 或 `genshin-db`；这些是 M0 明确允许的场景发布来源；
-- 重复来源 ID、悬空引用，以及任一字段路径只引用开发交叉源、Enka 或 Battle Chronicle 的 payload 一律拒绝。
+- 公共发布 `sourceRefs` 只允许 `official-announcement`、`community-wiki` 或 `genshin-db`；Battle Chronicle、Enka 和开发交叉检查证据不得嵌入发布 payload；
+- 内部审核证据单独保存为 `InternalReviewEvidence`，可记录 `battle-chronicle`、`enka-profile`、`development-cross-check` 及任意内部核对路径，但不参与发布签名与分发；
+- 公共 `fieldPath` 只能取受控路径，并必须完整覆盖对应模式：深渊为 `meta.effectiveRange`、`scenario.floors`、`scenario.blessing`；幽境危战为 `meta.effectiveRange`、`scenario.phases`、`scenario.difficulties`、`scenario.reusePolicy`；幻想真境剧诗为 `meta.effectiveRange`、`scenario.eligibility`、`scenario.cast`、`scenario.nodes`、`scenario.vigor`；
+- 重复来源 ID、悬空引用、任意路径、跨模式路径或缺少必需路径的 payload 一律拒绝。
 
-同一个场景字段路径可以混合正式来源和开发交叉来源，但不得只写笼统的“来自网络”。例如活动有效期可来自官方公告，敌人静态抗性可来自固定版本的 `genshin-db`。玩家角色数值则属于独立的玩家资料记录，可来自米游社或 Enka，不并入场景发布 provenance。
+同一个场景字段路径可以引用多个允许发布的正式来源，但不得只写笼统的“来自网络”。例如活动有效期可来自官方公告，敌人静态抗性可来自固定版本的 `genshin-db`。玩家角色数值属于独立的玩家资料记录，可来自米游社或 Enka，不并入场景发布 provenance；开发交叉检查结论只进入内部审核记录。
 
 ## 生效日期、版本与严格兼容
 
 - 场景 payload 的 `schemaVersion` 描述结构兼容性；`dataVersion` 唯一标识一份已发布业务数据。
 - `effectiveFrom` 必填，`effectiveTo` 可选但不得早于开始时间。它们属于经审核、被签名的 payload。
 - 推荐计划拥有独立的 `schemaVersion: 2`，以便历史记录与场景数据分别迁移；同时回显所用 `dataVersion`。
-- 外部发布 envelope、场景 payload、推荐计划和玩家干预均以 Zod `.strict()` 拒绝未知顶层字段，避免 producer drift 被静默丢弃。
+- 外部发布 envelope、场景 payload、推荐计划和玩家干预的所有对象层级均以 Zod `.strict()` 递归拒绝未知字段，避免嵌套 producer drift 被静默丢弃。
 - 兼容策略是“先识别版本，再执行显式迁移，最后按当前 strict schema 解析”；不通过接受未知字段实现前向兼容。
 - 时区敏感的活动时间在采集层保留明确偏移或统一为 UTC，并在 UI 按玩家时区显示。
 

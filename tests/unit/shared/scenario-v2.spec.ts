@@ -4,6 +4,7 @@ import {
   abyssPlanSchema,
   communityWikiSourceReferenceSchema,
   imaginariumTheaterScenarioSchema,
+  internalReviewEvidenceSchema,
   playerInterventionSchema,
   recommendationPlanSchema,
   scenarioCacheEnvelopeSchema,
@@ -55,12 +56,36 @@ const reviewedMeta = {
   effectiveFrom: '2026-07-01T00:00:00.000Z',
   effectiveTo: '2026-08-01T00:00:00.000Z',
   sourceRefs: [sourceRef],
-  fieldProvenance: [{ fieldPath: 'floors', sourceRefId: sourceRef.id }],
+  fieldProvenance: [
+    { fieldPath: 'meta.effectiveRange', sourceRefId: sourceRef.id },
+    { fieldPath: 'scenario.floors', sourceRefId: sourceRef.id },
+    { fieldPath: 'scenario.blessing', sourceRefId: sourceRef.id }
+  ],
   reviewedAt: '2026-07-01T01:00:00.000Z',
   reviewedBy: 'content-reviewer'
 };
 
 const meta = reviewedMeta;
+
+const metaWithPaths = (fieldPaths: string[]) => ({
+  ...reviewedMeta,
+  fieldProvenance: fieldPaths.map((fieldPath) => ({ fieldPath, sourceRefId: sourceRef.id }))
+});
+
+const stygianMeta = metaWithPaths([
+  'meta.effectiveRange',
+  'scenario.phases',
+  'scenario.difficulties',
+  'scenario.reusePolicy'
+]);
+
+const theaterMeta = metaWithPaths([
+  'meta.effectiveRange',
+  'scenario.eligibility',
+  'scenario.cast',
+  'scenario.nodes',
+  'scenario.vigor'
+]);
 
 const entity = (id: string, zhName: string) => ({
   id,
@@ -100,6 +125,7 @@ const spiralPayload = {
   mode: 'spiral-abyss' as const,
   id: 'abyss.2026-07',
   meta,
+  blessing: { id: 'blessing.current', description: '本期渊月祝福' },
   floors: [
     {
       floor: 12,
@@ -111,6 +137,55 @@ const spiralPayload = {
         }
       ]
     }
+  ]
+};
+
+const stygianPayload = {
+  mode: 'stygian-onslaught' as const,
+  id: 'stygian.identities',
+  meta: stygianMeta,
+  crossPartyReusePolicy: { rule: 'forbidden' as const },
+  difficulties: Array.from({ length: 6 }, (_, index) => ({
+    id: `difficulty-${index + 1}`,
+    order: index + 1,
+    name: entity(`difficulty.${index + 1}`, `难度 ${index + 1}`),
+    modifiers: [{ id: `difficulty-rule-${index + 1}`, description: '难度规则' }]
+  })),
+  phases: Array.from({ length: 3 }, (_, index) => ({
+    phase: index + 1,
+    encounterId: `encounter-${index + 1}`,
+    boss: enemy,
+    phaseModifiers: [{ id: `phase-rule-${index + 1}`, description: '阶段规则' }],
+    bossModifiers: [{ id: `boss-rule-${index + 1}`, description: '首领规则' }]
+  }))
+};
+
+const theaterPayload = {
+  mode: 'imaginarium-theater' as const,
+  id: 'theater.identities',
+  meta: theaterMeta,
+  eligibility: { elements: ['pyro' as const], minimumLevel: 70, requiredHeadcount: 10 },
+  pools: {
+    opening: [entity('character.opening', '开幕角色')],
+    trial: [entity('character.trial', '试用角色')],
+    specialGuest: [entity('character.guest', '特邀角色')],
+    support: [entity('character.support', '助演角色')]
+  },
+  vigor: {
+    initial: 2,
+    max: 4,
+    actCosts: [{ act: 1, cost: 1 }],
+    nodeCosts: [{ nodeId: 'arcana-1', cost: 1 }]
+  },
+  acts: [
+    {
+      act: 1,
+      encounters: [{ id: 'encounter-1', waves: [wave('theater-wave-1')] }],
+      pathNotes: []
+    }
+  ],
+  arcanaNodes: [
+    { id: 'arcana-1', name: entity('arcana.1', '秘法节点'), description: '测试节点' }
   ]
 };
 
@@ -214,7 +289,7 @@ describe('reviewed scenario metadata provenance', () => {
     const result = versionedMetaSchema.safeParse({
       ...legacyReviewedMeta,
       sourceRefs: [sourceRef, { ...sourceRef }],
-      fieldProvenance: [{ fieldPath: 'floors', sourceRefId: sourceRef.id }]
+      fieldProvenance: [{ fieldPath: 'scenario.floors', sourceRefId: sourceRef.id }]
     });
 
     expect(result.success).toBe(false);
@@ -223,7 +298,7 @@ describe('reviewed scenario metadata provenance', () => {
   it('rejects field provenance that references an unknown source', () => {
     const result = versionedMetaSchema.safeParse({
       ...legacyReviewedMeta,
-      fieldProvenance: [{ fieldPath: 'floors', sourceRefId: 'missing-source' }]
+      fieldProvenance: [{ fieldPath: 'scenario.floors', sourceRefId: 'missing-source' }]
     });
 
     expect(result.success).toBe(false);
@@ -238,7 +313,7 @@ describe('reviewed scenario metadata provenance', () => {
     const result = versionedMetaSchema.safeParse({
       ...legacyReviewedMeta,
       sourceRefs: [developmentSource],
-      fieldProvenance: [{ fieldPath: 'floors', sourceRefId: developmentSource.id }]
+      fieldProvenance: [{ fieldPath: 'scenario.floors', sourceRefId: developmentSource.id }]
     });
 
     expect(result.success).toBe(false);
@@ -253,7 +328,7 @@ describe('reviewed scenario metadata provenance', () => {
     const result = versionedMetaSchema.safeParse({
       ...reviewedMeta,
       sourceRefs: [sourceRef, developmentSource],
-      fieldProvenance: [{ fieldPath: 'floors', sourceRefId: developmentSource.id }]
+      fieldProvenance: [{ fieldPath: 'scenario.floors', sourceRefId: developmentSource.id }]
     });
 
     expect(result.success).toBe(false);
@@ -269,15 +344,15 @@ describe('reviewed scenario metadata provenance', () => {
       ...reviewedMeta,
       sourceRefs: [sourceRef, developmentSource],
       fieldProvenance: [
-        { fieldPath: 'floors[0]', sourceRefId: sourceRef.id },
-        { fieldPath: 'floors[1]', sourceRefId: developmentSource.id }
+        { fieldPath: 'scenario.floors', sourceRefId: sourceRef.id },
+        { fieldPath: 'scenario.blessing', sourceRefId: developmentSource.id }
       ]
     });
 
     expect(result.success).toBe(false);
   });
 
-  it('accepts production and development evidence for the same field path', () => {
+  it('rejects development evidence from a public payload even when production supports the path', () => {
     const developmentSource = {
       ...sourceRef,
       id: 'raw-cross-check',
@@ -287,9 +362,23 @@ describe('reviewed scenario metadata provenance', () => {
       ...reviewedMeta,
       sourceRefs: [sourceRef, developmentSource],
       fieldProvenance: [
-        { fieldPath: 'floors', sourceRefId: sourceRef.id },
-        { fieldPath: 'floors', sourceRefId: developmentSource.id }
+        { fieldPath: 'scenario.floors', sourceRefId: sourceRef.id },
+        { fieldPath: 'scenario.floors', sourceRefId: developmentSource.id }
       ]
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts development evidence in a separate internal review record', () => {
+    const developmentSource = {
+      ...sourceRef,
+      id: 'raw-cross-check',
+      source: 'development-cross-check' as const
+    };
+    const result = internalReviewEvidenceSchema.safeParse({
+      sourceRefs: [developmentSource],
+      fieldProvenance: [{ fieldPath: 'scenario.floors', sourceRefId: developmentSource.id }]
     });
 
     expect(result.success).toBe(true);
@@ -304,7 +393,7 @@ describe('reviewed scenario metadata provenance', () => {
     const result = versionedMetaSchema.safeParse({
       ...reviewedMeta,
       sourceRefs: [enkaSource],
-      fieldProvenance: [{ fieldPath: 'floors', sourceRefId: enkaSource.id }]
+      fieldProvenance: [{ fieldPath: 'scenario.floors', sourceRefId: enkaSource.id }]
     });
 
     expect(result.success).toBe(false);
@@ -319,7 +408,7 @@ describe('reviewed scenario metadata provenance', () => {
     const result = versionedMetaSchema.safeParse({
       ...reviewedMeta,
       sourceRefs: [battleChronicleSource],
-      fieldProvenance: [{ fieldPath: 'floors', sourceRefId: battleChronicleSource.id }]
+      fieldProvenance: [{ fieldPath: 'scenario.floors', sourceRefId: battleChronicleSource.id }]
     });
 
     expect(result.success).toBe(false);
@@ -330,12 +419,104 @@ describe('reviewed scenario metadata provenance', () => {
   });
 });
 
+describe('mode-specific publication provenance coverage', () => {
+  it('rejects an arbitrary field provenance path', () => {
+    const result = versionedMetaSchema.safeParse(metaWithPaths(['scenario.not-a-real-subtree']));
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects Abyss metadata missing blessing coverage', () => {
+    const result = spiralAbyssScenarioSchema.safeParse({
+      ...spiralPayload,
+      meta: metaWithPaths(['meta.effectiveRange', 'scenario.floors'])
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects Stygian metadata missing reuse-policy coverage', () => {
+    const result = stygianOnslaughtScenarioSchema.safeParse({
+      mode: 'stygian-onslaught',
+      id: 'stygian.missing-provenance',
+      meta: metaWithPaths([
+        'meta.effectiveRange',
+        'scenario.phases',
+        'scenario.difficulties'
+      ]),
+      crossPartyReusePolicy: { rule: 'forbidden' },
+      difficulties: Array.from({ length: 6 }, (_, index) => ({
+        id: `difficulty-${index + 1}`,
+        order: index + 1,
+        name: entity(`difficulty.${index + 1}`, `难度 ${index + 1}`),
+        modifiers: []
+      })),
+      phases: Array.from({ length: 3 }, (_, index) => ({
+        phase: index + 1,
+        encounterId: `encounter-${index + 1}`,
+        boss: enemy,
+        phaseModifiers: [],
+        bossModifiers: []
+      }))
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects Theater metadata missing vigor coverage', () => {
+    const result = imaginariumTheaterScenarioSchema.safeParse({
+      mode: 'imaginarium-theater',
+      id: 'theater.missing-provenance',
+      meta: metaWithPaths([
+        'meta.effectiveRange',
+        'scenario.eligibility',
+        'scenario.cast',
+        'scenario.nodes'
+      ]),
+      eligibility: { elements: ['pyro'], minimumLevel: 70, requiredHeadcount: 10 },
+      pools: { opening: [], trial: [], specialGuest: [], support: [] },
+      vigor: { initial: 2, max: 4, actCosts: [] },
+      acts: [
+        {
+          act: 1,
+          encounters: [],
+          pathNotes: []
+        }
+      ]
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a valid path that belongs to a different mode', () => {
+    const result = spiralAbyssScenarioSchema.safeParse({
+      ...spiralPayload,
+      meta: metaWithPaths([
+        'meta.effectiveRange',
+        'scenario.floors',
+        'scenario.blessing',
+        'scenario.phases'
+      ])
+    });
+
+    expect(result.success).toBe(false);
+  });
+});
+
 describe('scenario v2 mode schemas', () => {
+  it('rejects an Abyss scenario whose required blessing subtree is absent', () => {
+    const withoutBlessing: Record<string, unknown> = { ...spiralPayload };
+    delete withoutBlessing.blessing;
+
+    expect(spiralAbyssScenarioSchema.safeParse(withoutBlessing).success).toBe(false);
+  });
+
   it('accepts arbitrary configured Spiral Abyss floors with halves and waves', () => {
     const result = spiralAbyssScenarioSchema.safeParse({
       mode: 'spiral-abyss',
       id: 'abyss.2026-07',
       meta,
+      blessing: { id: 'blessing.current', description: '本期渊月祝福' },
       floors: [
         {
           floor: 13,
@@ -358,7 +539,7 @@ describe('scenario v2 mode schemas', () => {
     const result = stygianOnslaughtScenarioSchema.safeParse({
       mode: 'stygian-onslaught',
       id: 'stygian.2026-07',
-      meta,
+      meta: stygianMeta,
       crossPartyReusePolicy: {
         rule: 'limited',
         maxPartyAppearancesPerCharacter: 2,
@@ -372,6 +553,7 @@ describe('scenario v2 mode schemas', () => {
       })),
       phases: Array.from({ length: 3 }, (_, index) => ({
         phase: index + 1,
+        encounterId: `encounter-${index + 1}`,
         boss: {
           enemy: entity(`boss.${index + 1}`, `首领 ${index + 1}`),
           level: 110,
@@ -391,7 +573,7 @@ describe('scenario v2 mode schemas', () => {
     const result = imaginariumTheaterScenarioSchema.safeParse({
       mode: 'imaginarium-theater',
       id: 'theater.2026-07',
-      meta,
+      meta: theaterMeta,
       eligibility: {
         elements: ['pyro', 'hydro', 'anemo'],
         minimumLevel: 70,
@@ -427,7 +609,7 @@ describe('scenario v2 mode schemas', () => {
     const invalid = {
       mode: 'stygian-onslaught',
       id: 'stygian.invalid',
-      meta,
+      meta: stygianMeta,
       crossPartyReusePolicy: { rule: 'forbidden' },
       difficulties: Array.from({ length: 6 }, (_, index) => ({
         id: `difficulty-${index + 1}`,
@@ -438,12 +620,14 @@ describe('scenario v2 mode schemas', () => {
       phases: [
         {
           phase: 1,
+          encounterId: 'encounter-1',
           boss: enemy,
           phaseModifiers: [],
           bossModifiers: []
         },
         {
           phase: 2,
+          encounterId: 'encounter-2',
           boss: enemy,
           phaseModifiers: [],
           bossModifiers: []
@@ -458,7 +642,7 @@ describe('scenario v2 mode schemas', () => {
     const invalid = {
       mode: 'imaginarium-theater',
       id: 'theater.invalid',
-      meta,
+      meta: theaterMeta,
       eligibility: { elements: ['pyro'], minimumLevel: 70, requiredHeadcount: 10 },
       pools: { opening: [], trial: [], specialGuest: [], support: [] },
       vigor: { initial: 2, max: 4, actCosts: [] },
@@ -477,6 +661,7 @@ describe('scenario v2 mode schemas', () => {
         effectiveFrom: '2026-08-01T00:00:00.000Z',
         effectiveTo: '2026-07-01T00:00:00.000Z'
       },
+      blessing: { id: 'blessing.current', description: '本期渊月祝福' },
       floors: []
     });
 
@@ -667,6 +852,27 @@ describe('scenario and plan identity collections', () => {
     expect(result.success).toBe(false);
   });
 
+  it('rejects duplicate wave IDs within an Abyss half', () => {
+    const duplicateWave = wave('duplicate-wave');
+    const result = spiralAbyssScenarioSchema.safeParse({
+      ...spiralPayload,
+      floors: [
+        {
+          floor: 12,
+          chambers: [
+            {
+              chamber: 1,
+              firstHalf: { waves: [duplicateWave, duplicateWave] },
+              secondHalf: { waves: [wave('unique-wave')] }
+            }
+          ]
+        }
+      ]
+    });
+
+    expect(result.success).toBe(false);
+  });
+
   it('rejects duplicate floor and chamber coordinates in an Abyss plan', () => {
     const chamberPlan = {
       floor: 12,
@@ -689,7 +895,7 @@ describe('scenario and plan identity collections', () => {
     const result = stygianOnslaughtScenarioSchema.safeParse({
       mode: 'stygian-onslaught',
       id: 'stygian.duplicate-difficulty-id',
-      meta,
+      meta: stygianMeta,
       crossPartyReusePolicy: { rule: 'forbidden' },
       difficulties: Array.from({ length: 6 }, (_, index) => ({
         id: index < 2 ? 'duplicate' : `difficulty-${index + 1}`,
@@ -699,6 +905,7 @@ describe('scenario and plan identity collections', () => {
       })),
       phases: Array.from({ length: 3 }, (_, index) => ({
         phase: index + 1,
+        encounterId: `encounter-${index + 1}`,
         boss: enemy,
         phaseModifiers: [],
         bossModifiers: []
@@ -712,7 +919,7 @@ describe('scenario and plan identity collections', () => {
     const result = stygianOnslaughtScenarioSchema.safeParse({
       mode: 'stygian-onslaught',
       id: 'stygian.duplicate-phase',
-      meta,
+      meta: stygianMeta,
       crossPartyReusePolicy: { rule: 'forbidden' },
       difficulties: Array.from({ length: 6 }, (_, index) => ({
         id: `difficulty-${index + 1}`,
@@ -720,12 +927,61 @@ describe('scenario and plan identity collections', () => {
         name: entity(`difficulty.${index + 1}`, `难度 ${index + 1}`),
         modifiers: []
       })),
-      phases: [1, 1, 2].map((phase) => ({
+      phases: [1, 1, 2].map((phase, index) => ({
         phase,
+        encounterId: `encounter-${index + 1}`,
         boss: enemy,
         phaseModifiers: [],
         bossModifiers: []
       }))
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects duplicate Stygian encounter IDs', () => {
+    const result = stygianOnslaughtScenarioSchema.safeParse({
+      ...stygianPayload,
+      phases: stygianPayload.phases.map((phase) => ({
+        ...phase,
+        encounterId: 'duplicate-encounter'
+      }))
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects duplicate modifier IDs within a Stygian phase modifier collection', () => {
+    const modifier = { id: 'duplicate-phase-rule', description: '重复阶段规则' };
+    const result = stygianOnslaughtScenarioSchema.safeParse({
+      ...stygianPayload,
+      phases: stygianPayload.phases.map((phase, index) =>
+        index === 0 ? { ...phase, phaseModifiers: [modifier, modifier] } : phase
+      )
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects duplicate modifier IDs within a Stygian boss modifier collection', () => {
+    const modifier = { id: 'duplicate-boss-rule', description: '重复首领规则' };
+    const result = stygianOnslaughtScenarioSchema.safeParse({
+      ...stygianPayload,
+      phases: stygianPayload.phases.map((phase, index) =>
+        index === 0 ? { ...phase, bossModifiers: [modifier, modifier] } : phase
+      )
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects duplicate modifier IDs within a Stygian difficulty modifier collection', () => {
+    const modifier = { id: 'duplicate-difficulty-rule', description: '重复难度规则' };
+    const result = stygianOnslaughtScenarioSchema.safeParse({
+      ...stygianPayload,
+      difficulties: stygianPayload.difficulties.map((difficulty, index) =>
+        index === 0 ? { ...difficulty, modifiers: [modifier, modifier] } : difficulty
+      )
     });
 
     expect(result.success).toBe(false);
@@ -740,7 +996,7 @@ describe('scenario and plan identity collections', () => {
     const result = imaginariumTheaterScenarioSchema.safeParse({
       mode: 'imaginarium-theater',
       id: 'theater.duplicate-acts',
-      meta,
+      meta: theaterMeta,
       eligibility: { elements: ['pyro'], minimumLevel: 70, requiredHeadcount: 10 },
       pools: { opening: [], trial: [], specialGuest: [], support: [] },
       vigor: { initial: 2, max: 4, actCosts: [] },
@@ -759,7 +1015,7 @@ describe('scenario and plan identity collections', () => {
     const result = imaginariumTheaterScenarioSchema.safeParse({
       mode: 'imaginarium-theater',
       id: 'theater.duplicate-arcana',
-      meta,
+      meta: theaterMeta,
       eligibility: { elements: ['pyro'], minimumLevel: 70, requiredHeadcount: 10 },
       pools: { opening: [], trial: [], specialGuest: [], support: [] },
       vigor: { initial: 2, max: 4, actCosts: [] },
@@ -771,6 +1027,46 @@ describe('scenario and plan identity collections', () => {
         }
       ],
       arcanaNodes: [arcana, arcana]
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects duplicate Theater vigor act-cost IDs', () => {
+    const cost = { act: 1, cost: 1 };
+    const result = imaginariumTheaterScenarioSchema.safeParse({
+      ...theaterPayload,
+      vigor: { ...theaterPayload.vigor, actCosts: [cost, cost] }
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects duplicate Theater vigor node-cost IDs', () => {
+    const cost = { nodeId: 'arcana-1', cost: 1 };
+    const result = imaginariumTheaterScenarioSchema.safeParse({
+      ...theaterPayload,
+      vigor: { ...theaterPayload.vigor, nodeCosts: [cost, cost] }
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects duplicate character IDs within a Theater cast pool', () => {
+    const duplicate = entity('character.duplicate', '重复角色');
+    const result = imaginariumTheaterScenarioSchema.safeParse({
+      ...theaterPayload,
+      pools: { ...theaterPayload.pools, opening: [duplicate, duplicate] }
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects duplicate encounter IDs within a Theater act', () => {
+    const encounter = { id: 'duplicate-encounter', waves: [wave('unique-wave')] };
+    const result = imaginariumTheaterScenarioSchema.safeParse({
+      ...theaterPayload,
+      acts: [{ act: 1, encounters: [encounter, encounter], pathNotes: [] }]
     });
 
     expect(result.success).toBe(false);
@@ -811,6 +1107,79 @@ describe('scenario and plan identity collections', () => {
         supportCharacterIds: []
       },
       acts: [act, act]
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects duplicate candidate character IDs in a Theater plan act', () => {
+    const result = theaterPlanSchema.safeParse({
+      mode: 'imaginarium-theater',
+      ...commonPlan,
+      cast: {
+        openingCharacterIds: ['a'],
+        selectedCharacterIds: ['a'],
+        trialCharacterIds: [],
+        specialGuestCharacterIds: [],
+        supportCharacterIds: []
+      },
+      acts: [
+        {
+          act: 1,
+          candidateCharacterIds: ['a', 'a'],
+          plannedVigorSpend: [],
+          pathChoice: { kind: 'fixed', note: '按固定路线推进' }
+        }
+      ]
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects duplicate planned vigor-spend character IDs in a Theater plan act', () => {
+    const spend = { characterId: 'a', cost: 1 };
+    const result = theaterPlanSchema.safeParse({
+      mode: 'imaginarium-theater',
+      ...commonPlan,
+      cast: {
+        openingCharacterIds: ['a'],
+        selectedCharacterIds: ['a'],
+        trialCharacterIds: [],
+        specialGuestCharacterIds: [],
+        supportCharacterIds: []
+      },
+      acts: [
+        {
+          act: 1,
+          candidateCharacterIds: ['a'],
+          plannedVigorSpend: [spend, spend],
+          pathChoice: { kind: 'fixed', note: '按固定路线推进' }
+        }
+      ]
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects duplicate character IDs within a Theater plan cast collection', () => {
+    const result = theaterPlanSchema.safeParse({
+      mode: 'imaginarium-theater',
+      ...commonPlan,
+      cast: {
+        openingCharacterIds: ['a'],
+        selectedCharacterIds: ['a', 'a'],
+        trialCharacterIds: [],
+        specialGuestCharacterIds: [],
+        supportCharacterIds: []
+      },
+      acts: [
+        {
+          act: 1,
+          candidateCharacterIds: ['a'],
+          plannedVigorSpend: [],
+          pathChoice: { kind: 'fixed', note: '按固定路线推进' }
+        }
+      ]
     });
 
     expect(result.success).toBe(false);
@@ -886,6 +1255,65 @@ describe('structured player intervention', () => {
         lowInvestment: 'medium',
         noBuildChange: true
       }
+    });
+
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('recursive external payload strictness', () => {
+  it('rejects an unknown key nested inside scenario mechanics', () => {
+    const result = spiralAbyssScenarioSchema.safeParse({
+      ...spiralPayload,
+      floors: [
+        {
+          floor: 12,
+          chambers: [
+            {
+              chamber: 1,
+              firstHalf: {
+                waves: [
+                  {
+                    id: 'strict-wave-a',
+                    enemies: [
+                      {
+                        ...enemy,
+                        mechanics: { ...enemy.mechanics, producerDrift: true }
+                      }
+                    ]
+                  }
+                ]
+              },
+              secondHalf: { waves: [wave('strict-wave-b')] }
+            }
+          ]
+        }
+      ]
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects an unknown key nested inside a recommendation plan cast', () => {
+    const result = theaterPlanSchema.safeParse({
+      mode: 'imaginarium-theater',
+      ...commonPlan,
+      cast: {
+        openingCharacterIds: ['a'],
+        selectedCharacterIds: ['a'],
+        trialCharacterIds: [],
+        specialGuestCharacterIds: [],
+        supportCharacterIds: [],
+        producerDrift: true
+      },
+      acts: [
+        {
+          act: 1,
+          candidateCharacterIds: ['a'],
+          plannedVigorSpend: [],
+          pathChoice: { kind: 'fixed', note: '按固定路线推进' }
+        }
+      ]
     });
 
     expect(result.success).toBe(false);

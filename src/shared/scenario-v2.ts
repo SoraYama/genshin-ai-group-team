@@ -23,16 +23,19 @@ const sourceReferenceBaseShape = {
   retrievedAt: isoDateTimeSchema
 };
 
-const standardSourceReferenceSchema = z
+const publishedStandardSourceReferenceSchema = z
   .object({
     ...sourceReferenceBaseShape,
-    source: z.enum([
-      'official-announcement',
-      'battle-chronicle',
-      'genshin-db',
-      'enka-profile',
-      'development-cross-check'
-    ]),
+    source: z.enum(['official-announcement', 'genshin-db']),
+    url: z.url().optional(),
+    attribution: z.string().trim().min(1).optional()
+  })
+  .strict();
+
+export const internalSourceReferenceSchema = z
+  .object({
+    ...sourceReferenceBaseShape,
+    source: z.enum(['battle-chronicle', 'enka-profile', 'development-cross-check']),
     url: z.url().optional(),
     attribution: z.string().trim().min(1).optional()
   })
@@ -59,14 +62,41 @@ export const communityWikiSourceReferenceSchema = z
   })
   .strict();
 
-export const sourceReferenceSchema = z.discriminatedUnion('source', [
-  standardSourceReferenceSchema,
+export const publishedSourceReferenceSchema = z.discriminatedUnion('source', [
+  publishedStandardSourceReferenceSchema,
   communityWikiSourceReferenceSchema
+]);
+
+export const sourceReferenceSchema = z.discriminatedUnion('source', [
+  publishedStandardSourceReferenceSchema,
+  communityWikiSourceReferenceSchema,
+  internalSourceReferenceSchema
+]);
+
+export const publishedScenarioFieldPathSchema = z.enum([
+  'meta.effectiveRange',
+  'scenario.floors',
+  'scenario.blessing',
+  'scenario.phases',
+  'scenario.difficulties',
+  'scenario.reusePolicy',
+  'scenario.eligibility',
+  'scenario.cast',
+  'scenario.nodes',
+  'scenario.vigor'
 ]);
 
 export const fieldProvenanceSchema = z
   .object({
     fieldPath: z.string().trim().min(1),
+    sourceRefId: nonEmptyIdSchema,
+    note: z.string().trim().min(1).optional()
+  })
+  .strict();
+
+export const publishedFieldProvenanceSchema = z
+  .object({
+    fieldPath: publishedScenarioFieldPathSchema,
     sourceRefId: nonEmptyIdSchema,
     note: z.string().trim().min(1).optional()
   })
@@ -93,6 +123,32 @@ export const provenanceSchema = z
           code: 'custom',
           message: `Unknown source reference: ${sourceRefId}`,
           path: ['fields', index, 'sourceRefId']
+        });
+      }
+    });
+  });
+
+export const internalReviewEvidenceSchema = z
+  .object({
+    sourceRefs: z.array(internalSourceReferenceSchema).min(1),
+    fieldProvenance: z.array(fieldProvenanceSchema).min(1)
+  })
+  .strict()
+  .superRefine(({ sourceRefs, fieldProvenance }, context) => {
+    const sourceRefIds = new Set(sourceRefs.map(({ id }) => id));
+    if (sourceRefIds.size !== sourceRefs.length) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Internal source reference IDs must be unique',
+        path: ['sourceRefs']
+      });
+    }
+    fieldProvenance.forEach(({ sourceRefId }, index) => {
+      if (!sourceRefIds.has(sourceRefId)) {
+        context.addIssue({
+          code: 'custom',
+          message: `Unknown internal source reference: ${sourceRefId}`,
+          path: ['fieldProvenance', index, 'sourceRefId']
         });
       }
     });
@@ -129,8 +185,8 @@ export const versionedMetaSchema = z
     dataVersion: z.string().trim().min(1),
     effectiveFrom: isoDateTimeSchema,
     effectiveTo: isoDateTimeSchema.optional(),
-    sourceRefs: z.array(sourceReferenceSchema).min(1),
-    fieldProvenance: z.array(fieldProvenanceSchema).min(1),
+    sourceRefs: z.array(publishedSourceReferenceSchema).min(1),
+    fieldProvenance: z.array(publishedFieldProvenanceSchema).min(1),
     reviewedAt: isoDateTimeSchema,
     reviewedBy: z.string().trim().min(1)
   })
@@ -188,12 +244,61 @@ export const versionedMetaSchema = z
     });
   });
 
-export const localizedEntityReferenceSchema = z.object({
-  id: nonEmptyIdSchema,
-  names: z
-    .record(z.string().trim().min(1), z.string().trim().min(1))
-    .refine((names) => Object.keys(names).length > 0, 'At least one localized name is required')
-});
+const requiredFieldPathsByMode = {
+  'spiral-abyss': ['meta.effectiveRange', 'scenario.floors', 'scenario.blessing'],
+  'stygian-onslaught': [
+    'meta.effectiveRange',
+    'scenario.phases',
+    'scenario.difficulties',
+    'scenario.reusePolicy'
+  ],
+  'imaginarium-theater': [
+    'meta.effectiveRange',
+    'scenario.eligibility',
+    'scenario.cast',
+    'scenario.nodes',
+    'scenario.vigor'
+  ]
+} as const;
+
+function validateModeFieldCoverage(
+  mode: keyof typeof requiredFieldPathsByMode,
+  fieldProvenance: z.infer<typeof publishedFieldProvenanceSchema>[],
+  context: z.RefinementCtx
+): void {
+  const requiredPaths = requiredFieldPathsByMode[mode];
+  const requiredPathSet = new Set<string>(requiredPaths);
+  const actualPaths = new Set(fieldProvenance.map(({ fieldPath }) => fieldPath));
+
+  fieldProvenance.forEach(({ fieldPath }, index) => {
+    if (!requiredPathSet.has(fieldPath)) {
+      context.addIssue({
+        code: 'custom',
+        message: `Field path does not belong to ${mode}: ${fieldPath}`,
+        path: ['meta', 'fieldProvenance', index, 'fieldPath']
+      });
+    }
+  });
+
+  requiredPaths.forEach((fieldPath) => {
+    if (!actualPaths.has(fieldPath)) {
+      context.addIssue({
+        code: 'custom',
+        message: `Missing required provenance path for ${mode}: ${fieldPath}`,
+        path: ['meta', 'fieldProvenance']
+      });
+    }
+  });
+}
+
+export const localizedEntityReferenceSchema = z
+  .object({
+    id: nonEmptyIdSchema,
+    names: z
+      .record(z.string().trim().min(1), z.string().trim().min(1))
+      .refine((names) => Object.keys(names).length > 0, 'At least one localized name is required')
+  })
+  .strict();
 
 export const elementalTypeSchema = z.enum([
   'anemo',
@@ -205,68 +310,97 @@ export const elementalTypeSchema = z.enum([
   'cryo'
 ]);
 
-export const shieldSchema = z.object({
-  element: elementalTypeSchema.or(z.literal('untyped')),
-  strength: z.number().nonnegative().optional()
-});
+export const shieldSchema = z
+  .object({
+    element: elementalTypeSchema.or(z.literal('untyped')),
+    strength: z.number().nonnegative().optional()
+  })
+  .strict();
 
-export const resistanceSchema = z.object({
-  damageType: z.string().trim().min(1),
-  percent: z.number().min(-100).max(1000)
-});
+export const resistanceSchema = z
+  .object({
+    damageType: z.string().trim().min(1),
+    percent: z.number().min(-100).max(1000)
+  })
+  .strict();
 
-export const enemyMechanicsSchema = z.object({
-  shields: z.array(shieldSchema).default([]),
-  resistances: z.array(resistanceSchema).default([]),
-  immunities: z.array(z.string().trim().min(1)).default([]),
-  tags: z.array(z.string().trim().min(1)).default([])
-});
+export const enemyMechanicsSchema = z
+  .object({
+    shields: z.array(shieldSchema).default([]),
+    resistances: z.array(resistanceSchema).default([]),
+    immunities: z.array(z.string().trim().min(1)).default([]),
+    tags: z.array(z.string().trim().min(1)).default([])
+  })
+  .strict();
 
-export const enemyInstanceSchema = z.object({
-  enemy: localizedEntityReferenceSchema,
-  level: z.number().int().positive(),
-  count: z.number().int().positive(),
-  mechanics: enemyMechanicsSchema
-});
+export const enemyInstanceSchema = z
+  .object({
+    enemy: localizedEntityReferenceSchema,
+    level: z.number().int().positive(),
+    count: z.number().int().positive(),
+    mechanics: enemyMechanicsSchema
+  })
+  .strict();
 
-export const enemyWaveSchema = z.object({
-  id: nonEmptyIdSchema,
-  enemies: z.array(enemyInstanceSchema).min(1),
-  spawnCondition: z.string().trim().min(1).optional()
-});
+export const enemyWaveSchema = z
+  .object({
+    id: nonEmptyIdSchema,
+    enemies: z.array(enemyInstanceSchema).min(1),
+    spawnCondition: z.string().trim().min(1).optional()
+  })
+  .strict();
 
-export const combatHalfSchema = z.object({
-  waves: z.array(enemyWaveSchema).min(1)
-});
+const enemyWavesSchema = z
+  .array(enemyWaveSchema)
+  .refine(
+    (waves) => new Set(waves.map(({ id }) => id)).size === waves.length,
+    'Wave IDs must be unique within an encounter'
+  );
 
-const modifierSchema = z.object({
-  id: nonEmptyIdSchema,
-  description: z.string().trim().min(1)
-});
+export const combatHalfSchema = z.object({ waves: enemyWavesSchema.min(1) }).strict();
 
-const spiralChamberSchema = z.object({
-  chamber: z.number().int().positive(),
-  firstHalf: combatHalfSchema,
-  secondHalf: combatHalfSchema,
-  targetSeconds: z.number().int().positive().optional()
-});
+const modifierSchema = z
+  .object({
+    id: nonEmptyIdSchema,
+    description: z.string().trim().min(1)
+  })
+  .strict();
 
-const spiralFloorSchema = z.object({
-  floor: z.number().int().positive(),
-  chambers: z
-    .array(spiralChamberSchema)
-    .min(1)
-    .refine(
-      (chambers) => new Set(chambers.map(({ chamber }) => chamber)).size === chambers.length,
-      'Chamber numbers must be unique within a floor'
-    )
-});
+const modifiersSchema = z
+  .array(modifierSchema)
+  .refine(
+    (modifiers) => new Set(modifiers.map(({ id }) => id)).size === modifiers.length,
+    'Modifier IDs must be unique within a modifier collection'
+  );
+
+const spiralChamberSchema = z
+  .object({
+    chamber: z.number().int().positive(),
+    firstHalf: combatHalfSchema,
+    secondHalf: combatHalfSchema,
+    targetSeconds: z.number().int().positive().optional()
+  })
+  .strict();
+
+const spiralFloorSchema = z
+  .object({
+    floor: z.number().int().positive(),
+    chambers: z
+      .array(spiralChamberSchema)
+      .min(1)
+      .refine(
+        (chambers) => new Set(chambers.map(({ chamber }) => chamber)).size === chambers.length,
+        'Chamber numbers must be unique within a floor'
+      )
+  })
+  .strict();
 
 export const spiralAbyssScenarioSchema = z
   .object({
     mode: z.literal('spiral-abyss'),
     id: nonEmptyIdSchema,
     meta: versionedMetaSchema,
+    blessing: modifierSchema,
     floors: z
       .array(spiralFloorSchema)
       .min(1)
@@ -275,37 +409,51 @@ export const spiralAbyssScenarioSchema = z
         'Abyss floor numbers must be unique'
       )
   })
-  .strict();
+  .strict()
+  .superRefine(({ meta }, context) => {
+    validateModeFieldCoverage('spiral-abyss', meta.fieldProvenance, context);
+  });
 
 export const crossPartyReusePolicySchema = z.discriminatedUnion('rule', [
-  z.object({
-    rule: z.literal('forbidden'),
-    notes: z.array(z.string().trim().min(1)).default([])
-  }),
-  z.object({
-    rule: z.literal('allowed'),
-    notes: z.array(z.string().trim().min(1)).default([])
-  }),
-  z.object({
-    rule: z.literal('limited'),
-    maxPartyAppearancesPerCharacter: z.number().int().min(1).max(3),
-    notes: z.array(z.string().trim().min(1)).default([])
-  })
+  z
+    .object({
+      rule: z.literal('forbidden'),
+      notes: z.array(z.string().trim().min(1)).default([])
+    })
+    .strict(),
+  z
+    .object({
+      rule: z.literal('allowed'),
+      notes: z.array(z.string().trim().min(1)).default([])
+    })
+    .strict(),
+  z
+    .object({
+      rule: z.literal('limited'),
+      maxPartyAppearancesPerCharacter: z.number().int().min(1).max(3),
+      notes: z.array(z.string().trim().min(1)).default([])
+    })
+    .strict()
 ]);
 
-const stygianDifficultySchema = z.object({
-  id: nonEmptyIdSchema,
-  order: z.number().int().min(1).max(6),
-  name: localizedEntityReferenceSchema,
-  modifiers: z.array(modifierSchema)
-});
+const stygianDifficultySchema = z
+  .object({
+    id: nonEmptyIdSchema,
+    order: z.number().int().min(1).max(6),
+    name: localizedEntityReferenceSchema,
+    modifiers: modifiersSchema
+  })
+  .strict();
 
-const stygianPhaseSchema = z.object({
-  phase: z.number().int().min(1).max(3),
-  boss: enemyInstanceSchema,
-  phaseModifiers: z.array(modifierSchema),
-  bossModifiers: z.array(modifierSchema)
-});
+const stygianPhaseSchema = z
+  .object({
+    phase: z.number().int().min(1).max(3),
+    encounterId: nonEmptyIdSchema,
+    boss: enemyInstanceSchema,
+    phaseModifiers: modifiersSchema,
+    bossModifiers: modifiersSchema
+  })
+  .strict();
 
 const stygianDifficultiesSchema = z
   .array(stygianDifficultySchema)
@@ -325,6 +473,10 @@ const stygianPhasesSchema = z
   .refine(
     (phases) => new Set(phases.map(({ phase }) => phase)).size === 3,
     'Phases must contain phase 1, 2, and 3 exactly once'
+  )
+  .refine(
+    (phases) => new Set(phases.map(({ encounterId }) => encounterId)).size === phases.length,
+    'Stygian encounter IDs must be unique'
   );
 
 export const stygianOnslaughtScenarioSchema = z
@@ -336,53 +488,105 @@ export const stygianOnslaughtScenarioSchema = z
     difficulties: stygianDifficultiesSchema,
     phases: stygianPhasesSchema
   })
-  .strict();
+  .strict()
+  .superRefine(({ meta }, context) => {
+    validateModeFieldCoverage('stygian-onslaught', meta.fieldProvenance, context);
+  });
 
 export const theaterPathNoteSchema = z.discriminatedUnion('kind', [
-  z.object({
-    kind: z.literal('conditional'),
-    text: z.string().trim().min(1),
-    condition: z.string().trim().min(1)
-  }),
-  z.object({
-    kind: z.literal('random'),
-    text: z.string().trim().min(1)
-  }),
-  z.object({
-    kind: z.literal('fixed'),
-    text: z.string().trim().min(1)
-  })
+  z
+    .object({
+      kind: z.literal('conditional'),
+      text: z.string().trim().min(1),
+      condition: z.string().trim().min(1)
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('random'),
+      text: z.string().trim().min(1)
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('fixed'),
+      text: z.string().trim().min(1)
+    })
+    .strict()
 ]);
 
-const theaterEncounterSchema = z.object({
-  id: nonEmptyIdSchema,
-  waves: z.array(enemyWaveSchema)
-});
+const theaterEncounterSchema = z
+  .object({
+    id: nonEmptyIdSchema,
+    waves: enemyWavesSchema
+  })
+  .strict();
 
-const theaterActSchema = z.object({
-  act: z.number().int().min(1).max(10),
-  encounters: z.array(theaterEncounterSchema),
-  pathNotes: z.array(theaterPathNoteSchema)
-});
+const theaterActSchema = z
+  .object({
+    act: z.number().int().min(1).max(10),
+    encounters: z
+      .array(theaterEncounterSchema)
+      .refine(
+        (encounters) => new Set(encounters.map(({ id }) => id)).size === encounters.length,
+        'Encounter IDs must be unique within a Theater act'
+      ),
+    pathNotes: z.array(theaterPathNoteSchema)
+  })
+  .strict();
 
-const theaterPoolsSchema = z.object({
-  opening: z.array(localizedEntityReferenceSchema),
-  trial: z.array(localizedEntityReferenceSchema),
-  specialGuest: z.array(localizedEntityReferenceSchema),
-  support: z.array(localizedEntityReferenceSchema)
-});
+const uniqueEntityReferencesSchema = z
+  .array(localizedEntityReferenceSchema)
+  .refine(
+    (entities) => new Set(entities.map(({ id }) => id)).size === entities.length,
+    'Entity IDs must be unique within a cast pool'
+  );
+
+const theaterPoolsSchema = z
+  .object({
+    opening: uniqueEntityReferencesSchema,
+    trial: uniqueEntityReferencesSchema,
+    specialGuest: uniqueEntityReferencesSchema,
+    support: uniqueEntityReferencesSchema
+  })
+  .strict();
+
+const vigorActCostsSchema = z
+  .array(
+    z
+      .object({
+        act: z.number().int().min(1).max(10),
+        cost: z.number().int().nonnegative()
+      })
+      .strict()
+  )
+  .refine(
+    (costs) => new Set(costs.map(({ act }) => act)).size === costs.length,
+    'Vigor act-cost act IDs must be unique'
+  );
+
+const vigorNodeCostsSchema = z
+  .array(
+    z
+      .object({
+        nodeId: nonEmptyIdSchema,
+        cost: z.number().int().nonnegative()
+      })
+      .strict()
+  )
+  .refine(
+    (costs) => new Set(costs.map(({ nodeId }) => nodeId)).size === costs.length,
+    'Vigor node-cost node IDs must be unique'
+  );
 
 const vigorSchema = z
   .object({
     initial: z.number().int().nonnegative(),
     max: z.number().int().positive(),
-    actCosts: z.array(
-      z.object({
-        act: z.number().int().min(1).max(10),
-        cost: z.number().int().nonnegative()
-      })
-    )
+    actCosts: vigorActCostsSchema,
+    nodeCosts: vigorNodeCostsSchema.default([])
   })
+  .strict()
   .refine(({ initial, max }) => initial <= max, {
     message: 'Initial vigor cannot exceed maximum vigor',
     path: ['initial']
@@ -393,11 +597,13 @@ export const imaginariumTheaterScenarioSchema = z
     mode: z.literal('imaginarium-theater'),
     id: nonEmptyIdSchema,
     meta: versionedMetaSchema,
-    eligibility: z.object({
-      elements: z.array(elementalTypeSchema).min(1),
-      minimumLevel: z.number().int().positive(),
-      requiredHeadcount: z.number().int().positive()
-    }),
+    eligibility: z
+      .object({
+        elements: z.array(elementalTypeSchema).min(1),
+        minimumLevel: z.number().int().positive(),
+        requiredHeadcount: z.number().int().positive()
+      })
+      .strict(),
     pools: theaterPoolsSchema,
     vigor: vigorSchema,
     acts: z
@@ -410,12 +616,14 @@ export const imaginariumTheaterScenarioSchema = z
       ),
     arcanaNodes: z
       .array(
-        z.object({
-          id: nonEmptyIdSchema,
-          name: localizedEntityReferenceSchema,
-          description: z.string().trim().min(1),
-          pathNotes: z.array(theaterPathNoteSchema).default([])
-        })
+        z
+          .object({
+            id: nonEmptyIdSchema,
+            name: localizedEntityReferenceSchema,
+            description: z.string().trim().min(1),
+            pathNotes: z.array(theaterPathNoteSchema).default([])
+          })
+          .strict()
       )
       .refine(
         (nodes) => new Set(nodes.map(({ id }) => id)).size === nodes.length,
@@ -423,7 +631,10 @@ export const imaginariumTheaterScenarioSchema = z
       )
       .optional()
   })
-  .strict();
+  .strict()
+  .superRefine(({ meta }, context) => {
+    validateModeFieldCoverage('imaginarium-theater', meta.fieldProvenance, context);
+  });
 
 export const scenarioV2Schema = z.discriminatedUnion('mode', [
   spiralAbyssScenarioSchema,
@@ -466,20 +677,26 @@ export const playerPreferencesSchema = z
   .strict();
 
 export const recommendationTargetSchema = z.discriminatedUnion('mode', [
-  z.object({
-    mode: z.literal('spiral-abyss'),
-    floor: z.number().int().positive(),
-    chamber: z.number().int().positive().optional()
-  }),
-  z.object({
-    mode: z.literal('stygian-onslaught'),
-    difficultyId: nonEmptyIdSchema,
-    phase: z.number().int().min(1).max(3).optional()
-  }),
-  z.object({
-    mode: z.literal('imaginarium-theater'),
-    act: z.number().int().min(1).max(10).optional()
-  })
+  z
+    .object({
+      mode: z.literal('spiral-abyss'),
+      floor: z.number().int().positive(),
+      chamber: z.number().int().positive().optional()
+    })
+    .strict(),
+  z
+    .object({
+      mode: z.literal('stygian-onslaught'),
+      difficultyId: nonEmptyIdSchema,
+      phase: z.number().int().min(1).max(3).optional()
+    })
+    .strict(),
+  z
+    .object({
+      mode: z.literal('imaginarium-theater'),
+      act: z.number().int().min(1).max(10).optional()
+    })
+    .strict()
 ]);
 
 export const playerInterventionSchema = z
@@ -585,10 +802,12 @@ export const stygianPlanSchema = z
     reusePolicyAcknowledgement: z.enum(['forbidden', 'allowed', 'limited']),
     phases: z
       .array(
-        z.object({
-          phase: z.number().int().min(1).max(3),
-          team: teamAssignmentSchema
-        })
+        z
+          .object({
+            phase: z.number().int().min(1).max(3),
+            team: teamAssignmentSchema
+          })
+          .strict()
       )
       .length(3)
       .refine(
@@ -599,35 +818,57 @@ export const stygianPlanSchema = z
   .strict();
 
 const theaterPlanPathChoiceSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('fixed'), note: z.string().trim().min(1) }),
-  z.object({ kind: z.literal('conditional'), note: z.string().trim().min(1) }),
-  z.object({ kind: z.literal('random'), note: z.string().trim().min(1) })
+  z.object({ kind: z.literal('fixed'), note: z.string().trim().min(1) }).strict(),
+  z.object({ kind: z.literal('conditional'), note: z.string().trim().min(1) }).strict(),
+  z.object({ kind: z.literal('random'), note: z.string().trim().min(1) }).strict()
 ]);
+
+const uniqueCharacterIdsSchema = z
+  .array(nonEmptyIdSchema)
+  .refine((ids) => new Set(ids).size === ids.length, 'Character IDs must be unique');
+
+const nonEmptyUniqueCharacterIdsSchema = z
+  .array(nonEmptyIdSchema)
+  .min(1)
+  .refine((ids) => new Set(ids).size === ids.length, 'Character IDs must be unique');
+
+const plannedVigorSpendSchema = z
+  .array(
+    z
+      .object({
+        characterId: nonEmptyIdSchema,
+        cost: z.number().int().nonnegative()
+      })
+      .strict()
+  )
+  .refine(
+    (spends) => new Set(spends.map(({ characterId }) => characterId)).size === spends.length,
+    'Planned vigor-spend character IDs must be unique within an act'
+  );
 
 export const theaterPlanSchema = z
   .object({
     mode: z.literal('imaginarium-theater'),
     ...planCommonShape,
-    cast: z.object({
-      openingCharacterIds: z.array(nonEmptyIdSchema),
-      selectedCharacterIds: z.array(nonEmptyIdSchema).min(1),
-      trialCharacterIds: z.array(nonEmptyIdSchema),
-      specialGuestCharacterIds: z.array(nonEmptyIdSchema),
-      supportCharacterIds: z.array(nonEmptyIdSchema)
-    }),
+    cast: z
+      .object({
+        openingCharacterIds: uniqueCharacterIdsSchema,
+        selectedCharacterIds: nonEmptyUniqueCharacterIdsSchema,
+        trialCharacterIds: uniqueCharacterIdsSchema,
+        specialGuestCharacterIds: uniqueCharacterIdsSchema,
+        supportCharacterIds: uniqueCharacterIdsSchema
+      })
+      .strict(),
     acts: z
       .array(
-        z.object({
-          act: z.number().int().min(1).max(10),
-          candidateCharacterIds: z.array(nonEmptyIdSchema).min(1),
-          plannedVigorSpend: z.array(
-            z.object({
-              characterId: nonEmptyIdSchema,
-              cost: z.number().int().nonnegative()
-            })
-          ),
-          pathChoice: theaterPlanPathChoiceSchema
-        })
+        z
+          .object({
+            act: z.number().int().min(1).max(10),
+            candidateCharacterIds: nonEmptyUniqueCharacterIdsSchema,
+            plannedVigorSpend: plannedVigorSpendSchema,
+            pathChoice: theaterPlanPathChoiceSchema
+          })
+          .strict()
       )
       .min(1)
       .max(10)
@@ -649,9 +890,14 @@ export const scenarioSchema = scenarioV2Schema;
 export type DataSourceKind = z.infer<typeof dataSourceKindSchema>;
 export type ScenarioPublicationSourceKind = z.infer<typeof scenarioPublicationSourceKindSchema>;
 export type CommunityWikiLicense = z.infer<typeof communityWikiLicenseSchema>;
+export type PublishedSourceReference = z.infer<typeof publishedSourceReferenceSchema>;
+export type InternalSourceReference = z.infer<typeof internalSourceReferenceSchema>;
 export type SourceReference = z.infer<typeof sourceReferenceSchema>;
 export type FieldProvenanceV2 = z.infer<typeof fieldProvenanceSchema>;
+export type PublishedScenarioFieldPath = z.infer<typeof publishedScenarioFieldPathSchema>;
+export type PublishedFieldProvenance = z.infer<typeof publishedFieldProvenanceSchema>;
 export type Provenance = z.infer<typeof provenanceSchema>;
+export type InternalReviewEvidence = z.infer<typeof internalReviewEvidenceSchema>;
 export type PublicationIntegrity = z.infer<typeof publicationIntegritySchema>;
 export type VersionedMeta = z.infer<typeof versionedMetaSchema>;
 export type LocalizedEntityReference = z.infer<typeof localizedEntityReferenceSchema>;
