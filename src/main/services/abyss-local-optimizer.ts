@@ -38,6 +38,9 @@ const ELEMENTS: Record<string, string> = {
 // C(16, 4) = 1,820 candidates per half. This hard ceiling keeps the synchronous
 // fallback below a predictable main-process budget even for very large rosters.
 const MAX_JOINT_POOL_SIZE = 16;
+// Recommendation runs synchronously in Electron's main process. Complex but valid scenario data
+// must fail closed before it can monopolize the event loop.
+const MAX_FEASIBILITY_STATES = 12_000;
 
 export function buildLocalAbyssPlan({
   input,
@@ -504,6 +507,7 @@ function findFeasibleTeam(
   knowledge?: CharacterKnowledgeReader
 ): CharacterProfile[] | undefined {
   const constraints = hardConstraintsFor(enemies, knowledge);
+  if (!canCoverWithinFour(characters, constraints)) return undefined;
   const fullCoverage = fullMask(constraints.length);
   const lockBits = bitIndex(lockedIds);
   const fullLocks = fullMask(lockBits.size);
@@ -525,6 +529,7 @@ function findFeasibleTeam(
         score: state.score + scoreForHalf(character, enemies, input)
       };
       keepBestSingle(next, candidate);
+      if (next.size > MAX_FEASIBILITY_STATES) return undefined;
     }
     states = next;
   }
@@ -545,6 +550,12 @@ function findFeasibleJointSeed(
 ): Pick<JointAssignment, 'first' | 'second'> | undefined {
   const firstConstraints = hardConstraintsFor(firstEnemies, knowledge);
   const secondConstraints = hardConstraintsFor(secondEnemies, knowledge);
+  if (
+    !canCoverWithinFour(characters, firstConstraints) ||
+    !canCoverWithinFour(characters, secondConstraints)
+  ) {
+    return undefined;
+  }
   const fullFirst = fullMask(firstConstraints.length);
   const fullSecond = fullMask(secondConstraints.length);
   const lockBits = bitIndex(lockedIds);
@@ -579,6 +590,7 @@ function findFeasibleJointSeed(
           locked: state.locked | locked,
           score: state.score + scoreForHalf(character, firstEnemies, input)
         });
+        if (next.size > MAX_FEASIBILITY_STATES) return undefined;
       }
       if (state.second.length < 4) {
         keepBestJoint(next, {
@@ -589,6 +601,7 @@ function findFeasibleJointSeed(
           locked: state.locked | locked,
           score: state.score + scoreForHalf(character, secondEnemies, input)
         });
+        if (next.size > MAX_FEASIBILITY_STATES) return undefined;
       }
     }
     states = next;
@@ -665,6 +678,35 @@ function coverageMask(character: CharacterProfile, constraints: HardConstraint[]
       constraint.matches(character) ? mask | (1n << BigInt(index)) : mask,
     0n
   );
+}
+
+function canCoverWithinFour(
+  characters: CharacterProfile[],
+  constraints: HardConstraint[]
+): boolean {
+  const target = fullMask(constraints.length);
+  if (target === 0n) return true;
+  const reachable = Array.from({ length: 5 }, () => new Set<bigint>());
+  reachable[0]?.add(0n);
+  let stateCount = 1;
+  for (const character of characters) {
+    const mask = coverageMask(character, constraints);
+    for (let count = 4; count >= 1; count -= 1) {
+      const previous = reachable[count - 1];
+      const current = reachable[count];
+      if (!previous || !current) continue;
+      for (const coverage of previous) {
+        const combined = coverage | mask;
+        if (combined === target) return true;
+        if (!current.has(combined)) {
+          current.add(combined);
+          stateCount += 1;
+          if (stateCount > MAX_FEASIBILITY_STATES) return false;
+        }
+      }
+    }
+  }
+  return false;
 }
 
 function bitIndex(values: string[]): Map<string, number> {

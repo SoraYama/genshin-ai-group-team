@@ -432,6 +432,82 @@ describe('buildLocalAbyssPlan', () => {
     expect(expanded.status).toBe('planned');
   });
 
+  it('fails fast when more mutually exclusive hard requirements exist than four slots can cover', () => {
+    const scenario = abyssScenario();
+    const allRequirements = [
+      'healing',
+      'shield',
+      'grouping',
+      'off-field',
+      'on-field',
+      'onslaught',
+      'plunging',
+      'normal-attack',
+      'charged-attack',
+      'sword',
+      'claymore',
+      'polearm',
+      'bow',
+      'catalyst'
+    ];
+    const tags = allRequirements.map((requirement) => `requires-capability:${requirement}`);
+    const chamber = scenario.floors[0]!.chambers[0]!;
+    chamber.firstHalf.waves[0]!.enemies[0]!.mechanics.tags.push(...tags);
+    chamber.secondHalf.waves[0]!.enemies[0]!.mechanics.tags.push(...tags);
+    const weaponTypes = ['sword', 'claymore', 'polearm', 'bow', 'catalyst'] as const;
+    const capabilities = allRequirements.slice(0, 9) as Array<
+      | 'healing'
+      | 'shield'
+      | 'grouping'
+      | 'off-field'
+      | 'on-field'
+      | 'onslaught'
+      | 'plunging'
+      | 'normal-attack'
+      | 'charged-attack'
+    >;
+    const characters = Array.from({ length: 32 }, (_, index) => ({
+      ...ABYSS_CHARACTERS[index % ABYSS_CHARACTERS.length]!,
+      id: 9501 + index,
+      name: `复杂约束角色${index + 1}`
+    }));
+    const knowledge = CharacterKnowledgeStore.fromUnknown({
+      schemaVersion: 1,
+      knowledgeVersion: 'optimizer-fast-fail-v1',
+      updatedAt: '2026-07-23T00:00:00.000Z',
+      coverage: { characterCount: characters.length, notes: '复杂无解约束性能测试。' },
+      characters: characters.map((character, index) => ({
+        id: String(character.id),
+        name: character.name,
+        weaponType: weaponTypes[index % weaponTypes.length]!,
+        roles: ['support' as const],
+        energyCost: 60,
+        energyNeeds: 'medium' as const,
+        capabilities: [
+          capabilities[index % capabilities.length]!,
+          capabilities[(index * 5 + 3) % capabilities.length]!
+        ],
+        applicationNotes: [],
+        kitNotes: [],
+        unknownFields: []
+      }))
+    });
+    const startedAt = performance.now();
+    const result = buildLocalAbyssPlan({
+      input: abyssInput({ chamber: 1 }),
+      scenario,
+      characters,
+      knowledge
+    });
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      issues: [{ code: 'MECHANIC_COVERAGE_INVALID' }]
+    });
+    expect(elapsedMs).toBeLessThan(250);
+  });
+
   it('blocks unknown requires-capability tags instead of treating them as preferences', () => {
     const scenario = abyssScenario();
     scenario.floors[0]!.chambers[0]!.firstHalf.waves[0]!.enemies[0]!.mechanics.tags.push(
