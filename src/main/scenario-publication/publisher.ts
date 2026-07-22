@@ -1,6 +1,5 @@
 import { createHash, type KeyLike, type KeyObject } from 'node:crypto';
 
-import type { ScenarioV2 } from '../../shared/scenario-v2.js';
 import {
   scenarioPublicationManifestSchema,
   type ScenarioModeV2,
@@ -27,9 +26,9 @@ export interface ScenarioPublicationBundle {
   documents: Record<string, unknown>;
 }
 
-function publicationDirectory(payload: ScenarioV2): string {
-  const identity = `${payload.mode}\u0000${payload.id}\u0000${payload.meta.dataVersion}`;
-  return `publications/${payload.mode}/${createHash('sha256').update(identity).digest('hex').slice(0, 20)}`;
+function publicationDirectory(mode: ScenarioModeV2, digestBase64: string): string {
+  const digestHex = Buffer.from(digestBase64, 'base64').toString('hex');
+  return `publications/${mode}/${digestHex}`;
 }
 
 export function createScenarioPublicationBundle(
@@ -73,14 +72,17 @@ export function createScenarioPublicationBundle(
     identities.add(identity);
     if (candidate.current) currentModes.add(payload.mode);
 
-    const directory = publicationDirectory(payload);
+    const directory = publicationDirectory(payload.mode, publication.integrity.hash.value);
+    const keyDigest = createHash('sha256')
+      .update(publication.integrity.signature.keyId)
+      .digest('hex');
     const descriptor: ScenarioPublicationDescriptor = {
       mode: payload.mode,
       schemaVersion: payload.meta.schemaVersion,
       scenarioId: payload.id,
       dataVersion: payload.meta.dataVersion,
       payloadPath: `${directory}/payload.json`,
-      integrityPath: `${directory}/integrity.json`,
+      integrityPath: `${directory}/integrity-${keyDigest}.json`,
       channel: 'production'
     };
     manifest.modes[payload.mode].history.push(descriptor);

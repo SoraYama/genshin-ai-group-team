@@ -97,6 +97,67 @@ describe('RFC 8785 publication primitives', () => {
     ).toThrowError(expect.objectContaining({ code: 'unsupported-key-type' }));
   });
 
+  it('rejects private public-key material in PEM, KeyObject, and JWK forms', () => {
+    const pair = generateKeyPairSync('ed25519');
+    const publication = createScenarioPublication(makeScenario('spiral-abyss'), {
+      keyId: 'release-key',
+      privateKey: pair.privateKey
+    });
+    const privatePem = pair.privateKey.export({ type: 'pkcs8', format: 'pem' });
+    const privateJwk = pair.privateKey.export({ format: 'jwk' });
+
+    for (const privateMaterial of [pair.privateKey, privatePem, privateJwk] as const) {
+      expect(() =>
+        verifyScenarioPublication(publication.payload, publication.integrity, {
+          'release-key': privateMaterial as never
+        })
+      ).toThrowError(expect.objectContaining({ code: 'invalid-signing-key' }));
+    }
+  });
+
+  it('accepts an Ed25519 public JWK with no private parameter', () => {
+    const pair = generateKeyPairSync('ed25519');
+    const publication = createScenarioPublication(makeScenario('spiral-abyss'), {
+      keyId: 'release-key',
+      privateKey: pair.privateKey
+    });
+
+    expect(
+      verifyScenarioPublication(publication.payload, publication.integrity, {
+        'release-key': pair.publicKey.export({ format: 'jwk' })
+      })
+    ).toEqual(publication.payload);
+  });
+
+  it('signs and verifies only raw JSON values that Zod would not transform', () => {
+    const pair = generateKeyPairSync('ed25519');
+    const canonical = makeScenario('spiral-abyss');
+    const publication = createScenarioPublication(canonical, {
+      keyId: 'release-key',
+      privateKey: pair.privateKey
+    });
+    const whitespace = { ...canonical, id: `  ${canonical.id}  ` };
+    const omittedDefault = structuredClone(canonical);
+    if (omittedDefault.mode !== 'spiral-abyss') throw new Error('Unexpected fixture mode');
+    const mechanics = omittedDefault.floors[0]!.chambers[0]!.firstHalf.waves[0]!.enemies[0]!
+      .mechanics as unknown as Record<string, unknown>;
+    delete mechanics.shields;
+
+    for (const payload of [whitespace, omittedDefault]) {
+      expect(() =>
+        createScenarioPublication(payload, {
+          keyId: 'release-key',
+          privateKey: pair.privateKey
+        })
+      ).toThrowError(expect.objectContaining({ code: 'noncanonical-payload' }));
+      expect(() =>
+        verifyScenarioPublication(payload, publication.integrity, {
+          'release-key': pair.publicKey
+        })
+      ).toThrowError(expect.objectContaining({ code: 'noncanonical-payload' }));
+    }
+  });
+
   it('rejects unknown payload fields before signing', () => {
     const { privateKey } = generateKeyPairSync('ed25519');
     const payload = { ...makeScenario('spiral-abyss'), producerDrift: true };

@@ -30,7 +30,7 @@ export function calculateScenarioFreshness(
   }
   const effectiveToMs = Date.parse(meta.effectiveTo);
   if (!Number.isFinite(effectiveToMs)) return 'unknown';
-  if (asOfMs > effectiveToMs) return 'stale';
+  if (asOfMs >= effectiveToMs) return 'stale';
   if (asOfMs >= effectiveToMs - expiringWindowMs) return 'expiring';
   return 'fresh';
 }

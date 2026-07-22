@@ -39,6 +39,20 @@ const modePublicationIndexSchema = z
   })
   .strict();
 
+function descriptorFingerprint(
+  descriptor: z.infer<typeof scenarioPublicationDescriptorSchema>
+): string {
+  return [
+    descriptor.mode,
+    descriptor.schemaVersion,
+    descriptor.scenarioId,
+    descriptor.dataVersion,
+    descriptor.payloadPath,
+    descriptor.integrityPath,
+    descriptor.channel
+  ].join('\u0000');
+}
+
 export const scenarioPublicationManifestSchema = z
   .object({
     manifestVersion: z.literal(1),
@@ -53,6 +67,7 @@ export const scenarioPublicationManifestSchema = z
   })
   .strict()
   .superRefine(({ modes }, context) => {
+    const paths = new Map<string, string>();
     Object.entries(modes).forEach(([mode, index]) => {
       const descriptors = [...index.history, ...(index.current ? [index.current] : [])];
       descriptors.forEach((descriptor, descriptorIndex) => {
@@ -74,6 +89,47 @@ export const scenarioPublicationManifestSchema = z
           path: ['modes', mode, 'history']
         });
       }
+
+      if (
+        index.current &&
+        !index.history.some(
+          (descriptor) =>
+            descriptorFingerprint(descriptor) === descriptorFingerprint(index.current!)
+        )
+      ) {
+        context.addIssue({
+          code: 'custom',
+          message: `Current descriptor must exactly match a history entry for ${mode}`,
+          path: ['modes', mode, 'current']
+        });
+      }
+
+      descriptors.forEach((descriptor, descriptorIndex) => {
+        const fingerprint = descriptorFingerprint(descriptor);
+        const descriptorPath =
+          descriptorIndex < index.history.length
+            ? ['modes', mode, 'history', descriptorIndex]
+            : ['modes', mode, 'current'];
+        if (descriptor.payloadPath === descriptor.integrityPath) {
+          context.addIssue({
+            code: 'custom',
+            message: 'Payload and integrity paths must be different',
+            path: descriptorPath
+          });
+        }
+        for (const publicationPath of [descriptor.payloadPath, descriptor.integrityPath]) {
+          const existing = paths.get(publicationPath);
+          if (existing && existing !== fingerprint) {
+            context.addIssue({
+              code: 'custom',
+              message: `Publication path is reused by another descriptor: ${publicationPath}`,
+              path: descriptorPath
+            });
+          } else {
+            paths.set(publicationPath, fingerprint);
+          }
+        }
+      });
     });
   });
 

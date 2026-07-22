@@ -55,11 +55,13 @@ describe('FileScenarioPublicationStorage', () => {
     const failingFileSystem: AtomicFileSystem = {
       mkdir: fs.mkdir.bind(fs),
       readFile: fs.readFile.bind(fs),
+      readdir: fs.readdir.bind(fs),
       open: fs.open.bind(fs),
       rename: async () => {
         throw new Error('simulated rename failure');
       },
-      unlink: fs.unlink.bind(fs)
+      unlink: fs.unlink.bind(fs),
+      syncDirectory: async () => undefined
     };
     const failingStorage = new FileScenarioPublicationStorage(root, failingFileSystem);
 
@@ -85,5 +87,42 @@ describe('FileScenarioPublicationStorage', () => {
 
     await expect(storage.load('spiral-abyss', 'production')).resolves.toEqual(production);
     await expect(storage.load('spiral-abyss', 'development-sample')).resolves.toEqual(development);
+  });
+
+  it('cleans only its controlled temporary files and fsyncs the parent after rename', async () => {
+    const root = await temporaryRoot();
+    const scopedDirectory = path.join(root, 'production');
+    await fs.mkdir(scopedDirectory, { recursive: true });
+    const owned = '.spiral-abyss.scenario-cache-00000000-0000-4000-8000-000000000000.tmp';
+    const foreign = '.do-not-delete.tmp';
+    await fs.writeFile(path.join(scopedDirectory, owned), 'owned');
+    await fs.writeFile(path.join(scopedDirectory, foreign), 'foreign');
+    const events: string[] = [];
+    const fileSystem: AtomicFileSystem = {
+      mkdir: fs.mkdir.bind(fs),
+      readFile: fs.readFile.bind(fs),
+      readdir: fs.readdir.bind(fs),
+      open: fs.open.bind(fs),
+      rename: async (oldPath, newPath) => {
+        events.push(`rename:${path.basename(newPath)}`);
+        await fs.rename(oldPath, newPath);
+      },
+      unlink: fs.unlink.bind(fs),
+      syncDirectory: async (directoryPath) => {
+        events.push(`sync:${directoryPath}`);
+        const handle = await fs.open(directoryPath, 'r');
+        await handle.sync();
+        await handle.close();
+      }
+    };
+    const storage = new FileScenarioPublicationStorage(root, fileSystem);
+
+    await storage.save('spiral-abyss', 'production', stored('durable'));
+
+    await expect(fs.stat(path.join(scopedDirectory, owned))).rejects.toMatchObject({
+      code: 'ENOENT'
+    });
+    await expect(fs.readFile(path.join(scopedDirectory, foreign), 'utf8')).resolves.toBe('foreign');
+    expect(events).toEqual(['rename:spiral-abyss.json', `sync:${scopedDirectory}`]);
   });
 });

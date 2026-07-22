@@ -5,6 +5,7 @@ import {
   KeyObject,
   sign,
   verify,
+  type JsonWebKey,
   type KeyLike
 } from 'node:crypto';
 
@@ -74,10 +75,44 @@ export interface PublicationSigningOptions {
   privateKey: KeyLike | KeyObject;
 }
 
-export type ScenarioPublicKeyRing = Readonly<Record<string, KeyLike | KeyObject>>;
+export type ScenarioPublicKeyMaterial = KeyLike | KeyObject | JsonWebKey;
+export type ScenarioPublicKeyRing = Readonly<Record<string, ScenarioPublicKeyMaterial>>;
 
-function canonicalPayloadBytes(payload: ScenarioV2): Buffer {
+function canonicalPayloadBytes(payload: unknown): Buffer {
   return Buffer.from(canonicalizeJson(payload), 'utf8');
+}
+
+function isJsonWebKey(key: ScenarioPublicKeyMaterial): key is JsonWebKey {
+  return (
+    typeof key === 'object' &&
+    !(key instanceof KeyObject) &&
+    !Buffer.isBuffer(key) &&
+    !ArrayBuffer.isView(key)
+  );
+}
+
+function rejectPrivatePublicKeyMaterial(key: ScenarioPublicKeyMaterial): void {
+  if (key instanceof KeyObject) {
+    if (key.type !== 'public') throw new ScenarioPublicationError('invalid-signing-key');
+    return;
+  }
+
+  if (isJsonWebKey(key)) {
+    if ('d' in key && typeof key.d === 'string') {
+      throw new ScenarioPublicationError('invalid-signing-key');
+    }
+    return;
+  }
+
+  const pemText =
+    typeof key === 'string'
+      ? key
+      : Buffer.isBuffer(key) || ArrayBuffer.isView(key)
+        ? Buffer.from(key.buffer, key.byteOffset, key.byteLength).toString('utf8')
+        : '';
+  if (/-----BEGIN (?:[A-Z0-9 ]+ )?PRIVATE KEY-----/.test(pemText)) {
+    throw new ScenarioPublicationError('invalid-signing-key');
+  }
 }
 
 function requireEd25519PrivateKey(key: KeyLike | KeyObject): KeyObject {
@@ -96,13 +131,16 @@ function requireEd25519PrivateKey(key: KeyLike | KeyObject): KeyObject {
   return parsed;
 }
 
-function requireEd25519PublicKey(key: KeyLike | KeyObject): KeyObject {
+function requireEd25519PublicKey(key: ScenarioPublicKeyMaterial): KeyObject {
   let parsed: KeyObject;
   try {
-    if (key instanceof KeyObject && key.type !== 'public') {
-      throw new ScenarioPublicationError('invalid-signing-key');
-    }
-    parsed = key instanceof KeyObject ? key : createPublicKey(key);
+    rejectPrivatePublicKeyMaterial(key);
+    parsed =
+      key instanceof KeyObject
+        ? key
+        : isJsonWebKey(key)
+          ? createPublicKey({ key, format: 'jwk' })
+          : createPublicKey(key as KeyLike);
   } catch (error) {
     if (error instanceof ScenarioPublicationError) throw error;
     throw new ScenarioPublicationError('invalid-signing-key');
@@ -124,7 +162,11 @@ export function createScenarioPublication(
     });
   }
 
-  const payloadBytes = canonicalPayloadBytes(parsed.data);
+  const rawCanonical = canonicalizeJson(input);
+  if (rawCanonical !== canonicalizeJson(parsed.data)) {
+    throw new ScenarioPublicationError('noncanonical-payload');
+  }
+  const payloadBytes = canonicalPayloadBytes(input);
   const privateKey = requireEd25519PrivateKey(options.privateKey);
   const integrity: PublicationIntegrity = {
     scope: 'payload',
@@ -159,7 +201,11 @@ export function verifyScenarioPublication(
     throw new ScenarioPublicationError('schema-invalid', { cause: integrityResult.error });
   }
 
-  const payloadBytes = canonicalPayloadBytes(payloadResult.data);
+  const rawCanonical = canonicalizeJson(payloadInput);
+  if (rawCanonical !== canonicalizeJson(payloadResult.data)) {
+    throw new ScenarioPublicationError('noncanonical-payload');
+  }
+  const payloadBytes = canonicalPayloadBytes(payloadInput);
   const actualDigest = createHash('sha256').update(payloadBytes).digest('base64');
   if (actualDigest !== integrityResult.data.hash.value) {
     throw new ScenarioPublicationError('digest-mismatch');

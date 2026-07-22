@@ -137,6 +137,31 @@ describe('scenario publication manifest', () => {
       }).success
     ).toBe(false);
   });
+
+  it('requires current to exactly match a history descriptor', () => {
+    const manifest = manifestFor(makeScenario(mode));
+    manifest.modes[mode].history = [];
+
+    expect(scenarioPublicationManifestSchema.safeParse(manifest).success).toBe(false);
+  });
+
+  it('rejects descriptor path reuse across different publications', () => {
+    const manifest = manifestFor(makeScenario(mode));
+    const abyssDescriptor = manifest.modes[mode].current!;
+    const theaterPayload = makeScenario('imaginarium-theater');
+    const conflicting = {
+      ...abyssDescriptor,
+      mode: 'imaginarium-theater' as const,
+      scenarioId: theaterPayload.id,
+      dataVersion: theaterPayload.meta.dataVersion
+    };
+    manifest.modes['imaginarium-theater'] = {
+      current: conflicting,
+      history: [conflicting]
+    };
+
+    expect(scenarioPublicationManifestSchema.safeParse(manifest).success).toBe(false);
+  });
 });
 
 describe('ScenePublicationService', () => {
@@ -446,5 +471,17 @@ describe('freshness calculation stays outside the signed payload', () => {
         new Date('2026-01-15T00:00:00.000Z')
       )
     ).toBe('unknown');
+  });
+
+  it('treats effectiveTo as an exclusive boundary', () => {
+    expect(
+      calculateScenarioFreshness(
+        {
+          effectiveFrom: '2026-01-01T00:00:00.000Z',
+          effectiveTo: '2026-02-01T00:00:00.000Z'
+        },
+        new Date('2026-02-01T00:00:00.000Z')
+      )
+    ).toBe('stale');
   });
 });

@@ -2,7 +2,7 @@ import { defineConfig } from 'tsup';
 
 export default defineConfig({
   entry: { publish: 'scripts/scenario-data/publish.ts' },
-  outDir: 'dist/scripts/scenario-data',
+  outDir: 'dist-tools/scenario-data',
   format: ['esm'],
   target: 'node20',
   platform: 'node',

@@ -38,11 +38,11 @@ App 按以下顺序处理：
 1. strict 解析 manifest，并找到对应玩法的 `current`；
 2. 分别读取 payload 与 detached integrity；
 3. 先识别 `payload.meta.schemaVersion`。当前只注册 v2；未知新版返回 `unsupported-schema-version`，不以丢弃字段的方式“兼容”；
-4. 检查 descriptor channel 与调用方声明的 `expectedUse`，再从该用途的独立 keyring 选 key；strict 解析 payload/integrity，对 canonical payload 计算 SHA-256，并显式要求签名/验签 key 的 `asymmetricKeyType` 为 `ed25519`；
+4. 检查 descriptor channel 与调用方声明的 `expectedUse`，再从该用途的独立 keyring 选 key；原始 JSON 值必须与 strict schema 结果的 JCS 表示完全相同（禁止依赖 trim/default 等转换），摘要和签名直接覆盖这份未经转换的原始 JSON；验签 keyring 只接受 Ed25519 公钥，拒绝任何 private PEM、private `KeyObject` 或含私有参数的 JWK；
 5. 比较 manifest 与 payload 的 mode、schemaVersion、scenarioId 和 dataVersion，任何冲突都拒绝；
 6. 只有全部通过后才用同目录临时文件、flush 和 rename 原子替换本地缓存。
 
-manifest 是离线 publisher 的 commit point：所有 payload 和 integrity 文件先写完，最后才写 manifest。远端部署也应先上传内容寻址目录，再原子切换 manifest。
+manifest 是离线 publisher 的 commit point：payload 使用完整 canonical SHA-256 内容寻址，历史文件不可覆盖；文件和父目录完成 `fsync` 后才最后原子替换 manifest。相同发布可安全重跑，不同内容不得复用 identity 或路径。远端部署也应先上传内容寻址目录，再原子切换 manifest。
 
 ## 开发样例不是当前事实
 
@@ -61,7 +61,7 @@ manifest 是离线 publisher 的 commit point：所有 payload 和 integrity 文
 npm test -- --run tests/unit/scenario-publication/committed-fixtures.spec.ts
 ```
 
-正式发布应直接调用 `scripts/scenario-data/publish.ts` 的构建产物，显式传入受保护的 Ed25519 私钥路径、key ID、production 输入目录、输出目录和审核后的发布时间。
+正式发布应运行 `npm run build:scenario-publisher` 后直接调用 `dist-tools/scenario-data/publish.mjs`，显式传入受保护的 Ed25519 私钥路径、key ID、production 输入目录、输出目录和审核后的发布时间。`dist-tools`、`scripts/scenario-data` 与 `resources/scenarios/v2/development-source` 均被桌面安装包配置显式排除。
 
 ## 玩家界面状态语义
 
@@ -74,7 +74,7 @@ npm test -- --run tests/unit/scenario-publication/committed-fixtures.spec.ts
 | `last-known-good`                 | 更新失败，正在使用最近一次验证通过的数据 | 保留数据版本、审核时间和安全的错误类别       |
 | `unavailable`                     | 暂时没有可验证的挑战数据                 | 禁用依赖当前场景的推荐；角色浏览和历史仍可用 |
 
-HTTP 404、网络不可用、JSON 损坏、schema drift、digest mismatch、bad signature、identity mismatch、未知 schema 和原子写失败都有稳定 typed code。对玩家只展示可行动的中文说明；日志不得拼接响应正文、请求头、Cookie、API Key 或 Authorization。
+HTTP reader 默认只接受 HTTPS；明文 HTTP 仅允许调用方显式开启的 loopback 开发地址。单次响应有 `Content-Length` 预检、流式字节上限和覆盖建连到读取结束的总 abort deadline。HTTP 404、超时、响应过大、网络不可用、JSON 损坏、schema drift、digest mismatch、bad signature、identity mismatch、未知 schema 和原子写失败都有稳定 typed code。对玩家只展示可行动的中文说明；日志不得拼接响应正文、请求头、Cookie、API Key 或 Authorization。
 
 ## 审核、轮换与吊销
 

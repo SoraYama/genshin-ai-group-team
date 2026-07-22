@@ -1,4 +1,4 @@
-import { generateKeyPairSync } from 'node:crypto';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 
 import { scenarioPublicationManifestSchema } from '../../../src/main/scenario-publication/contracts.js';
@@ -26,6 +26,14 @@ describe('offline scenario publication bundle', () => {
       const index = bundle.manifest.modes[mode];
       expect(index.current?.channel).toBe('production');
       expect(index.history).toHaveLength(1);
+      const expectedDigest = Buffer.from(
+        (bundle.documents[index.current!.integrityPath] as { hash: { value: string } }).hash.value,
+        'base64'
+      ).toString('hex');
+      expect(index.current!.payloadPath).toContain(`/${expectedDigest}/payload.json`);
+      expect(index.current!.integrityPath).toContain(
+        `/integrity-${createHash('sha256').update('development-test-key').digest('hex')}.json`
+      );
       const payload = bundle.documents[index.current!.payloadPath];
       const integrity = bundle.documents[index.current!.integrityPath];
       expect(

@@ -42,7 +42,7 @@
 ## 生效日期、版本与严格兼容
 
 - 场景 payload 的 `schemaVersion` 描述结构兼容性；`dataVersion` 唯一标识一份已发布业务数据。
-- `effectiveFrom` 必填，`effectiveTo` 可选但不得早于开始时间。它们属于经审核、被签名的 payload。
+- `effectiveFrom` 必填，`effectiveTo` 可选但不得早于开始时间。有效区间按半开区间 `[effectiveFrom, effectiveTo)` 解释，因此检查时刻等于 `effectiveTo` 已是 stale。它们属于经审核、被签名的 payload。
 - 推荐计划拥有独立的 `schemaVersion: 2`，以便历史记录与场景数据分别迁移；同时回显所用 `dataVersion`。
 - 外部发布 envelope、场景 payload、推荐计划和玩家干预的所有对象层级均以 Zod `.strict()` 递归拒绝未知字段，避免嵌套 producer drift 被静默丢弃。
 - 兼容策略是“先识别版本，再执行显式迁移，最后按当前 strict schema 解析”；不通过接受未知字段实现前向兼容。
@@ -72,7 +72,7 @@
 }
 ```
 
-验证者只取 `payload` 的 JSON 值，按 RFC 8785 JSON Canonicalization Scheme 生成 UTF-8 字节；SHA-256 对这些字节求摘要并以标准 base64 表示；Ed25519 也对同一份 canonical payload 字节签名，使用 `keyId` 选择可信公钥，签名以标准 base64 表示。任何 envelope 其他字段、运行时缓存状态和完整性字段本身都不进入 canonical payload scope。哈希、签名、算法、编码或可信 key 不匹配时，该发布包不得进入推荐链路。
+验证者直接取磁盘或网络解码得到、尚未经 Zod 转换的 `payload` JSON 值，按 RFC 8785 JSON Canonicalization Scheme 生成 UTF-8 字节。该 JCS 必须与 strict schema 解析结果的 JCS 完全相同，任何 trim/default/coerce 造成的变化均拒绝。SHA-256 与 Ed25519 都覆盖这同一份原始 canonical 字节；`keyId` 只能选择可信 Ed25519 公钥，私钥 PEM、private `KeyObject` 和含 `d` 的 JWK 一律拒绝。任何 envelope 其他字段、运行时缓存状态和完整性字段本身都不进入 canonical payload scope。哈希、签名、算法、编码或可信 key 不匹配时，该发布包不得进入推荐链路。
 
 M1 已实现本地发布、验签、last-known-good 与原子缓存边界；生产密钥轮换、吊销列表和独立数据仓库上线流程见 [场景数据发布与本地消费](./scenario-publication.md)。
 

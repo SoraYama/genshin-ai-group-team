@@ -15,6 +15,7 @@ export default [
   {
     ignores: [
       '**/dist/**',
+      '**/dist-tools/**',
       'release/**',
       '**/node_modules/**',
       'legacy/**',
