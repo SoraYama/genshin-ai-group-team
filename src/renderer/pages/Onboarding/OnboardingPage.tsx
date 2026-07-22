@@ -13,8 +13,7 @@ type Method = 'account' | 'uid' | null;
 type Phase =
   | { kind: 'idle' }
   | { kind: 'logging-in' }
-  | { kind: 'validating' }
-  | { kind: 'roles'; roles: MiyousheRole[]; sessionId?: string }
+  | { kind: 'roles'; roles: MiyousheRole[]; sessionId: string }
   | { kind: 'syncing' }
   | { kind: 'error'; message: string };
 
@@ -23,10 +22,9 @@ export function OnboardingPage({ onBound, onCancel }: OnboardingPageProps) {
   const [method, setMethod] = useState<Method>(null);
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const [uid, setUid] = useState('');
-  const [cookie, setCookie] = useState('');
   const [selectedUid, setSelectedUid] = useState<string>();
 
-  const working = ['logging-in', 'validating', 'syncing'].includes(phase.kind);
+  const working = ['logging-in', 'syncing'].includes(phase.kind);
 
   function choose(next: Exclude<Method, null>) {
     setMethod(next);
@@ -87,41 +85,14 @@ export function OnboardingPage({ onBound, onCancel }: OnboardingPageProps) {
     }
   }
 
-  async function handleValidateManual() {
-    const trimmed = cookie.trim();
-    if (trimmed.length < 10) {
-      setPhase({ kind: 'error', message: t('onboarding.error.cookieIncomplete') });
-      return;
-    }
-    setPhase({ kind: 'validating' });
-    try {
-      const result = await api.miyoushe.bind({ cookie: trimmed });
-      if (!result.ok || result.roles.length === 0) {
-        setPhase({
-          kind: 'error',
-          message:
-            (locale === 'zh-CN' ? result.message : undefined) ?? t('onboarding.error.cookieInvalid')
-        });
-        return;
-      }
-      setSelectedUid(result.roles[0]?.gameUid);
-      setPhase({ kind: 'roles', roles: result.roles });
-    } catch (error) {
-      setPhase({
-        kind: 'error',
-        message: localizeError(error, locale, t, 'onboarding.error.validation')
-      });
-    }
-  }
-
   async function handleAccountImport() {
     if (phase.kind !== 'roles' || !selectedUid) return;
-    const sessionId = phase.sessionId;
     setPhase({ kind: 'syncing' });
     try {
-      const profile = sessionId
-        ? await api.profile.importFromSession({ sessionId, uid: selectedUid })
-        : await api.profile.importFromCookie({ cookie: cookie.trim(), uid: selectedUid });
+      const profile = await api.profile.importFromSession({
+        sessionId: phase.sessionId,
+        uid: selectedUid
+      });
       onBound(profile.uid);
     } catch (error) {
       setPhase({
@@ -272,28 +243,6 @@ export function OnboardingPage({ onBound, onCancel }: OnboardingPageProps) {
             <summary>{t('onboarding.manual')}</summary>
             <div className="gta-disclosure-body">
               <p>{t('onboarding.manualHelp')}</p>
-              <label className="gta-field">
-                <span className="gta-field-label">Cookie</span>
-                <textarea
-                  className="gta-textarea is-mono"
-                  value={cookie}
-                  onChange={(event) => setCookie(event.target.value)}
-                  placeholder="ltoken_v2=...; ltuid_v2=...; ltmid_v2=..."
-                  autoComplete="off"
-                  spellCheck={false}
-                  rows={3}
-                />
-              </label>
-              <button
-                type="button"
-                className="gta-btn gta-btn--ghost"
-                onClick={() => void handleValidateManual()}
-                disabled={working || cookie.trim().length < 10}
-              >
-                {phase.kind === 'validating'
-                  ? t('onboarding.validating')
-                  : t('onboarding.validate')}
-              </button>
             </div>
           </details>
           <button

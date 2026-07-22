@@ -57,6 +57,10 @@ export function AccountMaintenanceMenu({
     closeMenu();
     setDialog(kind);
   };
+  const closeDialog = () => {
+    setDialog(null);
+    requestAnimationFrame(() => triggerRef.current?.focus());
+  };
 
   return (
     <>
@@ -148,7 +152,7 @@ export function AccountMaintenanceMenu({
         title={t('roster.logoutDialog.title')}
         closeLabel={t('app.close')}
         initialFocusRef={cancelRef}
-        onClose={() => setDialog(null)}
+        onClose={closeDialog}
       >
         <p>{t('roster.logoutDialog.body')}</p>
         <div className="gta-dialog-actions">
@@ -156,7 +160,7 @@ export function AccountMaintenanceMenu({
             ref={cancelRef}
             type="button"
             className="gta-btn gta-btn--ghost"
-            onClick={() => setDialog(null)}
+            onClick={closeDialog}
           >
             {t('common.keepAndReturn')}
           </button>
@@ -164,7 +168,7 @@ export function AccountMaintenanceMenu({
             type="button"
             className="gta-btn gta-btn--danger"
             onClick={() => {
-              setDialog(null);
+              closeDialog();
               void onLogout();
             }}
           >
@@ -178,7 +182,7 @@ export function AccountMaintenanceMenu({
         title={t('roster.deleteDialog.title', { nickname: profile.nickname ?? profile.uid })}
         closeLabel={t('app.close')}
         initialFocusRef={cancelRef}
-        onClose={() => setDialog(null)}
+        onClose={closeDialog}
       >
         <p>{t('roster.deleteDialog.target', { uid: profile.uid })}</p>
         <p>{t('roster.deleteDialog.body')}</p>
@@ -188,7 +192,7 @@ export function AccountMaintenanceMenu({
             ref={cancelRef}
             type="button"
             className="gta-btn gta-btn--ghost"
-            onClick={() => setDialog(null)}
+            onClick={closeDialog}
           >
             {t('common.keepAndReturn')}
           </button>
@@ -196,7 +200,7 @@ export function AccountMaintenanceMenu({
             type="button"
             className="gta-btn gta-btn--danger"
             onClick={() => {
-              setDialog(null);
+              closeDialog();
               void onDelete();
             }}
           >

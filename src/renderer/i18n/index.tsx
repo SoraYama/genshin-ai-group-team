@@ -105,7 +105,8 @@ const zh = {
   'onboarding.account.title': '登录后读取完整角色清单',
   'onboarding.account.body': '会打开独立登录窗口。完成登录后，再选择要使用的游戏账号。',
   'onboarding.privacySimple': '登录状态只保存在这台电脑上，可随时从角色页清除。',
-  'onboarding.manualHelp': '仅在内置登录无法使用时采用。敏感内容不会进入页面脚本或上传给作者。',
+  'onboarding.manualHelp':
+    '为确保登录凭据不进入主界面脚本，暂不提供手动粘贴。内置登录无法使用时，可以返回并选择“只用 UID 展示柜”。',
   'onboarding.rolesTitle': '选择游戏账号',
   'onboarding.syncing': '正在同步角色资料…',
   'onboarding.syncingDetail': '正在读取角色清单与公开展示面板，完成后会自动进入角色页。',
@@ -118,7 +119,7 @@ const zh = {
   'onboarding.browserHelp.before': '会弹出独立窗口加载',
   'onboarding.browserHelp.after':
     '，请用手机扫码或账号密码完成登录。检测到登录凭据后窗口会自动关闭。',
-  'onboarding.manual': '高级：手动粘贴 Cookie（不推荐）',
+  'onboarding.manual': '高级：手动导入说明',
   'onboarding.step1.before': '用浏览器登录',
   'onboarding.step2.before': 'F12 → Application → Cookies → 选中',
   'onboarding.step3.before': '复制',
@@ -485,7 +486,7 @@ const en: Record<keyof typeof zh, string> = {
   'onboarding.privacySimple':
     'Sign-in state stays on this computer and can be cleared from the roster at any time.',
   'onboarding.manualHelp':
-    'Use only when built-in sign-in is unavailable. Sensitive values never enter page scripts or an author server.',
+    'To keep sign-in credentials out of the main UI script, manual paste is not available yet. If built-in sign-in is unavailable, go back and choose UID showcase only.',
   'onboarding.rolesTitle': 'Choose a game profile',
   'onboarding.syncing': 'Syncing character data…',
   'onboarding.syncingDetail':
@@ -499,7 +500,7 @@ const en: Record<keyof typeof zh, string> = {
   'onboarding.browserHelp.before': 'A separate window will open',
   'onboarding.browserHelp.after':
     '. Sign in with a QR code or credentials. The window closes automatically after the session is detected.',
-  'onboarding.manual': 'Advanced: paste a cookie manually (not recommended)',
+  'onboarding.manual': 'Advanced: manual import note',
   'onboarding.step1.before': 'Sign in with a browser at',
   'onboarding.step2.before': 'Open F12 → Application → Cookies and select',
   'onboarding.step3.before': 'Copy',

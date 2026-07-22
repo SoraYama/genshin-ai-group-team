@@ -111,7 +111,9 @@ test('boots with isolated data and navigates through preload-backed pages', asyn
 
   await page.getByRole('button', { name: /登录米游社/ }).click();
   await expect(page.getByRole('button', { name: '用内置浏览器登录米游社' })).toBeVisible();
-  await expect(page.getByText('高级：手动粘贴 Cookie（不推荐）')).toBeVisible();
+  await page.getByText('高级：手动导入说明').click();
+  await expect(page.getByText(/登录凭据不进入主界面脚本/)).toBeVisible();
+  await expect(page.getByLabel('Cookie')).toHaveCount(0);
   await page.getByRole('button', { name: '返回选择方式' }).click();
   await page.getByRole('button', { name: /只用 UID 展示柜/ }).click();
   const uidInput = page.getByLabel('游戏 UID');
@@ -475,11 +477,13 @@ test('renders profile coverage and known build fields without fake zero values',
   await expect(logoutDialog).toContainText('清除登录状态，不删除已同步角色资料');
   await logoutDialog.getByRole('button', { name: '保留并返回' }).click();
   await expect(page.getByText('登录状态已清除')).toHaveCount(0);
+  await expect(maintenanceButton).toBeFocused();
 
   await maintenanceButton.click();
   await maintenanceMenu.getByRole('menuitem', { name: '退出米游社登录' }).click();
   await logoutDialog.getByRole('button', { name: '清除米游社登录状态' }).click();
   await expect(page.getByText(/登录状态已清除/)).toBeVisible();
+  await expect(maintenanceButton).toBeFocused();
 
   await maintenanceButton.click();
   await maintenanceMenu.getByRole('menuitem', { name: '删除本机角色资料' }).click();
@@ -490,6 +494,7 @@ test('renders profile coverage and known build fields without fake zero values',
   await expect(deleteDialog).toContainText('无法撤销');
   await deleteDialog.getByRole('button', { name: '保留并返回' }).click();
   await expect(page.getByText('测试角色', { exact: true })).toBeVisible();
+  await expect(maintenanceButton).toBeFocused();
 
   await expect(page.locator('article').filter({ hasText: '测试角色' }).locator('img')).toHaveCount(
     0
