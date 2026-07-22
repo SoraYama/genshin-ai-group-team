@@ -344,6 +344,94 @@ describe('buildLocalAbyssPlan', () => {
     }
   });
 
+  it('does not lose a low-score multi-capability solution when high-score single specialists are added', () => {
+    const scenario = abyssScenario();
+    scenario.floors[0]!.chambers[0]!.firstHalf.waves[0]!.enemies[0]!.mechanics.tags.push(
+      ...['healing', 'shield', 'grouping', 'off-field', 'on-field'].map(
+        (capability) => `requires-capability:${capability}`
+      )
+    );
+    const allRounder = {
+      ...ABYSS_CHARACTERS[4]!,
+      id: 8999,
+      name: '低分多能力角色',
+      level: 1
+    };
+    const singleCapabilities = ['healing', 'shield', 'grouping', 'off-field', 'on-field'] as const;
+    const singleSpecialists = singleCapabilities.map((_, index) => ({
+      ...ABYSS_CHARACTERS[index]!,
+      id: 8101 + index,
+      name: `高分单项角色${index + 1}`,
+      level: 90
+    }));
+    const unrelated = Array.from({ length: 24 }, (_, index) => ({
+      ...ABYSS_CHARACTERS[index % ABYSS_CHARACTERS.length]!,
+      id: 8201 + index,
+      name: `高分无关角色${index + 1}`,
+      level: 90
+    }));
+    const knowledge = CharacterKnowledgeStore.fromUnknown({
+      schemaVersion: 1,
+      knowledgeVersion: 'optimizer-multi-capability-v1',
+      updatedAt: '2026-07-23T00:00:00.000Z',
+      coverage: { characterCount: 6, notes: '覆盖多能力角色与五名单项角色。' },
+      characters: [
+        knowledgeEntry('8999', '低分多能力角色', [...singleCapabilities]),
+        ...singleSpecialists.map((character, index) =>
+          knowledgeEntry(String(character.id), character.name, [singleCapabilities[index]!])
+        )
+      ]
+    });
+    const baseline = buildLocalAbyssPlan({
+      input: abyssInput({ chamber: 1 }),
+      scenario,
+      characters: [...ABYSS_CHARACTERS.slice(0, 8), allRounder],
+      knowledge
+    });
+    const expanded = buildLocalAbyssPlan({
+      input: abyssInput({ chamber: 1 }),
+      scenario,
+      characters: [...ABYSS_CHARACTERS.slice(0, 8), allRounder, ...singleSpecialists, ...unrelated],
+      knowledge
+    });
+
+    expect(baseline.status).toBe('planned');
+    expect(expanded.status).toBe('planned');
+    if (expanded.status === 'planned') {
+      expect(expanded.plan.firstHalfTeam.characterIds).toContain('8999');
+    }
+  });
+
+  it('does not lose a tail-element shield counter when a partial recompute roster expands', () => {
+    const prior = validAbyssPlan();
+    const input = abyssInput({
+      chamber: 1,
+      priorPlan: { ...prior, chambers: [prior.chambers[0]!] },
+      recomputeHalf: 'firstHalf',
+      excludedCharacterIds: ['1001']
+    });
+    const unrelated = Array.from({ length: 24 }, (_, index) => ({
+      ...ABYSS_CHARACTERS[index % 4]!,
+      id: 9001 + index,
+      name: `高分前序元素角色${index + 1}`,
+      element: ['Pyro', 'Hydro', 'Anemo', 'Geo'][index % 4]!,
+      level: 90
+    }));
+    const baseline = buildLocalAbyssPlan({
+      input,
+      scenario: abyssScenario(),
+      characters: ABYSS_CHARACTERS
+    });
+    const expanded = buildLocalAbyssPlan({
+      input,
+      scenario: abyssScenario(),
+      characters: [...ABYSS_CHARACTERS, ...unrelated]
+    });
+
+    expect(baseline.status).toBe('planned');
+    expect(expanded.status).toBe('planned');
+  });
+
   it('blocks unknown requires-capability tags instead of treating them as preferences', () => {
     const scenario = abyssScenario();
     scenario.floors[0]!.chambers[0]!.firstHalf.waves[0]!.enemies[0]!.mechanics.tags.push(
@@ -361,3 +449,22 @@ describe('buildLocalAbyssPlan', () => {
     });
   });
 });
+
+function knowledgeEntry(
+  id: string,
+  name: string,
+  capabilities: Array<'healing' | 'shield' | 'grouping' | 'off-field' | 'on-field'>
+) {
+  return {
+    id,
+    name,
+    weaponType: 'sword' as const,
+    roles: ['support' as const],
+    energyCost: 60,
+    energyNeeds: 'medium' as const,
+    capabilities,
+    applicationNotes: [],
+    kitNotes: [],
+    unknownFields: []
+  };
+}

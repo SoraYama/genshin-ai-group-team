@@ -38,7 +38,6 @@ const ELEMENTS: Record<string, string> = {
 // C(16, 4) = 1,820 candidates per half. This hard ceiling keeps the synchronous
 // fallback below a predictable main-process budget even for very large rosters.
 const MAX_JOINT_POOL_SIZE = 16;
-const MECHANIC_ELEMENT_BUCKETS = [...Object.keys(ELEMENTS), 'unknown'] as const;
 
 export function buildLocalAbyssPlan({
   input,
@@ -320,33 +319,9 @@ function buildSingleHalfPool(
         scoreForHalf(right, enemies, input) - scoreForHalf(left, enemies, input) ||
         left.id - right.id
     );
-  const locked = lockedIds.flatMap((id) => {
-    const character = characters.find(({ id: numericId }) => String(numericId) === id);
-    return character ? [character] : [];
-  });
-  const elementalSpecialists = MECHANIC_ELEMENT_BUCKETS.flatMap((element) =>
-    byScore.filter((character) => mechanicElementBucket(character.element) === element).slice(0, 4)
-  );
-  const capabilitySpecialists = Array.from(
-    new Set(
-      enemies.flatMap((enemy) =>
-        parseRequiredCapabilities(enemy.mechanics.tags)
-          .filter(({ known }) => known)
-          .map(({ value }) => value)
-      )
-    )
-  ).flatMap((requirement) => {
-    const character = byScore.find((candidate) =>
-      characterSatisfiesRequirement(String(candidate.id), requirement, knowledge)
-    );
-    return character ? [character] : [];
-  });
-  return uniqueCharacters([
-    ...locked,
-    ...capabilitySpecialists,
-    ...elementalSpecialists,
-    ...byScore
-  ]).slice(0, MAX_JOINT_POOL_SIZE);
+  const feasibleSeed = findFeasibleTeam(characters, lockedIds, enemies, input, knowledge);
+  if (!feasibleSeed) return [];
+  return uniqueCharacters([...feasibleSeed, ...byScore]).slice(0, MAX_JOINT_POOL_SIZE);
 }
 
 interface JointAssignment {
@@ -376,7 +351,8 @@ function optimizeJointAssignment(
     locked,
     firstEnemies,
     secondEnemies,
-    input
+    input,
+    knowledge
   );
   if (!feasibleSeed) return undefined;
   const capabilitySpecialists = selectCapabilitySpecialists(
@@ -481,189 +457,258 @@ function selectCapabilitySpecialists(
   return uniqueCharacters(selected);
 }
 
-interface ElementComposition {
-  counts: Record<string, number>;
-  estimate: number;
-  key: string;
-}
-
 function buildMechanicallyFeasibleSeed(
   characters: CharacterProfile[],
   locked: Set<string>,
   firstEnemies: EnemyInstance[],
   secondEnemies: EnemyInstance[],
-  input: AbyssAdvisorPlanInput
+  input: AbyssAdvisorPlanInput,
+  knowledge?: CharacterKnowledgeReader
 ): Pick<JointAssignment, 'first' | 'second'> | undefined {
-  const buckets = new Map<string, CharacterProfile[]>();
-  for (const key of MECHANIC_ELEMENT_BUCKETS) buckets.set(key, []);
-  for (const character of characters) {
-    buckets.get(mechanicElementBucket(character.element))?.push(character);
-  }
-  const firstCompositions = buildElementCompositions(buckets, firstEnemies, input);
-  const secondCompositions = buildElementCompositions(buckets, secondEnemies, input);
-  const lockedCounts = countElements(characters.filter(({ id }) => locked.has(String(id))));
-
-  for (const first of firstCompositions) {
-    for (const second of secondCompositions) {
-      const withinRoster = MECHANIC_ELEMENT_BUCKETS.every(
-        (element) =>
-          (first.counts[element] ?? 0) + (second.counts[element] ?? 0) <=
-          (buckets.get(element)?.length ?? 0)
-      );
-      if (!withinRoster) continue;
-      const includesLocks = MECHANIC_ELEMENT_BUCKETS.every(
-        (element) =>
-          (first.counts[element] ?? 0) + (second.counts[element] ?? 0) >=
-          (lockedCounts[element] ?? 0)
-      );
-      if (!includesLocks) continue;
-      const assignment = materializeElementAssignment(
-        buckets,
-        first.counts,
-        second.counts,
-        locked,
-        firstEnemies,
-        secondEnemies,
-        input
-      );
-      if (assignment) return assignment;
-    }
-  }
-  return undefined;
-}
-
-function buildElementCompositions(
-  buckets: Map<string, CharacterProfile[]>,
-  enemies: EnemyInstance[],
-  input: AbyssAdvisorPlanInput
-): ElementComposition[] {
-  const compositions: ElementComposition[] = [];
-  const counts: Record<string, number> = {};
-  const choose = (elementIndex: number, remaining: number): void => {
-    if (elementIndex === MECHANIC_ELEMENT_BUCKETS.length) {
-      if (remaining !== 0) return;
-      const team = MECHANIC_ELEMENT_BUCKETS.flatMap((element) => {
-        const representative = buckets.get(element)?.[0];
-        return representative ? Array(counts[element] ?? 0).fill(representative) : [];
-      });
-      if (
-        findAbyssMechanicCoverageGaps(team, enemies, undefined, {
-          ignoreCapabilityRequirements: true
-        }).length > 0
-      ) {
-        return;
-      }
-      const estimate = MECHANIC_ELEMENT_BUCKETS.reduce((total, element) => {
-        const ranked = (buckets.get(element) ?? [])
-          .slice()
-          .sort(
-            (left, right) =>
-              scoreForHalf(right, enemies, input) - scoreForHalf(left, enemies, input) ||
-              left.id - right.id
-          );
-        return (
-          total +
-          ranked
-            .slice(0, counts[element] ?? 0)
-            .reduce((sum, character) => sum + scoreForHalf(character, enemies, input), 0)
-        );
-      }, 0);
-      compositions.push({
-        counts: { ...counts },
-        estimate,
-        key: MECHANIC_ELEMENT_BUCKETS.map((element) => counts[element] ?? 0).join('')
-      });
-      return;
-    }
-    const element = MECHANIC_ELEMENT_BUCKETS[elementIndex];
-    if (!element) return;
-    const maximum = Math.min(remaining, buckets.get(element)?.length ?? 0);
-    for (let count = 0; count <= maximum; count += 1) {
-      counts[element] = count;
-      choose(elementIndex + 1, remaining - count);
-    }
-  };
-  choose(0, 4);
-  return compositions.sort(
-    (left, right) => right.estimate - left.estimate || left.key.localeCompare(right.key)
+  return findFeasibleJointSeed(
+    characters,
+    [...locked],
+    firstEnemies,
+    secondEnemies,
+    input,
+    knowledge
   );
 }
 
-function materializeElementAssignment(
-  buckets: Map<string, CharacterProfile[]>,
-  firstCounts: Record<string, number>,
-  secondCounts: Record<string, number>,
-  locked: Set<string>,
+interface HardConstraint {
+  key: string;
+  matches: (character: CharacterProfile) => boolean;
+}
+
+interface SingleSeedState {
+  team: CharacterProfile[];
+  coverage: bigint;
+  locked: bigint;
+  score: number;
+}
+
+interface JointSeedState {
+  first: CharacterProfile[];
+  second: CharacterProfile[];
+  firstCoverage: bigint;
+  secondCoverage: bigint;
+  locked: bigint;
+  score: number;
+}
+
+function findFeasibleTeam(
+  characters: CharacterProfile[],
+  lockedIds: string[],
+  enemies: EnemyInstance[],
+  input: AbyssAdvisorPlanInput,
+  knowledge?: CharacterKnowledgeReader
+): CharacterProfile[] | undefined {
+  const constraints = hardConstraintsFor(enemies, knowledge);
+  const fullCoverage = fullMask(constraints.length);
+  const lockBits = bitIndex(lockedIds);
+  const fullLocks = fullMask(lockBits.size);
+  let states = new Map<string, SingleSeedState>([
+    ['0|0|0', { team: [], coverage: 0n, locked: 0n, score: 0 }]
+  ]);
+  for (const character of characters.slice().sort((left, right) => left.id - right.id)) {
+    const coverage = coverageMask(character, constraints);
+    const locked = memberMask(String(character.id), lockBits);
+    // A locked character must occupy this team. Dropping the skip branch is both exact and
+    // prevents 2^N dead lock states from surviving through large rosters.
+    const next = locked === 0n ? new Map(states) : new Map<string, SingleSeedState>();
+    for (const state of states.values()) {
+      if (state.team.length >= 4) continue;
+      const candidate: SingleSeedState = {
+        team: [...state.team, character],
+        coverage: state.coverage | coverage,
+        locked: state.locked | locked,
+        score: state.score + scoreForHalf(character, enemies, input)
+      };
+      keepBestSingle(next, candidate);
+    }
+    states = next;
+  }
+  const result = states.get(`4|${fullCoverage}|${fullLocks}`);
+  if (!result || findAbyssMechanicCoverageGaps(result.team, enemies, knowledge).length > 0) {
+    return undefined;
+  }
+  return result.team.slice().sort((left, right) => left.id - right.id);
+}
+
+function findFeasibleJointSeed(
+  characters: CharacterProfile[],
+  lockedIds: string[],
   firstEnemies: EnemyInstance[],
   secondEnemies: EnemyInstance[],
-  input: AbyssAdvisorPlanInput
+  input: AbyssAdvisorPlanInput,
+  knowledge?: CharacterKnowledgeReader
 ): Pick<JointAssignment, 'first' | 'second'> | undefined {
-  const first: CharacterProfile[] = [];
-  const second: CharacterProfile[] = [];
-  for (const element of MECHANIC_ELEMENT_BUCKETS) {
-    const bucket = buckets.get(element) ?? [];
-    const lockedCharacters = bucket.filter(({ id }) => locked.has(String(id)));
-    const unlockedCharacters = bucket.filter(({ id }) => !locked.has(String(id)));
-    const firstCount = firstCounts[element] ?? 0;
-    const secondCount = secondCounts[element] ?? 0;
-    const minimumFirstLocked = Math.max(0, lockedCharacters.length - secondCount);
-    const maximumFirstLocked = Math.min(lockedCharacters.length, firstCount);
-    if (minimumFirstLocked > maximumFirstLocked) return undefined;
-    const rankedLocked = lockedCharacters.slice().sort((left, right) => {
-      const leftDelta =
-        scoreForHalf(left, firstEnemies, input) - scoreForHalf(left, secondEnemies, input);
-      const rightDelta =
-        scoreForHalf(right, firstEnemies, input) - scoreForHalf(right, secondEnemies, input);
-      return rightDelta - leftDelta || left.id - right.id;
-    });
-    const firstLocked = rankedLocked.slice(0, minimumFirstLocked);
-    const secondLocked = rankedLocked.slice(minimumFirstLocked);
-    const firstUnlockedCount = firstCount - firstLocked.length;
-    const secondUnlockedCount = secondCount - secondLocked.length;
-    const rankedFirstUnlocked = unlockedCharacters
-      .slice()
-      .sort(
-        (left, right) =>
-          scoreForHalf(right, firstEnemies, input) - scoreForHalf(left, firstEnemies, input) ||
-          left.id - right.id
-      );
-    const firstUnlocked = rankedFirstUnlocked.slice(0, firstUnlockedCount);
-    const firstUnlockedIds = new Set(firstUnlocked.map(({ id }) => id));
-    const secondUnlocked = unlockedCharacters
-      .filter(({ id }) => !firstUnlockedIds.has(id))
-      .sort(
-        (left, right) =>
-          scoreForHalf(right, secondEnemies, input) - scoreForHalf(left, secondEnemies, input) ||
-          left.id - right.id
-      )
-      .slice(0, secondUnlockedCount);
-    if (
-      firstUnlocked.length !== firstUnlockedCount ||
-      secondUnlocked.length !== secondUnlockedCount
-    ) {
-      return undefined;
+  const firstConstraints = hardConstraintsFor(firstEnemies, knowledge);
+  const secondConstraints = hardConstraintsFor(secondEnemies, knowledge);
+  const fullFirst = fullMask(firstConstraints.length);
+  const fullSecond = fullMask(secondConstraints.length);
+  const lockBits = bitIndex(lockedIds);
+  const fullLocks = fullMask(lockBits.size);
+  let states = new Map<string, JointSeedState>([
+    [
+      '0|0|0|0|0',
+      {
+        first: [],
+        second: [],
+        firstCoverage: 0n,
+        secondCoverage: 0n,
+        locked: 0n,
+        score: 0
+      }
+    ]
+  ]);
+  for (const character of characters.slice().sort((left, right) => left.id - right.id)) {
+    const firstCoverage = coverageMask(character, firstConstraints);
+    const secondCoverage = coverageMask(character, secondConstraints);
+    const locked = memberMask(String(character.id), lockBits);
+    // Locked characters must be assigned to one of the halves; keeping a skip branch would only
+    // create states that can never reach fullLocks and makes the search needlessly exponential.
+    const next = locked === 0n ? new Map(states) : new Map<string, JointSeedState>();
+    for (const state of states.values()) {
+      if (state.first.length < 4) {
+        keepBestJoint(next, {
+          first: [...state.first, character],
+          second: state.second,
+          firstCoverage: state.firstCoverage | firstCoverage,
+          secondCoverage: state.secondCoverage,
+          locked: state.locked | locked,
+          score: state.score + scoreForHalf(character, firstEnemies, input)
+        });
+      }
+      if (state.second.length < 4) {
+        keepBestJoint(next, {
+          first: state.first,
+          second: [...state.second, character],
+          firstCoverage: state.firstCoverage,
+          secondCoverage: state.secondCoverage | secondCoverage,
+          locked: state.locked | locked,
+          score: state.score + scoreForHalf(character, secondEnemies, input)
+        });
+      }
     }
-    first.push(...firstLocked, ...firstUnlocked);
-    second.push(...secondLocked, ...secondUnlocked);
+    states = next;
   }
-  if (first.length !== 4 || second.length !== 4) return undefined;
+  const result = states.get(`4|4|${fullFirst}|${fullSecond}|${fullLocks}`);
+  if (
+    !result ||
+    findAbyssMechanicCoverageGaps(result.first, firstEnemies, knowledge).length > 0 ||
+    findAbyssMechanicCoverageGaps(result.second, secondEnemies, knowledge).length > 0
+  ) {
+    return undefined;
+  }
   return {
-    first: first.slice().sort((left, right) => left.id - right.id),
-    second: second.slice().sort((left, right) => left.id - right.id)
+    first: result.first.slice().sort((left, right) => left.id - right.id),
+    second: result.second.slice().sort((left, right) => left.id - right.id)
   };
 }
 
-function countElements(characters: CharacterProfile[]): Record<string, number> {
-  return characters.reduce<Record<string, number>>((counts, character) => {
-    const element = mechanicElementBucket(character.element);
-    counts[element] = (counts[element] ?? 0) + 1;
-    return counts;
-  }, {});
+function hardConstraintsFor(
+  enemies: EnemyInstance[],
+  knowledge?: CharacterKnowledgeReader
+): HardConstraint[] {
+  const constraints = new Map<string, HardConstraint>();
+  for (const enemy of enemies) {
+    for (const shield of enemy.mechanics.shields) {
+      const counters = ABYSS_SHIELD_COUNTERS[shield.element] ?? [];
+      if (counters.length === 0) continue;
+      const key = `shield:${shield.element}`;
+      constraints.set(key, {
+        key,
+        matches: (character) => counters.includes(character.element.toLowerCase())
+      });
+    }
+    const immuneElements = recognizedImmuneElements(enemy.mechanics.immunities);
+    if (immuneElements.size > 0) {
+      const signature = [...immuneElements].sort().join(',');
+      const key = `immunity:${signature}`;
+      constraints.set(key, {
+        key,
+        matches: (character) => {
+          const element = character.element.toLowerCase();
+          return element in ELEMENTS && !immuneElements.has(element);
+        }
+      });
+    }
+    for (const requirement of parseRequiredCapabilities(enemy.mechanics.tags)) {
+      const key = `capability:${requirement.value}`;
+      constraints.set(key, {
+        key,
+        matches: (character) =>
+          requirement.known &&
+          characterSatisfiesRequirement(String(character.id), requirement.value, knowledge)
+      });
+    }
+  }
+  return [...constraints.values()].sort((left, right) => left.key.localeCompare(right.key));
 }
 
-function mechanicElementBucket(element: string): string {
-  const normalized = element.toLowerCase();
-  return normalized in ELEMENTS ? normalized : 'unknown';
+function recognizedImmuneElements(values: string[]): Set<string> {
+  const result = new Set<string>();
+  for (const value of values) {
+    const normalized = value.toLowerCase();
+    if (normalized in ELEMENTS) result.add(normalized);
+    Object.entries(ELEMENTS).forEach(([element, label]) => {
+      if (value.includes(`${label}元素伤害`)) result.add(element);
+    });
+  }
+  return result;
+}
+
+function coverageMask(character: CharacterProfile, constraints: HardConstraint[]): bigint {
+  return constraints.reduce(
+    (mask, constraint, index) =>
+      constraint.matches(character) ? mask | (1n << BigInt(index)) : mask,
+    0n
+  );
+}
+
+function bitIndex(values: string[]): Map<string, number> {
+  return new Map(Array.from(new Set(values)).map((value, index) => [value, index]));
+}
+
+function memberMask(value: string, index: Map<string, number>): bigint {
+  const bit = index.get(value);
+  return bit === undefined ? 0n : 1n << BigInt(bit);
+}
+
+function fullMask(size: number): bigint {
+  return size === 0 ? 0n : (1n << BigInt(size)) - 1n;
+}
+
+function keepBestSingle(states: Map<string, SingleSeedState>, candidate: SingleSeedState): void {
+  const key = `${candidate.team.length}|${candidate.coverage}|${candidate.locked}`;
+  const current = states.get(key);
+  if (
+    !current ||
+    candidate.score > current.score ||
+    (candidate.score === current.score && teamKey(candidate.team) < teamKey(current.team))
+  ) {
+    states.set(key, candidate);
+  }
+}
+
+function keepBestJoint(states: Map<string, JointSeedState>, candidate: JointSeedState): void {
+  const key = `${candidate.first.length}|${candidate.second.length}|${candidate.firstCoverage}|${candidate.secondCoverage}|${candidate.locked}`;
+  const current = states.get(key);
+  if (
+    !current ||
+    candidate.score > current.score ||
+    (candidate.score === current.score && assignmentKey(candidate) < assignmentKey(current))
+  ) {
+    states.set(key, candidate);
+  }
+}
+
+function teamKey(team: CharacterProfile[]): string {
+  return team
+    .map(({ id }) => id)
+    .sort((left, right) => left - right)
+    .join(',');
 }
 
 interface TeamCandidate {
