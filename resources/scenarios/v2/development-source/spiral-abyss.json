@@ -1,0 +1,85 @@
+{
+  "mode": "spiral-abyss",
+  "id": "development.spiral-abyss.sample-001",
+  "meta": {
+    "schemaVersion": 2,
+    "dataVersion": "development.2026-01.1",
+    "effectiveFrom": "2026-01-01T00:00:00.000Z",
+    "effectiveTo": "2026-02-01T00:00:00.000Z",
+    "sourceRefs": [
+      {
+        "id": "development-structure-reference",
+        "source": "genshin-db",
+        "retrievedAt": "2026-01-01T00:00:00.000Z",
+        "attribution": "Fictional development-only values shaped for the M0 schema; not live-service facts"
+      }
+    ],
+    "fieldProvenance": [
+      { "fieldPath": "meta.effectiveRange", "sourceRefId": "development-structure-reference" },
+      { "fieldPath": "scenario.floors", "sourceRefId": "development-structure-reference" },
+      { "fieldPath": "scenario.blessing", "sourceRefId": "development-structure-reference" }
+    ],
+    "reviewedAt": "2026-01-01T01:00:00.000Z",
+    "reviewedBy": "development-fixture-reviewer"
+  },
+  "blessing": {
+    "id": "development-blessing",
+    "description": "原创开发演示效果，不代表任何正式服祝福"
+  },
+  "floors": [
+    {
+      "floor": 12,
+      "chambers": [
+        {
+          "chamber": 1,
+          "firstHalf": {
+            "waves": [
+              {
+                "id": "development-first-wave",
+                "enemies": [
+                  {
+                    "enemy": {
+                      "id": "development.training-sprite",
+                      "names": { "zh-CN": "训练灵体", "en": "Training Sprite" }
+                    },
+                    "level": 100,
+                    "count": 2,
+                    "mechanics": {
+                      "shields": [],
+                      "resistances": [],
+                      "immunities": [],
+                      "tags": ["development-sample"]
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "secondHalf": {
+            "waves": [
+              {
+                "id": "development-second-wave",
+                "enemies": [
+                  {
+                    "enemy": {
+                      "id": "development.stone-sentinel",
+                      "names": { "zh-CN": "石铸哨卫", "en": "Stone Sentinel" }
+                    },
+                    "level": 100,
+                    "count": 1,
+                    "mechanics": {
+                      "shields": [],
+                      "resistances": [],
+                      "immunities": [],
+                      "tags": ["development-sample"]
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

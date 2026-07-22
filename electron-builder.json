@@ -6,11 +6,7 @@
     "output": "release",
     "buildResources": "resources"
   },
-  "files": [
-    "dist/**/*",
-    "node_modules/**/*",
-    "package.json"
-  ],
+  "files": ["dist/**/*", "node_modules/**/*", "package.json"],
   "asarUnpack": [
     "node_modules/@anthropic-ai/claude-agent-sdk/**/*",
     "node_modules/@anthropic-ai/claude-agent-sdk-*/**/*"
@@ -19,7 +15,7 @@
     {
       "from": "resources/scenarios",
       "to": "scenarios",
-      "filter": ["**/*.json"]
+      "filter": ["**/*.json", "**/*.pem"]
     },
     {
       "from": "resources/credits.md",

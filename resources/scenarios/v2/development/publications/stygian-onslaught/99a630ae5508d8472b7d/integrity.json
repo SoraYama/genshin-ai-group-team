@@ -1,0 +1,15 @@
+{
+  "scope": "payload",
+  "serialization": "RFC8785-JCS",
+  "hash": {
+    "algorithm": "sha256",
+    "encoding": "base64",
+    "value": "bYsvyZaHcO7OUdUZF5Qgd8x8MXLLcQz8P5MZfwEKJ6Q="
+  },
+  "signature": {
+    "algorithm": "ed25519",
+    "keyId": "development-sample-key-v1",
+    "encoding": "base64",
+    "value": "a10UUdT7yAyDbXRgZAVUHWdLfCHhkkvRG2DVMtgC1HMyp3Ers6Et9r3qEpW19WX4dZ+8YomCLeJKiisReYp5AA=="
+  }
+}

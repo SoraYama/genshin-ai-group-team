@@ -1,0 +1,20 @@
+{
+  "notice": "DEVELOPMENT SAMPLE — NOT CURRENT LIVE-SERVICE DATA",
+  "candidates": [
+    {
+      "inputFile": "spiral-abyss.json",
+      "current": true,
+      "channel": "development-sample"
+    },
+    {
+      "inputFile": "stygian-onslaught.json",
+      "current": true,
+      "channel": "development-sample"
+    },
+    {
+      "inputFile": "imaginarium-theater.json",
+      "current": true,
+      "channel": "development-sample"
+    }
+  ]
+}

@@ -1,0 +1,72 @@
+{
+  "manifestVersion": 1,
+  "publishedAt": "2026-01-01T02:00:00.000Z",
+  "modes": {
+    "spiral-abyss": {
+      "current": {
+        "mode": "spiral-abyss",
+        "schemaVersion": 2,
+        "scenarioId": "development.spiral-abyss.sample-001",
+        "dataVersion": "development.2026-01.1",
+        "payloadPath": "publications/spiral-abyss/bbb10bf419efcb803558/payload.json",
+        "integrityPath": "publications/spiral-abyss/bbb10bf419efcb803558/integrity.json",
+        "channel": "development-sample"
+      },
+      "history": [
+        {
+          "mode": "spiral-abyss",
+          "schemaVersion": 2,
+          "scenarioId": "development.spiral-abyss.sample-001",
+          "dataVersion": "development.2026-01.1",
+          "payloadPath": "publications/spiral-abyss/bbb10bf419efcb803558/payload.json",
+          "integrityPath": "publications/spiral-abyss/bbb10bf419efcb803558/integrity.json",
+          "channel": "development-sample"
+        }
+      ]
+    },
+    "stygian-onslaught": {
+      "current": {
+        "mode": "stygian-onslaught",
+        "schemaVersion": 2,
+        "scenarioId": "development.stygian-onslaught.sample-001",
+        "dataVersion": "development.2026-01.1",
+        "payloadPath": "publications/stygian-onslaught/99a630ae5508d8472b7d/payload.json",
+        "integrityPath": "publications/stygian-onslaught/99a630ae5508d8472b7d/integrity.json",
+        "channel": "development-sample"
+      },
+      "history": [
+        {
+          "mode": "stygian-onslaught",
+          "schemaVersion": 2,
+          "scenarioId": "development.stygian-onslaught.sample-001",
+          "dataVersion": "development.2026-01.1",
+          "payloadPath": "publications/stygian-onslaught/99a630ae5508d8472b7d/payload.json",
+          "integrityPath": "publications/stygian-onslaught/99a630ae5508d8472b7d/integrity.json",
+          "channel": "development-sample"
+        }
+      ]
+    },
+    "imaginarium-theater": {
+      "current": {
+        "mode": "imaginarium-theater",
+        "schemaVersion": 2,
+        "scenarioId": "development.imaginarium-theater.sample-001",
+        "dataVersion": "development.2026-01.1",
+        "payloadPath": "publications/imaginarium-theater/85f8d95acfa56b77415f/payload.json",
+        "integrityPath": "publications/imaginarium-theater/85f8d95acfa56b77415f/integrity.json",
+        "channel": "development-sample"
+      },
+      "history": [
+        {
+          "mode": "imaginarium-theater",
+          "schemaVersion": 2,
+          "scenarioId": "development.imaginarium-theater.sample-001",
+          "dataVersion": "development.2026-01.1",
+          "payloadPath": "publications/imaginarium-theater/85f8d95acfa56b77415f/payload.json",
+          "integrityPath": "publications/imaginarium-theater/85f8d95acfa56b77415f/integrity.json",
+          "channel": "development-sample"
+        }
+      ]
+    }
+  }
+}

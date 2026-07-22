@@ -74,7 +74,7 @@
 
 验证者只取 `payload` 的 JSON 值，按 RFC 8785 JSON Canonicalization Scheme 生成 UTF-8 字节；SHA-256 对这些字节求摘要并以标准 base64 表示；Ed25519 也对同一份 canonical payload 字节签名，使用 `keyId` 选择可信公钥，签名以标准 base64 表示。任何 envelope 其他字段、运行时缓存状态和完整性字段本身都不进入 canonical payload scope。哈希、签名、算法、编码或可信 key 不匹配时，该发布包不得进入推荐链路。
 
-密钥轮换、吊销列表和签名基础设施在后续里程碑实现；M0 先冻结可确定验证的边界与格式。
+M1 已实现本地发布、验签、last-known-good 与原子缓存边界；生产密钥轮换、吊销列表和独立数据仓库上线流程见 [场景数据发布与本地消费](./scenario-publication.md)。
 
 ## 运行时新鲜度与最近可用版本
 
