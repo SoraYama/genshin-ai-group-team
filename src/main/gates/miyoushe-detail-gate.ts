@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { app, session } from 'electron';
+import { app, BrowserWindow, session } from 'electron';
 import { MiyousheClient } from '../services/miyoushe-client.js';
 import { MiyousheCalculatorClient } from '../services/miyoushe-calculator.js';
 import {
@@ -15,6 +15,7 @@ import {
 import { createMiyousheBrowserTransport } from '../services/miyoushe/browser-transport.js';
 import { MiyousheDeviceFpRecoveryStore } from '../services/miyoushe/device-fp-recovery-store.js';
 import { MiyousheDeviceFpService } from '../services/miyoushe/device-fp.js';
+import { MiyousheVerificationService } from '../services/miyoushe/verification.js';
 import { MiyousheDetailGateDeviceFpCoordinator } from './miyoushe-detail-recovery.js';
 
 // `electron dist/main/miyoushe-detail-gate.mjs` does not load package.json as
@@ -69,6 +70,8 @@ interface SafeDeviceFpReport {
   ensure: SafeEnsureOutcome;
   recoveryEvents: MiyousheDeviceRecoveryEvent[];
 }
+
+let keepAliveWindow: BrowserWindow | undefined;
 
 const REQUIRED_DEVICE_COOKIE_NAMES = [
   '_MHYUUID',
@@ -125,6 +128,19 @@ function safeCoverage(
 
 async function run(): Promise<number> {
   await app.whenReady();
+  // Interactive 1034 verification closes its own BrowserWindow before the
+  // replayed list/detail requests finish. Keep this opt-in gate alive until
+  // the final sanitized report is printed. The production app already has
+  // its main window for the same purpose.
+  keepAliveWindow = new BrowserWindow({
+    show: false,
+    webPreferences: {
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
+      webSecurity: true
+    }
+  });
 
   const loginWindow = new MiyousheLoginWindow();
   const cookie = await loginWindow.readPersistedCookie();
@@ -149,6 +165,7 @@ async function run(): Promise<number> {
     session.fromPartition(MIYOUSHE_LOGIN_PARTITION)
   );
   const cooldown = new MiyousheDeviceFpRecoveryStore();
+  const verification = new MiyousheVerificationService();
   const deviceFp = new MiyousheDetailGateDeviceFpCoordinator(
     new MiyousheDeviceFpService({
       cookieWriter: loginWindow,
@@ -197,6 +214,8 @@ async function run(): Promise<number> {
   const client = new MiyousheGameRecordClient({
     browserTransport,
     deviceFp,
+    verificationProvider: (cookie, challengePath) =>
+      verification.requestHeaders(cookie, challengePath),
     onDeviceRecoveryEvent: (event) => recoveryEvents.push(event)
   });
   const calculator = new MiyousheCalculatorClient();
@@ -283,5 +302,7 @@ void run()
     process.exitCode = 1;
   })
   .finally(() => {
+    if (keepAliveWindow && !keepAliveWindow.isDestroyed()) keepAliveWindow.destroy();
+    keepAliveWindow = undefined;
     app.quit();
   });

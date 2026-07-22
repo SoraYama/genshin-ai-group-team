@@ -19,6 +19,7 @@ import { MiyousheGameRecordClient } from './services/miyoushe-game-record.js';
 import { MiyousheBrowserBridge } from './services/miyoushe/browser-bridge.js';
 import { createMiyousheBrowserTransport } from './services/miyoushe/browser-transport.js';
 import { MiyousheDeviceFpService } from './services/miyoushe/device-fp.js';
+import { MiyousheVerificationService } from './services/miyoushe/verification.js';
 import {
   bindDeviceFpToPartitionLifecycle,
   createMiyousheDeviceFpCooldown,
@@ -83,11 +84,16 @@ async function bootstrapServices(): Promise<void> {
   const deviceFp = bindDeviceFpToPartitionLifecycle(deviceFpService, partitionLifecycle);
   const miyousheSession = session.fromPartition(MIYOUSHE_LOGIN_PARTITION);
   const browserTransport = createMiyousheBrowserTransport(miyousheSession);
-  // Keep a Chromium-network retry for ordinary transport differences. Risk
-  // control itself is recovered exclusively by the official Battle Chronicle
-  // page or a supported data-source fallback; the former custom GeeTest
-  // submitter repeatedly produced retcode 10306 and has been removed.
-  const miyousheGameRecord = new MiyousheGameRecordClient({ browserTransport, deviceFp });
+  const verification = new MiyousheVerificationService();
+  // A real 1034 may use MiHoYo's supported interactive verification flow.
+  // 5003 remains strictly excluded because promoting it to GeeTest was
+  // rejected by the official verifier with 10306 during live validation.
+  const miyousheGameRecord = new MiyousheGameRecordClient({
+    browserTransport,
+    deviceFp,
+    verificationProvider: (cookie, challengePath) =>
+      verification.requestHeaders(cookie, challengePath)
+  });
   const miyousheBridge = new MiyousheBrowserBridge();
   const loginSessions = new LoginSessionStore();
   const rosterSessions = new RosterSessionStore();

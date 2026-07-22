@@ -149,6 +149,94 @@ describe('Chromium transport fallback', () => {
     expect(browserTransport).toHaveBeenCalledTimes(1);
     expect(browserTransport.mock.calls[0]?.[1].headers).toHaveProperty('DS');
   });
+
+  it('replays a natural 1034 with user verification headers after Chromium also requires captcha', async () => {
+    const { MiyousheGameRecordClient } =
+      await import('../../../src/main/services/miyoushe-game-record.js');
+    requestMock.mockResolvedValueOnce(
+      mockJson(200, { retcode: 1034, message: 'captcha required' })
+    );
+    const browserTransport = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockBrowserJson(200, { retcode: 1034, message: 'captcha required' })
+      )
+      .mockResolvedValueOnce(mockBrowserJson(200, indexSuccess));
+    const verificationProvider = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: { 'x-rpc-challenge': 'accepted-natural-challenge' }
+    });
+    const client = new MiyousheGameRecordClient({
+      browserTransport,
+      verificationProvider
+    });
+
+    await expect(client.ping('100000001', 'cookie=valid-enough')).resolves.toMatchObject({
+      ok: true,
+      data: { totalCharacters: 80 }
+    });
+    expect(verificationProvider).toHaveBeenCalledOnce();
+    expect(verificationProvider).toHaveBeenCalledWith(
+      'cookie=valid-enough',
+      '/game_record/app/genshin/api/index'
+    );
+    expect(browserTransport).toHaveBeenCalledTimes(2);
+    expect(browserTransport.mock.calls[1]?.[1].headers).toMatchObject({
+      'x-rpc-challenge': 'accepted-natural-challenge'
+    });
+  });
+
+  it('never promotes retcode 5003 into interactive verification', async () => {
+    const { MiyousheGameRecordClient } =
+      await import('../../../src/main/services/miyoushe-game-record.js');
+    requestMock.mockResolvedValueOnce(mockJson(200, { retcode: 5003, message: 'risk control' }));
+    const browserTransport = vi
+      .fn()
+      .mockResolvedValueOnce(mockBrowserJson(200, { retcode: 5003, message: 'risk control' }));
+    const verificationProvider = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: { 'x-rpc-challenge': 'must-not-be-used' }
+    });
+
+    const result = await new MiyousheGameRecordClient({
+      browserTransport,
+      verificationProvider
+    }).ping('100000001', 'cookie=valid-enough');
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { kind: 'captcha-required', retcode: 5003 }
+    });
+    expect(verificationProvider).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a rejected natural 1034 verification without leaking provider details', async () => {
+    const { MiyousheGameRecordClient } =
+      await import('../../../src/main/services/miyoushe-game-record.js');
+    requestMock.mockResolvedValueOnce(mockJson(200, { retcode: 1034, message: 'captcha' }));
+    const browserTransport = vi
+      .fn()
+      .mockResolvedValueOnce(mockBrowserJson(200, { retcode: 1034, message: 'captcha' }));
+    const verificationProvider = vi.fn().mockResolvedValue({
+      ok: false,
+      retcode: 10306,
+      message: 'verification rejected; cached data preserved'
+    });
+
+    const result = await new MiyousheGameRecordClient({
+      browserTransport,
+      verificationProvider
+    }).ping('100000001', 'cookie=valid-enough');
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        kind: 'captcha-required',
+        retcode: 10306,
+        message: 'verification rejected; cached data preserved'
+      }
+    });
+  });
 });
 
 describe('device fingerprint application boundaries', () => {

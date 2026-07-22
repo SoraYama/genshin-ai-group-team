@@ -1,9 +1,20 @@
 # v1.0 RC 收口交接（给新的 LLM Session）
 
-> 更新时间：2026-07-21（Asia/Shanghai）
+> 更新时间：2026-07-22（Asia/Shanghai）
 > 分支：`codex/v1-rc`
 
 ## 0. 最新结论
+
+### 2026-07-22 补充：自然 1034 已恢复生产验证链
+
+- getFp 设备档案生效后，当前真实账号的 Battle Chronicle `index` 在 Node 与持久 Chromium 会话中均返回自然 `1034`，不再是原先的 `5003`。
+- 已恢复官方 `createVerification → GeeTest → verifyVerification → x-rpc-challenge` 重放，但代码硬限制为**仅原始 retcode 1034**可进入；`5003` 仍禁止提升为验证码，避免已证实的 10306 死循环。
+- 官方验证组件已在沙箱 BrowserWindow 中真实加载到“验证组件已就绪”，用户完成一次点选后，生产 Electron 经 preload → `profile:refresh` 完成真实刷新与落盘。
+- 脱敏落盘结果：112 个角色、112 个头像、112 个 stats、112 个天赋，77 个角色返回已装备圣遗物数据；覆盖摘要为 `ownedCount=112`、`statsCount=112`、`missingDetailCount=0`、`partial=false`。
+- 77 个圣遗物覆盖表示官方响应中 77 个角色当前存在可映射的已装备圣遗物，并不表示其余角色或头像丢失。
+- 同时修复了 `npm run dev` 可能先加载旧 `dist/main/index.mjs` 的竞态：现在必须等本轮 main + preload 均成功构建才启动，并在二者变化时重启 Electron。
+
+以下关于 5003 与 calculator 的结论仍然有效，作为无法取得自然 1034 或用户取消验证时的降级路径。
 
 “本地只有 12 个角色”已经修复并完成真实落盘验证。
 
@@ -161,6 +172,7 @@ Enka UID API 只能读取游戏内公开展示柜。它适合补强面板，不�
 4. 不要把 calculator 未开启、schema drift 或网络失败映射为空角色池。
 5. 不要把 Cookie、完整 UID、验证码值或角色明细写入日志/Renderer。
 6. 不要为了绕过风控关闭 `sandbox`、`contextIsolation` 或 `webSecurity`。
+7. 不要把自然 1034 与 5003 混为一谈：前者允许官方交互验证，后者只能走合法数据源降级。
 
 ## 6. 后续事项
 

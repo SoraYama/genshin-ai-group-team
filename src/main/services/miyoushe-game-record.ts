@@ -66,9 +66,17 @@ export interface MiyousheGameRecordClientOptions {
   timeoutMs?: number;
   userAgent?: string;
   browserTransport?: MiyousheBrowserTransport;
+  verificationProvider?: (
+    cookie: string,
+    challengePath: string
+  ) => Promise<MiyousheVerificationProviderResult>;
   deviceFp?: MiyousheDeviceFpRecovery;
   onDeviceRecoveryEvent?: (event: MiyousheDeviceRecoveryEvent) => void;
 }
+
+export type MiyousheVerificationProviderResult =
+  | { ok: true; headers: { 'x-rpc-challenge': string } }
+  | { ok: false; message: string; retcode?: number };
 
 export type MiyousheDeviceRecoveryEvent =
   | { phase: 'detected'; retcode: 5003 }
@@ -561,6 +569,10 @@ export class MiyousheGameRecordClient {
   private readonly timeoutMs: number;
   private readonly userAgent: string;
   private readonly browserTransport?: MiyousheBrowserTransport;
+  private readonly verificationProvider?: (
+    cookie: string,
+    challengePath: string
+  ) => Promise<MiyousheVerificationProviderResult>;
   private readonly deviceFp?: MiyousheDeviceFpRecovery;
   private readonly onDeviceRecoveryEvent?: (event: MiyousheDeviceRecoveryEvent) => void;
 
@@ -570,6 +582,7 @@ export class MiyousheGameRecordClient {
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.userAgent = options.userAgent ?? MIYOUSHE_UA;
     this.browserTransport = options.browserTransport;
+    this.verificationProvider = options.verificationProvider;
     this.deviceFp = options.deviceFp;
     this.onDeviceRecoveryEvent = options.onDeviceRecoveryEvent;
   }
@@ -831,7 +844,8 @@ export class MiyousheGameRecordClient {
     method: 'GET' | 'POST',
     region: MiyousheRegion,
     cookie: string,
-    ds: string
+    ds: string,
+    extraHeaders?: { 'x-rpc-challenge': string }
   ): Record<string, string> {
     // Only reuse the matched device pair produced by the same persisted
     // browser session. Manual three-cookie imports continue without these
@@ -848,6 +862,8 @@ export class MiyousheGameRecordClient {
       Origin: region.isGlobal ? 'https://act.hoyolab.com' : 'https://webstatic.mihoyo.com',
       ...deviceHeadersFromCookie(cookie)
     };
+    const verifiedChallenge = extraHeaders?.['x-rpc-challenge'];
+    if (verifiedChallenge) headers['x-rpc-challenge'] = verifiedChallenge;
     if (method === 'POST') {
       headers['content-type'] = 'application/json;charset=UTF-8';
     }
@@ -903,6 +919,8 @@ export class MiyousheGameRecordClient {
     isRetry?: boolean;
     useBrowserTransport?: boolean;
     deviceRecoveryAttempted?: boolean;
+    verificationAttempted?: boolean;
+    extraHeaders?: { 'x-rpc-challenge': string };
   }): Promise<MiyousheFetchResult<T>> {
     const {
       method,
@@ -913,7 +931,9 @@ export class MiyousheGameRecordClient {
       body,
       isRetry,
       useBrowserTransport,
-      deviceRecoveryAttempted
+      deviceRecoveryAttempted,
+      verificationAttempted,
+      extraHeaders
     } = args;
     let effectiveCookie = cookie;
     if (!region.isGlobal && this.deviceFp) {
@@ -925,7 +945,13 @@ export class MiyousheGameRecordClient {
     }
     const token = signDsV2({ query, body, clientType: CLIENT_TYPE_WEB });
     const url = `${this.resolveBase(region)}${path}${query ? `?${query}` : ''}`;
-    const headers = this.buildHeaders(method, region, effectiveCookie, token.header);
+    const headers = this.buildHeaders(
+      method,
+      region,
+      effectiveCookie,
+      token.header,
+      extraHeaders
+    );
 
     const requestMaterial = `${query}\n${body}`;
     logInfo(
@@ -1055,6 +1081,41 @@ export class MiyousheGameRecordClient {
           isRetry: false,
           useBrowserTransport: true
         });
+      }
+
+      // A natural 1034 is MiHoYo's supported interactive verification path.
+      // Never promote 5003 into this branch: live verification correctly
+      // rejects that synthetic flow with 10306 and repeated attempts add risk.
+      if (
+        retcode === 1034 &&
+        !region.isGlobal &&
+        this.verificationProvider &&
+        !verificationAttempted
+      ) {
+        let verification: MiyousheVerificationProviderResult;
+        try {
+          verification = await this.verificationProvider(effectiveCookie, path);
+        } catch {
+          return { ok: false, error: classified };
+        }
+        if (verification.ok) {
+          return this.doSignedRequest<T>({
+            ...args,
+            cookie: effectiveCookie,
+            isRetry: false,
+            useBrowserTransport: true,
+            verificationAttempted: true,
+            extraHeaders: verification.headers
+          });
+        }
+        return {
+          ok: false,
+          error: {
+            kind: 'captcha-required',
+            retcode: verification.retcode ?? retcode,
+            message: verification.message
+          }
+        };
       }
 
       // Retry once on transient 5xx with a fresh DS. Auth/captcha/signature
