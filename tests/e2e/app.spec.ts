@@ -53,7 +53,28 @@ test('boots with isolated data and navigates through preload-backed pages', asyn
   await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible();
   await expect(page.getByRole('heading', { name: /绑定米游社账号/ })).toBeVisible();
 
-  await page.getByRole('button', { name: '设置' }).click();
+  const primaryNavigation = page.getByRole('navigation', { name: '主导航' });
+  await expect(primaryNavigation.getByRole('button')).toHaveText([
+    '角色一览',
+    '挑战配队',
+    '历史记录'
+  ]);
+  await expect(primaryNavigation.getByRole('button', { name: '绑定' })).toHaveCount(0);
+  await expect(primaryNavigation.getByRole('button', { name: '设置' })).toHaveCount(0);
+
+  const accountButton = page.getByRole('button', { name: '账号与设置' });
+  await accountButton.click();
+  const accountMenu = page.getByRole('menu', { name: '账号与设置' });
+  await expect(accountMenu).toBeVisible();
+  await expect(accountMenu.getByRole('menuitem', { name: '资料绑定' })).toBeVisible();
+  await expect(accountMenu.getByRole('menuitem', { name: '设置' })).toBeVisible();
+
+  await page.keyboard.press('Escape');
+  await expect(accountMenu).toBeHidden();
+  await expect(accountButton).toBeFocused();
+
+  await accountButton.click();
+  await accountMenu.getByRole('menuitem', { name: '设置' }).click();
   await expect(page.getByRole('heading', { name: /LLM 配置/ })).toBeVisible();
   await expect(page.getByText('未配置', { exact: true })).toBeVisible();
 
@@ -68,15 +89,17 @@ test('boots with isolated data and navigates through preload-backed pages', asyn
   expect(persistedConfig).not.toContain('e2e-api-secret');
   expect(persistedConfig).not.toContain('e2e-header-secret');
 
+  await page.getByRole('button', { name: '账号与设置' }).click();
   await page.getByRole('combobox', { name: '语言' }).selectOption('en-US');
   await expect(page.getByRole('navigation', { name: 'Primary navigation' })).toBeVisible();
   await expect(page.getByRole('heading', { name: /LLM Configuration/ })).toBeVisible();
   await expect(page.getByText('Configured (encrypted)', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Clear key' }).click();
   await expect(page.getByText('Not configured', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Account and settings' }).click();
   await page.getByRole('combobox', { name: 'Language' }).selectOption('zh-CN');
 
-  await page.getByRole('button', { name: '绑定' }).click();
+  await page.getByRole('menuitem', { name: '资料绑定' }).click();
   await expect(page.getByRole('heading', { name: /绑定米游社账号/ })).toBeVisible();
   expect(rendererErrors).toEqual([]);
 });
@@ -158,5 +181,58 @@ test('renders profile coverage and known build fields without fake zero values',
   await expect(page.getByText('6 / 9 / 10')).toBeVisible();
   await expect(page.getByText(/测试套装×1/)).toBeVisible();
   await expect(page.getByText('未知', { exact: true }).first()).toBeVisible();
+
+  await page.getByRole('button', { name: '挑战配队' }).click();
+  await expect(page.getByRole('heading', { name: '选择挑战' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /深境螺旋/ })).toContainText('上下半两队');
+  await expect(page.getByRole('button', { name: /幻想真境剧诗/ })).toContainText('演员池与活力');
+  await expect(page.getByRole('button', { name: /幽境危战/ })).toContainText('三阶段首领');
+  const legacyEnemyInput = page.locator('.gta-advisor-advanced textarea').first();
+  await expect(legacyEnemyInput).toHaveValue('abyss-mage, ruin-guard');
+  await expect(legacyEnemyInput).toBeHidden();
+
+  const globalBackground = await page.evaluate<string>(
+    "getComputedStyle(document.querySelector('.app-bg')).backgroundImage"
+  );
+  expect(globalBackground).toContain('app-global');
+  const modeBackgrounds = await page.evaluate<string[]>(
+    "Array.from(document.querySelectorAll('[data-testid=challenge-mode-entry]'), (element) => getComputedStyle(element).backgroundImage)"
+  );
+  expect(modeBackgrounds).toHaveLength(3);
+  expect(modeBackgrounds.join(' ')).toContain('spiral-abyss');
+  expect(modeBackgrounds.join(' ')).toContain('imaginarium-theater');
+  expect(modeBackgrounds.join(' ')).toContain('stygian-onslaught');
+
+  await page.setViewportSize({ width: 1024, height: 768 });
+  const viewportWidths = await page.evaluate<{ body: number; root: number; viewport: number }>(
+    '({ body: document.body.scrollWidth, root: document.documentElement.scrollWidth, viewport: window.innerWidth })'
+  );
+  expect(viewportWidths.body).toBeLessThanOrEqual(viewportWidths.viewport);
+  expect(viewportWidths.root).toBeLessThanOrEqual(viewportWidths.viewport);
+  await page.waitForTimeout(550);
+  await page.screenshot({ path: path.join(tmpdir(), 'gta-m2-challenge-1024x768.png') });
+
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const standardViewportWidths = await page.evaluate<{
+    body: number;
+    root: number;
+    viewport: number;
+  }>(
+    '({ body: document.body.scrollWidth, root: document.documentElement.scrollWidth, viewport: window.innerWidth })'
+  );
+  expect(standardViewportWidths.body).toBeLessThanOrEqual(standardViewportWidths.viewport);
+  expect(standardViewportWidths.root).toBeLessThanOrEqual(standardViewportWidths.viewport);
+
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  const wideViewportWidths = await page.evaluate<{
+    body: number;
+    root: number;
+    viewport: number;
+  }>(
+    '({ body: document.body.scrollWidth, root: document.documentElement.scrollWidth, viewport: window.innerWidth })'
+  );
+  expect(wideViewportWidths.body).toBeLessThanOrEqual(wideViewportWidths.viewport);
+  expect(wideViewportWidths.root).toBeLessThanOrEqual(wideViewportWidths.viewport);
+  await page.screenshot({ path: path.join(tmpdir(), 'gta-m2-challenge-1600x1000.png') });
   expect(rendererErrors).toEqual([]);
 });

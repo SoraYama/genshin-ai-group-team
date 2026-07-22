@@ -1,7 +1,4 @@
-/**
- * Visual primitives — SVG icons & decorative pieces shared across pages.
- * Element icon colors mirror Mantan21 wish-simulator's `app.css` gradient values.
- */
+/** Original geometric SVG primitives shared across pages. */
 import type { Element } from './tokens';
 import { elementPalette } from './tokens';
 
@@ -20,14 +17,9 @@ export function CornerPiece({ className, size = 22 }: SvgProps) {
       fill="none"
       aria-hidden="true"
     >
-      <path d="M 0 22 L 0 6 Q 0 0 6 0 L 22 0" stroke="#c3b8a1" strokeWidth="1.5" />
-      <path
-        d="M 3 18 L 3 8 Q 3 5 6 5 L 16 5"
-        stroke="#c3b8a1"
-        strokeWidth="1"
-        opacity="0.65"
-      />
-      <circle cx="6" cy="6" r="1.8" fill="#c3b8a1" />
+      <path d="M 0 22 L 0 6 Q 0 0 6 0 L 22 0" stroke="#bda775" strokeWidth="1.5" />
+      <path d="M 3 18 L 3 8 Q 3 5 6 5 L 16 5" stroke="#bda775" strokeWidth="1" opacity="0.65" />
+      <circle cx="6" cy="6" r="1.8" fill="#bda775" />
     </svg>
   );
 }
@@ -212,10 +204,18 @@ export function PanelCorners({ inset = -2 }: CornersProps) {
   };
   return (
     <>
-      <span style={style('tl')}><CornerPiece /></span>
-      <span style={style('tr')}><CornerPiece /></span>
-      <span style={style('bl')}><CornerPiece /></span>
-      <span style={style('br')}><CornerPiece /></span>
+      <span style={style('tl')}>
+        <CornerPiece />
+      </span>
+      <span style={style('tr')}>
+        <CornerPiece />
+      </span>
+      <span style={style('bl')}>
+        <CornerPiece />
+      </span>
+      <span style={style('br')}>
+        <CornerPiece />
+      </span>
     </>
   );
 }

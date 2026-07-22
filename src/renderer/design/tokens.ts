@@ -2,20 +2,12 @@
  * Design tokens — source-of-truth for runtime style access from TS.
  * All values mirror the CSS custom properties defined in global.css.
  *
- * Reference: docs/design/roster-mockup.html (v2) + Mantan21 wish simulator.
- * The visual language is "warm cream panel + slate-blue + element accents",
- * NOT the dark-blue + cool-gold I originally guessed.
+ * Visual language: cool blue-gray canvas, mist-green surfaces, ivory text and
+ * one restrained gold accent. CSS custom properties in styles/tokens.css are
+ * the rendered source of truth; this module serves data-driven TS consumers.
  */
 
-export const elements = [
-  'pyro',
-  'hydro',
-  'electro',
-  'anemo',
-  'geo',
-  'cryo',
-  'dendro'
-] as const;
+export const elements = ['pyro', 'hydro', 'electro', 'anemo', 'geo', 'cryo', 'dendro'] as const;
 
 export type Element = (typeof elements)[number];
 
@@ -23,13 +15,13 @@ export const elementPalette: Record<
   Element,
   { gradientStart: string; gradientEnd: string; flat: string; bg: string }
 > = {
-  pyro: { gradientStart: '#fe6606', gradientEnd: '#fea76b', flat: '#ee6c4c', bg: '#c45b31' },
-  hydro: { gradientStart: '#06bbff', gradientEnd: '#10e2ff', flat: '#3f8ed1', bg: '#3d6db5' },
-  electro: { gradientStart: '#ca82fc', gradientEnd: '#deb5fe', flat: '#7d67c5', bg: '#8246ba' },
-  anemo: { gradientStart: '#32d9a1', gradientEnd: '#aef2cd', flat: '#359697', bg: '#359697' },
-  geo: { gradientStart: '#f9aa02', gradientEnd: '#fcd260', flat: '#cb8f46', bg: '#b88f47' },
-  cryo: { gradientStart: '#7cfeff', gradientEnd: '#c6fffd', flat: '#46c2d8', bg: '#5cd2e3' },
-  dendro: { gradientStart: '#a6d138', gradientEnd: '#aaef3a', flat: '#64ad15', bg: '#64ad15' }
+  pyro: { gradientStart: '#c6634e', gradientEnd: '#d99474', flat: '#a84c40', bg: '#8b433a' },
+  hydro: { gradientStart: '#4b95ba', gradientEnd: '#7ebed1', flat: '#367da0', bg: '#315f78' },
+  electro: { gradientStart: '#8f79b1', gradientEnd: '#b7a6cc', flat: '#755e9a', bg: '#594875' },
+  anemo: { gradientStart: '#4d988e', gradientEnd: '#8ac4b7', flat: '#397d77', bg: '#356963' },
+  geo: { gradientStart: '#b39154', gradientEnd: '#d0b775', flat: '#96763e', bg: '#765d32' },
+  cryo: { gradientStart: '#69a7b6', gradientEnd: '#a2cdd2', flat: '#518b9a', bg: '#426f7b' },
+  dendro: { gradientStart: '#728b4b', gradientEnd: '#a3b778', flat: '#5c7338', bg: '#4b5e31' }
 };
 
 /**
@@ -49,37 +41,36 @@ export function normalizeElement(raw: string): Element {
 }
 
 export const palette = {
-  panelCream: '#fbf6ee',
-  panelCream2: '#ece5d8',
-  panelCream3: '#e0ddd4',
-  panelSlate: '#4a5265',
-  panelSlate2: '#333947',
-  strokeCream: '#ddd5c8',
-  strokeCreamSoft: '#ebe3d3',
-  textOnLight: '#383b40',
-  textOnLightSoft: '#5a6068',
-  textOnLightFaint: '#8a8b8f',
-  textOnDark: '#ffffff',
-  textOnDarkSoft: '#d0d4dc',
-  gold: '#c3b8a1',
-  goldSoft: 'rgba(210, 198, 156, 0.5)',
-  goldIcon: '#ffc107',
-  blueIcon: '#3f9ad1',
-  danger: '#c45b31',
-  ok: '#64ad15'
+  panelCream: '#ecf2f1',
+  panelCream2: '#dfe8e6',
+  panelCream3: '#cbd8d6',
+  panelSlate: '#263b4c',
+  panelSlate2: '#172a3a',
+  strokeCream: '#9db2b1',
+  strokeCreamSoft: '#a9bebb',
+  textOnLight: '#14222c',
+  textOnLightSoft: '#3f5360',
+  textOnLightFaint: '#687a82',
+  textOnDark: '#f7f5ec',
+  textOnDarkSoft: '#cbd7d8',
+  gold: '#bda775',
+  goldSoft: 'rgba(189, 167, 117, 0.3)',
+  goldIcon: '#d8c58d',
+  blueIcon: '#4b95ba',
+  danger: '#9f4c4f',
+  ok: '#356f61'
 } as const;
 
 export const fonts = {
-  body:
-    "'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif",
+  body: "'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif",
   mono: "'JetBrains Mono', ui-monospace, 'SF Mono', monospace"
 } as const;
 
 export const radii = {
-  sm: 4,
-  md: 8,
-  lg: 12,
-  pill: 999
+  sm: 2,
+  md: 4,
+  lg: 6,
+  pill: 4
 } as const;
 
 export const space = {

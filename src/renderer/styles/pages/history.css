@@ -1,0 +1,74 @@
+.gta-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.gta-history-entry {
+  overflow: hidden;
+  border: 1px solid var(--gta-stroke);
+  color: var(--gta-text-on-light);
+  background: var(--gta-panel);
+  transition:
+    border-color var(--gta-dur-base),
+    box-shadow var(--gta-dur-base);
+}
+.gta-history-entry:hover,
+.gta-history-entry.is-expanded {
+  border-color: var(--gta-gold);
+}
+.gta-history-entry.is-expanded {
+  box-shadow: var(--gta-shadow-card);
+}
+.gta-history-summary {
+  display: flex;
+  width: 100%;
+  min-height: 58px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border: 0;
+  color: var(--gta-text-on-light);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.gta-history-summary:hover {
+  background: rgba(223, 232, 230, 0.56);
+}
+.gta-history-time,
+.gta-history-uid {
+  color: var(--gta-text-on-light-faint);
+  font-family: var(--gta-font-mono);
+  font-size: var(--gta-text-xs);
+}
+.gta-history-time {
+  min-width: 128px;
+}
+.gta-history-enemies {
+  min-width: 160px;
+  flex: 1;
+  overflow: hidden;
+  font-size: var(--gta-text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gta-history-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  border-top: 1px solid var(--gta-stroke);
+}
+.gta-history-stats {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin: 0 0 10px;
+  color: rgba(238, 244, 242, 0.84);
+  font-family: var(--gta-font-mono);
+  font-size: var(--gta-text-xs);
+}

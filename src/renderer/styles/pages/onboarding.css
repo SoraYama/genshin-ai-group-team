@@ -1,0 +1,45 @@
+.gta-role-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.gta-role-list label {
+  display: flex;
+  min-height: 52px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--gta-stroke);
+  background: var(--gta-panel-2);
+  cursor: pointer;
+  transition:
+    border-color var(--gta-dur-base),
+    background var(--gta-dur-base);
+}
+.gta-role-list label:hover,
+.gta-role-list label:has(input:checked) {
+  border-color: var(--gta-gold);
+  background: var(--gta-panel);
+}
+.gta-role-list input {
+  accent-color: var(--gta-panel-dark);
+}
+.gta-role-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+.gta-role-line .uid {
+  color: var(--gta-text-on-light);
+  font-family: var(--gta-font-mono);
+  font-size: var(--gta-text-sm);
+  font-weight: 700;
+}
+.gta-role-line .meta {
+  color: var(--gta-text-on-light-soft);
+  font-size: var(--gta-text-xs);
+}

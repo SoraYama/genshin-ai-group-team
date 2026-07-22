@@ -14,7 +14,7 @@ import '@fontsource/jetbrains-mono/latin-700.css';
 
 import App from './App';
 import { I18nProvider } from './i18n';
-import './styles/global.css';
+import './styles/index.css';
 
 const root = document.getElementById('root');
 if (!root) {

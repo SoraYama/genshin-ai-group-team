@@ -1,0 +1,209 @@
+.gta-uid-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.gta-uid-tab {
+  display: flex;
+  min-width: 160px;
+  min-height: 60px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 8px 14px;
+  border: 1px solid var(--gta-stroke);
+  color: var(--gta-text-on-light-soft);
+  background: var(--gta-panel-2);
+  cursor: pointer;
+}
+.gta-uid-tab:hover {
+  border-color: var(--gta-gold);
+}
+.gta-uid-tab.is-active {
+  border-color: var(--gta-gold);
+  color: var(--gta-text-on-dark);
+  background: var(--gta-panel-dark);
+}
+.gta-uid-tab .uid,
+.gta-uid-tab .count {
+  font-family: var(--gta-font-mono);
+  font-size: 10px;
+}
+.gta-uid-tab .nickname {
+  font-size: var(--gta-text-sm);
+  font-weight: 700;
+}
+.gta-profile-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 18px;
+}
+.gta-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 1px;
+  background: var(--gta-stroke);
+}
+.gta-meta-cell {
+  min-width: 0;
+  padding: 10px 12px;
+  background: var(--gta-panel);
+}
+.gta-meta-label {
+  color: var(--gta-text-on-light-faint);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+.gta-meta-value {
+  overflow: hidden;
+  color: var(--gta-text-on-light);
+  font-size: var(--gta-text-md);
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gta-meta-detail {
+  color: var(--gta-text-on-light-faint);
+  font-family: var(--gta-font-mono);
+  font-size: 9px;
+}
+.gta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+  gap: 14px;
+}
+.gta-card {
+  position: relative;
+  padding: 16px;
+  border: 1px solid var(--gta-stroke);
+  color: var(--gta-text-on-light);
+  background: var(--gta-panel);
+  box-shadow: var(--gta-shadow-card);
+  transition:
+    transform var(--gta-dur-base),
+    border-color var(--gta-dur-base),
+    box-shadow var(--gta-dur-base);
+}
+.gta-card:hover {
+  border-color: var(--gta-gold);
+  box-shadow: var(--gta-shadow-card-hover);
+  transform: translateY(-2px);
+}
+.gta-card-head {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr);
+  gap: 12px;
+}
+.gta-portrait {
+  position: relative;
+  width: 78px;
+  height: 78px;
+}
+.gta-portrait-frame {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  overflow: hidden;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  background: var(--gta-panel-dark);
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+}
+.gta-portrait-frame img,
+.gta-portrait-frame svg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.gta-portrait-element {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid var(--gta-gold);
+  background: var(--gta-panel);
+}
+.gta-identity {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: 7px;
+}
+.gta-rank-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.gta-rank-stars {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding: 2px 5px;
+  color: var(--gta-gold);
+  background: rgba(189, 167, 117, 0.12);
+}
+.gta-level {
+  color: var(--gta-text-on-light-soft);
+  font-family: var(--gta-font-mono);
+  font-size: var(--gta-text-xs);
+}
+.gta-card-divider {
+  height: 1px;
+  margin: 12px 0;
+  background: var(--gta-stroke-soft);
+}
+.gta-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 16px;
+}
+.gta-stat {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--gta-text-xs);
+}
+.gta-stat-label {
+  color: var(--gta-text-on-light-faint);
+}
+.gta-stat-value {
+  color: var(--gta-text-on-light);
+  font-family: var(--gta-font-mono);
+  font-weight: 600;
+}
+.gta-stat-value .pct {
+  color: var(--gta-text-on-light-faint);
+}
+.gta-build-summary {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--gta-stroke-soft);
+}
+.gta-build-line {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr);
+  gap: 8px;
+  color: var(--gta-text-on-light-faint);
+  font-size: var(--gta-text-xs);
+}
+.gta-build-line strong {
+  overflow: hidden;
+  color: var(--gta-text-on-light-soft);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 920px) {
+  .gta-profile-row {
+    grid-template-columns: 1fr;
+  }
+}

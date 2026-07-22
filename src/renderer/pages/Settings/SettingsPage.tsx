@@ -4,6 +4,7 @@ import { DEFAULT_BASE_URL, DEFAULT_MODEL } from '../../../shared/domain';
 import type { LlmHealthReport, PublicConfig, UpdateStatus } from '../../../shared/domain';
 import { ButtonGlyph } from '../../design/Icons';
 import { localizeError, useI18n } from '../../i18n';
+import { StatusStrip } from '../../components/ui/StatusStrip';
 
 type SaveStatus =
   | { kind: 'idle' }
@@ -113,49 +114,36 @@ export function SettingsPage() {
       <div className="gta-panel" style={{ marginBottom: 'var(--gta-s4)' }}>
         <div className="gta-panel-body">
           <p className="gta-hint">{t('settings.privacy')}</p>
-          <dl className="gta-status-grid">
-            <div>
-              <dt>API Key</dt>
-              <dd>
-                {config.llm.hasApiKey
+          <StatusStrip
+            items={[
+              {
+                label: 'API Key',
+                value: config.llm.hasApiKey
                   ? t('settings.key.configured')
-                  : t('settings.key.missing')}
-              </dd>
-            </div>
-            <div>
-              <dt>Base URL</dt>
-              <dd>{config.llm.baseUrl}</dd>
-            </div>
-            <div>
-              <dt>Model</dt>
-              <dd>{config.llm.model}</dd>
-            </div>
-            <div>
-              <dt>{t('settings.headers')}</dt>
-              <dd>
-                {config.llm.customHeaderKeys.length > 0
-                  ? t('settings.headers.configured', {
-                      keys: config.llm.customHeaderKeys.join(', ')
-                    })
-                  : t('settings.headers.none')}
-              </dd>
-            </div>
-            <div>
-              <dt>App Version</dt>
-              <dd>{config.appVersion}</dd>
-            </div>
-            <div>
-              <dt>{t('settings.usage')}</dt>
-              <dd>
-                {config.monthlyUsage.inputTokens.toLocaleString()} in /{' '}
-                {config.monthlyUsage.outputTokens.toLocaleString()} out
-              </dd>
-            </div>
-            <div>
-              <dt>{t('settings.cost')}</dt>
-              <dd>${config.monthlyUsage.estimatedCostUsd.toFixed(4)}</dd>
-            </div>
-          </dl>
+                  : t('settings.key.missing')
+              },
+              { label: 'Base URL', value: config.llm.baseUrl },
+              { label: 'Model', value: config.llm.model },
+              {
+                label: t('settings.headers'),
+                value:
+                  config.llm.customHeaderKeys.length > 0
+                    ? t('settings.headers.configured', {
+                        keys: config.llm.customHeaderKeys.join(', ')
+                      })
+                    : t('settings.headers.none')
+              },
+              { label: 'App Version', value: config.appVersion },
+              {
+                label: t('settings.usage'),
+                value: `${config.monthlyUsage.inputTokens.toLocaleString()} in / ${config.monthlyUsage.outputTokens.toLocaleString()} out`
+              },
+              {
+                label: t('settings.cost'),
+                value: `$${config.monthlyUsage.estimatedCostUsd.toFixed(4)}`
+              }
+            ]}
+          />
         </div>
       </div>
 
@@ -381,10 +369,7 @@ function parseCustomHeaders(value: string, invalidMessage: string): Record<strin
   return headers;
 }
 
-function updateStatusLabel(
-  status: UpdateStatus,
-  t: ReturnType<typeof useI18n>['t']
-): string {
+function updateStatusLabel(status: UpdateStatus, t: ReturnType<typeof useI18n>['t']): string {
   switch (status.state) {
     case 'disabled':
       return t('update.disabled');

@@ -1,0 +1,251 @@
+.gta-advisor-page {
+  padding-bottom: 30px;
+}
+.gta-advisor-page > .gta-page-head {
+  margin-bottom: 24px;
+}
+.gta-challenge-path {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.gta-challenge-path::before {
+  position: absolute;
+  top: 28px;
+  right: 8%;
+  left: 8%;
+  z-index: -1;
+  height: 1px;
+  content: '';
+  background: linear-gradient(90deg, transparent, var(--gta-gold), transparent);
+}
+.gta-challenge-entry {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  min-height: clamp(230px, 28vh, 320px);
+  grid-template-rows: auto 1fr auto;
+  padding: 18px;
+  overflow: hidden;
+  border: 1px solid rgba(213, 226, 222, 0.26);
+  color: var(--gta-text-on-dark);
+  background-color: var(--gta-panel-dark-2);
+  background-position: center;
+  background-size: cover;
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.18);
+  clip-path: polygon(
+    10px 0,
+    100% 0,
+    100% calc(100% - 10px),
+    calc(100% - 10px) 100%,
+    0 100%,
+    0 10px
+  );
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--gta-dur-base),
+    transform var(--gta-dur-base) var(--gta-ease),
+    box-shadow var(--gta-dur-base);
+  animation: gta-path-enter var(--gta-dur-slow) var(--gta-ease) both;
+}
+.gta-challenge-entry:nth-child(2) {
+  animation-delay: 90ms;
+}
+.gta-challenge-entry:nth-child(3) {
+  animation-delay: 180ms;
+}
+.gta-challenge-entry::after {
+  position: absolute;
+  inset: 5px;
+  border: 1px solid rgba(215, 198, 148, 0.18);
+  content: '';
+  pointer-events: none;
+}
+.gta-challenge-entry:hover {
+  z-index: 2;
+  border-color: rgba(211, 189, 130, 0.82);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.34);
+  transform: translateY(-4px);
+}
+.gta-challenge-entry:focus-visible {
+  outline: 0;
+  box-shadow: inset 0 0 0 3px var(--gta-focus);
+}
+.gta-challenge-entry.is-selected {
+  border-color: var(--gta-gold-strong);
+  box-shadow:
+    0 0 0 1px rgba(211, 189, 130, 0.22),
+    0 24px 48px rgba(0, 0, 0, 0.32);
+}
+.gta-challenge-index {
+  position: relative;
+  z-index: 1;
+  justify-self: start;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--gta-gold);
+  color: var(--gta-gold-strong);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+}
+.gta-challenge-copy {
+  position: relative;
+  z-index: 1;
+  align-self: end;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 270px;
+}
+.gta-challenge-copy strong {
+  font-size: clamp(20px, 2vw, 28px);
+  letter-spacing: 0.06em;
+  line-height: 1.18;
+  text-shadow: 0 2px 16px rgba(0, 0, 0, 0.68);
+}
+.gta-challenge-copy span {
+  color: rgba(238, 244, 242, 0.82);
+  font-size: var(--gta-text-sm);
+  line-height: 1.65;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.66);
+}
+.gta-challenge-arrow {
+  position: relative;
+  z-index: 1;
+  align-self: end;
+  justify-self: end;
+  width: 34px;
+  height: 34px;
+  padding-top: 5px;
+  border: 1px solid rgba(211, 189, 130, 0.72);
+  color: var(--gta-gold-strong);
+  text-align: center;
+}
+.gta-mode-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0 26px;
+  padding: 13px 16px;
+  border-block: 1px solid rgba(212, 225, 222, 0.2);
+  color: rgba(237, 244, 242, 0.72);
+  background: rgba(8, 20, 32, 0.38);
+  backdrop-filter: blur(10px);
+  font-size: var(--gta-text-xs);
+  line-height: 1.6;
+}
+.gta-mode-status strong {
+  display: block;
+  color: var(--gta-text-on-dark);
+  font-size: var(--gta-text-sm);
+}
+.gta-mode-status-mark {
+  color: var(--gta-gold-strong);
+  font-size: 20px;
+}
+.gta-advisor-advanced {
+  margin-top: 0;
+}
+.gta-advisor-legacy-head {
+  align-items: center;
+  margin-bottom: 0;
+}
+.gta-compare-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.gta-diff-summary {
+  padding: 12px 14px;
+  border-left: 2px solid var(--gta-gold);
+  color: var(--gta-text-on-light);
+  background: var(--gta-panel-2);
+}
+.gta-stream-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.gta-progress-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--gta-text-on-light-soft);
+  font-size: var(--gta-text-sm);
+}
+.gta-progress-line code {
+  padding: 2px 7px;
+  border: 1px solid var(--gta-stroke);
+  color: var(--gta-text-on-light);
+  background: var(--gta-panel-2);
+  font-family: var(--gta-font-mono);
+  font-size: var(--gta-text-xs);
+}
+.gta-stream {
+  max-height: 240px;
+  margin: 0;
+  padding: 14px;
+  overflow: auto;
+  color: var(--gta-text-on-dark-soft);
+  background: var(--gta-panel-dark-2);
+  font-family: var(--gta-font-mono);
+  font-size: var(--gta-text-xs);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.gta-team-card {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 14px 16px;
+  border: 1px solid var(--gta-stroke);
+  border-left: 2px solid var(--gta-gold);
+  color: var(--gta-text-on-light);
+  background: rgba(223, 232, 230, 0.64);
+}
+.gta-team-card h4,
+.gta-team-card p {
+  margin: 0;
+}
+.gta-team-card p {
+  font-size: var(--gta-text-sm);
+  line-height: 1.6;
+}
+.gta-team-line-label {
+  margin-right: 7px;
+  color: var(--gta-text-on-light-faint);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+.gta-team-roster {
+  color: var(--gta-text-on-light-soft);
+  font-family: var(--gta-font-mono);
+  font-size: var(--gta-text-xs);
+}
+
+@keyframes gta-path-enter {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 920px) {
+  .gta-challenge-path {
+    grid-template-columns: 1fr;
+  }
+  .gta-challenge-entry {
+    min-height: 168px;
+  }
+  .gta-compare-grid {
+    grid-template-columns: 1fr;
+  }
+}
