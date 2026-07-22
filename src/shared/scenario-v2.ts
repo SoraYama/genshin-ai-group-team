@@ -339,32 +339,44 @@ const planCommonShape = {
   assumptions: z.array(z.string().trim().min(1))
 };
 
+const abyssHalfTacticsSchema = z
+  .object({
+    tactics: z.array(z.string().trim().min(1)).min(1),
+    risks: z.array(z.string().trim().min(1)).default([]),
+    substitutionNotes: z.array(z.string().trim().min(1)).default([])
+  })
+  .strict();
+
+const abyssChamberPlanSchema = z
+  .object({
+    floor: z.number().int().positive(),
+    chamber: z.number().int().positive(),
+    firstHalf: abyssHalfTacticsSchema,
+    secondHalf: abyssHalfTacticsSchema
+  })
+  .strict();
+
 const abyssPlanBaseSchema = z.object({
   mode: z.literal('spiral-abyss'),
   ...planCommonShape,
-  chambers: z.array(
-    z.object({
-      floor: z.number().int().positive(),
-      chamber: z.number().int().positive(),
-      firstHalf: teamAssignmentSchema,
-      secondHalf: teamAssignmentSchema
-    })
-  )
+  firstHalfTeam: teamAssignmentSchema,
+  secondHalfTeam: teamAssignmentSchema,
+  chambers: z.array(abyssChamberPlanSchema).min(1)
 });
 
-export const abyssPlanSchema = abyssPlanBaseSchema.superRefine(({ chambers }, context) => {
-  chambers.forEach(({ firstHalf, secondHalf }, index) => {
-    const firstHalfIds = new Set(firstHalf.characterIds);
-    const overlap = secondHalf.characterIds.filter((id) => firstHalfIds.has(id));
+export const abyssPlanSchema = abyssPlanBaseSchema.superRefine(
+  ({ firstHalfTeam, secondHalfTeam }, context) => {
+    const firstHalfIds = new Set(firstHalfTeam.characterIds);
+    const overlap = secondHalfTeam.characterIds.filter((id) => firstHalfIds.has(id));
     if (overlap.length > 0) {
       context.addIssue({
         code: 'custom',
         message: `Abyss halves must use non-overlapping teams: ${overlap.join(', ')}`,
-        path: ['chambers', index, 'secondHalf', 'characterIds']
+        path: ['secondHalfTeam', 'characterIds']
       });
     }
-  });
-});
+  }
+);
 
 export const stygianPlanSchema = z.object({
   mode: z.literal('stygian-onslaught'),

@@ -223,16 +223,24 @@ describe('scenario v2 mode schemas', () => {
 });
 
 describe('scenario v2 recommendation plan schemas', () => {
-  it('accepts an Abyss plan with two non-overlapping teams per chamber', () => {
+  it('accepts an Abyss plan with two fixed non-overlapping teams and per-chamber tactics', () => {
     const result = abyssPlanSchema.safeParse({
       mode: 'spiral-abyss',
       ...commonPlan,
+      firstHalfTeam: team('first', ['a', 'b', 'c', 'd']),
+      secondHalfTeam: team('second', ['e', 'f', 'g', 'h']),
       chambers: [
         {
           floor: 12,
           chamber: 1,
-          firstHalf: team('first', ['a', 'b', 'c', 'd']),
-          secondHalf: team('second', ['e', 'f', 'g', 'h'])
+          firstHalf: { tactics: ['先聚集第一波'], risks: ['注意冰抗'] },
+          secondHalf: { tactics: ['保留爆发处理第二波'], substitutionNotes: [] }
+        },
+        {
+          floor: 12,
+          chamber: 2,
+          firstHalf: { tactics: ['沿用固定上半队'] },
+          secondHalf: { tactics: ['沿用固定下半队'] }
         }
       ]
     });
@@ -286,12 +294,64 @@ describe('scenario v2 recommendation plan schemas', () => {
     const result = abyssPlanSchema.safeParse({
       mode: 'spiral-abyss',
       ...commonPlan,
+      firstHalfTeam: team('first', ['shared', 'b', 'c', 'd']),
+      secondHalfTeam: team('second', ['shared', 'f', 'g', 'h']),
       chambers: [
         {
           floor: 12,
           chamber: 1,
-          firstHalf: team('first', ['shared', 'b', 'c', 'd']),
-          secondHalf: team('second', ['shared', 'f', 'g', 'h'])
+          firstHalf: { tactics: ['处理上半'] },
+          secondHalf: { tactics: ['处理下半'] }
+        }
+      ]
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects an Abyss plan that moves a character from first half to second half across chambers', () => {
+    const result = abyssPlanSchema.safeParse({
+      mode: 'spiral-abyss',
+      ...commonPlan,
+      firstHalfTeam: team('fixed-first', ['a', 'b', 'c', 'd']),
+      secondHalfTeam: team('fixed-second', ['e', 'f', 'g', 'h']),
+      chambers: [
+        {
+          floor: 12,
+          chamber: 1,
+          firstHalf: team('first-1', ['a', 'b', 'c', 'd']),
+          secondHalf: team('second-1', ['e', 'f', 'g', 'h'])
+        },
+        {
+          floor: 12,
+          chamber: 2,
+          firstHalf: team('first-2', ['i', 'j', 'k', 'l']),
+          secondHalf: team('second-2', ['a', 'm', 'n', 'o'])
+        }
+      ]
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects an Abyss plan whose team roster changes between chambers', () => {
+    const result = abyssPlanSchema.safeParse({
+      mode: 'spiral-abyss',
+      ...commonPlan,
+      firstHalfTeam: team('fixed-first', ['a', 'b', 'c', 'd']),
+      secondHalfTeam: team('fixed-second', ['e', 'f', 'g', 'h']),
+      chambers: [
+        {
+          floor: 12,
+          chamber: 1,
+          firstHalf: team('first-1', ['a', 'b', 'c', 'd']),
+          secondHalf: team('second-1', ['e', 'f', 'g', 'h'])
+        },
+        {
+          floor: 12,
+          chamber: 2,
+          firstHalf: team('first-2', ['a', 'b', 'c', 'i']),
+          secondHalf: team('second-2', ['e', 'f', 'g', 'h'])
         }
       ]
     });
