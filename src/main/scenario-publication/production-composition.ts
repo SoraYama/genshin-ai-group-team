@@ -9,7 +9,9 @@ import { ScenePublicationService } from './service.js';
 import { FileScenarioPublicationStorage } from './storage.js';
 import type { ScenarioPublicKeyRing } from './publication.js';
 
-const publicKeyMapSchema = z.record(z.string().trim().min(1), z.string().trim().min(1));
+const publicKeyMapSchema = z
+  .record(z.string().trim().min(1), z.string().trim().min(1))
+  .refine((keys) => Object.keys(keys).length > 0, 'Production keyring cannot be empty');
 const packagedConfigSchema = z.discriminatedUnion('enabled', [
   z.object({ version: z.literal(1), enabled: z.literal(false) }).strict(),
   z

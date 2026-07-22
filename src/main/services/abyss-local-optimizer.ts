@@ -23,6 +23,8 @@ export interface BuildLocalAbyssPlanOptions {
   scenario: AbyssScenario;
   characters: CharacterProfile[];
   knowledge?: CharacterKnowledgeReader;
+  /** Test/debug override. Production uses the bounded default below. */
+  searchStateBudget?: number;
 }
 
 const ELEMENTS: Record<string, string> = {
@@ -40,14 +42,22 @@ const ELEMENTS: Record<string, string> = {
 const MAX_JOINT_POOL_SIZE = 16;
 // Recommendation runs synchronously in Electron's main process. Complex but valid scenario data
 // must fail closed before it can monopolize the event loop.
-const MAX_FEASIBILITY_STATES = 12_000;
+const DEFAULT_FEASIBILITY_STATE_BUDGET = 12_000;
+const MAX_HARD_CONSTRAINT_BITS = 64;
+
+type FeasibilityResult<T> =
+  | { status: 'feasible'; value: T }
+  | { status: 'infeasible' }
+  | { status: 'budget-exceeded' };
 
 export function buildLocalAbyssPlan({
   input,
   scenario,
   characters,
-  knowledge
+  knowledge,
+  searchStateBudget
 }: BuildLocalAbyssPlanOptions): AbyssAdvisorResult {
+  const stateBudget = normalizeStateBudget(searchStateBudget);
   const inputIssues = validateInputConstraints(input, characters);
   if (inputIssues.length > 0) return blocked(inputIssues);
 
@@ -88,6 +98,7 @@ export function buildLocalAbyssPlan({
       scenario,
       characters,
       knowledge,
+      searchStateBudget: stateBudget,
       chambers,
       firstEnemies,
       secondEnemies
@@ -99,9 +110,13 @@ export function buildLocalAbyssPlan({
     firstEnemies,
     secondEnemies,
     input,
-    knowledge
+    knowledge,
+    stateBudget
   );
-  if (!assignment) {
+  if (assignment.status === 'budget-exceeded') {
+    return blocked([searchBudgetIssue(['teams'])]);
+  }
+  if (assignment.status === 'infeasible') {
     return blocked([
       issue(
         'MECHANIC_COVERAGE_INVALID',
@@ -110,8 +125,9 @@ export function buildLocalAbyssPlan({
       )
     ]);
   }
+  const selectedAssignment = assignment.value;
 
-  const warnings = buildWarnings(assignment, chambers.length);
+  const warnings = buildWarnings(selectedAssignment, chambers.length);
   const assumptions = [
     '本地规则只使用已知的元素、等级、资料完整度、充能与敌人机制；未知角色职责没有被当作确定事实。',
     '角色职责、技能范围和实战操作未进入本地知识时，打法采用保守描述。'
@@ -121,18 +137,18 @@ export function buildLocalAbyssPlan({
     schemaVersion: 2 as const,
     scenarioId: scenario.id,
     dataVersion: scenario.meta.dataVersion,
-    confidence: confidenceFor(assignment) as 'low' | 'medium' | 'high',
+    confidence: confidenceFor(selectedAssignment) as 'low' | 'medium' | 'high',
     warnings,
     assumptions,
     firstHalfTeam: {
       id: 'first-half',
-      characterIds: assignment.first.map(({ id }) => String(id)),
+      characterIds: selectedAssignment.first.map(({ id }) => String(id)),
       purpose: `固定覆盖 ${input.floor} 层上半${input.chamber ? `第 ${input.chamber} 间` : '全部所选房间'}`,
       rotationNotes: ['根据实战充能调整技能顺序，保留关键技能处理下一波或阶段转场。']
     },
     secondHalfTeam: {
       id: 'second-half',
-      characterIds: assignment.second.map(({ id }) => String(id)),
+      characterIds: selectedAssignment.second.map(({ id }) => String(id)),
       purpose: `固定覆盖 ${input.floor} 层下半${input.chamber ? `第 ${input.chamber} 间` : '全部所选房间'}`,
       rotationNotes: ['根据实战充能调整技能顺序，避免在转场前耗尽关键技能。']
     },
@@ -161,6 +177,7 @@ function buildPartialPlan({
   scenario,
   characters,
   knowledge,
+  searchStateBudget,
   chambers,
   firstEnemies,
   secondEnemies
@@ -240,7 +257,27 @@ function buildPartialPlan({
     ]);
   }
   const enemies = recomputeHalf === 'firstHalf' ? firstEnemies : secondEnemies;
-  const pool = buildSingleHalfPool(available, requiredLocks, enemies, input, knowledge);
+  const poolResult = buildSingleHalfPool(
+    available,
+    requiredLocks,
+    enemies,
+    input,
+    knowledge,
+    normalizeStateBudget(searchStateBudget)
+  );
+  if (poolResult.status === 'budget-exceeded') {
+    return blocked([searchBudgetIssue([recomputeTeamKey])]);
+  }
+  if (poolResult.status === 'infeasible') {
+    return blocked([
+      issue(
+        'MECHANIC_COVERAGE_INVALID',
+        [recomputeTeamKey],
+        '在保留另一半的前提下，当前角色与干预条件无法覆盖该半场硬机制。'
+      )
+    ]);
+  }
+  const pool = poolResult.value;
   const requiredLockSet = new Set(requiredLocks);
   const candidate = buildTeamCandidates(pool, enemies, input, knowledge).find(({ ids }) =>
     [...requiredLockSet].every((id) => ids.has(id))
@@ -313,8 +350,9 @@ function buildSingleHalfPool(
   lockedIds: string[],
   enemies: EnemyInstance[],
   input: AbyssAdvisorPlanInput,
-  knowledge?: CharacterKnowledgeReader
-): CharacterProfile[] {
+  knowledge: CharacterKnowledgeReader | undefined,
+  stateBudget: number
+): FeasibilityResult<CharacterProfile[]> {
   const byScore = characters
     .slice()
     .sort(
@@ -322,9 +360,19 @@ function buildSingleHalfPool(
         scoreForHalf(right, enemies, input) - scoreForHalf(left, enemies, input) ||
         left.id - right.id
     );
-  const feasibleSeed = findFeasibleTeam(characters, lockedIds, enemies, input, knowledge);
-  if (!feasibleSeed) return [];
-  return uniqueCharacters([...feasibleSeed, ...byScore]).slice(0, MAX_JOINT_POOL_SIZE);
+  const feasibleSeed = findFeasibleTeam(
+    characters,
+    lockedIds,
+    enemies,
+    input,
+    knowledge,
+    stateBudget
+  );
+  if (feasibleSeed.status !== 'feasible') return feasibleSeed;
+  return {
+    status: 'feasible',
+    value: uniqueCharacters([...feasibleSeed.value, ...byScore]).slice(0, MAX_JOINT_POOL_SIZE)
+  };
 }
 
 interface JointAssignment {
@@ -339,8 +387,9 @@ function optimizeJointAssignment(
   firstEnemies: EnemyInstance[],
   secondEnemies: EnemyInstance[],
   input: AbyssAdvisorPlanInput,
-  knowledge?: CharacterKnowledgeReader
-): JointAssignment | undefined {
+  knowledge: CharacterKnowledgeReader | undefined,
+  stateBudget: number
+): FeasibilityResult<JointAssignment> {
   const locked = new Set(lockedIds);
   const rankedFor = (enemies: EnemyInstance[]) =>
     characters.slice().sort((left, right) => {
@@ -355,9 +404,10 @@ function optimizeJointAssignment(
     firstEnemies,
     secondEnemies,
     input,
-    knowledge
+    knowledge,
+    stateBudget
   );
-  if (!feasibleSeed) return undefined;
+  if (feasibleSeed.status !== 'feasible') return feasibleSeed;
   const capabilitySpecialists = selectCapabilitySpecialists(
     characters,
     firstEnemies,
@@ -366,8 +416,8 @@ function optimizeJointAssignment(
     knowledge
   );
   const pool = uniqueCharacters([
-    ...feasibleSeed.first,
-    ...feasibleSeed.second,
+    ...feasibleSeed.value.first,
+    ...feasibleSeed.value.second,
     ...capabilitySpecialists
   ]).slice(0, MAX_JOINT_POOL_SIZE);
   for (let index = 0; pool.length < MAX_JOINT_POOL_SIZE; index += 1) {
@@ -407,7 +457,7 @@ function optimizeJointAssignment(
       }
     }
   }
-  return best;
+  return best ? { status: 'feasible', value: best } : { status: 'infeasible' };
 }
 
 function selectCapabilitySpecialists(
@@ -466,15 +516,17 @@ function buildMechanicallyFeasibleSeed(
   firstEnemies: EnemyInstance[],
   secondEnemies: EnemyInstance[],
   input: AbyssAdvisorPlanInput,
-  knowledge?: CharacterKnowledgeReader
-): Pick<JointAssignment, 'first' | 'second'> | undefined {
+  knowledge: CharacterKnowledgeReader | undefined,
+  stateBudget: number
+): FeasibilityResult<Pick<JointAssignment, 'first' | 'second'>> {
   return findFeasibleJointSeed(
     characters,
     [...locked],
     firstEnemies,
     secondEnemies,
     input,
-    knowledge
+    knowledge,
+    stateBudget
   );
 }
 
@@ -504,10 +556,12 @@ function findFeasibleTeam(
   lockedIds: string[],
   enemies: EnemyInstance[],
   input: AbyssAdvisorPlanInput,
-  knowledge?: CharacterKnowledgeReader
-): CharacterProfile[] | undefined {
+  knowledge: CharacterKnowledgeReader | undefined,
+  stateBudget: number
+): FeasibilityResult<CharacterProfile[]> {
   const constraints = hardConstraintsFor(enemies, knowledge);
-  if (!canCoverWithinFour(characters, constraints)) return undefined;
+  const coverability = canCoverWithinFour(characters, constraints, stateBudget);
+  if (coverability !== 'feasible') return { status: coverability };
   const fullCoverage = fullMask(constraints.length);
   const lockBits = bitIndex(lockedIds);
   const fullLocks = fullMask(lockBits.size);
@@ -529,15 +583,18 @@ function findFeasibleTeam(
         score: state.score + scoreForHalf(character, enemies, input)
       };
       keepBestSingle(next, candidate);
-      if (next.size > MAX_FEASIBILITY_STATES) return undefined;
+      if (next.size > stateBudget) return { status: 'budget-exceeded' };
     }
     states = next;
   }
   const result = states.get(`4|${fullCoverage}|${fullLocks}`);
   if (!result || findAbyssMechanicCoverageGaps(result.team, enemies, knowledge).length > 0) {
-    return undefined;
+    return { status: 'infeasible' };
   }
-  return result.team.slice().sort((left, right) => left.id - right.id);
+  return {
+    status: 'feasible',
+    value: result.team.slice().sort((left, right) => left.id - right.id)
+  };
 }
 
 function findFeasibleJointSeed(
@@ -546,16 +603,15 @@ function findFeasibleJointSeed(
   firstEnemies: EnemyInstance[],
   secondEnemies: EnemyInstance[],
   input: AbyssAdvisorPlanInput,
-  knowledge?: CharacterKnowledgeReader
-): Pick<JointAssignment, 'first' | 'second'> | undefined {
+  knowledge: CharacterKnowledgeReader | undefined,
+  stateBudget: number
+): FeasibilityResult<Pick<JointAssignment, 'first' | 'second'>> {
   const firstConstraints = hardConstraintsFor(firstEnemies, knowledge);
   const secondConstraints = hardConstraintsFor(secondEnemies, knowledge);
-  if (
-    !canCoverWithinFour(characters, firstConstraints) ||
-    !canCoverWithinFour(characters, secondConstraints)
-  ) {
-    return undefined;
-  }
+  const firstCoverability = canCoverWithinFour(characters, firstConstraints, stateBudget);
+  if (firstCoverability !== 'feasible') return { status: firstCoverability };
+  const secondCoverability = canCoverWithinFour(characters, secondConstraints, stateBudget);
+  if (secondCoverability !== 'feasible') return { status: secondCoverability };
   const fullFirst = fullMask(firstConstraints.length);
   const fullSecond = fullMask(secondConstraints.length);
   const lockBits = bitIndex(lockedIds);
@@ -590,7 +646,7 @@ function findFeasibleJointSeed(
           locked: state.locked | locked,
           score: state.score + scoreForHalf(character, firstEnemies, input)
         });
-        if (next.size > MAX_FEASIBILITY_STATES) return undefined;
+        if (next.size > stateBudget) return { status: 'budget-exceeded' };
       }
       if (state.second.length < 4) {
         keepBestJoint(next, {
@@ -601,7 +657,7 @@ function findFeasibleJointSeed(
           locked: state.locked | locked,
           score: state.score + scoreForHalf(character, secondEnemies, input)
         });
-        if (next.size > MAX_FEASIBILITY_STATES) return undefined;
+        if (next.size > stateBudget) return { status: 'budget-exceeded' };
       }
     }
     states = next;
@@ -612,11 +668,14 @@ function findFeasibleJointSeed(
     findAbyssMechanicCoverageGaps(result.first, firstEnemies, knowledge).length > 0 ||
     findAbyssMechanicCoverageGaps(result.second, secondEnemies, knowledge).length > 0
   ) {
-    return undefined;
+    return { status: 'infeasible' };
   }
   return {
-    first: result.first.slice().sort((left, right) => left.id - right.id),
-    second: result.second.slice().sort((left, right) => left.id - right.id)
+    status: 'feasible',
+    value: {
+      first: result.first.slice().sort((left, right) => left.id - right.id),
+      second: result.second.slice().sort((left, right) => left.id - right.id)
+    }
   };
 }
 
@@ -682,10 +741,12 @@ function coverageMask(character: CharacterProfile, constraints: HardConstraint[]
 
 function canCoverWithinFour(
   characters: CharacterProfile[],
-  constraints: HardConstraint[]
-): boolean {
+  constraints: HardConstraint[],
+  stateBudget: number
+): FeasibilityResult<never>['status'] {
+  if (constraints.length > MAX_HARD_CONSTRAINT_BITS) return 'budget-exceeded';
   const target = fullMask(constraints.length);
-  if (target === 0n) return true;
+  if (target === 0n) return 'feasible';
   const reachable = Array.from({ length: 5 }, () => new Set<bigint>());
   reachable[0]?.add(0n);
   let stateCount = 1;
@@ -697,16 +758,16 @@ function canCoverWithinFour(
       if (!previous || !current) continue;
       for (const coverage of previous) {
         const combined = coverage | mask;
-        if (combined === target) return true;
+        if (combined === target) return 'feasible';
         if (!current.has(combined)) {
           current.add(combined);
           stateCount += 1;
-          if (stateCount > MAX_FEASIBILITY_STATES) return false;
+          if (stateCount > stateBudget) return 'budget-exceeded';
         }
       }
     }
   }
-  return false;
+  return 'infeasible';
 }
 
 function bitIndex(values: string[]): Map<string, number> {
@@ -720,6 +781,20 @@ function memberMask(value: string, index: Map<string, number>): bigint {
 
 function fullMask(size: number): bigint {
   return size === 0 ? 0n : (1n << BigInt(size)) - 1n;
+}
+
+function normalizeStateBudget(value: number | undefined): number {
+  if (value === undefined) return DEFAULT_FEASIBILITY_STATE_BUDGET;
+  return Math.max(1, Math.min(Math.floor(value), DEFAULT_FEASIBILITY_STATE_BUDGET));
+}
+
+function searchBudgetIssue(path: Array<string | number>): AbyssPlanIssue {
+  return issue(
+    'SEARCH_BUDGET_EXCEEDED',
+    path,
+    '角色组合搜索达到安全上限。请缩小角色池，或锁定关键角色后重试。',
+    { stateBudgetExceeded: true }
+  );
 }
 
 function keepBestSingle(states: Map<string, SingleSeedState>, candidate: SingleSeedState): void {

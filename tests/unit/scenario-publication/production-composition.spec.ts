@@ -197,4 +197,34 @@ describe('production scenario publication composition', () => {
       })
     ).resolves.toEqual({ status: 'unavailable', reason: 'production-config-invalid' });
   });
+
+  it('rejects an empty production keyring from both environment and packaged config', async () => {
+    const userDataDir = await mkdtemp(path.join(os.tmpdir(), 'gta-production-empty-keyring-'));
+    temporaryDirectories.push(userDataDir);
+    await expect(
+      createProductionScenarioPublicationSource({
+        userDataDir,
+        packagedConfigPath: path.join(userDataDir, 'unused.json'),
+        env: {
+          GTA_SCENARIO_MANIFEST_URL: 'https://scenario.example.test/manifest.json',
+          GTA_SCENARIO_PUBLIC_KEYS_JSON: '{}'
+        }
+      })
+    ).resolves.toEqual({ status: 'unavailable', reason: 'production-config-invalid' });
+
+    await expect(
+      createProductionScenarioPublicationSource({
+        userDataDir,
+        packagedConfigPath: path.join(userDataDir, 'scenario-production.json'),
+        env: {},
+        readFile: async () =>
+          JSON.stringify({
+            version: 1,
+            enabled: true,
+            manifestUrl: 'https://scenario.example.test/manifest.json',
+            publicKeys: {}
+          })
+      })
+    ).resolves.toEqual({ status: 'unavailable', reason: 'production-config-invalid' });
+  });
 });

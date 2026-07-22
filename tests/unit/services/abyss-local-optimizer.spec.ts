@@ -215,6 +215,49 @@ describe('buildLocalAbyssPlan', () => {
     expect(elapsedMs).toBeLessThan(500);
   });
 
+  it('keeps an eight-character feasible seed when seventy unrelated characters are added', () => {
+    const baselineCharacters = ABYSS_CHARACTERS.slice(0, 8);
+    const unrelated = Array.from({ length: 70 }, (_, index) => ({
+      ...ABYSS_CHARACTERS[0]!,
+      id: 10_001 + index,
+      name: `无关扩展角色${index + 1}`,
+      element: 'Pyro',
+      level: 90
+    }));
+    const input = abyssInput();
+    const scenario = abyssScenario();
+
+    const baseline = buildLocalAbyssPlan({ input, scenario, characters: baselineCharacters });
+    const expanded = buildLocalAbyssPlan({
+      input,
+      scenario,
+      characters: [...baselineCharacters, ...unrelated]
+    });
+
+    expect(baseline.status).toBe('planned');
+    expect(expanded.status).toBe('planned');
+  });
+
+  it('reports search budget exhaustion honestly instead of claiming the mechanics are impossible', () => {
+    const result = buildLocalAbyssPlan({
+      input: abyssInput(),
+      scenario: abyssScenario(),
+      characters: ABYSS_CHARACTERS,
+      searchStateBudget: 1
+    });
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      issues: [
+        {
+          code: 'SEARCH_BUDGET_EXCEEDED',
+          message: expect.stringMatching(/缩小角色池|锁定关键角色/)
+        }
+      ]
+    });
+    expect(result.issues.map(({ code }) => code)).not.toContain('MECHANIC_COVERAGE_INVALID');
+  });
+
   it('does not lose a feasible twin-counter plan when unrelated high-score characters are added', () => {
     const scenario = abyssScenario();
     const chamber = scenario.floors[0]!.chambers[0]!;

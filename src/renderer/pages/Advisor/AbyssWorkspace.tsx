@@ -584,6 +584,9 @@ function AbyssResult({
   pending: boolean;
 }) {
   if (result.status === 'blocked') {
+    const searchBudgetExceeded = result.issues.some(
+      ({ code }) => code === 'SEARCH_BUDGET_EXCEEDED'
+    );
     return (
       <section
         className="gta-abyss-result gta-abyss-result--blocked"
@@ -595,7 +598,11 @@ function AbyssResult({
             <li key={`${issue.code}-${index}`}>{issue.message}</li>
           ))}
         </ul>
-        <p>请减少锁定或排除角色，或补充角色资料后再试。</p>
+        <p>
+          {searchBudgetExceeded
+            ? '这不代表当前角色一定无解。请缩小角色池，或先锁定关键角色再试。'
+            : '请减少锁定或排除角色，或补充角色资料后再试。'}
+        </p>
       </section>
     );
   }
