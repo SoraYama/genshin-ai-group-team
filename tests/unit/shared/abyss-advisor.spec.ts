@@ -5,6 +5,7 @@ import {
   abyssAdvisorResultSchema,
   abyssScenarioViewSchema
 } from '../../../src/shared/abyss-advisor.js';
+import { validAbyssPlan } from '../services/abyss-test-fixtures.js';
 
 const preferences = {
   comfort: 'high',
@@ -54,6 +55,33 @@ describe('abyss advisor v2 contracts', () => {
         lockedCharacterIds: ['1001'],
         excludedCharacterIds: ['1001']
       })
+    ).toThrow();
+  });
+
+  it('accepts partial recompute only when the prior plan and target half are provided together', () => {
+    const base = {
+      correlationId: 'contract-partial-request',
+      uid: '123456789',
+      scenarioId: 'abyss.2026-07',
+      dataVersion: '2026.07.1',
+      floor: 12,
+      preferences,
+      lockedCharacterIds: [],
+      excludedCharacterIds: []
+    };
+
+    expect(
+      abyssAdvisorPlanInputSchema.parse({
+        ...base,
+        priorPlan: validAbyssPlan(),
+        recomputeHalf: 'firstHalf'
+      }).recomputeHalf
+    ).toBe('firstHalf');
+    expect(() =>
+      abyssAdvisorPlanInputSchema.parse({ ...base, priorPlan: validAbyssPlan() })
+    ).toThrow();
+    expect(() =>
+      abyssAdvisorPlanInputSchema.parse({ ...base, recomputeHalf: 'secondHalf' })
     ).toThrow();
   });
 

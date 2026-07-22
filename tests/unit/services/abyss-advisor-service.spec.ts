@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { AbyssAdvisorService } from '../../../src/main/services/abyss-advisor-service.js';
+import { CharacterKnowledgeStore } from '../../../src/main/services/character-knowledge-store.js';
 import type { AgentSdkRunOptions } from '../../../src/main/services/agent-sdk-adapter.js';
 import type { AbyssScenarioView } from '../../../src/shared/abyss-advisor.js';
 import {
@@ -77,6 +78,7 @@ function readyScenario() {
     trust: 'production' as const,
     snapshotStatus: 'ready' as const,
     notCurrent: false,
+    usableForRecommendation: true,
     freshness: 'fresh' as const,
     checkedAt: '2026-07-23T00:00:00.000Z',
     scenario: abyssScenario()
@@ -112,11 +114,15 @@ function service(options: {
   agentTimeoutMs?: number;
   recordUsage?: ReturnType<typeof vi.fn>;
   scenarioService?: { getView: () => Promise<AbyssScenarioView> };
+  knowledge?: CharacterKnowledgeStore;
+  toolLog?: ReturnType<typeof vi.fn>;
+  auditLog?: ReturnType<typeof vi.fn>;
 }) {
   return new AbyssAdvisorService({
     runner: options.runner,
-    scenarioService:
-      options.scenarioService ?? ({ getView: async () => options.scenarioView ?? readyScenario() }),
+    scenarioService: options.scenarioService ?? {
+      getView: async () => options.scenarioView ?? readyScenario()
+    },
     profiles: { get: () => profile(options.characters) },
     history: { appendAbyss: options.appendAbyss ?? vi.fn() },
     config: {
@@ -127,11 +133,39 @@ function service(options: {
       recordUsage: options.recordUsage
     },
     sdkEnvironment: { cwd: '/tmp/gta-test', clientVersion: 'test' },
-    agentTimeoutMs: options.agentTimeoutMs
+    agentTimeoutMs: options.agentTimeoutMs,
+    knowledge: options.knowledge,
+    toolLog: options.toolLog,
+    auditLog: options.auditLog
   });
 }
 
 describe('AbyssAdvisorService', () => {
+  it('records a correlated, redacted result audit with stable issue codes', async () => {
+    const auditLog = vi.fn();
+    const result = await service({
+      runner: new FixtureRunner([]),
+      characters: ABYSS_CHARACTERS.slice(0, 7),
+      auditLog
+    }).recommend(abyssInput());
+
+    expect(result.status).toBe('blocked');
+    expect(auditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        correlationId: 'abyss-test-request',
+        scenarioId: 'abyss.2026-07',
+        dataVersion: '2026.07.1',
+        knowledgeVersion: 'unavailable',
+        outcome: 'blocked',
+        issueCodes: ['ROSTER_INSUFFICIENT'],
+        parameterSummary: expect.objectContaining({ floor: 12, recompute: 'both' })
+      })
+    );
+    expect(JSON.stringify(auditLog.mock.calls)).not.toMatch(
+      /123456789|测试角色|api.?key|authorization/i
+    );
+  });
+
   it('uses the strict agent plan, emits player-semantic progress, and persists an immutable snapshot', async () => {
     const appendAbyss = vi.fn();
     const recordUsage = vi.fn();
@@ -173,6 +207,42 @@ describe('AbyssAdvisorService', () => {
     expect(runner.calls).toBe(2);
     expect(result).toMatchObject({ status: 'planned', source: 'local-rules' });
     expect(result.warnings.join(' ')).toContain('智能服务');
+  });
+
+  it('downgrades smart output when selected-character knowledge coverage is incomplete', async () => {
+    const knowledge = CharacterKnowledgeStore.fromUnknown({
+      schemaVersion: 1,
+      knowledgeVersion: 'partial-knowledge-v1',
+      updatedAt: '2026-07-23T00:00:00.000Z',
+      coverage: { characterCount: 1, notes: '仅覆盖一个测试角色。' },
+      characters: [
+        {
+          id: '1001',
+          name: '测试角色1',
+          weaponType: 'sword',
+          roles: ['support'],
+          energyCost: 60,
+          energyNeeds: 'medium',
+          capabilities: ['off-field'],
+          applicationNotes: [],
+          kitNotes: [],
+          unknownFields: []
+        }
+      ]
+    });
+    const result = await service({
+      runner: new FixtureRunner([validAbyssPlan({ confidence: 'high' })]),
+      apiKey: 'secret',
+      knowledge
+    }).recommend(abyssInput());
+
+    expect(result.status).toBe('planned');
+    if (result.status === 'planned') {
+      expect(result.source).toBe('smart-service');
+      expect(result.plan.confidence).toBe('low');
+      expect(result.assumptions.join(' ')).toContain('角色知识仅覆盖 1 / 8');
+      expect(result.plan.assumptions.join(' ')).toContain('partial-knowledge-v1');
+    }
   });
 
   it('uses local rules without invoking the agent when the smart service is not configured', async () => {
@@ -219,6 +289,7 @@ describe('AbyssAdvisorService', () => {
         snapshotStatus: 'last-known-good',
         refreshErrorCode: 'network-unavailable',
         notCurrent: true,
+        usableForRecommendation: false,
         freshness: 'stale',
         checkedAt: '2026-07-23T00:00:00.000Z',
         scenario: abyssScenario()
@@ -230,6 +301,34 @@ describe('AbyssAdvisorService', () => {
       issues: [{ code: 'SCENARIO_MISMATCH' }]
     });
   });
+
+  it.each(['fresh', 'expiring'] as const)(
+    'allows verified last-known-good %s data and carries the refresh warning into the plan',
+    async (freshness) => {
+      const runner = new FixtureRunner([validAbyssPlan()]);
+      const result = await service({
+        runner,
+        scenarioView: {
+          status: 'ready',
+          trust: 'production',
+          snapshotStatus: 'last-known-good',
+          refreshErrorCode: 'network-unavailable',
+          refreshWarning: '正在使用最近一次已确认的资料；本次刷新失败。',
+          notCurrent: false,
+          usableForRecommendation: true,
+          freshness,
+          checkedAt: '2026-07-23T00:00:00.000Z',
+          scenario: abyssScenario()
+        }
+      }).recommend(abyssInput());
+
+      expect(result.status).toBe('planned');
+      expect(result.warnings).toContain('正在使用最近一次已确认的资料；本次刷新失败。');
+      if (result.status === 'planned') {
+        expect(result.plan.warnings).toContain('正在使用最近一次已确认的资料；本次刷新失败。');
+      }
+    }
+  );
 
   it('aborts a hung smart-service request and falls back to local rules', async () => {
     const advisor = service({

@@ -4,6 +4,7 @@ import {
   ABYSS_MCP_TOOL_NAMES,
   createAbyssBusinessTools
 } from '../../../src/main/services/abyss-business-tools.js';
+import { CharacterKnowledgeStore } from '../../../src/main/services/character-knowledge-store.js';
 import { ABYSS_CHARACTERS, abyssScenario } from './abyss-test-fixtures.js';
 
 function textPayload(
@@ -63,7 +64,8 @@ describe('abyss in-process business tools', () => {
   it('rejects scenario identity drift and returns only the selected localized enemy fields', async () => {
     const scenario = abyssScenario();
     scenario.floors[0]!.chambers[0]!.firstHalf.waves[0]!.enemies[0]!.mechanics.tags.push(
-      'development-sample'
+      'development-sample',
+      'requires-capability:bow'
     );
     scenario.floors[0]!.chambers[0]!.firstHalf.waves[0]!.enemies[0]!.mechanics.immunities = [
       'hydro',
@@ -92,30 +94,90 @@ describe('abyss in-process business tools', () => {
     const payload = textPayload(result) as { firstHalf: unknown; secondHalf: unknown };
     expect(JSON.stringify(payload)).toContain('训练水兽');
     expect(JSON.stringify(payload)).toContain('水元素护盾');
+    expect(payload).toMatchObject({
+      firstHalf: [
+        {
+          enemies: [
+            {
+              mechanics: {
+                requiredCapabilities: [{ contractVersion: 1, value: 'bow', known: true }]
+              }
+            }
+          ]
+        }
+      ]
+    });
     expect(JSON.stringify(payload)).not.toMatch(
       /Training Hydra|training-hydra|12-1-first-wave-1|development-sample|internal-immunity|"hydro"/
     );
   });
 
-  it('labels missing kit knowledge as unknown and records only safe observability fields', async () => {
+  it('returns versioned character knowledge and records only correlated safe observability fields', async () => {
     const log = vi.fn();
+    const knowledge = CharacterKnowledgeStore.fromUnknown({
+      schemaVersion: 1,
+      knowledgeVersion: 'test-knowledge-v1',
+      updatedAt: '2026-07-23T00:00:00.000Z',
+      coverage: { characterCount: 1, notes: '测试覆盖。' },
+      characters: [
+        {
+          id: '1001',
+          name: '测试角色1',
+          weaponType: 'bow',
+          roles: ['support'],
+          energyCost: 60,
+          energyNeeds: 'medium',
+          capabilities: ['healing', 'off-field'],
+          applicationNotes: ['后台恢复。'],
+          kitNotes: ['不推断伤害。'],
+          unknownFields: []
+        }
+      ]
+    });
     const tools = createAbyssBusinessTools({
       getProfile: () => null,
       getScenario: () => abyssScenario(),
-      getCharacter: (id) => ABYSS_CHARACTERS.find(({ id: numericId }) => String(numericId) === id),
+      knowledge,
+      auditContext: {
+        correlationId: 'audit-request-1',
+        scenarioId: 'abyss.2026-07',
+        dataVersion: '2026.07.1'
+      },
       log
     });
     const result = await tools[2]!.handler({ characterIds: ['1001', '9999'] }, {});
-    const payload = textPayload(result) as { characters: Array<Record<string, unknown>> };
-    expect(payload.characters[0]).toMatchObject({ id: '1001', element: 'Pyro' });
+    const payload = textPayload(result) as {
+      knowledgeVersion: string;
+      characters: Array<Record<string, unknown>>;
+    };
+    expect(payload.knowledgeVersion).toBe('test-knowledge-v1');
+    expect(payload.characters[0]).toMatchObject({
+      id: '1001',
+      status: 'known',
+      weaponType: 'bow',
+      roles: ['support'],
+      capabilities: ['healing', 'off-field']
+    });
     expect(payload.characters[1]).toMatchObject({
       id: '9999',
-      knowledge: 'unknown',
-      unknownFields: ['element', 'level', 'energyRecharge', 'role', 'kit']
+      status: 'unknown',
+      unknownFields: expect.arrayContaining(['weaponType', 'roles', 'capabilities', 'kitNotes'])
     });
     expect(log).toHaveBeenCalledWith(
-      expect.objectContaining({ tool: 'query_genshin_db', itemCount: 2, ok: true })
+      expect.objectContaining({
+        tool: 'query_genshin_db',
+        itemCount: 2,
+        ok: true,
+        correlationId: 'audit-request-1',
+        scenarioId: 'abyss.2026-07',
+        dataVersion: '2026.07.1',
+        knowledgeVersion: 'test-knowledge-v1',
+        parameterSummary: { requestedCount: 2 },
+        issueCodes: []
+      })
     );
-    expect(JSON.stringify(log.mock.calls)).not.toContain('123456789');
+    expect(JSON.stringify(log.mock.calls)).not.toMatch(
+      /123456789|1001|9999|api.?key|authorization/i
+    );
   });
 });

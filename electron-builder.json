@@ -29,6 +29,15 @@
       "to": "credits.md"
     },
     {
+      "from": "resources/scenario-production.json",
+      "to": "scenario-production.json"
+    },
+    {
+      "from": "resources/knowledge",
+      "to": "knowledge",
+      "filter": ["**/*.json"]
+    },
+    {
       "from": "docs",
       "to": "docs",
       "filter": ["privacy.md", "data-acquisition.md", "llm-provider.md", "troubleshooting.md"]

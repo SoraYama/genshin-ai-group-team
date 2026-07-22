@@ -27,7 +27,9 @@ interface RunState {
   message?: string;
 }
 
-const DEFAULT_ENEMIES_SINGLE = 'abyss-mage, ruin-guard';
+const LEGACY_ADVISOR_ENABLED =
+  import.meta.env.DEV && import.meta.env.VITE_GTA_ENABLE_LEGACY_ADVISOR === '1';
+const DEFAULT_ENEMIES_SINGLE = '';
 function emptySideState(): SideState {
   return { stage: '', message: '', streamText: '', result: null };
 }
@@ -39,9 +41,9 @@ export function AdvisorPage({ state, onGotoOnboarding }: AdvisorPageProps) {
   const [challengeMode, setChallengeMode] = useState<ChallengeMode>('spiral-abyss');
   const [singleEnemies, setSingleEnemies] = useState(DEFAULT_ENEMIES_SINGLE);
   const [singlePref, setSinglePref] = useState(() => t('advisor.defaultPreference'));
-  const [leftEnemies, setLeftEnemies] = useState('abyss-mage');
+  const [leftEnemies, setLeftEnemies] = useState('');
   const [leftPref, setLeftPref] = useState(() => t('advisor.defaultPreference'));
-  const [rightEnemies, setRightEnemies] = useState('ruin-guard');
+  const [rightEnemies, setRightEnemies] = useState('');
   const [rightPref, setRightPref] = useState(() => t('advisor.defaultPreference'));
   const [diffSummary, setDiffSummary] = useState<string>('');
   const [run, setRun] = useState<RunState>({ kind: 'idle' });
@@ -231,217 +233,219 @@ export function AdvisorPage({ state, onGotoOnboarding }: AdvisorPageProps) {
             <strong>
               {t('advisor.mode.selected', { mode: challengeModeLabel(challengeMode, t) })}
             </strong>
-            该玩法会使用独立规则与结果结构；当前不会误用下方的自定义敌人表单。
+            该玩法会使用独立规则与结果结构；相关敌情与配队流程正在单独建设。
           </span>
         </div>
       )}
 
-      <details className="gta-disclosure gta-advisor-advanced">
-        <summary>{t('advisor.advanced')}</summary>
-        <div className="gta-disclosure-body">
-          <p className="gta-hint">{t('advisor.advancedHelp')}</p>
-          <div className="gta-page-head gta-advisor-legacy-head">
-            <h3 className="gta-card-title">{t('advisor.title')}</h3>
-            <div className="gta-segment" role="group" aria-label={t('advisor.advancedModeLabel')}>
-              <button
-                type="button"
-                className={mode === 'single' ? 'is-active' : ''}
-                aria-pressed={mode === 'single'}
-                onClick={() => setMode('single')}
-              >
-                {t('advisor.single')}
-              </button>
-              <button
-                type="button"
-                className={mode === 'compare' ? 'is-active' : ''}
-                aria-pressed={mode === 'compare'}
-                onClick={() => setMode('compare')}
-              >
-                {t('advisor.compare')}
-              </button>
-            </div>
-          </div>
-
-          {mode === 'single' && (
-            <>
-              <div className="gta-panel" style={{ marginBottom: 'var(--gta-s4)' }}>
-                <div className="gta-panel-body">
-                  <div className="gta-form">
-                    <label className="gta-field">
-                      <span className="gta-field-label">{t('advisor.enemiesCurrent')}</span>
-                      <textarea
-                        className="gta-textarea"
-                        value={singleEnemies}
-                        onChange={(event) => setSingleEnemies(event.target.value)}
-                        spellCheck={false}
-                        placeholder={t('advisor.enemiesPlaceholder')}
-                      />
-                    </label>
-                    <label className="gta-field">
-                      <span className="gta-field-label">{t('advisor.preferenceOptional')}</span>
-                      <input
-                        type="text"
-                        className="gta-input"
-                        value={singlePref}
-                        onChange={(event) => setSinglePref(event.target.value)}
-                      />
-                    </label>
-                    <div className="gta-actions">
-                      <button
-                        type="button"
-                        className="gta-btn"
-                        onClick={() => void handleSingleRun()}
-                        disabled={isRunning}
-                      >
-                        <span className="gta-btn-icon">
-                          <ButtonGlyph name="check" />
-                        </span>
-                        {isRunning ? t('advisor.generating') : t('advisor.generate')}
-                      </button>
-                      {isRunning && (
-                        <button
-                          type="button"
-                          className="gta-btn gta-btn--danger"
-                          onClick={() => void handleCancel()}
-                        >
-                          <span className="gta-btn-icon">
-                            <ButtonGlyph name="x" />
-                          </span>
-                          {t('advisor.cancel')}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <SidePanel
-                title={t('advisor.singleResult')}
-                sideState={single}
-                scrollRef={singleScrollRef}
-              />
-            </>
-          )}
-
-          {mode === 'compare' && (
-            <>
-              <div className="gta-compare-grid" style={{ marginBottom: 'var(--gta-s4)' }}>
-                <div className="gta-panel">
-                  <div className="gta-panel-body">
-                    <h3 className="gta-name" style={{ fontSize: 'var(--gta-text-lg)' }}>
-                      {t('advisor.environmentA')}
-                    </h3>
-                    <div className="gta-form">
-                      <label className="gta-field">
-                        <span className="gta-field-label">{t('advisor.enemies')}</span>
-                        <textarea
-                          className="gta-textarea"
-                          value={leftEnemies}
-                          onChange={(event) => setLeftEnemies(event.target.value)}
-                          spellCheck={false}
-                        />
-                      </label>
-                      <label className="gta-field">
-                        <span className="gta-field-label">{t('advisor.preference')}</span>
-                        <input
-                          type="text"
-                          className="gta-input"
-                          value={leftPref}
-                          onChange={(event) => setLeftPref(event.target.value)}
-                        />
-                      </label>
-                    </div>
-                  </div>
-                </div>
-                <div className="gta-panel">
-                  <div className="gta-panel-body">
-                    <h3 className="gta-name" style={{ fontSize: 'var(--gta-text-lg)' }}>
-                      {t('advisor.environmentB')}
-                    </h3>
-                    <div className="gta-form">
-                      <label className="gta-field">
-                        <span className="gta-field-label">{t('advisor.enemies')}</span>
-                        <textarea
-                          className="gta-textarea"
-                          value={rightEnemies}
-                          onChange={(event) => setRightEnemies(event.target.value)}
-                          spellCheck={false}
-                        />
-                      </label>
-                      <label className="gta-field">
-                        <span className="gta-field-label">{t('advisor.preference')}</span>
-                        <input
-                          type="text"
-                          className="gta-input"
-                          value={rightPref}
-                          onChange={(event) => setRightPref(event.target.value)}
-                        />
-                      </label>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="gta-actions" style={{ marginBottom: 'var(--gta-s4)' }}>
+      {LEGACY_ADVISOR_ENABLED && (
+        <details className="gta-disclosure gta-advisor-advanced">
+          <summary>{t('advisor.advanced')}</summary>
+          <div className="gta-disclosure-body">
+            <p className="gta-hint">{t('advisor.advancedHelp')}</p>
+            <div className="gta-page-head gta-advisor-legacy-head">
+              <h3 className="gta-card-title">{t('advisor.title')}</h3>
+              <div className="gta-segment" role="group" aria-label={t('advisor.advancedModeLabel')}>
                 <button
                   type="button"
-                  className="gta-btn"
-                  onClick={() => void handleCompareRun()}
-                  disabled={isRunning}
+                  className={mode === 'single' ? 'is-active' : ''}
+                  aria-pressed={mode === 'single'}
+                  onClick={() => setMode('single')}
                 >
-                  <span className="gta-btn-icon">
-                    <ButtonGlyph name="check" />
-                  </span>
-                  {isRunning ? t('advisor.comparing') : t('advisor.generateCompare')}
+                  {t('advisor.single')}
                 </button>
-                {isRunning && (
+                <button
+                  type="button"
+                  className={mode === 'compare' ? 'is-active' : ''}
+                  aria-pressed={mode === 'compare'}
+                  onClick={() => setMode('compare')}
+                >
+                  {t('advisor.compare')}
+                </button>
+              </div>
+            </div>
+
+            {mode === 'single' && (
+              <>
+                <div className="gta-panel" style={{ marginBottom: 'var(--gta-s4)' }}>
+                  <div className="gta-panel-body">
+                    <div className="gta-form">
+                      <label className="gta-field">
+                        <span className="gta-field-label">{t('advisor.enemiesCurrent')}</span>
+                        <textarea
+                          className="gta-textarea"
+                          value={singleEnemies}
+                          onChange={(event) => setSingleEnemies(event.target.value)}
+                          spellCheck={false}
+                          placeholder={t('advisor.enemiesPlaceholder')}
+                        />
+                      </label>
+                      <label className="gta-field">
+                        <span className="gta-field-label">{t('advisor.preferenceOptional')}</span>
+                        <input
+                          type="text"
+                          className="gta-input"
+                          value={singlePref}
+                          onChange={(event) => setSinglePref(event.target.value)}
+                        />
+                      </label>
+                      <div className="gta-actions">
+                        <button
+                          type="button"
+                          className="gta-btn"
+                          onClick={() => void handleSingleRun()}
+                          disabled={isRunning}
+                        >
+                          <span className="gta-btn-icon">
+                            <ButtonGlyph name="check" />
+                          </span>
+                          {isRunning ? t('advisor.generating') : t('advisor.generate')}
+                        </button>
+                        {isRunning && (
+                          <button
+                            type="button"
+                            className="gta-btn gta-btn--danger"
+                            onClick={() => void handleCancel()}
+                          >
+                            <span className="gta-btn-icon">
+                              <ButtonGlyph name="x" />
+                            </span>
+                            {t('advisor.cancel')}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <SidePanel
+                  title={t('advisor.singleResult')}
+                  sideState={single}
+                  scrollRef={singleScrollRef}
+                />
+              </>
+            )}
+
+            {mode === 'compare' && (
+              <>
+                <div className="gta-compare-grid" style={{ marginBottom: 'var(--gta-s4)' }}>
+                  <div className="gta-panel">
+                    <div className="gta-panel-body">
+                      <h3 className="gta-name" style={{ fontSize: 'var(--gta-text-lg)' }}>
+                        {t('advisor.environmentA')}
+                      </h3>
+                      <div className="gta-form">
+                        <label className="gta-field">
+                          <span className="gta-field-label">{t('advisor.enemies')}</span>
+                          <textarea
+                            className="gta-textarea"
+                            value={leftEnemies}
+                            onChange={(event) => setLeftEnemies(event.target.value)}
+                            spellCheck={false}
+                          />
+                        </label>
+                        <label className="gta-field">
+                          <span className="gta-field-label">{t('advisor.preference')}</span>
+                          <input
+                            type="text"
+                            className="gta-input"
+                            value={leftPref}
+                            onChange={(event) => setLeftPref(event.target.value)}
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="gta-panel">
+                    <div className="gta-panel-body">
+                      <h3 className="gta-name" style={{ fontSize: 'var(--gta-text-lg)' }}>
+                        {t('advisor.environmentB')}
+                      </h3>
+                      <div className="gta-form">
+                        <label className="gta-field">
+                          <span className="gta-field-label">{t('advisor.enemies')}</span>
+                          <textarea
+                            className="gta-textarea"
+                            value={rightEnemies}
+                            onChange={(event) => setRightEnemies(event.target.value)}
+                            spellCheck={false}
+                          />
+                        </label>
+                        <label className="gta-field">
+                          <span className="gta-field-label">{t('advisor.preference')}</span>
+                          <input
+                            type="text"
+                            className="gta-input"
+                            value={rightPref}
+                            onChange={(event) => setRightPref(event.target.value)}
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="gta-actions" style={{ marginBottom: 'var(--gta-s4)' }}>
                   <button
                     type="button"
-                    className="gta-btn gta-btn--danger"
-                    onClick={() => void handleCancel()}
+                    className="gta-btn"
+                    onClick={() => void handleCompareRun()}
+                    disabled={isRunning}
                   >
                     <span className="gta-btn-icon">
-                      <ButtonGlyph name="x" />
+                      <ButtonGlyph name="check" />
                     </span>
-                    {t('advisor.cancel')}
+                    {isRunning ? t('advisor.comparing') : t('advisor.generateCompare')}
                   </button>
-                )}
-              </div>
-
-              {diffSummary && (
-                <div className="gta-diff-summary" style={{ marginBottom: 'var(--gta-s4)' }}>
-                  <span className="gta-team-line-label">{t('advisor.difference')}</span>
-                  {diffSummary}
+                  {isRunning && (
+                    <button
+                      type="button"
+                      className="gta-btn gta-btn--danger"
+                      onClick={() => void handleCancel()}
+                    >
+                      <span className="gta-btn-icon">
+                        <ButtonGlyph name="x" />
+                      </span>
+                      {t('advisor.cancel')}
+                    </button>
+                  )}
                 </div>
-              )}
 
-              <div className="gta-compare-grid">
-                <SidePanel
-                  title={t('advisor.environmentA')}
-                  sideState={left}
-                  scrollRef={leftScrollRef}
-                />
-                <SidePanel
-                  title={t('advisor.environmentB')}
-                  sideState={right}
-                  scrollRef={rightScrollRef}
-                />
-              </div>
-            </>
-          )}
+                {diffSummary && (
+                  <div className="gta-diff-summary" style={{ marginBottom: 'var(--gta-s4)' }}>
+                    <span className="gta-team-line-label">{t('advisor.difference')}</span>
+                    {diffSummary}
+                  </div>
+                )}
 
-          {run.kind === 'error' && run.message && (
-            <p className="gta-error" style={{ marginTop: 'var(--gta-s4)' }}>
-              {t('advisor.error.withMessage', {
-                message:
-                  locale === 'en-US' && /[\u3400-\u9fff]/u.test(run.message)
-                    ? t('common.error.internal')
-                    : run.message
-              })}
-            </p>
-          )}
-        </div>
-      </details>
+                <div className="gta-compare-grid">
+                  <SidePanel
+                    title={t('advisor.environmentA')}
+                    sideState={left}
+                    scrollRef={leftScrollRef}
+                  />
+                  <SidePanel
+                    title={t('advisor.environmentB')}
+                    sideState={right}
+                    scrollRef={rightScrollRef}
+                  />
+                </div>
+              </>
+            )}
+
+            {run.kind === 'error' && run.message && (
+              <p className="gta-error" style={{ marginTop: 'var(--gta-s4)' }}>
+                {t('advisor.error.withMessage', {
+                  message:
+                    locale === 'en-US' && /[\u3400-\u9fff]/u.test(run.message)
+                      ? t('common.error.internal')
+                      : run.message
+                })}
+              </p>
+            )}
+          </div>
+        </details>
+      )}
     </section>
   );
 }

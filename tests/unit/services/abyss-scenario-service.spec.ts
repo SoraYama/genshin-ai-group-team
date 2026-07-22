@@ -132,8 +132,82 @@ describe('AbyssScenarioService', () => {
       trust: 'production',
       snapshotStatus: 'last-known-good',
       refreshErrorCode: 'network-unavailable',
-      notCurrent: true,
+      notCurrent: false,
+      usableForRecommendation: true,
+      refreshWarning: '正在使用最近一次已确认的资料；本次刷新失败。',
       scenario: { id: scenario.id, meta: { dataVersion: '2026.07.1' } }
+    });
+  });
+
+  it.each([
+    ['fresh', false, true],
+    ['expiring', false, true],
+    ['stale', true, false],
+    ['unknown', true, false]
+  ] as const)(
+    'maps last-known-good %s freshness to notCurrent=%s and usable=%s',
+    async (freshness, notCurrent, usableForRecommendation) => {
+      const scenario = makeScenario('spiral-abyss', 'production', '2026.07.1');
+      if (scenario.mode !== 'spiral-abyss') throw new Error('Expected abyss fixture');
+      const service = new AbyssScenarioService({
+        enableDevelopmentScenarios: false,
+        developmentFixturePath: '/legacy-must-not-be-read.json',
+        readFile: async () => {
+          throw new Error('legacy fixture must not be read');
+        },
+        productionSnapshot: async () => ({
+          status: 'last-known-good',
+          trustedUse: 'production',
+          freshness,
+          checkedAt: '2026-07-23T00:00:00.000Z',
+          publication: {
+            payload: scenario,
+            integrity: {
+              scope: 'payload',
+              serialization: 'RFC8785-JCS',
+              hash: {
+                algorithm: 'sha256',
+                encoding: 'base64',
+                value: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+              },
+              signature: {
+                algorithm: 'ed25519',
+                keyId: 'test-key',
+                encoding: 'base64',
+                value:
+                  'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=='
+              }
+            }
+          },
+          refreshErrorCode: 'network-unavailable'
+        })
+      });
+
+      await expect(service.getView()).resolves.toMatchObject({
+        status: 'ready',
+        snapshotStatus: 'last-known-good',
+        freshness,
+        notCurrent,
+        usableForRecommendation,
+        refreshWarning: '正在使用最近一次已确认的资料；本次刷新失败。'
+      });
+    }
+  );
+
+  it('returns a distinct typed unavailable reason for an invalid production config', async () => {
+    const service = new AbyssScenarioService({
+      enableDevelopmentScenarios: false,
+      developmentFixturePath: '/legacy-must-not-be-read.json',
+      productionUnavailableReason: 'production-config-invalid',
+      readFile: async () => {
+        throw new Error('legacy fixture must not be read');
+      }
+    });
+
+    await expect(service.getView()).resolves.toEqual({
+      status: 'unavailable',
+      reason: 'production-config-invalid',
+      message: '正式挑战资料配置无效，已停止加载。'
     });
   });
 });

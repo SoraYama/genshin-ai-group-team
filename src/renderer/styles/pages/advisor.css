@@ -347,6 +347,10 @@
   color: #f1d89b;
   font-size: var(--gta-text-sm);
 }
+.gta-abyss-sample-banner.is-refresh-warning {
+  border-color: rgba(122, 171, 164, 0.42);
+  background: rgba(49, 91, 92, 0.3);
+}
 .gta-abyss-targets {
   display: flex;
   align-items: end;
@@ -536,6 +540,10 @@
   gap: 18px;
   margin-bottom: 14px;
 }
+.gta-abyss-runbar {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
 .gta-abyss-roster-toolbar label {
   flex: 1 1 320px;
 }
@@ -549,6 +557,20 @@
 .gta-abyss-runbar > span {
   color: var(--gta-text-on-light-faint);
   font-size: var(--gta-text-xs);
+}
+.gta-abyss-runbar > span.is-pending {
+  color: #755825;
+  font-weight: 700;
+}
+.gta-abyss-pending-badge {
+  display: inline-flex;
+  margin-top: 6px;
+  padding: 3px 9px;
+  border: 1px solid rgba(164, 119, 42, 0.38);
+  color: #755825;
+  background: rgba(232, 207, 145, 0.34);
+  font-size: var(--gta-text-xs);
+  letter-spacing: 0.08em;
 }
 .gta-abyss-roster {
   display: grid;

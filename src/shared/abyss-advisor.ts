@@ -41,21 +41,32 @@ export const abyssAdvisorPlanInputSchema = z
     chamber: z.number().int().positive().optional(),
     preferences: playerPreferencesSchema,
     lockedCharacterIds: uniqueCharacterIdsSchema.default([]),
-    excludedCharacterIds: uniqueCharacterIdsSchema.default([])
+    excludedCharacterIds: uniqueCharacterIdsSchema.default([]),
+    priorPlan: abyssPlanSchema.optional(),
+    recomputeHalf: z.enum(['firstHalf', 'secondHalf']).optional()
   })
   .strict()
-  .superRefine(({ lockedCharacterIds, excludedCharacterIds }, context) => {
-    const excluded = new Set(excludedCharacterIds);
-    lockedCharacterIds.forEach((id, index) => {
-      if (excluded.has(id)) {
+  .superRefine(
+    ({ lockedCharacterIds, excludedCharacterIds, priorPlan, recomputeHalf }, context) => {
+      const excluded = new Set(excludedCharacterIds);
+      lockedCharacterIds.forEach((id, index) => {
+        if (excluded.has(id)) {
+          context.addIssue({
+            code: 'custom',
+            message: `Character cannot be both locked and excluded: ${id}`,
+            path: ['lockedCharacterIds', index]
+          });
+        }
+      });
+      if ((priorPlan === undefined) !== (recomputeHalf === undefined)) {
         context.addIssue({
           code: 'custom',
-          message: `Character cannot be both locked and excluded: ${id}`,
-          path: ['lockedCharacterIds', index]
+          message: 'priorPlan and recomputeHalf must be provided together',
+          path: [priorPlan === undefined ? 'priorPlan' : 'recomputeHalf']
         });
       }
-    });
-  });
+    }
+  );
 
 export const abyssPlanIssueCodeSchema = z.enum([
   'INPUT_INVALID',
@@ -74,6 +85,8 @@ export const abyssPlanIssueCodeSchema = z.enum([
   'CHAMBER_COVERAGE_INVALID',
   'TACTICS_MISSING',
   'MECHANIC_COVERAGE_INVALID',
+  'PRESERVED_HALF_CONFLICT',
+  'PRESERVED_HALF_CHANGED',
   'PLAN_SCHEMA_INVALID',
   'AGENT_OUTPUT_INVALID'
 ]);
@@ -92,6 +105,7 @@ const unavailableScenarioViewSchema = z
     status: z.literal('unavailable'),
     reason: z.enum([
       'production-source-not-configured',
+      'production-config-invalid',
       'production-data-unavailable',
       'development-sample-invalid'
     ]),
@@ -149,6 +163,8 @@ const productionScenarioViewSchema = z
     snapshotStatus: z.enum(['ready', 'last-known-good']),
     refreshErrorCode: z.string().trim().min(1).optional(),
     notCurrent: z.boolean(),
+    usableForRecommendation: z.boolean(),
+    refreshWarning: z.string().trim().min(1).optional(),
     freshness: z.enum(['fresh', 'expiring', 'stale', 'unknown']),
     checkedAt: z.iso.datetime({ offset: true }),
     scenario: spiralAbyssScenarioSchema

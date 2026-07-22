@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { validateAbyssPlan } from '../../../src/main/services/abyss-plan-validator.js';
+import { CharacterKnowledgeStore } from '../../../src/main/services/character-knowledge-store.js';
 import {
   ABYSS_CHARACTERS,
   abyssInput,
@@ -109,6 +110,29 @@ describe('validateAbyssPlan', () => {
     ).toMatchObject({ ok: true, issues: [] });
   });
 
+  it('requires a partial recompute to preserve the other team and its per-chamber tactics exactly', () => {
+    const priorPlan = validAbyssPlan();
+    const input = abyssInput({ priorPlan, recomputeHalf: 'firstHalf' });
+    const changed = validAbyssPlan({
+      secondHalfTeam: { ...priorPlan.secondHalfTeam, purpose: '被智能服务擅自改写' }
+    });
+    changed.chambers[0] = {
+      ...changed.chambers[0]!,
+      secondHalf: { ...changed.chambers[0]!.secondHalf, tactics: ['被擅自改写'] }
+    };
+
+    const result = validateAbyssPlan({
+      input,
+      scenario: abyssScenario(),
+      characters: ABYSS_CHARACTERS,
+      plan: changed
+    });
+
+    expect(result.issues).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: 'PRESERVED_HALF_CHANGED' })])
+    );
+  });
+
   it('rejects teams that cannot satisfy a hard enemy shield mechanic', () => {
     const characters = ABYSS_CHARACTERS.map((character) => ({ ...character, element: 'Pyro' }));
     const result = validateAbyssPlan({
@@ -144,4 +168,101 @@ describe('validateAbyssPlan', () => {
       ])
     );
   });
+
+  it.each([
+    ['requires-capability:healing', { capabilities: ['healing'], weaponType: 'sword' }],
+    ['requires-capability:bow', { capabilities: [], weaponType: 'bow' }],
+    ['requires-capability:onslaught', { capabilities: ['onslaught'], weaponType: 'sword' }]
+  ] as const)(
+    'enforces the documented hard mechanic %s using character knowledge',
+    (tag, known) => {
+      const scenario = abyssScenario();
+      scenario.floors[0]!.chambers[0]!.firstHalf.waves[0]!.enemies[0]!.mechanics.tags.push(tag);
+      const knowledge = knowledgeFor1001(known);
+
+      expect(
+        validateAbyssPlan({
+          input: abyssInput(),
+          scenario,
+          characters: ABYSS_CHARACTERS,
+          knowledge,
+          plan: validAbyssPlan()
+        })
+      ).toMatchObject({ ok: true, issues: [] });
+    }
+  );
+
+  it('fails closed for unmet or unknown hard requirements and preferences cannot override them', () => {
+    const scenario = abyssScenario();
+    scenario.floors[0]!.chambers[0]!.firstHalf.waves[0]!.enemies[0]!.mechanics.tags.push(
+      'requires-capability:healing',
+      'requires-capability:teleport'
+    );
+    const result = validateAbyssPlan({
+      input: abyssInput({
+        preferences: {
+          comfort: 'high',
+          survival: 'high',
+          lowInvestment: 'high',
+          noBuildChange: true
+        }
+      }),
+      scenario,
+      characters: ABYSS_CHARACTERS,
+      knowledge: knowledgeFor1001({ capabilities: [], weaponType: 'sword' }),
+      plan: validAbyssPlan()
+    });
+
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'MECHANIC_COVERAGE_INVALID',
+          details: expect.objectContaining({ requirement: 'healing' })
+        }),
+        expect.objectContaining({
+          code: 'MECHANIC_COVERAGE_INVALID',
+          details: expect.objectContaining({ requirement: 'teleport', unknownRequirement: true })
+        })
+      ])
+    );
+  });
+
+  it('does not harden ordinary descriptive tags', () => {
+    const scenario = abyssScenario();
+    scenario.floors[0]!.chambers[0]!.firstHalf.waves[0]!.enemies[0]!.mechanics.tags.push(
+      '建议携带治疗角色'
+    );
+
+    expect(
+      validateAbyssPlan({
+        input: abyssInput(),
+        scenario,
+        characters: ABYSS_CHARACTERS,
+        plan: validAbyssPlan()
+      })
+    ).toMatchObject({ ok: true, issues: [] });
+  });
 });
+
+function knowledgeFor1001(input: { capabilities: readonly string[]; weaponType: string }) {
+  return CharacterKnowledgeStore.fromUnknown({
+    schemaVersion: 1,
+    knowledgeVersion: 'mechanic-test-v1',
+    updatedAt: '2026-07-23T00:00:00.000Z',
+    coverage: { characterCount: 1, notes: '仅覆盖测试角色。' },
+    characters: [
+      {
+        id: '1001',
+        name: '测试角色1',
+        weaponType: input.weaponType,
+        roles: ['support'],
+        energyCost: 60,
+        energyNeeds: 'medium',
+        capabilities: input.capabilities,
+        applicationNotes: [],
+        kitNotes: [],
+        unknownFields: []
+      }
+    ]
+  });
+}

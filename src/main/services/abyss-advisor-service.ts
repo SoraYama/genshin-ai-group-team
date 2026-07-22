@@ -7,9 +7,11 @@ import {
   type AbyssAdvisorProgressStep,
   type AbyssAdvisorResult,
   type AbyssPlanIssue,
+  type AbyssPlanOutput,
   type AbyssScenarioView
 } from '../../shared/abyss-advisor.js';
 import type { AbyssPlanHistoryEntry } from '../../shared/domain.js';
+import type { CharacterKnowledgeReader } from '../../shared/character-knowledge.js';
 import {
   ABYSS_MCP_TOOL_NAMES,
   createAbyssBusinessMcpServer,
@@ -37,6 +39,25 @@ export interface AbyssAdvisorServiceOptions {
   sdkEnvironment: { cwd: string; clientVersion: string };
   agentTimeoutMs?: number;
   toolLog?: (event: AbyssBusinessToolLog) => void;
+  auditLog?: (event: AbyssAdvisorAuditLog) => void;
+  knowledge?: CharacterKnowledgeReader;
+}
+
+export interface AbyssAdvisorAuditLog {
+  correlationId: string;
+  scenarioId: string;
+  dataVersion: string;
+  knowledgeVersion: string;
+  outcome: 'planned' | 'blocked';
+  source: AbyssAdvisorResult['source'];
+  issueCodes: string[];
+  parameterSummary: Readonly<{
+    floor: number;
+    chamber: number | 'all';
+    lockedCount: number;
+    excludedCount: number;
+    recompute: 'firstHalf' | 'secondHalf' | 'both';
+  }>;
 }
 
 export class AbyssAdvisorService {
@@ -71,6 +92,29 @@ export class AbyssAdvisorService {
       ]);
     }
     const input = inputResult.data;
+    const finish = (result: AbyssAdvisorResult): AbyssAdvisorResult => {
+      try {
+        this.options.auditLog?.({
+          correlationId: input.correlationId,
+          scenarioId: input.scenarioId,
+          dataVersion: input.dataVersion,
+          knowledgeVersion: this.options.knowledge?.version ?? 'unavailable',
+          outcome: result.status,
+          source: result.source,
+          issueCodes: Array.from(new Set(result.issues.map(({ code }) => code))),
+          parameterSummary: {
+            floor: input.floor,
+            chamber: input.chamber ?? 'all',
+            lockedCount: input.lockedCharacterIds.length,
+            excludedCount: input.excludedCharacterIds.length,
+            recompute: input.recomputeHalf ?? 'both'
+          }
+        });
+      } catch {
+        // Observability is secondary and must not affect a checked recommendation.
+      }
+      return result;
+    };
     this.currentAbort?.abort();
     const requestAbort = new AbortController();
     this.currentAbort = requestAbort;
@@ -84,14 +128,16 @@ export class AbyssAdvisorService {
       emit('reading-roster');
       const profile = this.options.profiles.get(input.uid);
       if (!profile) {
-        return blocked([
-          {
-            code: 'ROSTER_INSUFFICIENT',
-            path: ['profile'],
-            message: '没有找到该 UID 的本地角色资料。',
-            details: { required: 8, available: 0, missing: 8 }
-          }
-        ]);
+        return finish(
+          blocked([
+            {
+              code: 'ROSTER_INSUFFICIENT',
+              path: ['profile'],
+              message: '没有找到该 UID 的本地角色资料。',
+              details: { required: 8, available: 0, missing: 8 }
+            }
+          ])
+        );
       }
 
       emit('analyzing-rules');
@@ -101,51 +147,60 @@ export class AbyssAdvisorService {
       );
       throwIfCancelled();
       if (scenarioView.status !== 'ready') {
-        return blocked([
-          {
-            code: 'SCENARIO_MISMATCH',
-            path: ['scenarioId'],
-            message: scenarioView.message
-          }
-        ]);
+        return finish(
+          blocked([
+            {
+              code: 'SCENARIO_MISMATCH',
+              path: ['scenarioId'],
+              message: scenarioView.message
+            }
+          ])
+        );
       }
-      if (scenarioView.trust === 'production' && scenarioView.notCurrent) {
-        return blocked([
-          {
-            code: 'SCENARIO_MISMATCH',
-            path: ['scenarioId'],
-            message: '当前仅有过期或刷新失败的挑战资料；可查看敌情，但不能据此生成本期方案。'
-          }
-        ]);
+      if (scenarioView.trust === 'production' && !scenarioView.usableForRecommendation) {
+        return finish(
+          blocked([
+            {
+              code: 'SCENARIO_MISMATCH',
+              path: ['scenarioId'],
+              message: '当前仅有过期或刷新失败的挑战资料；可查看敌情，但不能据此生成本期方案。'
+            }
+          ])
+        );
       }
       const scenario = scenarioView.scenario;
       if (scenario.id !== input.scenarioId) {
-        return blocked([
-          {
-            code: 'SCENARIO_MISMATCH',
-            path: ['scenarioId'],
-            message: '所选场景已发生变化，请重新选择。'
-          }
-        ]);
+        return finish(
+          blocked([
+            {
+              code: 'SCENARIO_MISMATCH',
+              path: ['scenarioId'],
+              message: '所选场景已发生变化，请重新选择。'
+            }
+          ])
+        );
       }
       if (scenario.meta.dataVersion !== input.dataVersion) {
-        return blocked([
-          {
-            code: 'DATA_VERSION_MISMATCH',
-            path: ['dataVersion'],
-            message: '挑战资料已更新，请重新确认楼层与房间。'
-          }
-        ]);
+        return finish(
+          blocked([
+            {
+              code: 'DATA_VERSION_MISMATCH',
+              path: ['dataVersion'],
+              message: '挑战资料已更新，请重新确认楼层与房间。'
+            }
+          ])
+        );
       }
 
       emit('generating-teams');
       const localPreflight = buildLocalAbyssPlan({
         input,
         scenario,
-        characters: profile.characters
+        characters: profile.characters,
+        knowledge: this.options.knowledge
       });
       throwIfCancelled();
-      if (localPreflight.status === 'blocked') return localPreflight;
+      if (localPreflight.status === 'blocked') return finish(localPreflight);
 
       let result: AbyssAdvisorResult = localPreflight;
       const apiKey = this.options.config.getApiKey();
@@ -165,14 +220,19 @@ export class AbyssAdvisorService {
           const mcpServer = createAbyssBusinessMcpServer({
             getProfile: (uid) => (uid === input.uid ? profile : null),
             getScenario: () => scenario,
-            getCharacter: (id) =>
-              profile.characters.find(({ id: numericId }) => String(numericId) === id),
+            knowledge: this.options.knowledge,
+            auditContext: {
+              correlationId: input.correlationId,
+              scenarioId: scenario.id,
+              dataVersion: scenario.meta.dataVersion
+            },
             log: this.options.toolLog
           });
           const agent = await this.planAgent.compose({
             input,
             scenario,
             characters: profile.characters,
+            knowledge: this.options.knowledge,
             sdkOptions: {
               apiKey,
               baseUrl: this.options.config.getBaseUrl(),
@@ -194,13 +254,14 @@ export class AbyssAdvisorService {
           );
           throwIfCancelled();
           if (agent.ok) {
+            const checkedPlan = applyKnowledgeCoverage(agent.plan, this.options.knowledge);
             result = abyssAdvisorResultSchema.parse({
               status: 'planned',
               source: 'smart-service',
               issues: [],
               warnings: agent.plan.warnings,
-              assumptions: agent.plan.assumptions,
-              plan: agent.plan
+              assumptions: checkedPlan.assumptions,
+              plan: checkedPlan
             });
           } else {
             result = addAgentFallbackWarning(localPreflight);
@@ -215,12 +276,19 @@ export class AbyssAdvisorService {
         }
       }
 
+      if (
+        result.status === 'planned' &&
+        scenarioView.trust === 'production' &&
+        scenarioView.refreshWarning
+      ) {
+        result = addPlanWarning(result, scenarioView.refreshWarning);
+      }
       throwIfCancelled();
       emit('checking-conflicts');
       emit('writing-tactics');
       throwIfCancelled();
       if (result.status === 'planned') this.persist(input, result, profile, scenarioView);
-      return result;
+      return finish(result);
     } finally {
       if (this.currentAbort === requestAbort) this.currentAbort = undefined;
     }
@@ -247,7 +315,8 @@ export class AbyssAdvisorService {
         interventions: {
           lockedCharacterIds: input.lockedCharacterIds,
           excludedCharacterIds: input.excludedCharacterIds,
-          preferences: input.preferences
+          preferences: input.preferences,
+          ...(input.recomputeHalf ? { recomputeHalf: input.recomputeHalf } : {})
         },
         characters: [
           ...result.plan.firstHalfTeam.characterIds,
@@ -306,6 +375,33 @@ function addAgentFallbackWarning(
     warnings: [warning, ...result.warnings],
     plan: { ...result.plan, warnings: [warning, ...result.plan.warnings] }
   });
+}
+
+function applyKnowledgeCoverage(
+  plan: AbyssPlanOutput,
+  knowledge?: CharacterKnowledgeReader
+): AbyssPlanOutput {
+  if (!knowledge) return plan;
+  const selectedIds = [...plan.firstHalfTeam.characterIds, ...plan.secondHalfTeam.characterIds];
+  const coverage = knowledge.coverageFor(selectedIds);
+  if (coverage.known === coverage.requested) return plan;
+  const assumption = `角色知识仅覆盖 ${coverage.known} / ${coverage.requested}（版本 ${coverage.knowledgeVersion}）；未覆盖角色的职责与技能保持未知。`;
+  return {
+    ...plan,
+    confidence: 'low',
+    assumptions: [assumption, ...plan.assumptions]
+  };
+}
+
+function addPlanWarning(
+  result: Extract<AbyssAdvisorResult, { status: 'planned' }>,
+  warning: string
+): Extract<AbyssAdvisorResult, { status: 'planned' }> {
+  return abyssAdvisorResultSchema.parse({
+    ...result,
+    warnings: [warning, ...result.warnings],
+    plan: { ...result.plan, warnings: [warning, ...result.plan.warnings] }
+  }) as Extract<AbyssAdvisorResult, { status: 'planned' }>;
 }
 
 function blocked(issues: AbyssPlanIssue[]): AbyssAdvisorResult {

@@ -7,6 +7,7 @@ import {
 } from '../../shared/abyss-advisor.js';
 import { abyssPlanSchema } from '../../shared/scenario-v2.js';
 import { findAbyssMechanicCoverageGaps } from '../../shared/abyss-mechanics.js';
+import type { CharacterKnowledgeReader } from '../../shared/character-knowledge.js';
 
 export type AbyssPlanValidationResult =
   | { ok: true; issues: []; plan: AbyssPlanOutput }
@@ -16,6 +17,7 @@ export interface ValidateAbyssPlanOptions {
   input: AbyssAdvisorPlanInput;
   scenario: AbyssScenario;
   characters: CharacterProfile[];
+  knowledge?: CharacterKnowledgeReader;
   plan: unknown;
 }
 
@@ -23,6 +25,7 @@ export function validateAbyssPlan({
   input,
   scenario,
   characters,
+  knowledge,
   plan
 }: ValidateAbyssPlanOptions): AbyssPlanValidationResult {
   const issues: AbyssPlanIssue[] = [];
@@ -40,6 +43,8 @@ export function validateAbyssPlan({
   if (raw['dataVersion'] !== input.dataVersion || input.dataVersion !== scenario.meta.dataVersion) {
     addIssue(issues, 'DATA_VERSION_MISMATCH', ['dataVersion'], '方案使用的资料版本不一致。');
   }
+
+  validatePreservedHalf(input, raw, issues);
 
   const targetFloor = scenario.floors.find(({ floor }) => floor === input.floor);
   const targetChambers = targetFloor
@@ -178,10 +183,12 @@ export function validateAbyssPlan({
       }
     ] as const;
     halves.forEach(({ key, team, enemies }) => {
-      findAbyssMechanicCoverageGaps(team, enemies).forEach((gap) =>
+      findAbyssMechanicCoverageGaps(team, enemies, knowledge).forEach((gap) =>
         addIssue(issues, 'MECHANIC_COVERAGE_INVALID', [key], gap.message, {
           enemyName: gap.enemyName,
-          mechanic: gap.kind
+          mechanic: gap.kind,
+          ...(gap.requirement ? { requirement: gap.requirement } : {}),
+          ...(gap.unknownRequirement ? { unknownRequirement: true } : {})
         })
       );
     });
@@ -201,6 +208,74 @@ export function validateAbyssPlan({
 
   if (issues.length > 0 || !parsed.success) return { ok: false, issues };
   return { ok: true, issues: [], plan: parsed.data };
+}
+
+function validatePreservedHalf(
+  input: AbyssAdvisorPlanInput,
+  raw: Record<string, unknown>,
+  issues: AbyssPlanIssue[]
+): void {
+  if (!input.priorPlan || !input.recomputeHalf) return;
+  const prior = input.priorPlan;
+  if (
+    prior.scenarioId !== input.scenarioId ||
+    prior.dataVersion !== input.dataVersion ||
+    prior.mode !== 'spiral-abyss'
+  ) {
+    addIssue(
+      issues,
+      'PRESERVED_HALF_CONFLICT',
+      ['priorPlan'],
+      '旧方案与当前挑战资料不一致，请改用完整重算。'
+    );
+    return;
+  }
+  const preservedTeamKey = input.recomputeHalf === 'firstHalf' ? 'secondHalfTeam' : 'firstHalfTeam';
+  const preservedChamberKey = input.recomputeHalf === 'firstHalf' ? 'secondHalf' : 'firstHalf';
+  const preservedIds = new Set(prior[preservedTeamKey].characterIds);
+  const conflictingExclusions = input.excludedCharacterIds.filter((id) => preservedIds.has(id));
+  if (conflictingExclusions.length > 0) {
+    addIssue(
+      issues,
+      'PRESERVED_HALF_CONFLICT',
+      ['excludedCharacterIds'],
+      '排除角色与需要保留的半场冲突，请改用完整重算。',
+      { characterIds: conflictingExclusions }
+    );
+  }
+  const outputTeam = raw[preservedTeamKey];
+  if (!deepEqual(outputTeam, prior[preservedTeamKey])) {
+    addIssue(
+      issues,
+      'PRESERVED_HALF_CHANGED',
+      [preservedTeamKey],
+      '只重算半场时，不得改动另一半队伍。'
+    );
+  }
+  const outputChambers = Array.isArray(raw['chambers']) ? raw['chambers'] : [];
+  for (const priorChamber of prior.chambers) {
+    const outputChamber = outputChambers.find(
+      (candidate) =>
+        isRecord(candidate) &&
+        candidate['floor'] === priorChamber.floor &&
+        candidate['chamber'] === priorChamber.chamber
+    );
+    if (
+      !isRecord(outputChamber) ||
+      !deepEqual(outputChamber[preservedChamberKey], priorChamber[preservedChamberKey])
+    ) {
+      addIssue(
+        issues,
+        'PRESERVED_HALF_CHANGED',
+        ['chambers', `${priorChamber.floor}:${priorChamber.chamber}`, preservedChamberKey],
+        '只重算半场时，不得改动另一半的逐间打法。'
+      );
+    }
+  }
+}
+
+function deepEqual(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function validateTeam(ids: string[], teamKey: string, issues: AbyssPlanIssue[]): void {

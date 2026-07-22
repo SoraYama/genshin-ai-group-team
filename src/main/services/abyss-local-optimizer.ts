@@ -11,14 +11,18 @@ import {
   ABYSS_SHIELD_COUNTERS,
   abyssElementLabel,
   findAbyssMechanicCoverageGaps,
-  localizedMechanicTerm
+  characterSatisfiesRequirement,
+  localizedMechanicTerm,
+  parseRequiredCapabilities
 } from '../../shared/abyss-mechanics.js';
+import type { CharacterKnowledgeReader } from '../../shared/character-knowledge.js';
 import { validateAbyssPlan } from './abyss-plan-validator.js';
 
 export interface BuildLocalAbyssPlanOptions {
   input: AbyssAdvisorPlanInput;
   scenario: AbyssScenario;
   characters: CharacterProfile[];
+  knowledge?: CharacterKnowledgeReader;
 }
 
 const ELEMENTS: Record<string, string> = {
@@ -39,7 +43,8 @@ const MECHANIC_ELEMENT_BUCKETS = [...Object.keys(ELEMENTS), 'unknown'] as const;
 export function buildLocalAbyssPlan({
   input,
   scenario,
-  characters
+  characters,
+  knowledge
 }: BuildLocalAbyssPlanOptions): AbyssAdvisorResult {
   const inputIssues = validateInputConstraints(input, characters);
   if (inputIssues.length > 0) return blocked(inputIssues);
@@ -75,12 +80,24 @@ export function buildLocalAbyssPlan({
   const secondEnemies = chambers.flatMap(({ secondHalf }) =>
     secondHalf.waves.flatMap(({ enemies }) => enemies)
   );
+  if (input.priorPlan && input.recomputeHalf) {
+    return buildPartialPlan({
+      input,
+      scenario,
+      characters,
+      knowledge,
+      chambers,
+      firstEnemies,
+      secondEnemies
+    });
+  }
   const assignment = optimizeJointAssignment(
     available,
     input.lockedCharacterIds,
     firstEnemies,
     secondEnemies,
-    input
+    input,
+    knowledge
   );
   if (!assignment) {
     return blocked([
@@ -125,7 +142,7 @@ export function buildLocalAbyssPlan({
     }))
   };
 
-  const validation = validateAbyssPlan({ input, scenario, characters, plan });
+  const validation = validateAbyssPlan({ input, scenario, characters, knowledge, plan });
   if (!validation.ok) return blocked(validation.issues);
   return abyssAdvisorResultSchema.parse({
     status: 'planned',
@@ -135,6 +152,201 @@ export function buildLocalAbyssPlan({
     assumptions,
     plan: validation.plan
   });
+}
+
+function buildPartialPlan({
+  input,
+  scenario,
+  characters,
+  knowledge,
+  chambers,
+  firstEnemies,
+  secondEnemies
+}: BuildLocalAbyssPlanOptions & {
+  chambers: AbyssScenario['floors'][number]['chambers'];
+  firstEnemies: EnemyInstance[];
+  secondEnemies: EnemyInstance[];
+}): AbyssAdvisorResult {
+  const prior = input.priorPlan;
+  const recomputeHalf = input.recomputeHalf;
+  if (!prior || !recomputeHalf) return blocked([]);
+  const preservedTeamKey = recomputeHalf === 'firstHalf' ? 'secondHalfTeam' : 'firstHalfTeam';
+  const recomputeTeamKey = recomputeHalf === 'firstHalf' ? 'firstHalfTeam' : 'secondHalfTeam';
+  const preservedChamberKey = recomputeHalf === 'firstHalf' ? 'secondHalf' : 'firstHalf';
+  const recomputeChamberKey = recomputeHalf === 'firstHalf' ? 'firstHalf' : 'secondHalf';
+  if (
+    prior.scenarioId !== scenario.id ||
+    prior.dataVersion !== scenario.meta.dataVersion ||
+    prior.chambers.length !== chambers.length ||
+    !chambers.every(({ chamber }) =>
+      prior.chambers.some(
+        (candidate) => candidate.floor === input.floor && candidate.chamber === chamber
+      )
+    )
+  ) {
+    return blocked([
+      issue(
+        'PRESERVED_HALF_CONFLICT',
+        ['priorPlan'],
+        '旧方案与当前挑战目标不一致，请改用完整重算。'
+      )
+    ]);
+  }
+  const preservedIds = new Set(prior[preservedTeamKey].characterIds);
+  const excludedPreserved = input.excludedCharacterIds.filter((id) => preservedIds.has(id));
+  if (excludedPreserved.length > 0) {
+    return blocked([
+      issue(
+        'PRESERVED_HALF_CONFLICT',
+        ['excludedCharacterIds'],
+        '排除角色与需要保留的半场冲突，请改用完整重算。',
+        { characterIds: excludedPreserved }
+      )
+    ]);
+  }
+  const owned = new Map(characters.map((character) => [String(character.id), character]));
+  if (prior[preservedTeamKey].characterIds.some((id) => !owned.has(id))) {
+    return blocked([
+      issue(
+        'PRESERVED_HALF_CONFLICT',
+        [preservedTeamKey],
+        '需要保留的半场包含当前角色资料中不存在的角色，请改用完整重算。'
+      )
+    ]);
+  }
+  const requiredLocks = input.lockedCharacterIds.filter((id) => !preservedIds.has(id));
+  if (requiredLocks.length > 4) {
+    return blocked([
+      issue(
+        'PRESERVED_HALF_CONFLICT',
+        ['lockedCharacterIds'],
+        '保留另一半后，新增锁定角色超过可重算半场的 4 个位置，请改用完整重算。'
+      )
+    ]);
+  }
+  const excluded = new Set(input.excludedCharacterIds);
+  const available = characters.filter(
+    ({ id }) => !preservedIds.has(String(id)) && !excluded.has(String(id))
+  );
+  if (available.length < 4) {
+    return blocked([
+      issue('ROSTER_INSUFFICIENT', ['profile', 'characters'], '保留另一半后可重算角色不足 4 名。', {
+        required: 4,
+        available: available.length,
+        missing: 4 - available.length
+      })
+    ]);
+  }
+  const enemies = recomputeHalf === 'firstHalf' ? firstEnemies : secondEnemies;
+  const pool = buildSingleHalfPool(available, requiredLocks, enemies, input, knowledge);
+  const requiredLockSet = new Set(requiredLocks);
+  const candidate = buildTeamCandidates(pool, enemies, input, knowledge).find(({ ids }) =>
+    [...requiredLockSet].every((id) => ids.has(id))
+  );
+  if (!candidate) {
+    return blocked([
+      issue(
+        'MECHANIC_COVERAGE_INVALID',
+        [recomputeTeamKey],
+        '在保留另一半的前提下，当前角色与干预条件无法覆盖该半场硬机制。'
+      )
+    ]);
+  }
+  const recomputedTeam = {
+    id: recomputeHalf === 'firstHalf' ? 'first-half' : 'second-half',
+    characterIds: candidate.team.map(({ id }) => String(id)),
+    purpose: `固定覆盖 ${input.floor} 层${recomputeHalf === 'firstHalf' ? '上半' : '下半'}${input.chamber ? `第 ${input.chamber} 间` : '全部所选房间'}`,
+    rotationNotes: ['根据实战充能调整技能顺序，保留关键技能处理下一波或阶段转场。']
+  };
+  const preservedCharacters = prior[preservedTeamKey].characterIds.flatMap((id) => {
+    const character = owned.get(id);
+    return character ? [character] : [];
+  });
+  const assignment: JointAssignment = {
+    first: recomputeHalf === 'firstHalf' ? candidate.team : preservedCharacters,
+    second: recomputeHalf === 'secondHalf' ? candidate.team : preservedCharacters,
+    score: candidate.score
+  };
+  const warnings = [
+    `仅重算${recomputeHalf === 'firstHalf' ? '上半' : '下半'}；另一半队伍与逐间打法保持不变。`,
+    ...buildWarnings(assignment, chambers.length)
+  ];
+  const assumptions = prior.assumptions;
+  const plan = {
+    ...prior,
+    confidence: confidenceFor(assignment),
+    warnings,
+    assumptions,
+    [recomputeTeamKey]: recomputedTeam,
+    [preservedTeamKey]: prior[preservedTeamKey],
+    chambers: chambers.map((chamber) => {
+      const preserved = prior.chambers.find(
+        (candidate) => candidate.floor === input.floor && candidate.chamber === chamber.chamber
+      );
+      if (!preserved) throw new Error('validated prior chamber is missing');
+      return {
+        floor: input.floor,
+        chamber: chamber.chamber,
+        [recomputeChamberKey]: tacticsForHalf(
+          chamber[recomputeChamberKey].waves.flatMap(({ enemies: waveEnemies }) => waveEnemies)
+        ),
+        [preservedChamberKey]: preserved[preservedChamberKey]
+      };
+    })
+  };
+  const validation = validateAbyssPlan({ input, scenario, characters, knowledge, plan });
+  if (!validation.ok) return blocked(validation.issues);
+  return abyssAdvisorResultSchema.parse({
+    status: 'planned',
+    source: 'local-rules',
+    issues: [],
+    warnings,
+    assumptions,
+    plan: validation.plan
+  });
+}
+
+function buildSingleHalfPool(
+  characters: CharacterProfile[],
+  lockedIds: string[],
+  enemies: EnemyInstance[],
+  input: AbyssAdvisorPlanInput,
+  knowledge?: CharacterKnowledgeReader
+): CharacterProfile[] {
+  const byScore = characters
+    .slice()
+    .sort(
+      (left, right) =>
+        scoreForHalf(right, enemies, input) - scoreForHalf(left, enemies, input) ||
+        left.id - right.id
+    );
+  const locked = lockedIds.flatMap((id) => {
+    const character = characters.find(({ id: numericId }) => String(numericId) === id);
+    return character ? [character] : [];
+  });
+  const elementalSpecialists = MECHANIC_ELEMENT_BUCKETS.flatMap((element) =>
+    byScore.filter((character) => mechanicElementBucket(character.element) === element).slice(0, 4)
+  );
+  const capabilitySpecialists = Array.from(
+    new Set(
+      enemies.flatMap((enemy) =>
+        parseRequiredCapabilities(enemy.mechanics.tags)
+          .filter(({ known }) => known)
+          .map(({ value }) => value)
+      )
+    )
+  ).flatMap((requirement) => {
+    const character = byScore.find((candidate) =>
+      characterSatisfiesRequirement(String(candidate.id), requirement, knowledge)
+    );
+    return character ? [character] : [];
+  });
+  return uniqueCharacters([
+    ...locked,
+    ...capabilitySpecialists,
+    ...elementalSpecialists,
+    ...byScore
+  ]).slice(0, MAX_JOINT_POOL_SIZE);
 }
 
 interface JointAssignment {
@@ -148,7 +360,8 @@ function optimizeJointAssignment(
   lockedIds: string[],
   firstEnemies: EnemyInstance[],
   secondEnemies: EnemyInstance[],
-  input: AbyssAdvisorPlanInput
+  input: AbyssAdvisorPlanInput,
+  knowledge?: CharacterKnowledgeReader
 ): JointAssignment | undefined {
   const locked = new Set(lockedIds);
   const rankedFor = (enemies: EnemyInstance[]) =>
@@ -166,7 +379,18 @@ function optimizeJointAssignment(
     input
   );
   if (!feasibleSeed) return undefined;
-  const pool = uniqueCharacters([...feasibleSeed.first, ...feasibleSeed.second]);
+  const capabilitySpecialists = selectCapabilitySpecialists(
+    characters,
+    firstEnemies,
+    secondEnemies,
+    input,
+    knowledge
+  );
+  const pool = uniqueCharacters([
+    ...feasibleSeed.first,
+    ...feasibleSeed.second,
+    ...capabilitySpecialists
+  ]).slice(0, MAX_JOINT_POOL_SIZE);
   for (let index = 0; pool.length < MAX_JOINT_POOL_SIZE; index += 1) {
     const additions = [rankedFirst[index], rankedSecond[index]].filter(
       (character): character is CharacterProfile => character !== undefined
@@ -177,8 +401,8 @@ function optimizeJointAssignment(
       if (!pool.some(({ id }) => id === character.id)) pool.push(character);
     }
   }
-  const firstCandidates = buildTeamCandidates(pool, firstEnemies, input);
-  const secondCandidates = buildTeamCandidates(pool, secondEnemies, input);
+  const firstCandidates = buildTeamCandidates(pool, firstEnemies, input, knowledge);
+  const secondCandidates = buildTeamCandidates(pool, secondEnemies, input, knowledge);
   let best: JointAssignment | undefined;
 
   for (const firstCandidate of firstCandidates) {
@@ -207,6 +431,56 @@ function optimizeJointAssignment(
   return best;
 }
 
+function selectCapabilitySpecialists(
+  characters: CharacterProfile[],
+  firstEnemies: EnemyInstance[],
+  secondEnemies: EnemyInstance[],
+  input: AbyssAdvisorPlanInput,
+  knowledge?: CharacterKnowledgeReader
+): CharacterProfile[] {
+  const selected: CharacterProfile[] = [];
+  const selectedByHalf = [new Set<number>(), new Set<number>()];
+  const usedByOtherHalf = [new Set<number>(), new Set<number>()];
+  [firstEnemies, secondEnemies].forEach((enemies, halfIndex) => {
+    const requirements = Array.from(
+      new Set(
+        enemies.flatMap((enemy) =>
+          parseRequiredCapabilities(enemy.mechanics.tags)
+            .filter(({ known }) => known)
+            .map(({ value }) => value)
+        )
+      )
+    );
+    requirements.forEach((requirement) => {
+      if (
+        selected.some(
+          (character) =>
+            selectedByHalf[halfIndex]?.has(character.id) &&
+            characterSatisfiesRequirement(String(character.id), requirement, knowledge)
+        )
+      ) {
+        return;
+      }
+      const ranked = characters
+        .filter((character) =>
+          characterSatisfiesRequirement(String(character.id), requirement, knowledge)
+        )
+        .sort(
+          (left, right) =>
+            scoreForHalf(right, enemies, input) - scoreForHalf(left, enemies, input) ||
+            left.id - right.id
+        );
+      const specialist =
+        ranked.find((character) => !usedByOtherHalf[halfIndex]?.has(character.id)) ?? ranked[0];
+      if (!specialist) return;
+      selected.push(specialist);
+      selectedByHalf[halfIndex]?.add(specialist.id);
+      usedByOtherHalf[halfIndex === 0 ? 1 : 0]?.add(specialist.id);
+    });
+  });
+  return uniqueCharacters(selected);
+}
+
 interface ElementComposition {
   counts: Record<string, number>;
   estimate: number;
@@ -227,9 +501,7 @@ function buildMechanicallyFeasibleSeed(
   }
   const firstCompositions = buildElementCompositions(buckets, firstEnemies, input);
   const secondCompositions = buildElementCompositions(buckets, secondEnemies, input);
-  const lockedCounts = countElements(
-    characters.filter(({ id }) => locked.has(String(id)))
-  );
+  const lockedCounts = countElements(characters.filter(({ id }) => locked.has(String(id))));
 
   for (const first of firstCompositions) {
     for (const second of secondCompositions) {
@@ -274,7 +546,13 @@ function buildElementCompositions(
         const representative = buckets.get(element)?.[0];
         return representative ? Array(counts[element] ?? 0).fill(representative) : [];
       });
-      if (findAbyssMechanicCoverageGaps(team, enemies).length > 0) return;
+      if (
+        findAbyssMechanicCoverageGaps(team, enemies, undefined, {
+          ignoreCapabilityRequirements: true
+        }).length > 0
+      ) {
+        return;
+      }
       const estimate = MECHANIC_ELEMENT_BUCKETS.reduce((total, element) => {
         const ranked = (buckets.get(element) ?? [])
           .slice()
@@ -342,11 +620,13 @@ function materializeElementAssignment(
     const secondLocked = rankedLocked.slice(minimumFirstLocked);
     const firstUnlockedCount = firstCount - firstLocked.length;
     const secondUnlockedCount = secondCount - secondLocked.length;
-    const rankedFirstUnlocked = unlockedCharacters.slice().sort(
-      (left, right) =>
-        scoreForHalf(right, firstEnemies, input) - scoreForHalf(left, firstEnemies, input) ||
-        left.id - right.id
-    );
+    const rankedFirstUnlocked = unlockedCharacters
+      .slice()
+      .sort(
+        (left, right) =>
+          scoreForHalf(right, firstEnemies, input) - scoreForHalf(left, firstEnemies, input) ||
+          left.id - right.id
+      );
     const firstUnlocked = rankedFirstUnlocked.slice(0, firstUnlockedCount);
     const firstUnlockedIds = new Set(firstUnlocked.map(({ id }) => id));
     const secondUnlocked = unlockedCharacters
@@ -395,10 +675,11 @@ interface TeamCandidate {
 function buildTeamCandidates(
   pool: CharacterProfile[],
   enemies: EnemyInstance[],
-  input: AbyssAdvisorPlanInput
+  input: AbyssAdvisorPlanInput,
+  knowledge?: CharacterKnowledgeReader
 ): TeamCandidate[] {
   return combinations(pool, 4)
-    .filter((team) => findAbyssMechanicCoverageGaps(team, enemies).length === 0)
+    .filter((team) => findAbyssMechanicCoverageGaps(team, enemies, knowledge).length === 0)
     .map((team) => {
       const sorted = team.slice().sort((left, right) => left.id - right.id);
       return {

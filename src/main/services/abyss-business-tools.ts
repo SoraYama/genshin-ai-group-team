@@ -3,7 +3,15 @@ import { z } from 'zod';
 
 import type { PersistedProfile } from '../../shared/domain.js';
 import type { AbyssScenario } from '../../shared/abyss-advisor.js';
-import { abyssElementLabel, localizedMechanicTerm } from '../../shared/abyss-mechanics.js';
+import {
+  abyssElementLabel,
+  localizedMechanicTerm,
+  parseRequiredCapabilities
+} from '../../shared/abyss-mechanics.js';
+import {
+  ALL_CHARACTER_KNOWLEDGE_FIELDS,
+  type CharacterKnowledgeReader
+} from '../../shared/character-knowledge.js';
 
 export const ABYSS_MCP_TOOL_NAMES = [
   'mcp__genshin__read_profile_cache',
@@ -16,12 +24,25 @@ export interface AbyssBusinessToolLog {
   itemCount: number;
   ok: boolean;
   durationMs: number;
+  correlationId: string;
+  scenarioId: string;
+  dataVersion: string;
+  knowledgeVersion: string;
+  parameterSummary: Readonly<Record<string, string | number | boolean>>;
+  issueCodes: string[];
+}
+
+export interface AbyssBusinessToolAuditContext {
+  correlationId: string;
+  scenarioId: string;
+  dataVersion: string;
 }
 
 export interface AbyssBusinessToolsOptions {
   getProfile: (uid: string) => PersistedProfile | null;
   getScenario: () => AbyssScenario;
-  getCharacter?: (characterId: string) => PersistedProfile['characters'][number] | undefined;
+  knowledge?: CharacterKnowledgeReader;
+  auditContext?: AbyssBusinessToolAuditContext;
   maxCharacters?: number;
   log?: (event: AbyssBusinessToolLog) => void;
   now?: () => number;
@@ -30,9 +51,17 @@ export interface AbyssBusinessToolsOptions {
 export function createAbyssBusinessTools(options: AbyssBusinessToolsOptions) {
   const maxCharacters = Math.min(Math.max(options.maxCharacters ?? 128, 1), 128);
   const now = options.now ?? Date.now;
+  const knowledge = options.knowledge ?? UNKNOWN_KNOWLEDGE_READER;
+  const auditContext = options.auditContext ?? {
+    correlationId: 'unscoped',
+    scenarioId: options.getScenario().id,
+    dataVersion: options.getScenario().meta.dataVersion
+  };
   const run = async <T>(
     toolName: AbyssBusinessToolLog['tool'],
     itemCount: number,
+    parameterSummary: AbyssBusinessToolLog['parameterSummary'],
+    failureIssueCode: string,
     operation: () => T
   ) => {
     const startedAt = now();
@@ -42,7 +71,11 @@ export function createAbyssBusinessTools(options: AbyssBusinessToolsOptions) {
         tool: toolName,
         itemCount,
         ok: true,
-        durationMs: Math.max(0, now() - startedAt)
+        durationMs: Math.max(0, now() - startedAt),
+        ...auditContext,
+        knowledgeVersion: knowledge.version,
+        parameterSummary,
+        issueCodes: []
       });
       return textResult(value);
     } catch (error) {
@@ -50,7 +83,11 @@ export function createAbyssBusinessTools(options: AbyssBusinessToolsOptions) {
         tool: toolName,
         itemCount,
         ok: false,
-        durationMs: Math.max(0, now() - startedAt)
+        durationMs: Math.max(0, now() - startedAt),
+        ...auditContext,
+        knowledgeVersion: knowledge.version,
+        parameterSummary,
+        issueCodes: [failureIssueCode]
       });
       return errorResult(error instanceof Error ? error.message : 'Tool request failed');
     }
@@ -63,23 +100,29 @@ export function createAbyssBusinessTools(options: AbyssBusinessToolsOptions) {
       { uid: z.string().regex(/^\d{9}$/) },
       async ({ uid }) => {
         const profile = options.getProfile(uid);
-        return run('read_profile_cache', profile?.characters.length ?? 0, () => {
-          if (!profile) throw new Error('Profile not found');
-          return {
-            uid: profile.uid,
-            fetchedAt: profile.fetchedAt,
-            coverage: profile.coverage,
-            characters: profile.characters.slice(0, maxCharacters).map((character) => ({
-              id: String(character.id),
-              name: character.name,
-              element: character.element,
-              rarity: character.rarity,
-              level: character.level,
-              completeness: character.completeness,
-              energyRecharge: character.build?.stats?.energyRecharge
-            }))
-          };
-        });
+        return run(
+          'read_profile_cache',
+          profile?.characters.length ?? 0,
+          { requested: 'profile', maxCharacters },
+          'PROFILE_NOT_FOUND',
+          () => {
+            if (!profile) throw new Error('Profile not found');
+            return {
+              uid: profile.uid,
+              fetchedAt: profile.fetchedAt,
+              coverage: profile.coverage,
+              characters: profile.characters.slice(0, maxCharacters).map((character) => ({
+                id: String(character.id),
+                name: character.name,
+                element: character.element,
+                rarity: character.rarity,
+                level: character.level,
+                completeness: character.completeness,
+                energyRecharge: character.build?.stats?.energyRecharge
+              }))
+            };
+          }
+        );
       },
       { annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } }
     ),
@@ -93,7 +136,7 @@ export function createAbyssBusinessTools(options: AbyssBusinessToolsOptions) {
         chamber: z.number().int().positive()
       },
       async ({ scenarioId, dataVersion, floor, chamber }) =>
-        run('query_enemy_data', 1, () => {
+        run('query_enemy_data', 1, { floor, chamber }, 'SCENARIO_DATA_UNAVAILABLE', () => {
           const scenario = options.getScenario();
           if (scenario.id !== scenarioId || scenario.meta.dataVersion !== dataVersion) {
             throw new Error('Scenario identity mismatch');
@@ -123,33 +166,38 @@ export function createAbyssBusinessTools(options: AbyssBusinessToolsOptions) {
           .max(8)
       },
       async ({ characterIds }) =>
-        run('query_genshin_db', characterIds.length, () => {
-          const profiles = characterIds.map((id) => {
-            // This bounded tool intentionally knows only data already present in the profile cache.
-            // It never invents role/kit classifications when the bundled knowledge is absent.
-            const character = options.getCharacter?.(id);
-            if (!character) {
-              return {
-                id,
-                knowledge: 'unknown',
-                unknownFields: ['element', 'level', 'energyRecharge', 'role', 'kit']
-              };
-            }
-            return {
-              id,
-              knowledge: 'profile-only',
-              element: character.element,
-              level: character.level,
-              energyRecharge: character.build?.stats?.energyRecharge,
-              unknownFields: ['role', 'kit']
-            };
-          });
-          return { characters: profiles };
-        }),
+        run(
+          'query_genshin_db',
+          characterIds.length,
+          { requestedCount: characterIds.length },
+          'KNOWLEDGE_LOOKUP_FAILED',
+          () => ({
+            knowledgeVersion: knowledge.version,
+            coverage: knowledge.coverageFor(characterIds),
+            characters: characterIds.map((id) => knowledge.lookup(id))
+          })
+        ),
       { annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } }
     )
   ] as const;
 }
+
+const UNKNOWN_KNOWLEDGE_READER: CharacterKnowledgeReader = {
+  version: 'unavailable',
+  coverage: { characterCount: 0, notes: '角色知识资料不可用。' },
+  lookup: (id) => ({
+    status: 'unknown',
+    id,
+    knowledgeVersion: 'unavailable',
+    unknownFields: [...ALL_CHARACTER_KNOWLEDGE_FIELDS]
+  }),
+  coverageFor: (characterIds) => ({
+    knowledgeVersion: 'unavailable',
+    requested: new Set(characterIds).size,
+    known: 0,
+    unknownCharacterIds: Array.from(new Set(characterIds))
+  })
+};
 
 export function createAbyssBusinessMcpServer(options: AbyssBusinessToolsOptions) {
   return createSdkMcpServer({
@@ -179,7 +227,8 @@ function localizedWave(
           percent
         })),
         immunities: enemy.mechanics.immunities.map(localizedMechanicTerm),
-        tags: enemy.mechanics.tags.filter((tag) => /[\u3400-\u9fff]/u.test(tag))
+        tags: enemy.mechanics.tags.filter((tag) => /[\u3400-\u9fff]/u.test(tag)),
+        requiredCapabilities: parseRequiredCapabilities(enemy.mechanics.tags)
       }
     }))
   };

@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import { buildLocalAbyssPlan } from '../../../src/main/services/abyss-local-optimizer.js';
 import { validateAbyssPlan } from '../../../src/main/services/abyss-plan-validator.js';
-import { ABYSS_CHARACTERS, abyssInput, abyssScenario } from './abyss-test-fixtures.js';
+import { CharacterKnowledgeStore } from '../../../src/main/services/character-knowledge-store.js';
+import {
+  ABYSS_CHARACTERS,
+  abyssInput,
+  abyssScenario,
+  validAbyssPlan
+} from './abyss-test-fixtures.js';
 
 describe('buildLocalAbyssPlan', () => {
   it('jointly returns two deterministic, zero-overlap teams for all target chambers', () => {
@@ -44,6 +50,41 @@ describe('buildLocalAbyssPlan', () => {
     ];
     expect(ids).toEqual(expect.arrayContaining(['1001', '1009']));
     expect(ids).not.toEqual(expect.arrayContaining(['1002', '1010']));
+  });
+
+  it('recomputes only the requested half and preserves the other half byte-for-byte', () => {
+    const prior = validAbyssPlan();
+    const input = abyssInput({
+      priorPlan: prior,
+      recomputeHalf: 'firstHalf',
+      excludedCharacterIds: [prior.firstHalfTeam.characterIds[0]!]
+    });
+    const result = buildLocalAbyssPlan({
+      input,
+      scenario: abyssScenario(),
+      characters: ABYSS_CHARACTERS
+    });
+
+    expect(result.status).toBe('planned');
+    if (result.status !== 'planned') return;
+    expect(result.plan.secondHalfTeam).toEqual(prior.secondHalfTeam);
+    expect(result.plan.chambers.map(({ secondHalf }) => secondHalf)).toEqual(
+      prior.chambers.map(({ secondHalf }) => secondHalf)
+    );
+    expect(result.plan.firstHalfTeam.characterIds).not.toContain(input.excludedCharacterIds[0]);
+  });
+
+  it('blocks partial recompute when an intervention conflicts with the preserved half', () => {
+    const prior = validAbyssPlan();
+    const input = abyssInput({
+      priorPlan: prior,
+      recomputeHalf: 'firstHalf',
+      excludedCharacterIds: [prior.secondHalfTeam.characterIds[0]!]
+    });
+
+    expect(
+      buildLocalAbyssPlan({ input, scenario: abyssScenario(), characters: ABYSS_CHARACTERS })
+    ).toMatchObject({ status: 'blocked', issues: [{ code: 'PRESERVED_HALF_CONFLICT' }] });
   });
 
   it('uses known mechanics and stats without claiming unknown character roles', () => {
@@ -250,5 +291,73 @@ describe('buildLocalAbyssPlan', () => {
         'CHARACTER_NOT_OWNED'
       ])
     );
+  });
+
+  it('retains a low-score knowledge specialist required by a hard capability tag', () => {
+    const scenario = abyssScenario();
+    scenario.floors[0]!.chambers[0]!.firstHalf.waves[0]!.enemies[0]!.mechanics.tags.push(
+      'requires-capability:healing'
+    );
+    const regular = Array.from({ length: 20 }, (_, index) => ({
+      ...ABYSS_CHARACTERS[index % ABYSS_CHARACTERS.length]!,
+      id: 7001 + index,
+      name: `高分普通角色${index + 1}`,
+      level: 90
+    }));
+    const healer = {
+      ...ABYSS_CHARACTERS[0]!,
+      id: 7999,
+      name: '低分治疗专才',
+      level: 1
+    };
+    const knowledge = CharacterKnowledgeStore.fromUnknown({
+      schemaVersion: 1,
+      knowledgeVersion: 'optimizer-capability-v1',
+      updatedAt: '2026-07-23T00:00:00.000Z',
+      coverage: { characterCount: 1, notes: '仅覆盖治疗专才。' },
+      characters: [
+        {
+          id: '7999',
+          name: '低分治疗专才',
+          weaponType: 'sword',
+          roles: ['sustain'],
+          energyCost: 60,
+          energyNeeds: 'medium',
+          capabilities: ['healing'],
+          applicationNotes: [],
+          kitNotes: [],
+          unknownFields: []
+        }
+      ]
+    });
+
+    const result = buildLocalAbyssPlan({
+      input: abyssInput(),
+      scenario,
+      characters: [...regular, healer],
+      knowledge
+    });
+
+    expect(result.status).toBe('planned');
+    if (result.status === 'planned') {
+      expect(result.plan.firstHalfTeam.characterIds).toContain('7999');
+    }
+  });
+
+  it('blocks unknown requires-capability tags instead of treating them as preferences', () => {
+    const scenario = abyssScenario();
+    scenario.floors[0]!.chambers[0]!.firstHalf.waves[0]!.enemies[0]!.mechanics.tags.push(
+      'requires-capability:teleport'
+    );
+    const result = buildLocalAbyssPlan({
+      input: abyssInput(),
+      scenario,
+      characters: ABYSS_CHARACTERS
+    });
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      issues: [{ code: 'MECHANIC_COVERAGE_INVALID' }]
+    });
   });
 });

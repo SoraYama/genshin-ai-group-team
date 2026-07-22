@@ -11,6 +11,7 @@ import {
 } from '../agents/abyss-composer/prompt.js';
 import type { AgentSdkRunOptions } from './agent-sdk-adapter.js';
 import { validateAbyssPlan } from './abyss-plan-validator.js';
+import type { CharacterKnowledgeReader } from '../../shared/character-knowledge.js';
 
 export interface AbyssPlanAgentRunner {
   run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown>;
@@ -20,6 +21,7 @@ export interface AbyssPlanAgentInput {
   input: AbyssAdvisorPlanInput;
   scenario: AbyssScenario;
   characters: CharacterProfile[];
+  knowledge?: CharacterKnowledgeReader;
   sdkOptions: AgentSdkRunOptions;
 }
 
@@ -140,7 +142,7 @@ interface ToolAudit {
 
 function validateAgentOutput(
   raw: string,
-  context: Pick<AbyssPlanAgentInput, 'input' | 'scenario' | 'characters'>,
+  context: Pick<AbyssPlanAgentInput, 'input' | 'scenario' | 'characters' | 'knowledge'>,
   tools: ToolAudit[]
 ): { ok: true; plan: AbyssPlanOutput } | { ok: false; issues: AbyssPlanIssue[] } {
   let parsed: unknown;
@@ -255,7 +257,17 @@ function publicRequest(context: Pick<AbyssPlanAgentInput, 'input' | 'scenario'>)
     chamber: context.input.chamber,
     preferences: context.input.preferences,
     lockedCharacterIds: context.input.lockedCharacterIds,
-    excludedCharacterIds: context.input.excludedCharacterIds
+    excludedCharacterIds: context.input.excludedCharacterIds,
+    ...(context.input.priorPlan && context.input.recomputeHalf
+      ? {
+          recomputeHalf: context.input.recomputeHalf,
+          priorPlan: context.input.priorPlan,
+          preservationRule:
+            context.input.recomputeHalf === 'firstHalf'
+              ? 'secondHalfTeam 与每个 chambers.secondHalf 必须逐字段保持不变'
+              : 'firstHalfTeam 与每个 chambers.firstHalf 必须逐字段保持不变'
+        }
+      : {})
   };
 }
 

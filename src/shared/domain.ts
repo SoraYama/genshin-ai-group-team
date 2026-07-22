@@ -295,6 +295,7 @@ export interface AbyssPlanHistoryEntry {
     lockedCharacterIds: string[];
     excludedCharacterIds: string[];
     preferences: import('./scenario-v2.js').PlayerPreferences;
+    recomputeHalf?: 'firstHalf' | 'secondHalf';
   };
   characters: Array<{
     id: string;

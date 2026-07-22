@@ -625,9 +625,8 @@ test('renders profile coverage and known build fields without fake zero values',
   await expect(theaterEntry).toHaveAttribute('aria-pressed', 'true');
   await expect(abyssEntry).toHaveAttribute('aria-pressed', 'false');
 
-  const legacyEnemyInput = page.locator('.gta-advisor-advanced textarea').first();
-  await expect(legacyEnemyInput).toHaveValue('abyss-mage, ruin-guard');
-  await expect(legacyEnemyInput).toBeHidden();
+  await expect(page.locator('.gta-advisor-advanced')).toHaveCount(0);
+  await expect(page.getByText(/abyss-mage|ruin-guard/i)).toHaveCount(0);
 
   const globalBackground = await page.evaluate<string>(
     "getComputedStyle(document.querySelector('.app-bg')).backgroundImage"
@@ -641,23 +640,6 @@ test('renders profile coverage and known build fields without fake zero values',
   expect(modeBackgrounds.join(' ')).toContain('imaginarium-theater');
   expect(modeBackgrounds.join(' ')).toContain('stygian-onslaught');
 
-  await page.locator('.gta-advisor-advanced > summary').click();
-  const drillModeGroup = page.getByRole('group', { name: '自定义演练模式' });
-  const singleModeButton = drillModeGroup.getByRole('button', { name: '单环境' });
-  const compareModeButton = drillModeGroup.getByRole('button', { name: '双环境对比' });
-  await expect(singleModeButton).toHaveAttribute('aria-pressed', 'true');
-  await expect(compareModeButton).toHaveAttribute('aria-pressed', 'false');
-  await compareModeButton.click();
-  await expect(compareModeButton).toHaveAttribute('aria-pressed', 'true');
-  await expect(singleModeButton).toHaveAttribute('aria-pressed', 'false');
-  await singleModeButton.click();
-  await expect(singleModeButton).toHaveAttribute('aria-pressed', 'true');
-  await expect(legacyEnemyInput).toBeVisible();
-
-  await page.getByRole('button', { name: '生成建议' }).click();
-  await expect(page.locator('.gta-tag.is-fallback')).toContainText('本地规则', {
-    timeout: 10_000
-  });
   await expectNoForbiddenPlayerTerms();
   await expectPageFitsEveryViewport('Advisor details');
 
@@ -804,7 +786,6 @@ test('runs the abyss-specific development-sample flow with accessible interventi
     .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-result-character-id')));
   expect(resultCharacters).toHaveLength(8);
   expect(new Set(resultCharacters).size).toBe(8);
-  await expect(page.getByText(/调整后重新生成完整双队/).first()).toBeVisible();
   await expect(page.getByText(/循环：根据实战充能调整技能顺序/).first()).toBeVisible();
   await expect(page.getByText(/替换建议：.*重新生成完整双队/).first()).toBeVisible();
   await expect(page.locator('.gta-abyss-progress li').last()).toHaveClass(/is-done/);
@@ -819,13 +800,32 @@ test('runs the abyss-specific development-sample flow with accessible interventi
   await page.screenshot({ path: path.join(tmpdir(), 'gta-m4-abyss-result-1600x1000.png') });
 
   await page.getByRole('button', { name: '操作简单' }).click();
-  await expect(page.getByRole('heading', { name: '上下半零重复' })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: '上下半零重复' })).toBeVisible();
+  await expect(page.getByText('待更新', { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: '只重算上半' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '只重算下半' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '完整重算' })).toBeVisible();
+  const preservedLowerBefore = await page
+    .locator('.gta-abyss-result-teams > section')
+    .nth(1)
+    .locator('[data-result-character-id]')
+    .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-result-character-id')));
+  await page.getByRole('button', { name: '只重算上半' }).click();
+  await expect(page.getByText('待更新', { exact: true })).toHaveCount(0);
+  const preservedLowerAfter = await page
+    .locator('.gta-abyss-result-teams > section')
+    .nth(1)
+    .locator('[data-result-character-id]')
+    .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-result-character-id')));
+  expect(preservedLowerAfter).toEqual(preservedLowerBefore);
 
   await page.getByRole('button', { name: '历史记录' }).click();
   await expect(page.getByRole('heading', { name: '深境螺旋方案' })).toBeVisible();
-  await expect(page.getByText('演练资料', { exact: true })).toBeVisible();
+  await expect(page.getByText('演练资料', { exact: true }).first()).toBeVisible();
   await expect(page.locator('main')).not.toContainText(/development\.|development-sample/);
-  const abyssHistory = page.getByRole('button', { name: /UID 123456789.*12 层.*全部房间/ });
+  const abyssHistory = page
+    .getByRole('button', { name: /UID 123456789.*12 层.*全部房间/ })
+    .first();
   await abyssHistory.click();
   await expect(page.getByRole('button', { name: '删除这条深境螺旋方案' })).toBeVisible();
 });

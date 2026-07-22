@@ -49,6 +49,7 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
   );
   const [search, setSearch] = useState('');
   const [result, setResult] = useState<AbyssAdvisorResult | null>(null);
+  const [resultNeedsUpdate, setResultNeedsUpdate] = useState(false);
   const [activeStep, setActiveStep] = useState<AbyssAdvisorProgressStep | null>(null);
   const [running, setRunning] = useState(false);
   const requestSequence = useRef(0);
@@ -66,6 +67,7 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
     setChamberNumber('all');
     setInterventions({});
     setResult(null);
+    setResultNeedsUpdate(false);
     setActiveStep(null);
     setRunning(false);
     void Promise.all([api.abyssAdvisor.getScenario(), api.profile.get({ uid })])
@@ -123,11 +125,24 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
     scenarioView.trust === 'production' &&
     scenarioView.notCurrent;
 
-  function invalidatePlan() {
+  function resetPlan() {
     requestSequence.current += 1;
     activeCorrelation.current = null;
     setResult(null);
+    setResultNeedsUpdate(false);
     setActiveStep(null);
+    if (running) {
+      setRunning(false);
+      void api.abyssAdvisor.cancel();
+    }
+  }
+
+  function markPlanNeedsUpdate() {
+    requestSequence.current += 1;
+    activeCorrelation.current = null;
+    setActiveStep(null);
+    setResultNeedsUpdate(result?.status === 'planned');
+    if (result?.status !== 'planned') setResult(null);
     if (running) {
       setRunning(false);
       void api.abyssAdvisor.cancel();
@@ -140,7 +155,7 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
         ? { ...previous, noBuildChange: !previous.noBuildChange }
         : { ...previous, [key]: previous[key] === 'high' ? 'off' : 'high' }
     );
-    invalidatePlan();
+    markPlanNeedsUpdate();
   }
 
   function cycleCharacter(id: string) {
@@ -148,17 +163,19 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
       ...previous,
       [id]: cycleCharacterIntervention(previous[id] ?? 'neutral')
     }));
-    invalidatePlan();
+    markPlanNeedsUpdate();
   }
 
-  async function generatePlan() {
+  async function generatePlan(recomputeHalf?: 'firstHalf' | 'secondHalf') {
     if (!scenario || !floor || tooManyLocks || scenarioReadOnly) return;
+    const priorPlan = result?.status === 'planned' ? result.plan : undefined;
+    if (recomputeHalf && (!resultNeedsUpdate || !priorPlan)) return;
     const requestId = requestSequence.current + 1;
     const correlationId = `abyss-${Date.now()}-${requestId}`;
     requestSequence.current = requestId;
     activeCorrelation.current = correlationId;
     setRunning(true);
-    setResult(null);
+    if (!recomputeHalf) setResult(null);
     setActiveStep('reading-roster');
     try {
       const next = await api.abyssAdvisor.recommend({
@@ -170,9 +187,13 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
         ...(chamberNumber === 'all' ? {} : { chamber: chamberNumber }),
         preferences,
         lockedCharacterIds,
-        excludedCharacterIds
+        excludedCharacterIds,
+        ...(recomputeHalf && priorPlan ? { priorPlan, recomputeHalf } : {})
       });
-      if (requestSequence.current === requestId) setResult(next);
+      if (requestSequence.current === requestId) {
+        setResult(next);
+        setResultNeedsUpdate(false);
+      }
     } catch {
       if (requestSequence.current === requestId) {
         setLoadError('生成方案时发生错误；角色与挑战资料没有被修改。');
@@ -208,7 +229,7 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
       <section className="gta-abyss-unavailable" aria-labelledby="abyss-unavailable-title">
         <span className="gta-page-kicker">深境螺旋</span>
         <h3 id="abyss-unavailable-title">本期挑战资料暂不可用</h3>
-        <p>{scenarioView.message} 你仍可查看角色、历史方案，或在下方打开自定义演练。</p>
+        <p>{scenarioView.message} 你仍可查看角色与历史方案；恢复可信资料后才能生成新方案。</p>
       </section>
     );
   }
@@ -244,6 +265,12 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
           <span>正式数据刷新失败或已失效；为避免误导，暂时不能据此生成新方案。</span>
         </div>
       )}
+      {scenarioView.trust === 'production' && scenarioView.refreshWarning && !scenarioReadOnly && (
+        <div className="gta-abyss-sample-banner is-refresh-warning" role="status">
+          <strong>正在使用最近一次已确认资料</strong>
+          <span>{scenarioView.refreshWarning} 仍可谨慎生成方案，请留意资料版本。</span>
+        </div>
+      )}
 
       <nav className="gta-abyss-targets" aria-label="选择深境螺旋目标">
         <div className="gta-abyss-floor-tabs" role="group" aria-label="选择楼层">
@@ -256,7 +283,7 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
               onClick={() => {
                 setFloorNumber(number);
                 setChamberNumber('all');
-                invalidatePlan();
+                resetPlan();
               }}
             >
               {number} 层
@@ -270,7 +297,7 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
             value={chamberNumber}
             onChange={(event) => {
               setChamberNumber(event.target.value === 'all' ? 'all' : Number(event.target.value));
-              invalidatePlan();
+              resetPlan();
             }}
           >
             <option value="all">全部房间 · 固定双队</option>
@@ -359,18 +386,52 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
           ))}
         </div>
         <div className="gta-abyss-runbar">
-          <GtaButton
-            onClick={() => void generatePlan()}
-            disabled={running || tooManyLocks || selectedChambers.length === 0 || scenarioReadOnly}
-          >
-            {running ? '正在生成双队…' : '生成上下半方案'}
-          </GtaButton>
+          {resultNeedsUpdate && result?.status === 'planned' ? (
+            <>
+              <GtaButton
+                onClick={() => void generatePlan('firstHalf')}
+                disabled={
+                  running || tooManyLocks || selectedChambers.length === 0 || scenarioReadOnly
+                }
+              >
+                只重算上半
+              </GtaButton>
+              <GtaButton
+                onClick={() => void generatePlan('secondHalf')}
+                disabled={
+                  running || tooManyLocks || selectedChambers.length === 0 || scenarioReadOnly
+                }
+              >
+                只重算下半
+              </GtaButton>
+              <GtaButton
+                tone="ghost"
+                onClick={() => void generatePlan()}
+                disabled={
+                  running || tooManyLocks || selectedChambers.length === 0 || scenarioReadOnly
+                }
+              >
+                完整重算
+              </GtaButton>
+            </>
+          ) : (
+            <GtaButton
+              onClick={() => void generatePlan()}
+              disabled={
+                running || tooManyLocks || selectedChambers.length === 0 || scenarioReadOnly
+              }
+            >
+              {running ? '正在生成双队…' : '生成上下半方案'}
+            </GtaButton>
+          )}
           {running && (
             <GtaButton tone="ghost" onClick={cancelPlan}>
               取消生成
             </GtaButton>
           )}
-          {result && <span>调整后重新生成完整双队，才能继续检查跨队冲突。</span>}
+          {resultNeedsUpdate && (
+            <span className="is-pending">待更新 · 可只重算受影响半场，另一半保持原样。</span>
+          )}
         </div>
       </section>
 
@@ -393,7 +454,7 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
         </ol>
       )}
 
-      {result && <AbyssResult result={result} profile={profile} />}
+      {result && <AbyssResult result={result} profile={profile} pending={resultNeedsUpdate} />}
     </section>
   );
 }
@@ -515,10 +576,12 @@ function CharacterInterventionButton({
 
 function AbyssResult({
   result,
-  profile
+  profile,
+  pending
 }: {
   result: AbyssAdvisorResult;
   profile: PersistedProfile;
+  pending: boolean;
 }) {
   if (result.status === 'blocked') {
     return (
@@ -545,6 +608,7 @@ function AbyssResult({
         <div>
           <span className="gta-page-kicker">固定双队方案</span>
           <h4 id="abyss-result-title">上下半零重复</h4>
+          {pending && <span className="gta-abyss-pending-badge">待更新</span>}
         </div>
         <div className={`gta-abyss-source is-${result.source}`}>
           {result.source === 'smart-service' ? '智能服务' : '本地规则'}

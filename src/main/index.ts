@@ -50,6 +50,8 @@ import { UpdateService } from './services/update-service.js';
 import { UPDATE_EVENT_CHANNEL } from '../shared/ipc-contract.js';
 import { AbyssScenarioService } from './services/abyss-scenario-service.js';
 import { AbyssAdvisorService } from './services/abyss-advisor-service.js';
+import { createProductionScenarioPublicationSource } from './scenario-publication/production-composition.js';
+import { CharacterKnowledgeStore } from './services/character-knowledge-store.js';
 
 const isolatedUserDataDir = process.env.GTA_E2E_USER_DATA_DIR;
 if (isolatedUserDataDir) {
@@ -71,6 +73,12 @@ function resolveBundledScenarioDir(): string {
     return path.join(process.resourcesPath, 'scenarios');
   }
   return path.resolve(__dirname, '../../resources/scenarios');
+}
+
+function resolveBundledKnowledgePath(): string {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'knowledge', 'characters.v1.json')
+    : path.resolve(__dirname, '../../resources/knowledge/characters.v1.json');
 }
 
 async function bootstrapServices(): Promise<void> {
@@ -105,6 +113,14 @@ async function bootstrapServices(): Promise<void> {
   const profiles = new ProfileStore();
   const history = new HistoryStore();
   const advisor = new AdvisorAgent(config, profiles, history);
+  const characterKnowledge = await CharacterKnowledgeStore.load(resolveBundledKnowledgePath());
+  const productionScenarios = await createProductionScenarioPublicationSource({
+    userDataDir: app.getPath('userData'),
+    packagedConfigPath: app.isPackaged
+      ? path.join(process.resourcesPath, 'scenario-production.json')
+      : path.resolve(__dirname, '../../resources/scenario-production.json'),
+    env: process.env
+  });
   const abyssScenario = new AbyssScenarioService({
     enableDevelopmentScenarios: process.env.GTA_ENABLE_DEVELOPMENT_SCENARIOS === '1',
     developmentFixturePath: path.join(
@@ -112,7 +128,10 @@ async function bootstrapServices(): Promise<void> {
       'v2',
       'development-source',
       'spiral-abyss.json'
-    )
+    ),
+    ...(productionScenarios.status === 'configured'
+      ? { productionSnapshot: () => productionScenarios.refresh('spiral-abyss') }
+      : { productionUnavailableReason: productionScenarios.reason })
   });
   const abyssAdvisor = new AbyssAdvisorService({
     runner: new AgentSdkAdapter(),
@@ -120,7 +139,9 @@ async function bootstrapServices(): Promise<void> {
     profiles,
     history,
     config,
+    knowledge: characterKnowledge,
     toolLog: (event) => console.info('[abyss-business-tool]', event),
+    auditLog: (event) => console.info('[abyss-advisor]', event),
     sdkEnvironment: { cwd: app.getPath('userData'), clientVersion: app.getVersion() }
   });
   const updates = new UpdateService({

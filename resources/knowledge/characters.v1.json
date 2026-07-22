@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 1,
+  "knowledgeVersion": "2026.07.seed-1",
+  "updatedAt": "2026-07-23T00:00:00.000Z",
+  "coverage": {
+    "characterCount": 8,
+    "notes": "首批仅覆盖少量常用机制角色；未收录角色和未声明字段必须按 unknown 处理。"
+  },
+  "characters": [
+    {
+      "id": "10000003",
+      "name": "琴",
+      "weaponType": "sword",
+      "roles": ["sustain", "support"],
+      "energyCost": 80,
+      "energyNeeds": "high",
+      "capabilities": ["healing", "grouping"],
+      "applicationNotes": ["可提供治疗与有限聚拢。"],
+      "kitNotes": ["不在知识库中推断具体伤害或循环秒数。"],
+      "unknownFields": []
+    },
+    {
+      "id": "10000014",
+      "name": "芭芭拉",
+      "weaponType": "catalyst",
+      "roles": ["sustain", "support"],
+      "energyCost": 80,
+      "energyNeeds": "high",
+      "capabilities": ["healing"],
+      "applicationNotes": ["可提供治疗。"],
+      "kitNotes": ["不在知识库中推断具体伤害或循环秒数。"],
+      "unknownFields": []
+    },
+    {
+      "id": "10000022",
+      "name": "温迪",
+      "weaponType": "bow",
+      "roles": ["support", "off-field"],
+      "energyCost": 60,
+      "energyNeeds": "medium",
+      "capabilities": ["grouping", "off-field"],
+      "applicationNotes": ["可提供聚怪与后台作用。"],
+      "kitNotes": ["聚怪有效性仍取决于敌人重量与场景。"],
+      "unknownFields": []
+    },
+    {
+      "id": "10000030",
+      "name": "钟离",
+      "weaponType": "polearm",
+      "roles": ["support", "sustain"],
+      "energyCost": 40,
+      "energyNeeds": "low",
+      "capabilities": ["shield", "off-field"],
+      "applicationNotes": ["可提供护盾。"],
+      "kitNotes": ["不把护盾视为所有机制的自动解法。"],
+      "unknownFields": []
+    },
+    {
+      "id": "10000031",
+      "name": "菲谢尔",
+      "weaponType": "bow",
+      "roles": ["off-field"],
+      "energyCost": 60,
+      "energyNeeds": "low",
+      "capabilities": ["off-field"],
+      "applicationNotes": ["可提供后台作用。"],
+      "kitNotes": ["不在知识库中推断具体伤害或循环秒数。"],
+      "unknownFields": []
+    },
+    {
+      "id": "10000032",
+      "name": "班尼特",
+      "weaponType": "sword",
+      "roles": ["support", "sustain"],
+      "energyCost": 60,
+      "energyNeeds": "medium",
+      "capabilities": ["healing"],
+      "applicationNotes": ["可在限定区域内提供治疗。"],
+      "kitNotes": ["不在知识库中推断具体增益数值。"],
+      "unknownFields": []
+    },
+    {
+      "id": "10000034",
+      "name": "诺艾尔",
+      "weaponType": "claymore",
+      "roles": ["on-field", "sustain"],
+      "energyCost": 60,
+      "energyNeeds": "high",
+      "capabilities": ["shield", "healing", "on-field"],
+      "applicationNotes": ["可提供护盾，并在特定条件下提供治疗。"],
+      "kitNotes": ["治疗与站场条件必须在具体循环中再确认。"],
+      "unknownFields": []
+    },
+    {
+      "id": "10000091",
+      "name": "娜维娅",
+      "weaponType": "claymore",
+      "roles": ["on-field"],
+      "energyCost": 60,
+      "energyNeeds": "medium",
+      "capabilities": ["on-field", "onslaught"],
+      "applicationNotes": ["可承担正面攻坚。"],
+      "kitNotes": ["不在知识库中推断具体伤害或循环秒数。"],
+      "unknownFields": []
+    }
+  ]
+}

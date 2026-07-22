@@ -15,6 +15,7 @@ export interface AbyssScenarioServiceOptions {
   enableDevelopmentScenarios: boolean;
   developmentFixturePath: string;
   productionSnapshot?: () => Promise<ScenarioPublicationSnapshot>;
+  productionUnavailableReason?: 'production-source-not-configured' | 'production-config-invalid';
   readFile?: (filePath: string, encoding: 'utf8') => Promise<string>;
   now?: () => Date;
 }
@@ -38,12 +39,18 @@ export class AbyssScenarioService {
       return this.readDevelopmentSample();
     }
 
+    const reason =
+      this.options.productionUnavailableReason ??
+      (this.options.productionSnapshot
+        ? 'production-data-unavailable'
+        : 'production-source-not-configured');
     return {
       status: 'unavailable',
-      reason: this.options.productionSnapshot
-        ? 'production-data-unavailable'
-        : 'production-source-not-configured',
-      message: '暂时没有可验证的深境螺旋资料。'
+      reason,
+      message:
+        reason === 'production-config-invalid'
+          ? '正式挑战资料配置无效，已停止加载。'
+          : '暂时没有可验证的深境螺旋资料。'
     };
   }
 
@@ -60,15 +67,18 @@ export class AbyssScenarioService {
       ) {
         return undefined;
       }
+      const usableForRecommendation =
+        snapshot.freshness === 'fresh' || snapshot.freshness === 'expiring';
       return abyssScenarioViewSchema.parse({
         status: 'ready',
         trust: 'production',
         snapshotStatus: snapshot.status,
         refreshErrorCode: snapshot.refreshErrorCode,
-        notCurrent:
-          snapshot.status === 'last-known-good' ||
-          snapshot.freshness === 'stale' ||
-          snapshot.freshness === 'unknown',
+        notCurrent: !usableForRecommendation,
+        usableForRecommendation,
+        ...(snapshot.status === 'last-known-good'
+          ? { refreshWarning: '正在使用最近一次已确认的资料；本次刷新失败。' }
+          : {}),
         freshness: snapshot.freshness,
         checkedAt: snapshot.checkedAt,
         scenario: payload

@@ -132,6 +132,25 @@ describe('AbyssPlanAgent', () => {
     expect(runner.calls).toHaveLength(2);
   });
 
+  it('tells the agent which half to recompute and rejects changes to the preserved half', async () => {
+    const prior = validAbyssPlan();
+    const changed = validAbyssPlan({
+      secondHalfTeam: { ...prior.secondHalfTeam, purpose: '不应被修改' }
+    });
+    const runner = new FixtureRunner([changed, prior]);
+    const result = await new AbyssPlanAgent(runner).compose({
+      input: abyssInput({ priorPlan: prior, recomputeHalf: 'firstHalf' }),
+      scenario: abyssScenario(),
+      characters: ABYSS_CHARACTERS,
+      sdkOptions: sdkOptions()
+    });
+
+    expect(result).toMatchObject({ ok: true, repaired: true });
+    expect(runner.calls[0]?.prompt).toContain('recomputeHalf');
+    expect(runner.calls[0]?.prompt).toContain('firstHalf');
+    expect(runner.calls[1]?.prompt).toContain('PRESERVED_HALF_CHANGED');
+  });
+
   it('treats narrative or malformed output as invalid instead of scraping arbitrary prose', async () => {
     const runner = new FixtureRunner(['```json\n{}\n```', 'not-json']);
     const result = await new AbyssPlanAgent(runner).compose({
