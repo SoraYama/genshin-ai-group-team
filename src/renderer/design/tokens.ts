@@ -50,7 +50,7 @@ export const palette = {
   strokeCreamSoft: '#a9bebb',
   textOnLight: '#14222c',
   textOnLightSoft: '#3f5360',
-  textOnLightFaint: '#687a82',
+  textOnLightFaint: '#5d7078',
   textOnDark: '#f7f5ec',
   textOnDarkSoft: '#cbd7d8',
   gold: '#bda775',

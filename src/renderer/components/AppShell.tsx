@@ -24,17 +24,24 @@ export function AppShell({ activeUid, children, onNavigate, view }: AppShellProp
   const [menuOpen, setMenuOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const menuRootRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const firstItemRef = useRef<HTMLButtonElement>(null);
+  const requestedMenuFocusRef = useRef<'first' | 'last'>('first');
 
   const closeMenu = (restoreFocus = false) => {
     setMenuOpen(false);
     if (restoreFocus) requestAnimationFrame(() => triggerRef.current?.focus());
   };
 
+  const openMenu = (focus: 'first' | 'last' = 'first') => {
+    requestedMenuFocusRef.current = focus;
+    setMenuOpen(true);
+  };
+
   useEffect(() => {
     if (!menuOpen) return;
-    firstItemRef.current?.focus();
+    const menuItems = getMenuItems(menuRef.current);
+    menuItems[requestedMenuFocusRef.current === 'last' ? menuItems.length - 1 : 0]?.focus();
     const handlePointerDown = (event: PointerEvent) => {
       if (!menuRootRef.current?.contains(event.target as Node)) closeMenu();
     };
@@ -55,6 +62,42 @@ export function AppShell({ activeUid, children, onNavigate, view }: AppShellProp
   const navigateFromMenu = (next: AppView) => {
     onNavigate(next);
     closeMenu();
+  };
+
+  const handleTriggerKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (!['ArrowDown', 'Enter', ' '].includes(event.key)) return;
+    event.preventDefault();
+    openMenu('first');
+  };
+
+  const handleMenuKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Tab') {
+      event.preventDefault();
+      setMenuOpen(false);
+      focusOutsideMenu(triggerRef.current, menuRef.current, event.shiftKey ? -1 : 1);
+      return;
+    }
+
+    const menuItems = getMenuItems(menuRef.current);
+    const currentItem = (event.target as HTMLElement).closest<HTMLElement>('[role="menuitem"]');
+    const currentIndex = currentItem ? menuItems.indexOf(currentItem) : -1;
+    if (currentIndex === -1) return;
+
+    let nextIndex: number | undefined;
+    if (event.key === 'ArrowDown') nextIndex = (currentIndex + 1) % menuItems.length;
+    if (event.key === 'ArrowUp')
+      nextIndex = (currentIndex - 1 + menuItems.length) % menuItems.length;
+    if (event.key === 'Home') nextIndex = 0;
+    if (event.key === 'End') nextIndex = menuItems.length - 1;
+    if (nextIndex === undefined) return;
+    event.preventDefault();
+    menuItems[nextIndex]?.focus();
+  };
+
+  const openAbout = () => {
+    setMenuOpen(false);
+    triggerRef.current?.focus();
+    setAboutOpen(true);
   };
 
   return (
@@ -100,7 +143,8 @@ export function AppShell({ activeUid, children, onNavigate, view }: AppShellProp
               aria-label={t('app.accountMenu')}
               aria-haspopup="menu"
               aria-expanded={menuOpen}
-              onClick={() => setMenuOpen((open) => !open)}
+              onClick={() => (menuOpen ? closeMenu() : openMenu('first'))}
+              onKeyDown={handleTriggerKeyDown}
             >
               <span className="gta-account-mark" aria-hidden="true">
                 ◇
@@ -115,44 +159,47 @@ export function AppShell({ activeUid, children, onNavigate, view }: AppShellProp
             </button>
 
             {menuOpen && (
-              <div className="gta-account-menu" role="menu" aria-label={t('app.accountMenu')}>
+              <div
+                ref={menuRef}
+                className="gta-account-menu"
+                role="menu"
+                aria-label={t('app.accountMenu')}
+                onKeyDown={handleMenuKeyDown}
+              >
                 <div className="gta-account-menu-head">
                   <span>{t('app.localProfile')}</span>
                   <strong>{activeUid ? `UID ${activeUid}` : t('app.notConnected')}</strong>
                 </div>
                 <button
-                  ref={firstItemRef}
                   type="button"
                   role="menuitem"
+                  tabIndex={-1}
                   onClick={() => navigateFromMenu('onboarding')}
                 >
                   {t('app.profileBinding')}
                 </button>
-                <button type="button" role="menuitem" onClick={() => navigateFromMenu('settings')}>
-                  {t('app.nav.settings')}
-                </button>
-                <div className="gta-account-language" role="none">
-                  <label htmlFor="gta-language">{t('app.language')}</label>
-                  <select
-                    id="gta-language"
-                    aria-label={t('app.language')}
-                    value={locale}
-                    onChange={(event) =>
-                      setLocale(event.target.value === 'en-US' ? 'en-US' : 'zh-CN')
-                    }
-                  >
-                    <option value="zh-CN">中文</option>
-                    <option value="en-US">English</option>
-                  </select>
-                </div>
                 <button
                   type="button"
                   role="menuitem"
+                  tabIndex={-1}
+                  onClick={() => navigateFromMenu('settings')}
+                >
+                  {t('app.nav.settings')}
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  tabIndex={-1}
                   onClick={() => {
+                    setLocale(locale === 'zh-CN' ? 'en-US' : 'zh-CN');
                     closeMenu();
-                    setAboutOpen(true);
                   }}
                 >
+                  {t('app.languageSwitch', {
+                    language: locale === 'zh-CN' ? t('app.language.zh') : t('app.language.en')
+                  })}
+                </button>
+                <button type="button" role="menuitem" tabIndex={-1} onClick={openAbout}>
                   {t('app.about')}
                 </button>
               </div>
@@ -173,4 +220,24 @@ export function AppShell({ activeUid, children, onNavigate, view }: AppShellProp
       </GtaDialog>
     </>
   );
+}
+
+function getMenuItems(menu: HTMLElement | null): HTMLElement[] {
+  return menu ? Array.from(menu.querySelectorAll<HTMLElement>('[role="menuitem"]')) : [];
+}
+
+function focusOutsideMenu(
+  trigger: HTMLElement | null,
+  menu: HTMLElement | null,
+  direction: -1 | 1
+) {
+  if (!trigger) return;
+  const focusable = Array.from(
+    document.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])'
+    )
+  ).filter((element) => !menu?.contains(element));
+  const triggerIndex = focusable.indexOf(trigger);
+  const target = focusable[triggerIndex + direction];
+  requestAnimationFrame(() => target?.focus());
 }

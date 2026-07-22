@@ -247,23 +247,6 @@
   background: rgba(82, 114, 120, 0.08);
 }
 
-.gta-account-language {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 50px;
-  padding: 0 12px;
-  border-bottom: 1px solid var(--gta-stroke-soft);
-  font-size: var(--gta-text-sm);
-}
-
-.gta-account-language select {
-  min-height: 44px;
-  border: 1px solid var(--gta-stroke);
-  color: var(--gta-text-on-light);
-  background: var(--gta-panel);
-}
-
 @keyframes gta-shell-enter {
   from {
     opacity: 0;

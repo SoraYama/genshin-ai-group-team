@@ -90,18 +90,81 @@ test('boots with isolated data and navigates through preload-backed pages', asyn
   expect(persistedConfig).not.toContain('e2e-header-secret');
 
   await page.getByRole('button', { name: '账号与设置' }).click();
-  await page.getByRole('combobox', { name: '语言' }).selectOption('en-US');
+  await page.getByRole('menuitem', { name: '切换语言，当前：中文' }).click();
   await expect(page.getByRole('navigation', { name: 'Primary navigation' })).toBeVisible();
   await expect(page.getByRole('heading', { name: /LLM Configuration/ })).toBeVisible();
   await expect(page.getByText('Configured (encrypted)', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Clear key' }).click();
   await expect(page.getByText('Not configured', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Account and settings' }).click();
-  await page.getByRole('combobox', { name: 'Language' }).selectOption('zh-CN');
+  await page.getByRole('menuitem', { name: 'Switch language, current: English' }).click();
 
+  await page.getByRole('button', { name: '账号与设置' }).click();
   await page.getByRole('menuitem', { name: '资料绑定' }).click();
   await expect(page.getByRole('heading', { name: /绑定米游社账号/ })).toBeVisible();
   expect(rendererErrors).toEqual([]);
+});
+
+test('supports the complete keyboard model for the account menu', async () => {
+  const accountButton = page.getByRole('button', { name: '账号与设置' });
+  const accountMenu = page.getByRole('menu', { name: '账号与设置' });
+  const profileItem = accountMenu.getByRole('menuitem', { name: '资料绑定' });
+  const historyNav = page.getByRole('navigation', { name: '主导航' }).getByRole('button', {
+    name: '历史记录'
+  });
+
+  await accountButton.focus();
+  await page.keyboard.press('ArrowDown');
+  await expect(accountMenu).toBeVisible();
+  await expect(profileItem).toBeFocused();
+
+  await page.keyboard.press('ArrowUp');
+  await expect(accountMenu.getByRole('menuitem', { name: '关于' })).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(profileItem).toBeFocused();
+  await page.keyboard.press('End');
+  await expect(accountMenu.getByRole('menuitem', { name: '关于' })).toBeFocused();
+  await page.keyboard.press('Home');
+  await expect(profileItem).toBeFocused();
+
+  await page.keyboard.press('Tab');
+  await expect(accountMenu).toBeHidden();
+  await expect(page.getByRole('button', { name: '用内置浏览器登录米游社' })).toBeFocused();
+
+  await accountButton.focus();
+  await page.keyboard.press('Enter');
+  await expect(accountMenu).toBeVisible();
+  await expect(profileItem).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(accountMenu).toBeHidden();
+  await expect(historyNav).toBeFocused();
+
+  await accountButton.focus();
+  await page.keyboard.press('Space');
+  await expect(accountMenu).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(accountMenu).toBeHidden();
+  await expect(accountButton).toBeFocused();
+});
+
+test('traps modal focus and restores it to the connected opener', async () => {
+  const accountButton = page.getByRole('button', { name: '账号与设置' });
+  await accountButton.click();
+  await page.getByRole('menuitem', { name: '关于' }).click();
+
+  const dialog = page.getByRole('dialog', { name: '关于原神配队助手' });
+  const closeButton = dialog.getByRole('button', { name: '关闭对话框' });
+  await expect(dialog).toBeVisible();
+  await expect(closeButton).toBeFocused();
+
+  await page.keyboard.press('Tab');
+  await expect(closeButton).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(closeButton).toBeFocused();
+
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(accountButton).toBeFocused();
 });
 
 test('renders profile coverage and known build fields without fake zero values', async () => {
