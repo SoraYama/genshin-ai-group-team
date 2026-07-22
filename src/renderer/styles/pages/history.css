@@ -1,3 +1,14 @@
+.gta-history-abyss {
+  margin-bottom: var(--gta-s5);
+}
+
+.gta-history-abyss > h3 {
+  margin: 0 0 var(--gta-s3);
+  color: var(--gta-gold);
+  font-size: var(--gta-text-lg);
+  letter-spacing: 0.08em;
+}
+
 .gta-history-list {
   display: flex;
   flex-direction: column;

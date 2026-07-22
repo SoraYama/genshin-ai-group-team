@@ -67,6 +67,7 @@ export const abyssPlanIssueCodeSchema = z.enum([
   'CROSS_TEAM_DUPLICATE',
   'CHAMBER_COVERAGE_INVALID',
   'TACTICS_MISSING',
+  'MECHANIC_COVERAGE_INVALID',
   'PLAN_SCHEMA_INVALID',
   'AGENT_OUTPUT_INVALID'
 ]);
@@ -139,6 +140,8 @@ const productionScenarioViewSchema = z
   .object({
     status: z.literal('ready'),
     trust: z.literal('production'),
+    snapshotStatus: z.enum(['ready', 'last-known-good']),
+    refreshErrorCode: z.string().trim().min(1).optional(),
     notCurrent: z.boolean(),
     freshness: z.enum(['fresh', 'expiring', 'stale', 'unknown']),
     checkedAt: z.iso.datetime({ offset: true }),

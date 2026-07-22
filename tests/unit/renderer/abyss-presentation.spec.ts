@@ -30,6 +30,17 @@ describe('abyss presentation', () => {
         tags: ['development-sample', '多目标']
       })
     ).toEqual(['多目标']);
+    expect(
+      mechanicLabels({
+        shields: [],
+        resistances: [
+          { damageType: 'physical', percent: 30 },
+          { damageType: 'internal-slug', percent: 10 }
+        ],
+        immunities: ['hydro', 'internal-immunity'],
+        tags: []
+      }).join(' ')
+    ).toBe('物理抗性 30% 其他伤害抗性 10% 免疫：水元素伤害 免疫：未本地化机制');
   });
 
   it('cycles keyboard-friendly intervention state without conflicting lock and exclusion', () => {

@@ -111,6 +111,48 @@ describe('buildLocalAbyssPlan', () => {
     });
   });
 
+  it('blocks a roster that cannot satisfy a required elemental shield counter', () => {
+    const characters = ABYSS_CHARACTERS.slice(0, 8).map((character) => ({
+      ...character,
+      element: 'Pyro'
+    }));
+    const result = buildLocalAbyssPlan({
+      input: abyssInput(),
+      scenario: abyssScenario(),
+      characters
+    });
+
+    expect(result).toMatchObject({
+      status: 'blocked',
+      issues: [{ code: 'MECHANIC_COVERAGE_INVALID' }]
+    });
+  });
+
+  it('keeps a low-score half-specific shield specialist in the joint candidate pool', () => {
+    const pyroCharacters = Array.from({ length: 20 }, (_, index) => ({
+      ...ABYSS_CHARACTERS[index % ABYSS_CHARACTERS.length]!,
+      id: 2001 + index,
+      name: `高分火角色${index + 1}`,
+      element: 'Pyro',
+      level: 90
+    }));
+    const cryoSpecialist = {
+      ...ABYSS_CHARACTERS[0]!,
+      id: 2999,
+      name: '低分破盾专才',
+      element: 'Cryo',
+      level: 1
+    };
+    const result = buildLocalAbyssPlan({
+      input: abyssInput(),
+      scenario: abyssScenario(),
+      characters: [...pyroCharacters, cryoSpecialist]
+    });
+    expect(result.status).toBe('planned');
+    if (result.status !== 'planned') return;
+    expect(result.plan.firstHalfTeam.characterIds).toContain('2999');
+  });
+
   it('blocks contradictory, excessive, or unowned locks instead of emitting an invalid plan', () => {
     const result = buildLocalAbyssPlan({
       input: abyssInput({

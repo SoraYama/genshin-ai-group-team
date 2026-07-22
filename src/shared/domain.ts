@@ -293,6 +293,12 @@ export interface AbyssPlanHistoryEntry {
     excludedCharacterIds: string[];
     preferences: import('./scenario-v2.js').PlayerPreferences;
   };
+  characters: Array<{
+    id: string;
+    name: string;
+    element: string;
+    level?: number;
+  }>;
   plan: import('./scenario-v2.js').AbyssPlan;
 }
 

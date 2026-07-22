@@ -65,6 +65,10 @@ describe('abyss in-process business tools', () => {
     scenario.floors[0]!.chambers[0]!.firstHalf.waves[0]!.enemies[0]!.mechanics.tags.push(
       'development-sample'
     );
+    scenario.floors[0]!.chambers[0]!.firstHalf.waves[0]!.enemies[0]!.mechanics.immunities = [
+      'hydro',
+      'internal-immunity'
+    ];
     const tools = createAbyssBusinessTools({
       getProfile: () => null,
       getScenario: () => scenario
@@ -89,7 +93,7 @@ describe('abyss in-process business tools', () => {
     expect(JSON.stringify(payload)).toContain('训练水兽');
     expect(JSON.stringify(payload)).toContain('水元素护盾');
     expect(JSON.stringify(payload)).not.toMatch(
-      /Training Hydra|training-hydra|12-1-first-wave-1|development-sample/
+      /Training Hydra|training-hydra|12-1-first-wave-1|development-sample|internal-immunity|"hydro"/
     );
   });
 

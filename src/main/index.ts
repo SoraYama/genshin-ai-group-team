@@ -120,6 +120,7 @@ async function bootstrapServices(): Promise<void> {
     profiles,
     history,
     config,
+    toolLog: (event) => console.info('[abyss-business-tool]', event),
     sdkEnvironment: { cwd: app.getPath('userData'), clientVersion: app.getVersion() }
   });
   const updates = new UpdateService({

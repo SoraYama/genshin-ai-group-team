@@ -16,7 +16,57 @@ class FixtureRunner {
 
   async *run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown> {
     this.calls.push({ prompt, options });
-    yield { type: 'result', result: JSON.stringify(this.outputs.shift()) };
+    const toolUses = [
+      {
+        id: 'profile',
+        name: 'mcp__genshin__read_profile_cache',
+        input: { uid: '123456789' }
+      },
+      ...[1, 2].map((chamber) => ({
+        id: `enemy-${chamber}`,
+        name: 'mcp__genshin__query_enemy_data',
+        input: {
+          scenarioId: 'abyss.2026-07',
+          dataVersion: '2026.07.1',
+          floor: 12,
+          chamber
+        }
+      })),
+      {
+        id: 'characters',
+        name: 'mcp__genshin__query_genshin_db',
+        input: { characterIds: ABYSS_CHARACTERS.slice(0, 8).map(({ id }) => String(id)) }
+      }
+    ];
+    yield {
+      type: 'assistant',
+      message: { content: toolUses.map((use) => ({ type: 'tool_use', ...use })) }
+    };
+    yield {
+      type: 'user',
+      message: {
+        content: toolUses.map(({ id }) => ({
+          type: 'tool_result',
+          tool_use_id: id,
+          is_error: false,
+          content: 'ok'
+        }))
+      }
+    };
+    yield {
+      type: 'result',
+      result: JSON.stringify(this.outputs.shift()),
+      usage: { input_tokens: 10, output_tokens: 5 },
+      total_cost_usd: 0.01
+    };
+  }
+}
+
+class NoToolRunner {
+  calls = 0;
+  async *run(): AsyncIterable<unknown> {
+    this.calls += 1;
+    yield { type: 'result', result: JSON.stringify(validAbyssPlan()) };
   }
 }
 
@@ -56,6 +106,7 @@ describe('AbyssPlanAgent', () => {
     });
 
     expect(result).toMatchObject({ ok: true, repaired: true, plan: repaired });
+    expect(result.usage).toEqual({ inputTokens: 20, outputTokens: 10, estimatedCostUsd: 0.02 });
     expect(runner.calls).toHaveLength(2);
     expect(runner.calls[0]?.options.systemPrompt).toContain('AbyssTeamComposer');
     expect(runner.calls[0]?.options.maxTurns).toBe(4);
@@ -93,5 +144,20 @@ describe('AbyssPlanAgent', () => {
       ok: false,
       issues: [{ code: 'AGENT_OUTPUT_INVALID' }]
     });
+  });
+
+  it('rejects an otherwise valid plan when required tools were not successfully called', async () => {
+    const runner = new NoToolRunner();
+    const result = await new AbyssPlanAgent(runner).compose({
+      input: abyssInput(),
+      scenario: abyssScenario(),
+      characters: ABYSS_CHARACTERS,
+      sdkOptions: sdkOptions()
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      issues: [{ code: 'AGENT_OUTPUT_INVALID' }]
+    });
+    expect(runner.calls).toBe(2);
   });
 });

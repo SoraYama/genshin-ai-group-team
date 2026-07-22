@@ -130,7 +130,9 @@ describe('AbyssScenarioService', () => {
     await expect(service.getView()).resolves.toMatchObject({
       status: 'ready',
       trust: 'production',
-      notCurrent: false,
+      snapshotStatus: 'last-known-good',
+      refreshErrorCode: 'network-unavailable',
+      notCurrent: true,
       scenario: { id: scenario.id, meta: { dataVersion: '2026.07.1' } }
     });
   });

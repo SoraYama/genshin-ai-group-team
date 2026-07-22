@@ -181,13 +181,13 @@ export function validAbyssPlan(overrides: Partial<AbyssPlanOutput> = {}): AbyssP
     assumptions: ['未知角色职责未用于确定性结论。'],
     firstHalfTeam: {
       id: 'first-half',
-      characterIds: ['1001', '1002', '1003', '1004'],
+      characterIds: ['1001', '1004', '1005', '1006'],
       purpose: '覆盖上半全部房间',
       rotationNotes: ['按充能情况调整技能顺序。']
     },
     secondHalfTeam: {
       id: 'second-half',
-      characterIds: ['1005', '1006', '1007', '1008'],
+      characterIds: ['1002', '1003', '1007', '1008'],
       purpose: '覆盖下半全部房间',
       rotationNotes: ['保留关键技能处理转场。']
     },

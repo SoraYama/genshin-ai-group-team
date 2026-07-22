@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import type { PersistedProfile } from '../../shared/domain.js';
 import type { AbyssScenario } from '../../shared/abyss-advisor.js';
+import { abyssElementLabel, localizedMechanicTerm } from '../../shared/abyss-mechanics.js';
 
 export const ABYSS_MCP_TOOL_NAMES = [
   'mcp__genshin__read_profile_cache',
@@ -177,7 +178,7 @@ function localizedWave(
           label: `${elementLabel(damageType)}抗性`,
           percent
         })),
-        immunities: enemy.mechanics.immunities,
+        immunities: enemy.mechanics.immunities.map(localizedMechanicTerm),
         tags: enemy.mechanics.tags.filter((tag) => /[\u3400-\u9fff]/u.test(tag))
       }
     }))
@@ -185,18 +186,8 @@ function localizedWave(
 }
 
 function elementLabel(value: string): string {
-  return (
-    {
-      pyro: '火',
-      hydro: '水',
-      anemo: '风',
-      geo: '岩',
-      electro: '雷',
-      dendro: '草',
-      cryo: '冰',
-      untyped: '无属性'
-    }[value] ?? value
-  );
+  if (value === 'untyped') return '无属性';
+  return abyssElementLabel(value);
 }
 
 function textResult(value: unknown) {

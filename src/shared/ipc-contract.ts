@@ -3,6 +3,7 @@ import type {
   AdvisorCompareResult,
   AdvisorEvent,
   AdvisorRequest,
+  AbyssPlanHistoryEntry,
   BindCookieResult,
   HistoryQueryOptions,
   HistoryQueryResult,
@@ -97,6 +98,8 @@ export interface IpcContract {
 
   'history:list': { req: HistoryQueryOptions; res: HistoryQueryResult };
   'history:delete': { req: { id: string }; res: { ok: boolean } };
+  'history:abyss-list': { req: { uid?: string }; res: AbyssPlanHistoryEntry[] };
+  'history:abyss-delete': { req: { id: string }; res: { ok: boolean } };
   'history:clear': {
     req: { uid?: string; source?: 'llm' | 'fallback'; enemyKeyword?: string };
     res: { removed: number };
@@ -140,6 +143,8 @@ export const ALL_IPC_CHANNELS: IpcChannel[] = [
   'scenario:refresh',
   'history:list',
   'history:delete',
+  'history:abyss-list',
+  'history:abyss-delete',
   'history:clear'
 ];
 
@@ -203,6 +208,12 @@ export interface RendererApi {
   history: {
     list: (input: IpcRequest<'history:list'>) => Promise<IpcResponse<'history:list'>>;
     delete: (input: IpcRequest<'history:delete'>) => Promise<IpcResponse<'history:delete'>>;
+    listAbyss: (
+      input: IpcRequest<'history:abyss-list'>
+    ) => Promise<IpcResponse<'history:abyss-list'>>;
+    deleteAbyss: (
+      input: IpcRequest<'history:abyss-delete'>
+    ) => Promise<IpcResponse<'history:abyss-delete'>>;
     clear: (input: IpcRequest<'history:clear'>) => Promise<IpcResponse<'history:clear'>>;
   };
 }

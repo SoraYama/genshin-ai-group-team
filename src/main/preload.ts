@@ -103,6 +103,8 @@ const api: RendererApi = {
   history: {
     list: (input) => invoke('history:list', input),
     delete: (input) => invoke('history:delete', input),
+    listAbyss: (input) => invoke('history:abyss-list', input),
+    deleteAbyss: (input) => invoke('history:abyss-delete', input),
     clear: (input) => invoke('history:clear', input)
   },
   scenario: {

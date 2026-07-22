@@ -62,6 +62,14 @@ export class HistoryStore {
     );
   }
 
+  removeAbyssById(id: string): boolean {
+    const entries = this.store.get('abyssPlans');
+    const next = entries.filter((entry) => entry.id !== id);
+    if (next.length === entries.length) return false;
+    this.store.set('abyssPlans', next);
+    return true;
+  }
+
   query(options: HistoryQueryOptions = {}): HistoryQueryResult {
     const offset = options.offset && options.offset > 0 ? options.offset : 0;
     const limit =

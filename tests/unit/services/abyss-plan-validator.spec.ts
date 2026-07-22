@@ -108,4 +108,40 @@ describe('validateAbyssPlan', () => {
       })
     ).toMatchObject({ ok: true, issues: [] });
   });
+
+  it('rejects teams that cannot satisfy a hard enemy shield mechanic', () => {
+    const characters = ABYSS_CHARACTERS.map((character) => ({ ...character, element: 'Pyro' }));
+    const result = validateAbyssPlan({
+      input: abyssInput(),
+      scenario: abyssScenario(),
+      characters,
+      plan: validAbyssPlan()
+    });
+    expect(result.ok).toBe(false);
+    expect(result.issues.map(({ code }) => code)).toContain('MECHANIC_COVERAGE_INVALID');
+  });
+
+  it('rejects a half whose known elements are all immune', () => {
+    const scenario = abyssScenario();
+    scenario.floors[0]!.chambers[0]!.firstHalf.waves[0]!.enemies[0]!.mechanics.immunities = [
+      'pyro',
+      'geo',
+      'cryo',
+      'electro'
+    ];
+    const result = validateAbyssPlan({
+      input: abyssInput(),
+      scenario,
+      characters: ABYSS_CHARACTERS,
+      plan: validAbyssPlan()
+    });
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'MECHANIC_COVERAGE_INVALID',
+          details: expect.objectContaining({ mechanic: 'immunity' })
+        })
+      ])
+    );
+  });
 });

@@ -7,6 +7,12 @@ import {
   type AbyssScenario
 } from '../../shared/abyss-advisor.js';
 import type { EnemyInstance } from '../../shared/scenario-v2.js';
+import {
+  ABYSS_SHIELD_COUNTERS,
+  abyssElementLabel,
+  findAbyssMechanicCoverageGaps,
+  localizedMechanicTerm
+} from '../../shared/abyss-mechanics.js';
 import { validateAbyssPlan } from './abyss-plan-validator.js';
 
 export interface BuildLocalAbyssPlanOptions {
@@ -23,15 +29,6 @@ const ELEMENTS: Record<string, string> = {
   electro: '雷',
   dendro: '草',
   cryo: '冰'
-};
-
-const SHIELD_COUNTERS: Record<string, string[]> = {
-  pyro: ['hydro'],
-  hydro: ['dendro', 'cryo', 'electro'],
-  electro: ['pyro', 'dendro', 'cryo'],
-  cryo: ['pyro'],
-  geo: ['geo'],
-  untyped: ['geo']
 };
 
 export function buildLocalAbyssPlan({
@@ -82,7 +79,11 @@ export function buildLocalAbyssPlan({
   );
   if (!assignment) {
     return blocked([
-      issue('INPUT_INVALID', ['lockedCharacterIds'], '当前锁定与排除条件无法组成两支完整队伍。')
+      issue(
+        'MECHANIC_COVERAGE_INVALID',
+        ['teams'],
+        '当前角色与干预条件无法组成同时覆盖上下半硬机制的两支队伍。'
+      )
     ]);
   }
 
@@ -145,57 +146,89 @@ function optimizeJointAssignment(
   input: AbyssAdvisorPlanInput
 ): JointAssignment | undefined {
   const locked = new Set(lockedIds);
-  const byMaxScore = characters.slice().sort((left, right) => {
-    const difference =
-      Math.max(
-        scoreForHalf(right, firstEnemies, input),
-        scoreForHalf(right, secondEnemies, input)
-      ) -
-      Math.max(scoreForHalf(left, firstEnemies, input), scoreForHalf(left, secondEnemies, input));
-    return difference || left.id - right.id;
-  });
+  const rankedFor = (enemies: EnemyInstance[]) =>
+    characters.slice().sort((left, right) => {
+      const difference = scoreForHalf(right, enemies, input) - scoreForHalf(left, enemies, input);
+      return difference || left.id - right.id;
+    });
+  const rankedFirst = rankedFor(firstEnemies);
+  const rankedSecond = rankedFor(secondEnemies);
   const lockedCharacters = characters.filter(({ id }) => locked.has(String(id)));
+  const seenElements = new Set<string>();
+  const elementSpecialists = [...rankedFirst, ...rankedSecond].filter(({ element }) => {
+    const normalized = element.toLowerCase();
+    if (!(normalized in ELEMENTS) || seenElements.has(normalized)) return false;
+    seenElements.add(normalized);
+    return true;
+  });
   const pool = uniqueCharacters([
     ...lockedCharacters,
-    ...byMaxScore.filter(({ id }) => !locked.has(String(id)))
-  ]).slice(0, Math.max(16, lockedCharacters.length));
+    ...rankedFirst.slice(0, 8),
+    ...rankedSecond.slice(0, 8),
+    ...elementSpecialists
+  ]);
+  const firstCandidates = buildTeamCandidates(pool, firstEnemies, input);
+  const secondCandidates = buildTeamCandidates(pool, secondEnemies, input);
   let best: JointAssignment | undefined;
 
-  for (const first of combinations(pool, 4)) {
-    const firstIdSet = new Set(first.map(({ id }) => String(id)));
-    const remainingLocked = lockedCharacters.filter(({ id }) => !firstIdSet.has(String(id)));
-    if (remainingLocked.length > 4) continue;
-    const remaining = pool.filter(({ id }) => !firstIdSet.has(String(id)));
-    const requiredSecond = new Set(remainingLocked.map(({ id }) => String(id)));
-    const second = [
-      ...remainingLocked,
-      ...remaining
-        .filter(({ id }) => !requiredSecond.has(String(id)))
-        .sort((left, right) => {
-          const difference =
-            scoreForHalf(right, secondEnemies, input) - scoreForHalf(left, secondEnemies, input);
-          return difference || left.id - right.id;
-        })
-        .slice(0, 4 - remainingLocked.length)
-    ];
-    if (second.length !== 4) continue;
-    const score =
-      first.reduce((total, character) => total + scoreForHalf(character, firstEnemies, input), 0) +
-      second.reduce((total, character) => total + scoreForHalf(character, secondEnemies, input), 0);
-    const candidate = {
-      first: first.slice().sort((a, b) => a.id - b.id),
-      second: second.slice().sort((a, b) => a.id - b.id),
-      score
-    };
-    if (
-      !best ||
-      score > best.score ||
-      (score === best.score && assignmentKey(candidate) < assignmentKey(best))
-    ) {
-      best = candidate;
+  for (const firstCandidate of firstCandidates) {
+    if (best && firstCandidate.score + (secondCandidates[0]?.score ?? 0) < best.score) break;
+    for (const secondCandidate of secondCandidates) {
+      const score = firstCandidate.score + secondCandidate.score;
+      if (best && score < best.score) break;
+      if ([...secondCandidate.ids].some((id) => firstCandidate.ids.has(id))) continue;
+      if (![...locked].every((id) => firstCandidate.ids.has(id) || secondCandidate.ids.has(id))) {
+        continue;
+      }
+      const candidate = {
+        first: firstCandidate.team,
+        second: secondCandidate.team,
+        score
+      };
+      if (
+        !best ||
+        score > best.score ||
+        (score === best.score && assignmentKey(candidate) < assignmentKey(best))
+      ) {
+        best = candidate;
+      }
     }
   }
   return best;
+}
+
+interface TeamCandidate {
+  team: CharacterProfile[];
+  ids: Set<string>;
+  score: number;
+}
+
+function buildTeamCandidates(
+  pool: CharacterProfile[],
+  enemies: EnemyInstance[],
+  input: AbyssAdvisorPlanInput
+): TeamCandidate[] {
+  return combinations(pool, 4)
+    .filter((team) => findAbyssMechanicCoverageGaps(team, enemies).length === 0)
+    .map((team) => {
+      const sorted = team.slice().sort((left, right) => left.id - right.id);
+      return {
+        team: sorted,
+        ids: new Set(sorted.map(({ id }) => String(id))),
+        score: sorted.reduce(
+          (total, character) => total + scoreForHalf(character, enemies, input),
+          0
+        )
+      };
+    })
+    .sort(
+      (left, right) =>
+        right.score - left.score ||
+        left.team
+          .map(({ id }) => id)
+          .join(',')
+          .localeCompare(right.team.map(({ id }) => id).join(','))
+    );
 }
 
 function scoreForHalf(
@@ -222,7 +255,7 @@ function scoreForHalf(
 
   for (const enemy of enemies) {
     for (const shield of enemy.mechanics.shields) {
-      if (SHIELD_COUNTERS[shield.element]?.includes(element)) score += 95 * enemy.count;
+      if (ABYSS_SHIELD_COUNTERS[shield.element]?.includes(element)) score += 95 * enemy.count;
     }
     for (const resistance of enemy.mechanics.resistances) {
       if (resistance.damageType.toLowerCase() === element) score -= resistance.percent * 1.8;
@@ -250,19 +283,24 @@ function tacticsForHalf(enemies: EnemyInstance[]) {
     if (enemy.mechanics.shields.length > 0) {
       mechanics.push(
         `优先处理${enemy.mechanics.shields
-          .map(({ element }) => `${ELEMENTS[element] ?? '无属性'}元素护盾`)
+          .map(({ element }) => `${abyssElementLabel(element)}元素护盾`)
           .join('、')}`
       );
     }
     if (enemy.mechanics.resistances.length > 0) {
       mechanics.push(
         `留意${enemy.mechanics.resistances
-          .map(({ damageType, percent }) => `${ELEMENTS[damageType] ?? damageType}抗性 ${percent}%`)
+          .map(
+            ({ damageType, percent }) =>
+              `${localizedMechanicTerm(damageType).replace(/(?:元素)?伤害$/u, '')}抗性 ${percent}%`
+          )
           .join('、')}`
       );
     }
     if (enemy.mechanics.immunities.length > 0) {
-      mechanics.push(`不要依赖其免疫的${enemy.mechanics.immunities.join('、')}`);
+      mechanics.push(
+        `不要依赖其免疫的${enemy.mechanics.immunities.map(localizedMechanicTerm).join('、')}`
+      );
     }
     const playerFacingTags = enemy.mechanics.tags.filter((tag) => /[\u3400-\u9fff]/u.test(tag));
     if (playerFacingTags.length > 0) {

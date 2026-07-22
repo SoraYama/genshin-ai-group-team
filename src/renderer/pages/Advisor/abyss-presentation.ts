@@ -1,4 +1,5 @@
 import type { AbyssAdvisorProgressStep } from '../../../shared/abyss-advisor.js';
+import { abyssElementLabel, localizedMechanicTerm } from '../../../shared/abyss-mechanics.js';
 import type { EnemyInstance, EnemyMechanics } from '../../../shared/scenario-v2.js';
 
 export type CharacterInterventionState = 'neutral' | 'locked' | 'excluded';
@@ -33,12 +34,16 @@ export function mechanicLabels(mechanics: EnemyMechanics): string[] {
         `${ELEMENT_LABELS[element] ?? '未知'}元素护盾${strength === undefined ? '' : ` · 强度 ${strength}`}`
     ),
     ...mechanics.resistances.map(
-      ({ damageType, percent }) =>
-        `${ELEMENT_LABELS[damageType.toLowerCase()] ?? damageType}抗性 ${percent}%`
+      ({ damageType, percent }) => `${localizedResistanceType(damageType)}抗性 ${percent}%`
     ),
-    ...mechanics.immunities.map((immunity) => `免疫：${immunity}`),
+    ...mechanics.immunities.map((immunity) => `免疫：${localizedMechanicTerm(immunity)}`),
     ...mechanics.tags.filter((tag) => /[\u3400-\u9fff]/u.test(tag))
   ];
+}
+
+function localizedResistanceType(value: string): string {
+  const localized = localizedMechanicTerm(value);
+  return localized === '未本地化机制' ? '其他伤害' : localized.replace(/(?:元素)?伤害$/u, '');
 }
 
 export function cycleCharacterIntervention(
@@ -52,5 +57,6 @@ export function progressStepLabel(step: AbyssAdvisorProgressStep): string {
 }
 
 export function characterElementLabel(element: string): string {
-  return ELEMENT_LABELS[element.toLowerCase()] ?? '未知';
+  const label = abyssElementLabel(element);
+  return label === '其他' ? '未知' : label;
 }

@@ -9,7 +9,11 @@ import {
   type AbyssScenarioView
 } from '../../shared/abyss-advisor.js';
 import type { AbyssPlanHistoryEntry } from '../../shared/domain.js';
-import { ABYSS_MCP_TOOL_NAMES, createAbyssBusinessMcpServer } from './abyss-business-tools.js';
+import {
+  ABYSS_MCP_TOOL_NAMES,
+  createAbyssBusinessMcpServer,
+  type AbyssBusinessToolLog
+} from './abyss-business-tools.js';
 import { buildLocalAbyssPlan } from './abyss-local-optimizer.js';
 import { AbyssPlanAgent, type AbyssPlanAgentRunner } from './abyss-plan-agent.js';
 
@@ -27,8 +31,11 @@ export interface AbyssAdvisorServiceOptions {
     getBaseUrl: () => string;
     getModel: () => string;
     getCustomHeaders: () => Record<string, string>;
+    recordUsage?: (inputTokens: number, outputTokens: number, estimatedCostUsd: number) => void;
   };
   sdkEnvironment: { cwd: string; clientVersion: string };
+  agentTimeoutMs?: number;
+  toolLog?: (event: AbyssBusinessToolLog) => void;
 }
 
 export class AbyssAdvisorService {
@@ -87,6 +94,15 @@ export class AbyssAdvisorService {
         }
       ]);
     }
+    if (scenarioView.trust === 'production' && scenarioView.notCurrent) {
+      return blocked([
+        {
+          code: 'SCENARIO_MISMATCH',
+          path: ['scenarioId'],
+          message: '当前仅有过期或刷新失败的挑战资料；可查看敌情，但不能据此生成本期方案。'
+        }
+      ]);
+    }
     const scenario = scenarioView.scenario;
     if (scenario.id !== input.scenarioId) {
       return blocked([
@@ -117,12 +133,21 @@ export class AbyssAdvisorService {
       this.currentAbort?.abort();
       const abortController = new AbortController();
       this.currentAbort = abortController;
+      let timedOut = false;
+      const timeout = setTimeout(
+        () => {
+          timedOut = true;
+          abortController.abort();
+        },
+        Math.max(1, Math.min(this.options.agentTimeoutMs ?? 60_000, 120_000))
+      );
       try {
         const mcpServer = createAbyssBusinessMcpServer({
           getProfile: (uid) => (uid === input.uid ? profile : null),
           getScenario: () => scenario,
           getCharacter: (id) =>
-            profile.characters.find(({ id: numericId }) => String(numericId) === id)
+            profile.characters.find(({ id: numericId }) => String(numericId) === id),
+          log: this.options.toolLog
         });
         const agent = await this.planAgent.compose({
           input,
@@ -142,6 +167,11 @@ export class AbyssAdvisorService {
             allowedBusinessTools: [...ABYSS_MCP_TOOL_NAMES]
           }
         });
+        this.options.config.recordUsage?.(
+          agent.usage.inputTokens,
+          agent.usage.outputTokens,
+          agent.usage.estimatedCostUsd
+        );
         if (agent.ok) {
           result = abyssAdvisorResultSchema.parse({
             status: 'planned',
@@ -155,22 +185,24 @@ export class AbyssAdvisorService {
           result = addAgentFallbackWarning(localPreflight);
         }
       } catch (error) {
-        if (abortController.signal.aborted) throw error;
+        if (abortController.signal.aborted && !timedOut) throw error;
         result = addAgentFallbackWarning(localPreflight);
       } finally {
+        clearTimeout(timeout);
         if (this.currentAbort === abortController) this.currentAbort = undefined;
       }
     }
 
     progress('checking-conflicts');
     progress('writing-tactics');
-    if (result.status === 'planned') this.persist(input, result);
+    if (result.status === 'planned') this.persist(input, result, profile);
     return result;
   }
 
   private persist(
     input: AbyssAdvisorPlanInput,
-    result: Extract<AbyssAdvisorResult, { status: 'planned' }>
+    result: Extract<AbyssAdvisorResult, { status: 'planned' }>,
+    profile: PersistedProfile
   ): void {
     try {
       this.options.history.appendAbyss({
@@ -186,6 +218,24 @@ export class AbyssAdvisorService {
           excludedCharacterIds: input.excludedCharacterIds,
           preferences: input.preferences
         },
+        characters: [
+          ...result.plan.firstHalfTeam.characterIds,
+          ...result.plan.secondHalfTeam.characterIds
+        ].flatMap((id) => {
+          const character = profile.characters.find(
+            ({ id: numericId }) => String(numericId) === id
+          );
+          return character
+            ? [
+                {
+                  id,
+                  name: character.name,
+                  element: character.element,
+                  ...(character.level === undefined ? {} : { level: character.level })
+                }
+              ]
+            : [];
+        }),
         plan: result.plan
       });
     } catch {

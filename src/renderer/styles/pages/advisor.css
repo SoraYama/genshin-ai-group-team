@@ -577,6 +577,11 @@
 .gta-abyss-character:hover {
   background: #fff;
 }
+.gta-abyss-character:disabled,
+.gta-abyss-preferences button:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
 .gta-abyss-character:focus-visible {
   z-index: 1;
   outline: 2px solid #497b83;

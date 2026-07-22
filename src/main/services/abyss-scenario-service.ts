@@ -53,6 +53,7 @@ export class AbyssScenarioService {
       const payload = snapshot?.publication?.payload;
       if (
         !snapshot ||
+        (snapshot.status !== 'ready' && snapshot.status !== 'last-known-good') ||
         snapshot.trustedUse !== 'production' ||
         !payload ||
         payload.mode !== 'spiral-abyss'
@@ -62,7 +63,12 @@ export class AbyssScenarioService {
       return abyssScenarioViewSchema.parse({
         status: 'ready',
         trust: 'production',
-        notCurrent: snapshot.freshness === 'stale' || snapshot.freshness === 'unknown',
+        snapshotStatus: snapshot.status,
+        refreshErrorCode: snapshot.refreshErrorCode,
+        notCurrent:
+          snapshot.status === 'last-known-good' ||
+          snapshot.freshness === 'stale' ||
+          snapshot.freshness === 'unknown',
         freshness: snapshot.freshness,
         checkedAt: snapshot.checkedAt,
         scenario: payload

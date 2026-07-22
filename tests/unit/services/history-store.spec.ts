@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { RecommendationResult } from '../../../src/shared/domain.js';
-import { abyssInput, validAbyssPlan } from './abyss-test-fixtures.js';
+import { ABYSS_CHARACTERS, abyssInput, validAbyssPlan } from './abyss-test-fixtures.js';
 
 const storeState = new Map<string, unknown>();
 
@@ -223,6 +223,12 @@ describe('HistoryStore', () => {
         excludedCharacterIds: input.excludedCharacterIds,
         preferences: input.preferences
       },
+      characters: ABYSS_CHARACTERS.slice(0, 8).map(({ id, name, element, level }) => ({
+        id: String(id),
+        name,
+        element,
+        level
+      })),
       plan
     });
 
@@ -239,6 +245,9 @@ describe('HistoryStore', () => {
     });
     expect(stored?.plan.firstHalfTeam.characterIds[0]).toBe('1001');
     expect(stored?.interventions.lockedCharacterIds).toEqual(['1001']);
+    expect(stored?.characters[0]).toMatchObject({ id: '1001', name: '测试角色1' });
+    expect(store.removeAbyssById(entry.id)).toBe(true);
+    expect(store.queryAbyss({ uid: input.uid })).toEqual([]);
   });
 
   it('keeps legacy recommendation entries readable after abyss history is introduced', async () => {
@@ -263,6 +272,12 @@ describe('HistoryStore', () => {
         excludedCharacterIds: [],
         preferences: abyssInput().preferences
       },
+      characters: ABYSS_CHARACTERS.slice(0, 8).map(({ id, name, element, level }) => ({
+        id: String(id),
+        name,
+        element,
+        level
+      })),
       plan: validAbyssPlan()
     });
 

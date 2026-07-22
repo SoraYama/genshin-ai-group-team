@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../../ipc';
 import type {
+  AbyssPlanHistoryEntry,
   HistoryQueryResult,
   ProfileStateView,
   RecommendationHistoryEntry
@@ -43,6 +44,7 @@ export function HistoryPage({ state }: HistoryPageProps) {
     hasMore: false
   });
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [abyssPlans, setAbyssPlans] = useState<AbyssPlanHistoryEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const filtersRef = useRef(filters);
@@ -52,16 +54,34 @@ export function HistoryPage({ state }: HistoryPageProps) {
       setError(null);
       setLoading(true);
       try {
-        const result = await api.history.list({
-          uid: next.scope === 'active' ? state.activeUid : undefined,
-          source: next.source === 'all' ? undefined : next.source,
-          enemyKeyword: next.enemyKeyword.trim() || undefined,
-          fromDate: next.fromDate || undefined,
-          toDate: next.toDate || undefined,
-          offset,
-          limit: next.limit
-        });
+        const [result, nextAbyssPlans] = await Promise.all([
+          api.history.list({
+            uid: next.scope === 'active' ? state.activeUid : undefined,
+            source: next.source === 'all' ? undefined : next.source,
+            enemyKeyword: next.enemyKeyword.trim() || undefined,
+            fromDate: next.fromDate || undefined,
+            toDate: next.toDate || undefined,
+            offset,
+            limit: next.limit
+          }),
+          api.history.listAbyss({
+            uid: next.scope === 'active' ? state.activeUid : undefined
+          })
+        ]);
         setQuery(result);
+        setAbyssPlans(
+          nextAbyssPlans.filter((entry) => {
+            const sourceMatches =
+              next.source === 'all' ||
+              (next.source === 'llm' && entry.source === 'smart-service') ||
+              (next.source === 'fallback' && entry.source === 'local-rules');
+            const timestamp = Date.parse(entry.createdAt);
+            const fromMatches =
+              !next.fromDate || timestamp >= Date.parse(`${next.fromDate}T00:00:00`);
+            const toMatches = !next.toDate || timestamp <= Date.parse(`${next.toDate}T23:59:59`);
+            return sourceMatches && fromMatches && toMatches && !next.enemyKeyword.trim();
+          })
+        );
       } catch (err) {
         setError(localizeError(err, locale, t, 'history.error.load'));
       } finally {
@@ -98,6 +118,12 @@ export function HistoryPage({ state }: HistoryPageProps) {
     if (expandedId === id) {
       setExpandedId(null);
     }
+    await load(filters, query.offset);
+  }
+
+  async function deleteAbyssEntry(id: string) {
+    await api.history.deleteAbyss({ id });
+    if (expandedId === id) setExpandedId(null);
     await load(filters, query.offset);
   }
 
@@ -241,6 +267,27 @@ export function HistoryPage({ state }: HistoryPageProps) {
 
       {error && <p className="gta-error">{error}</p>}
 
+      <section className="gta-history-abyss" aria-labelledby="abyss-history-title">
+        <h3 id="abyss-history-title">深境螺旋方案</h3>
+        {abyssPlans.length === 0 ? (
+          <p className="gta-hint">当前筛选下没有已保存的深境螺旋双队方案。</p>
+        ) : (
+          <ul className="gta-history-list">
+            {abyssPlans.map((entry) => (
+              <AbyssHistoryListItem
+                key={entry.id}
+                entry={entry}
+                expanded={expandedId === entry.id}
+                onToggle={() =>
+                  setExpandedId((previous) => (previous === entry.id ? null : entry.id))
+                }
+                onDelete={() => void deleteAbyssEntry(entry.id)}
+              />
+            ))}
+          </ul>
+        )}
+      </section>
+
       <p className="gta-history-stats">
         <span>{t('history.total', { count: query.total })}</span>
         <span>
@@ -292,6 +339,59 @@ export function HistoryPage({ state }: HistoryPageProps) {
         </button>
       </div>
     </section>
+  );
+}
+
+function AbyssHistoryListItem({
+  entry,
+  expanded,
+  onToggle,
+  onDelete
+}: {
+  entry: AbyssPlanHistoryEntry;
+  expanded: boolean;
+  onToggle: () => void;
+  onDelete: () => void;
+}) {
+  const characters = new Map(entry.characters.map((character) => [character.id, character]));
+  const teamNames = (ids: string[]) =>
+    ids.map((id) => characters.get(id)?.name ?? `角色 ${id}`).join(' · ');
+  return (
+    <li className={expanded ? 'gta-history-entry is-expanded' : 'gta-history-entry'}>
+      <button type="button" className="gta-history-summary" onClick={onToggle}>
+        <span className="gta-history-time">{formatTime(entry.createdAt)}</span>
+        <span
+          className={entry.source === 'smart-service' ? 'gta-tag is-llm' : 'gta-tag is-fallback'}
+        >
+          {entry.source === 'smart-service' ? '智能服务' : '本地规则'}
+        </span>
+        <span className="gta-history-uid">UID {entry.uid}</span>
+        <span className="gta-history-enemies">
+          {entry.target.floor} 层 ·{' '}
+          {entry.target.chamber ? `第 ${entry.target.chamber} 间` : '全部房间'} ·{' '}
+          {entry.dataVersion}
+        </span>
+      </button>
+      {expanded && (
+        <div className="gta-history-body">
+          <article className="gta-team-card">
+            <h4>上半队伍</h4>
+            <p>{teamNames(entry.plan.firstHalfTeam.characterIds)}</p>
+            <p>{entry.plan.firstHalfTeam.rotationNotes.join('；')}</p>
+          </article>
+          <article className="gta-team-card">
+            <h4>下半队伍</h4>
+            <p>{teamNames(entry.plan.secondHalfTeam.characterIds)}</p>
+            <p>{entry.plan.secondHalfTeam.rotationNotes.join('；')}</p>
+          </article>
+          <div className="gta-actions">
+            <button type="button" className="gta-btn gta-btn--danger" onClick={onDelete}>
+              删除这条深境螺旋方案
+            </button>
+          </div>
+        </div>
+      )}
+    </li>
   );
 }
 

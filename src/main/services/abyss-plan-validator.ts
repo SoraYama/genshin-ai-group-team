@@ -6,6 +6,7 @@ import {
   type AbyssScenario
 } from '../../shared/abyss-advisor.js';
 import { abyssPlanSchema } from '../../shared/scenario-v2.js';
+import { findAbyssMechanicCoverageGaps } from '../../shared/abyss-mechanics.js';
 
 export type AbyssPlanValidationResult =
   | { ok: true; issues: []; plan: AbyssPlanOutput }
@@ -30,6 +31,7 @@ export function validateAbyssPlan({
   const secondIds = teamIds(raw['secondHalfTeam']);
   const allIds = [...firstIds, ...secondIds];
   const ownedIds = new Set(characters.map(({ id }) => String(id)));
+  const charactersById = new Map(characters.map((character) => [String(character.id), character]));
   const excludedIds = new Set(input.excludedCharacterIds);
 
   if (raw['scenarioId'] !== input.scenarioId || input.scenarioId !== scenario.id) {
@@ -149,6 +151,41 @@ export function validateAbyssPlan({
       }
     }
   });
+
+  if (targetChambers.length > 0) {
+    const firstTeam = firstIds.flatMap((id) => {
+      const character = charactersById.get(id);
+      return character ? [character] : [];
+    });
+    const secondTeam = secondIds.flatMap((id) => {
+      const character = charactersById.get(id);
+      return character ? [character] : [];
+    });
+    const halves = [
+      {
+        key: 'firstHalfTeam',
+        team: firstTeam,
+        enemies: targetChambers.flatMap(({ firstHalf }) =>
+          firstHalf.waves.flatMap(({ enemies }) => enemies)
+        )
+      },
+      {
+        key: 'secondHalfTeam',
+        team: secondTeam,
+        enemies: targetChambers.flatMap(({ secondHalf }) =>
+          secondHalf.waves.flatMap(({ enemies }) => enemies)
+        )
+      }
+    ] as const;
+    halves.forEach(({ key, team, enemies }) => {
+      findAbyssMechanicCoverageGaps(team, enemies).forEach((gap) =>
+        addIssue(issues, 'MECHANIC_COVERAGE_INVALID', [key], gap.message, {
+          enemyName: gap.enemyName,
+          mechanic: gap.kind
+        })
+      );
+    });
+  }
 
   const parsed = abyssPlanSchema.safeParse(plan);
   if (!parsed.success) {

@@ -762,6 +762,8 @@ test('runs the abyss-specific development-sample flow with accessible interventi
   await page.getByRole('button', { name: /深境螺旋/ }).click();
 
   await expect(page.getByText('演练资料，不代表本期')).toBeVisible();
+  await expect(page.getByText('演练增益', { exact: true })).toBeVisible();
+  await expect(page.getByText('本期祝福', { exact: true })).toHaveCount(0);
   await expect(page.getByText('训练灵体')).toBeVisible();
   await expect(page.locator('main')).not.toContainText(
     /Training Sprite|development\.training|development-sample/
@@ -803,6 +805,9 @@ test('runs the abyss-specific development-sample flow with accessible interventi
   expect(resultCharacters).toHaveLength(8);
   expect(new Set(resultCharacters).size).toBe(8);
   await expect(page.getByText(/调整后重新生成完整双队/).first()).toBeVisible();
+  await expect(page.getByText(/循环：根据实战充能调整技能顺序/).first()).toBeVisible();
+  await expect(page.getByText(/替换建议：.*重新生成完整双队/).first()).toBeVisible();
+  await expect(page.locator('.gta-abyss-progress li').last()).toHaveClass(/is-done/);
   await expectNoForbiddenPlayerTerms();
 
   await expectPageFitsEveryViewport('Abyss input and result');
@@ -812,4 +817,13 @@ test('runs the abyss-specific development-sample flow with accessible interventi
   await page.setViewportSize({ width: 1600, height: 1000 });
   await page.getByRole('heading', { name: '上下半零重复' }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: path.join(tmpdir(), 'gta-m4-abyss-result-1600x1000.png') });
+
+  await page.getByRole('button', { name: '操作简单' }).click();
+  await expect(page.getByRole('heading', { name: '上下半零重复' })).toHaveCount(0);
+
+  await page.getByRole('button', { name: '历史记录' }).click();
+  await expect(page.getByRole('heading', { name: '深境螺旋方案' })).toBeVisible();
+  const abyssHistory = page.getByRole('button', { name: /UID 123456789.*12 层.*全部房间/ });
+  await abyssHistory.click();
+  await expect(page.getByRole('button', { name: '删除这条深境螺旋方案' })).toBeVisible();
 });

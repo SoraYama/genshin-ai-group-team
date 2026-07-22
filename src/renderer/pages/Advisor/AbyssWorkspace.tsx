@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { CharacterProfile, PersistedProfile } from '../../../shared/domain';
 import type {
@@ -51,12 +51,23 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
   const [result, setResult] = useState<AbyssAdvisorResult | null>(null);
   const [activeStep, setActiveStep] = useState<AbyssAdvisorProgressStep | null>(null);
   const [running, setRunning] = useState(false);
+  const requestSequence = useRef(0);
+  const progressAccepted = useRef(false);
 
   useEffect(() => {
     let active = true;
+    requestSequence.current += 1;
+    progressAccepted.current = false;
+    void api.abyssAdvisor.cancel();
     setScenarioView(null);
     setProfile(null);
     setLoadError('');
+    setFloorNumber(null);
+    setChamberNumber('all');
+    setInterventions({});
+    setResult(null);
+    setActiveStep(null);
+    setRunning(false);
     void Promise.all([api.abyssAdvisor.getScenario(), api.profile.get({ uid })])
       .then(([nextScenario, nextProfile]) => {
         if (!active) return;
@@ -71,10 +82,19 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
       });
     return () => {
       active = false;
+      requestSequence.current += 1;
+      progressAccepted.current = false;
+      void api.abyssAdvisor.cancel();
     };
   }, [uid]);
 
-  useEffect(() => api.abyssAdvisor.onEvent((event) => setActiveStep(event.step)), []);
+  useEffect(
+    () =>
+      api.abyssAdvisor.onEvent((event) => {
+        if (progressAccepted.current) setActiveStep(event.step);
+      }),
+    []
+  );
 
   const scenario = scenarioView?.status === 'ready' ? scenarioView.scenario : null;
   const floor = scenario?.floors.find(({ floor: candidate }) => candidate === floorNumber);
@@ -98,6 +118,21 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
     .filter(([, state]) => state === 'excluded')
     .map(([id]) => id);
   const tooManyLocks = lockedCharacterIds.length > 8;
+  const scenarioReadOnly =
+    scenarioView?.status === 'ready' &&
+    scenarioView.trust === 'production' &&
+    scenarioView.notCurrent;
+
+  function invalidatePlan() {
+    requestSequence.current += 1;
+    progressAccepted.current = false;
+    setResult(null);
+    setActiveStep(null);
+    if (running) {
+      setRunning(false);
+      void api.abyssAdvisor.cancel();
+    }
+  }
 
   function togglePreference(key: 'comfort' | 'survival' | 'lowInvestment' | 'noBuildChange') {
     setPreferences((previous) =>
@@ -105,6 +140,7 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
         ? { ...previous, noBuildChange: !previous.noBuildChange }
         : { ...previous, [key]: previous[key] === 'high' ? 'off' : 'high' }
     );
+    invalidatePlan();
   }
 
   function cycleCharacter(id: string) {
@@ -112,11 +148,14 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
       ...previous,
       [id]: cycleCharacterIntervention(previous[id] ?? 'neutral')
     }));
-    setResult(null);
+    invalidatePlan();
   }
 
   async function generatePlan() {
-    if (!scenario || !floor || tooManyLocks) return;
+    if (!scenario || !floor || tooManyLocks || scenarioReadOnly) return;
+    const requestId = requestSequence.current + 1;
+    requestSequence.current = requestId;
+    progressAccepted.current = true;
     setRunning(true);
     setResult(null);
     setActiveStep('reading-roster');
@@ -131,12 +170,25 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
         lockedCharacterIds,
         excludedCharacterIds
       });
-      setResult(next);
+      if (requestSequence.current === requestId) setResult(next);
     } catch {
-      setLoadError('生成方案时发生错误；角色与挑战资料没有被修改。');
+      if (requestSequence.current === requestId) {
+        setLoadError('生成方案时发生错误；角色与挑战资料没有被修改。');
+      }
     } finally {
-      setRunning(false);
+      if (requestSequence.current === requestId) {
+        progressAccepted.current = false;
+        setRunning(false);
+      }
     }
+  }
+
+  function cancelPlan() {
+    requestSequence.current += 1;
+    progressAccepted.current = false;
+    setRunning(false);
+    setActiveStep(null);
+    void api.abyssAdvisor.cancel();
   }
 
   if (loadError) {
@@ -184,6 +236,12 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
           <span>以下敌人与规则只用于验证交互和约束；不会冒充正式服当前周期。</span>
         </div>
       )}
+      {scenarioReadOnly && (
+        <div className="gta-abyss-sample-banner" role="status">
+          <strong>资料已过期，仅供查看</strong>
+          <span>正式数据刷新失败或已失效；为避免误导，暂时不能据此生成新方案。</span>
+        </div>
+      )}
 
       <nav className="gta-abyss-targets" aria-label="选择深境螺旋目标">
         <div className="gta-abyss-floor-tabs" role="group" aria-label="选择楼层">
@@ -191,11 +249,12 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
             <button
               key={number}
               type="button"
+              disabled={running}
               aria-pressed={floorNumber === number}
               onClick={() => {
                 setFloorNumber(number);
                 setChamberNumber('all');
-                setResult(null);
+                invalidatePlan();
               }}
             >
               {number} 层
@@ -205,10 +264,11 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
         <label>
           <span>目标房间</span>
           <select
+            disabled={running}
             value={chamberNumber}
             onChange={(event) => {
               setChamberNumber(event.target.value === 'all' ? 'all' : Number(event.target.value));
-              setResult(null);
+              invalidatePlan();
             }}
           >
             <option value="all">全部房间 · 固定双队</option>
@@ -222,7 +282,7 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
       </nav>
 
       <div className="gta-abyss-blessing">
-        <span>本期祝福</span>
+        <span>{scenarioView.trust === 'development-sample' ? '演练增益' : '本期祝福'}</span>
         <p>{readyScenario.blessing.description}</p>
       </div>
 
@@ -242,21 +302,25 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
         <div className="gta-abyss-preferences" role="group" aria-label="配队偏好">
           <PreferenceChip
             label="操作简单"
+            disabled={running}
             active={preferences.comfort === 'high'}
             onClick={() => togglePreference('comfort')}
           />
           <PreferenceChip
             label="生存优先"
+            disabled={running}
             active={preferences.survival === 'high'}
             onClick={() => togglePreference('survival')}
           />
           <PreferenceChip
             label="低练度"
+            disabled={running}
             active={preferences.lowInvestment === 'high'}
             onClick={() => togglePreference('lowInvestment')}
           />
           <PreferenceChip
             label="不换装备"
+            disabled={running}
             active={preferences.noBuildChange}
             onClick={() => togglePreference('noBuildChange')}
           />
@@ -286,6 +350,7 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
             <CharacterInterventionButton
               key={character.id}
               character={character}
+              disabled={running}
               state={interventions[String(character.id)] ?? 'neutral'}
               onClick={() => cycleCharacter(String(character.id))}
             />
@@ -294,10 +359,15 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
         <div className="gta-abyss-runbar">
           <GtaButton
             onClick={() => void generatePlan()}
-            disabled={running || tooManyLocks || selectedChambers.length === 0}
+            disabled={running || tooManyLocks || selectedChambers.length === 0 || scenarioReadOnly}
           >
             {running ? '正在生成双队…' : '生成上下半方案'}
           </GtaButton>
+          {running && (
+            <GtaButton tone="ghost" onClick={cancelPlan}>
+              取消生成
+            </GtaButton>
+          )}
           {result && <span>调整后重新生成完整双队，才能继续检查跨队冲突。</span>}
         </div>
       </section>
@@ -307,14 +377,13 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
           {PROGRESS_STEPS.map((step) => {
             const currentIndex = activeStep ? PROGRESS_STEPS.indexOf(activeStep) : -1;
             const index = PROGRESS_STEPS.indexOf(step);
+            const done = Boolean(result) || index < currentIndex;
             return (
               <li
                 key={step}
-                className={
-                  index < currentIndex ? 'is-done' : index === currentIndex ? 'is-active' : ''
-                }
+                className={done ? 'is-done' : index === currentIndex ? 'is-active' : ''}
               >
-                <span aria-hidden="true">{index < currentIndex ? '✓' : index + 1}</span>
+                <span aria-hidden="true">{done ? '✓' : index + 1}</span>
                 {progressStepLabel(step)}
               </li>
             );
@@ -392,14 +461,16 @@ function EnemyRow({ enemy }: { enemy: EnemyInstance }) {
 function PreferenceChip({
   label,
   active,
+  disabled,
   onClick
 }: {
   label: string;
   active: boolean;
+  disabled: boolean;
   onClick: () => void;
 }) {
   return (
-    <button type="button" aria-pressed={active} onClick={onClick}>
+    <button type="button" aria-pressed={active} disabled={disabled} onClick={onClick}>
       {label}
     </button>
   );
@@ -408,10 +479,12 @@ function PreferenceChip({
 function CharacterInterventionButton({
   character,
   state,
+  disabled,
   onClick
 }: {
   character: CharacterProfile;
   state: CharacterInterventionState;
+  disabled: boolean;
   onClick: () => void;
 }) {
   const stateLabel = state === 'locked' ? '锁定' : state === 'excluded' ? '排除' : '未设置';
@@ -421,6 +494,7 @@ function CharacterInterventionButton({
       className={`gta-abyss-character is-${state}`}
       aria-label={`${character.name}，当前：${stateLabel}；按下切换`}
       aria-pressed={state === 'locked'}
+      disabled={disabled}
       onClick={onClick}
     >
       <span className="gta-abyss-character-mark" aria-hidden="true">
@@ -479,12 +553,14 @@ function AbyssResult({
           title="上半队伍"
           ids={result.plan.firstHalfTeam.characterIds}
           purpose={result.plan.firstHalfTeam.purpose}
+          rotationNotes={result.plan.firstHalfTeam.rotationNotes}
           characters={characterById}
         />
         <ResultTeam
           title="下半队伍"
           ids={result.plan.secondHalfTeam.characterIds}
           purpose={result.plan.secondHalfTeam.purpose}
+          rotationNotes={result.plan.secondHalfTeam.rotationNotes}
           characters={characterById}
         />
       </div>
@@ -500,6 +576,10 @@ function AbyssResult({
                 <p key={text}>{text}</p>
               ))}
               <small>超时风险：{chamber.firstHalf.risks.join('；') || '暂无额外提示'}</small>
+              <small>
+                替换建议：
+                {chamber.firstHalf.substitutionNotes.join('；') || '调整角色后重新生成完整双队'}
+              </small>
             </div>
             <div>
               <strong>下半怎么打</strong>
@@ -507,6 +587,10 @@ function AbyssResult({
                 <p key={text}>{text}</p>
               ))}
               <small>超时风险：{chamber.secondHalf.risks.join('；') || '暂无额外提示'}</small>
+              <small>
+                替换建议：
+                {chamber.secondHalf.substitutionNotes.join('；') || '调整角色后重新生成完整双队'}
+              </small>
             </div>
           </article>
         ))}
@@ -543,17 +627,22 @@ function ResultTeam({
   title,
   ids,
   purpose,
+  rotationNotes,
   characters
 }: {
   title: string;
   ids: string[];
   purpose: string;
+  rotationNotes: string[];
   characters: Map<string, CharacterProfile>;
 }) {
   return (
     <section>
       <h5>{title}</h5>
       <p>{purpose}</p>
+      {rotationNotes.length > 0 && (
+        <p className="gta-abyss-rotation">循环：{rotationNotes.join('；')}</p>
+      )}
       <div className="gta-abyss-result-roster">
         {ids.map((id) => {
           const character = characters.get(id);
