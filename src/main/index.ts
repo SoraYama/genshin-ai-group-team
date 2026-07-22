@@ -41,12 +41,15 @@ import type { CharacterProfile } from '../shared/domain.js';
 import { registerConfigIpc } from './ipc/config.ipc.js';
 import { registerProfileIpc } from './ipc/profile.ipc.js';
 import { registerAdvisorIpc } from './ipc/advisor.ipc.js';
+import { registerAbyssAdvisorIpc } from './ipc/abyss-advisor.ipc.js';
 import { registerHistoryIpc } from './ipc/history.ipc.js';
 import { registerScenarioIpc } from './ipc/scenario.ipc.js';
 import { ensureAllChannelsRegistered } from './ipc/registry.js';
 import { registerUpdateIpc } from './ipc/update.ipc.js';
 import { UpdateService } from './services/update-service.js';
 import { UPDATE_EVENT_CHANNEL } from '../shared/ipc-contract.js';
+import { AbyssScenarioService } from './services/abyss-scenario-service.js';
+import { AbyssAdvisorService } from './services/abyss-advisor-service.js';
 
 const isolatedUserDataDir = process.env.GTA_E2E_USER_DATA_DIR;
 if (isolatedUserDataDir) {
@@ -102,6 +105,23 @@ async function bootstrapServices(): Promise<void> {
   const profiles = new ProfileStore();
   const history = new HistoryStore();
   const advisor = new AdvisorAgent(config, profiles, history);
+  const abyssScenario = new AbyssScenarioService({
+    enableDevelopmentScenarios: process.env.GTA_ENABLE_DEVELOPMENT_SCENARIOS === '1',
+    developmentFixturePath: path.join(
+      resolveBundledScenarioDir(),
+      'v2',
+      'development-source',
+      'spiral-abyss.json'
+    )
+  });
+  const abyssAdvisor = new AbyssAdvisorService({
+    runner: new AgentSdkAdapter(),
+    scenarioService: abyssScenario,
+    profiles,
+    history,
+    config,
+    sdkEnvironment: { cwd: app.getPath('userData'), clientVersion: app.getVersion() }
+  });
   const updates = new UpdateService({
     enabled: app.isPackaged && !packagedSdkSmokeUrl,
     onStatus: (status) => mainWindow?.webContents.send(UPDATE_EVENT_CHANNEL, status)
@@ -129,6 +149,11 @@ async function bootstrapServices(): Promise<void> {
     store: profiles
   });
   registerAdvisorIpc({ advisor, getMainWindow: () => mainWindow });
+  registerAbyssAdvisorIpc({
+    scenario: abyssScenario,
+    advisor: abyssAdvisor,
+    getMainWindow: () => mainWindow
+  });
   registerHistoryIpc({ history });
   registerScenarioIpc({ store: scenarioStore, refresher: scenarioRefresher });
   registerUpdateIpc(updates);

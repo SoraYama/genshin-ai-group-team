@@ -109,4 +109,65 @@ describe('buildAgentSdkOptions', () => {
     });
     expect(options.env?.ANTHROPIC_CUSTOM_HEADERS).toBe('X-Tenant: community');
   });
+
+  it('allows only explicitly registered read-only business MCP tools for bounded agent turns', async () => {
+    const allowedBusinessTools = [
+      'mcp__genshin__read_profile_cache',
+      'mcp__genshin__query_enemy_data',
+      'mcp__genshin__query_genshin_db'
+    ];
+    const options = buildAgentSdkOptions({
+      apiKey: 'test-key',
+      baseUrl: 'https://llm.example.test',
+      model: 'test-model',
+      systemPrompt: 'system',
+      cwd: '/tmp/genshin-advisor',
+      abortController: new AbortController(),
+      maxTurns: 4,
+      mcpServers: { genshin: { type: 'sdk', name: 'genshin', instance: {} as never } },
+      allowedBusinessTools
+    });
+
+    expect(options.tools).toEqual([]);
+    expect(options.allowedTools).toEqual(allowedBusinessTools);
+    expect(options.mcpServers).toHaveProperty('genshin');
+    expect(options.maxTurns).toBe(4);
+    expect(options.disallowedTools).toEqual(
+      expect.arrayContaining(['Bash', 'Read', 'Write', 'WebFetch', 'Agent', 'Task'])
+    );
+
+    const hook = options.hooks?.PreToolUse?.[0]?.hooks[0];
+    if (!hook) throw new Error('Expected permission hook');
+    const allowed = await hook(
+      {
+        hook_event_name: 'PreToolUse',
+        session_id: 'session',
+        transcript_path: '/tmp/transcript',
+        cwd: '/tmp/genshin-advisor',
+        tool_name: 'mcp__genshin__query_enemy_data',
+        tool_input: {},
+        tool_use_id: 'allowed'
+      },
+      'allowed',
+      { signal: new AbortController().signal }
+    );
+    expect(allowed).toEqual({ continue: true });
+
+    const denied = await hook(
+      {
+        hook_event_name: 'PreToolUse',
+        session_id: 'session',
+        transcript_path: '/tmp/transcript',
+        cwd: '/tmp/genshin-advisor',
+        tool_name: 'mcp__other__read_profile_cache',
+        tool_input: {},
+        tool_use_id: 'denied'
+      },
+      'denied',
+      { signal: new AbortController().signal }
+    );
+    expect(denied).toMatchObject({
+      hookSpecificOutput: { permissionDecision: 'deny' }
+    });
+  });
 });

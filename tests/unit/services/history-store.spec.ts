@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { RecommendationResult } from '../../../src/shared/domain.js';
+import { abyssInput, validAbyssPlan } from './abyss-test-fixtures.js';
 
 const storeState = new Map<string, unknown>();
 
@@ -78,9 +79,24 @@ describe('HistoryStore', () => {
     const { HistoryStore } = await import('../../../src/main/services/history-store.js');
     const store = new HistoryStore();
 
-    store.append({ uid: '111111111', enemyNames: ['abyss-mage'], result: makeResult('llm'), side: 'single' });
-    store.append({ uid: '222222222', enemyNames: ['abyss-mage'], result: makeResult('fallback'), side: 'single' });
-    store.append({ uid: '111111111', enemyNames: ['ruin-guard'], result: makeResult('llm'), side: 'single' });
+    store.append({
+      uid: '111111111',
+      enemyNames: ['abyss-mage'],
+      result: makeResult('llm'),
+      side: 'single'
+    });
+    store.append({
+      uid: '222222222',
+      enemyNames: ['abyss-mage'],
+      result: makeResult('fallback'),
+      side: 'single'
+    });
+    store.append({
+      uid: '111111111',
+      enemyNames: ['ruin-guard'],
+      result: makeResult('llm'),
+      side: 'single'
+    });
 
     expect(store.query({ uid: '111111111' }).total).toBe(2);
     expect(store.query({ source: 'fallback' }).total).toBe(1);
@@ -160,12 +176,97 @@ describe('HistoryStore', () => {
     const { HistoryStore } = await import('../../../src/main/services/history-store.js');
     const store = new HistoryStore();
 
-    store.append({ uid: '111111111', enemyNames: ['abyss'], result: makeResult('llm'), side: 'single' });
-    store.append({ uid: '111111111', enemyNames: ['ruin'], result: makeResult('fallback'), side: 'single' });
-    store.append({ uid: '222222222', enemyNames: ['abyss'], result: makeResult('llm'), side: 'single' });
+    store.append({
+      uid: '111111111',
+      enemyNames: ['abyss'],
+      result: makeResult('llm'),
+      side: 'single'
+    });
+    store.append({
+      uid: '111111111',
+      enemyNames: ['ruin'],
+      result: makeResult('fallback'),
+      side: 'single'
+    });
+    store.append({
+      uid: '222222222',
+      enemyNames: ['abyss'],
+      result: makeResult('llm'),
+      side: 'single'
+    });
 
     const removed = store.removeMany({ source: 'fallback' });
     expect(removed).toBe(1);
     expect(store.query().total).toBe(2);
+  });
+
+  it('stores an immutable abyss snapshot with scenario version, target, source, and interventions', async () => {
+    const { HistoryStore } = await import('../../../src/main/services/history-store.js');
+    const store = new HistoryStore();
+    const plan = validAbyssPlan();
+    const input = abyssInput({
+      lockedCharacterIds: ['1001'],
+      excludedCharacterIds: ['1010'],
+      chamber: 1
+    });
+
+    const entry = store.appendAbyss({
+      uid: input.uid,
+      scenarioId: input.scenarioId,
+      schemaVersion: 2,
+      dataVersion: input.dataVersion,
+      mode: 'spiral-abyss',
+      target: { floor: input.floor, chamber: input.chamber },
+      source: 'local-rules',
+      interventions: {
+        lockedCharacterIds: input.lockedCharacterIds,
+        excludedCharacterIds: input.excludedCharacterIds,
+        preferences: input.preferences
+      },
+      plan
+    });
+
+    plan.firstHalfTeam.characterIds[0] = '9999';
+    input.lockedCharacterIds.push('1002');
+    const stored = store.queryAbyss({ uid: input.uid })[0];
+    expect(entry).toMatchObject({
+      scenarioId: 'abyss.2026-07',
+      schemaVersion: 2,
+      dataVersion: '2026.07.1',
+      mode: 'spiral-abyss',
+      target: { floor: 12, chamber: 1 },
+      source: 'local-rules'
+    });
+    expect(stored?.plan.firstHalfTeam.characterIds[0]).toBe('1001');
+    expect(stored?.interventions.lockedCharacterIds).toEqual(['1001']);
+  });
+
+  it('keeps legacy recommendation entries readable after abyss history is introduced', async () => {
+    const { HistoryStore } = await import('../../../src/main/services/history-store.js');
+    const store = new HistoryStore();
+    store.append({
+      uid: '111111111',
+      enemyNames: ['legacy-enemy'],
+      result: makeResult('fallback'),
+      side: 'single'
+    });
+    store.appendAbyss({
+      uid: '111111111',
+      scenarioId: 'abyss.2026-07',
+      schemaVersion: 2,
+      dataVersion: '2026.07.1',
+      mode: 'spiral-abyss',
+      target: { floor: 12 },
+      source: 'local-rules',
+      interventions: {
+        lockedCharacterIds: [],
+        excludedCharacterIds: [],
+        preferences: abyssInput().preferences
+      },
+      plan: validAbyssPlan()
+    });
+
+    expect(store.query().items[0]?.enemyNames).toEqual(['legacy-enemy']);
+    expect(store.queryAbyss({ uid: '111111111' })).toHaveLength(1);
   });
 });

@@ -249,3 +249,611 @@
     grid-template-columns: 1fr;
   }
 }
+
+.gta-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.gta-abyss-workspace {
+  position: relative;
+  margin: 18px 0 26px;
+  overflow: clip;
+  border-block: 1px solid rgba(211, 189, 130, 0.42);
+  color: var(--gta-text-on-dark);
+  background:
+    linear-gradient(115deg, rgba(8, 18, 31, 0.94), rgba(20, 41, 55, 0.82)),
+    url('../../../../resources/backgrounds/spiral-abyss.webp') center / cover;
+  box-shadow: 0 24px 64px rgba(1, 8, 16, 0.32);
+  animation: gta-abyss-reveal 360ms var(--gta-ease) both;
+}
+.gta-abyss-workspace::before,
+.gta-abyss-workspace::after {
+  position: absolute;
+  width: 70px;
+  height: 1px;
+  content: '';
+  background: var(--gta-gold-strong);
+}
+.gta-abyss-workspace::before {
+  top: 8px;
+  left: 0;
+}
+.gta-abyss-workspace::after {
+  right: 0;
+  bottom: 8px;
+}
+.gta-abyss-heading,
+.gta-abyss-control-heading,
+.gta-abyss-result > header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 24px;
+}
+.gta-abyss-heading {
+  padding: clamp(22px, 4vw, 42px);
+}
+.gta-abyss-heading h3,
+.gta-abyss-control-heading h4,
+.gta-abyss-result h4 {
+  margin: 4px 0 8px;
+  font-size: clamp(23px, 3vw, 34px);
+  letter-spacing: 0.06em;
+}
+.gta-abyss-heading p,
+.gta-abyss-control-heading p {
+  max-width: 650px;
+  margin: 0;
+  color: var(--gta-text-on-dark-soft);
+  line-height: 1.75;
+}
+.gta-abyss-data-stamp {
+  display: grid;
+  justify-items: end;
+  min-width: 150px;
+  padding-left: 24px;
+  border-left: 1px solid rgba(211, 189, 130, 0.42);
+}
+.gta-abyss-data-stamp span {
+  color: rgba(235, 240, 236, 0.62);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+}
+.gta-abyss-data-stamp strong {
+  margin-top: 6px;
+  color: var(--gta-gold-strong);
+  font-family: var(--gta-font-mono);
+  font-size: var(--gta-text-xs);
+}
+.gta-abyss-sample-banner {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 12px clamp(22px, 4vw, 42px);
+  border-block: 1px solid rgba(211, 189, 130, 0.35);
+  color: var(--gta-text-on-dark-soft);
+  background: rgba(116, 87, 38, 0.24);
+  font-size: var(--gta-text-xs);
+}
+.gta-abyss-sample-banner strong {
+  flex: 0 0 auto;
+  color: #f1d89b;
+  font-size: var(--gta-text-sm);
+}
+.gta-abyss-targets {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 22px clamp(22px, 4vw, 42px);
+}
+.gta-abyss-floor-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.gta-abyss-floor-tabs button,
+.gta-abyss-preferences button {
+  min-height: 38px;
+  padding: 8px 15px;
+  border: 1px solid rgba(205, 221, 220, 0.26);
+  color: var(--gta-text-on-dark-soft);
+  background: rgba(7, 17, 28, 0.58);
+  cursor: pointer;
+  transition: 160ms var(--gta-ease);
+}
+.gta-abyss-floor-tabs button[aria-pressed='true'],
+.gta-abyss-preferences button[aria-pressed='true'] {
+  border-color: var(--gta-gold-strong);
+  color: #fff8e4;
+  background: rgba(130, 103, 55, 0.42);
+}
+.gta-abyss-targets label {
+  display: grid;
+  gap: 7px;
+  min-width: min(260px, 100%);
+  color: var(--gta-text-on-dark-soft);
+  font-size: var(--gta-text-xs);
+}
+.gta-abyss-targets select,
+.gta-abyss-roster-toolbar input {
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid rgba(205, 221, 220, 0.3);
+  color: var(--gta-text-on-dark);
+  background: rgba(7, 17, 28, 0.82);
+}
+.gta-abyss-blessing {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  gap: 18px;
+  padding: 14px clamp(22px, 4vw, 42px);
+  border-block: 1px solid rgba(205, 221, 220, 0.16);
+  background: rgba(186, 201, 197, 0.08);
+}
+.gta-abyss-blessing span {
+  color: var(--gta-gold-strong);
+  font-size: var(--gta-text-xs);
+  letter-spacing: 0.1em;
+}
+.gta-abyss-blessing p {
+  margin: 0;
+  color: var(--gta-text-on-dark-soft);
+}
+.gta-abyss-halves,
+.gta-abyss-result-teams {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.gta-abyss-half {
+  min-width: 0;
+  padding: clamp(22px, 4vw, 42px);
+}
+.gta-abyss-half + .gta-abyss-half {
+  border-left: 1px solid rgba(211, 189, 130, 0.32);
+}
+.gta-abyss-half > h4 {
+  margin: 0 0 22px;
+  color: #f4ecda;
+  font-size: var(--gta-text-xl);
+  letter-spacing: 0.08em;
+}
+.gta-abyss-chamber + .gta-abyss-chamber {
+  margin-top: 28px;
+  padding-top: 22px;
+  border-top: 1px solid rgba(205, 221, 220, 0.16);
+}
+.gta-abyss-chamber-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 13px;
+}
+.gta-abyss-chamber-title span {
+  color: rgba(226, 236, 233, 0.55);
+  font-size: var(--gta-text-xs);
+}
+.gta-abyss-wave {
+  position: relative;
+  padding-left: 24px;
+}
+.gta-abyss-wave + .gta-abyss-wave {
+  margin-top: 16px;
+}
+.gta-abyss-wave::before {
+  position: absolute;
+  top: 5px;
+  bottom: 4px;
+  left: 5px;
+  width: 1px;
+  content: '';
+  background: linear-gradient(var(--gta-gold-strong), transparent);
+}
+.gta-abyss-wave-index {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--gta-gold-strong);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+}
+.gta-abyss-enemy {
+  padding: 11px 0;
+  border-bottom: 1px solid rgba(205, 221, 220, 0.12);
+}
+.gta-abyss-enemy > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.gta-abyss-enemy strong small {
+  color: var(--gta-gold-strong);
+}
+.gta-abyss-enemy > div > span,
+.gta-abyss-enemy p {
+  color: rgba(226, 236, 233, 0.58);
+  font-size: var(--gta-text-xs);
+}
+.gta-abyss-enemy ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 9px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.gta-abyss-enemy li {
+  padding: 3px 7px;
+  border-left: 1px solid var(--gta-gold);
+  color: rgba(235, 241, 238, 0.74);
+  background: rgba(213, 226, 222, 0.06);
+  font-size: 10px;
+}
+.gta-abyss-controls,
+.gta-abyss-result {
+  padding: clamp(24px, 4vw, 42px);
+  color: var(--gta-text-on-light);
+  background: rgba(238, 243, 239, 0.96);
+}
+.gta-abyss-control-heading {
+  align-items: end;
+}
+.gta-abyss-control-heading h4,
+.gta-abyss-result h4 {
+  color: var(--gta-text-on-light);
+}
+.gta-abyss-control-heading p {
+  color: var(--gta-text-on-light-soft);
+  font-size: var(--gta-text-xs);
+}
+.gta-abyss-preferences {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 20px 0;
+}
+.gta-abyss-preferences button {
+  border-color: var(--gta-stroke);
+  color: var(--gta-text-on-light-soft);
+  background: rgba(218, 229, 226, 0.58);
+}
+.gta-abyss-preferences button[aria-pressed='true'] {
+  color: #273126;
+  background: rgba(211, 189, 130, 0.46);
+}
+.gta-abyss-roster-toolbar,
+.gta-abyss-runbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 14px;
+}
+.gta-abyss-roster-toolbar label {
+  flex: 1 1 320px;
+}
+.gta-abyss-roster-toolbar input {
+  width: min(420px, 100%);
+  border-color: var(--gta-stroke);
+  color: var(--gta-text-on-light);
+  background: rgba(250, 252, 249, 0.92);
+}
+.gta-abyss-roster-toolbar > span,
+.gta-abyss-runbar > span {
+  color: var(--gta-text-on-light-faint);
+  font-size: var(--gta-text-xs);
+}
+.gta-abyss-roster {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  border: 1px solid var(--gta-stroke-soft);
+  background: var(--gta-stroke-soft);
+}
+.gta-abyss-character {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  min-width: 0;
+  min-height: 60px;
+  gap: 10px;
+  padding: 9px 12px;
+  border: 0;
+  color: var(--gta-text-on-light);
+  background: rgba(246, 249, 246, 0.98);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 150ms,
+    box-shadow 150ms;
+}
+.gta-abyss-character:hover {
+  background: #fff;
+}
+.gta-abyss-character:focus-visible {
+  z-index: 1;
+  outline: 2px solid #497b83;
+  outline-offset: -2px;
+}
+.gta-abyss-character.is-locked {
+  background: #f2ead5;
+  box-shadow: inset 3px 0 var(--gta-gold);
+}
+.gta-abyss-character.is-excluded {
+  color: #6f5f60;
+  background: #e7dddd;
+  box-shadow: inset 3px 0 var(--gta-danger);
+}
+.gta-abyss-character-mark {
+  color: var(--gta-gold);
+  font-size: 18px;
+  text-align: center;
+}
+.gta-abyss-character.is-excluded .gta-abyss-character-mark {
+  color: var(--gta-danger);
+}
+.gta-abyss-character > span:nth-child(2) {
+  display: grid;
+  min-width: 0;
+}
+.gta-abyss-character strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gta-abyss-character small,
+.gta-abyss-character em {
+  color: var(--gta-text-on-light-faint);
+  font-size: 10px;
+  font-style: normal;
+}
+.gta-abyss-runbar {
+  margin: 20px 0 0;
+}
+.gta-abyss-inline-error {
+  margin: -4px 0 12px;
+  color: var(--gta-danger);
+  font-size: var(--gta-text-sm);
+}
+.gta-abyss-progress {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin: 0;
+  padding: 18px clamp(22px, 4vw, 42px);
+  border-top: 1px solid rgba(211, 189, 130, 0.28);
+  background: rgba(7, 17, 28, 0.86);
+  list-style: none;
+}
+.gta-abyss-progress li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: rgba(226, 236, 233, 0.42);
+  font-size: var(--gta-text-xs);
+}
+.gta-abyss-progress li::after {
+  width: 100%;
+  height: 1px;
+  margin-left: 4px;
+  content: '';
+  background: rgba(205, 221, 220, 0.18);
+}
+.gta-abyss-progress li:last-child::after {
+  display: none;
+}
+.gta-abyss-progress li.is-active,
+.gta-abyss-progress li.is-done {
+  color: #f0e3be;
+}
+.gta-abyss-progress li span {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid currentColor;
+}
+.gta-abyss-result {
+  border-top: 1px solid var(--gta-gold);
+  background: rgba(232, 239, 236, 0.98);
+  animation: gta-abyss-result-reveal 240ms var(--gta-ease) both;
+}
+.gta-abyss-result > header {
+  margin-bottom: 20px;
+}
+.gta-abyss-source {
+  padding: 7px 12px;
+  border: 1px solid var(--gta-stroke);
+  color: var(--gta-text-on-light-soft);
+  font-size: var(--gta-text-xs);
+}
+.gta-abyss-source.is-smart-service {
+  border-color: var(--gta-gold);
+}
+.gta-abyss-result-teams {
+  border-block: 1px solid var(--gta-stroke-soft);
+}
+.gta-abyss-result-teams > section {
+  min-width: 0;
+  padding: 22px 0;
+}
+.gta-abyss-result-teams > section + section {
+  padding-left: 28px;
+  border-left: 1px solid var(--gta-stroke-soft);
+}
+.gta-abyss-result-teams > section:first-child {
+  padding-right: 28px;
+}
+.gta-abyss-result h5 {
+  margin: 0 0 8px;
+  font-size: var(--gta-text-lg);
+}
+.gta-abyss-result-teams p {
+  margin: 0 0 14px;
+  color: var(--gta-text-on-light-soft);
+  font-size: var(--gta-text-xs);
+}
+.gta-abyss-result-roster {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.gta-abyss-result-roster > span {
+  display: grid;
+  min-width: 0;
+  padding: 9px 11px;
+  border-left: 2px solid var(--gta-gold);
+  background: rgba(201, 216, 211, 0.44);
+}
+.gta-abyss-result-roster small {
+  color: var(--gta-text-on-light-faint);
+  font-size: 10px;
+}
+.gta-abyss-tactics article {
+  display: grid;
+  grid-template-columns: 130px repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  padding: 22px 0;
+  border-bottom: 1px solid var(--gta-stroke-soft);
+}
+.gta-abyss-tactics h5,
+.gta-abyss-tactics strong {
+  color: #344653;
+}
+.gta-abyss-tactics p {
+  margin: 8px 0;
+  font-size: var(--gta-text-sm);
+  line-height: 1.7;
+}
+.gta-abyss-tactics small {
+  color: var(--gta-text-on-light-faint);
+  line-height: 1.6;
+}
+.gta-abyss-result-notes {
+  display: grid;
+  gap: 9px;
+  margin-top: 20px;
+}
+.gta-abyss-result-notes div {
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr);
+  gap: 16px;
+  color: var(--gta-text-on-light-soft);
+  font-size: var(--gta-text-xs);
+}
+.gta-abyss-result--blocked {
+  border-left: 3px solid var(--gta-danger);
+}
+.gta-abyss-unavailable {
+  margin: 18px 0 26px;
+  padding: clamp(24px, 4vw, 42px);
+  border-block: 1px solid rgba(211, 189, 130, 0.4);
+  color: var(--gta-text-on-dark-soft);
+  background: rgba(8, 20, 32, 0.76);
+}
+.gta-abyss-unavailable h3 {
+  margin: 8px 0;
+  color: var(--gta-text-on-dark);
+}
+
+@keyframes gta-abyss-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes gta-abyss-result-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 920px) {
+  .gta-abyss-heading,
+  .gta-abyss-control-heading,
+  .gta-abyss-result > header,
+  .gta-abyss-targets,
+  .gta-abyss-roster-toolbar,
+  .gta-abyss-runbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .gta-abyss-data-stamp {
+    justify-items: start;
+    padding: 12px 0 0;
+    border-top: 1px solid rgba(211, 189, 130, 0.3);
+    border-left: 0;
+  }
+  .gta-abyss-halves,
+  .gta-abyss-result-teams {
+    grid-template-columns: 1fr;
+  }
+  .gta-abyss-half + .gta-abyss-half,
+  .gta-abyss-result-teams > section + section {
+    padding-left: clamp(22px, 4vw, 42px);
+    border-top: 1px solid rgba(211, 189, 130, 0.32);
+    border-left: 0;
+  }
+  .gta-abyss-result-teams > section,
+  .gta-abyss-result-teams > section:first-child {
+    padding-inline: 0;
+  }
+  .gta-abyss-result-teams > section + section {
+    padding-left: 0;
+  }
+  .gta-abyss-tactics article {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .gta-abyss-roster-toolbar label,
+  .gta-abyss-roster-toolbar input {
+    width: 100%;
+  }
+}
+
+@media (max-width: 620px) {
+  .gta-abyss-sample-banner,
+  .gta-abyss-chamber-title {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .gta-abyss-blessing {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .gta-abyss-roster,
+  .gta-abyss-result-roster {
+    grid-template-columns: 1fr;
+  }
+  .gta-abyss-progress {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .gta-abyss-progress li::after {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gta-abyss-workspace,
+  .gta-abyss-result {
+    animation: none;
+  }
+}

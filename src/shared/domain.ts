@@ -278,6 +278,24 @@ export interface RecommendationHistoryEntry {
   compareGroupId?: string;
 }
 
+export interface AbyssPlanHistoryEntry {
+  id: string;
+  createdAt: string;
+  uid: string;
+  scenarioId: string;
+  schemaVersion: 2;
+  dataVersion: string;
+  mode: 'spiral-abyss';
+  target: { floor: number; chamber?: number };
+  source: 'smart-service' | 'local-rules';
+  interventions: {
+    lockedCharacterIds: string[];
+    excludedCharacterIds: string[];
+    preferences: import('./scenario-v2.js').PlayerPreferences;
+  };
+  plan: import('./scenario-v2.js').AbyssPlan;
+}
+
 export interface HistoryQueryOptions {
   uid?: string;
   source?: 'llm' | 'fallback';

@@ -6,6 +6,7 @@ import { localizeError, useI18n } from '../../i18n';
 import { ChallengeModeEntry, type ChallengeMode } from '../../components/ChallengeModeEntry';
 import { GtaButton } from '../../components/ui/GtaButton';
 import { OrnamentPanel } from '../../components/ui/OrnamentPanel';
+import { AbyssWorkspace } from './AbyssWorkspace';
 
 interface AdvisorPageProps {
   state: ProfileStateView;
@@ -219,17 +220,21 @@ export function AdvisorPage({ state, onGotoOnboarding }: AdvisorPageProps) {
         />
       </div>
 
-      <div className="gta-mode-status" aria-live="polite">
-        <span className="gta-mode-status-mark" aria-hidden="true">
-          ✦
-        </span>
-        <span>
-          <strong>
-            {t('advisor.mode.selected', { mode: challengeModeLabel(challengeMode, t) })}
-          </strong>
-          {t('advisor.mode.pending')}
-        </span>
-      </div>
+      {challengeMode === 'spiral-abyss' ? (
+        <AbyssWorkspace uid={activeUid} />
+      ) : (
+        <div className="gta-mode-status" aria-live="polite">
+          <span className="gta-mode-status-mark" aria-hidden="true">
+            ✦
+          </span>
+          <span>
+            <strong>
+              {t('advisor.mode.selected', { mode: challengeModeLabel(challengeMode, t) })}
+            </strong>
+            该玩法会使用独立规则与结果结构；当前不会误用下方的自定义敌人表单。
+          </span>
+        </div>
+      )}
 
       <details className="gta-disclosure gta-advisor-advanced">
         <summary>{t('advisor.advanced')}</summary>

@@ -19,8 +19,15 @@ import type {
   ScenarioPayload,
   UpdateStatus
 } from './domain.js';
+import type {
+  AbyssAdvisorEvent,
+  AbyssAdvisorPlanInput,
+  AbyssAdvisorResult,
+  AbyssScenarioView
+} from './abyss-advisor.js';
 
 export const ADVISOR_EVENT_CHANNEL = 'advisor:event' as const;
+export const ABYSS_ADVISOR_EVENT_CHANNEL = 'abyss-advisor:event' as const;
 export const UPDATE_EVENT_CHANNEL = 'update:event' as const;
 
 export interface IpcContract {
@@ -39,7 +46,11 @@ export interface IpcContract {
     req: void;
     res:
       | { ok: true; bind: BindCookieResult; sessionId: string }
-      | { ok: false; reason: 'cancelled' | 'timeout' | 'load-failed' | 'bind-failed'; message?: string };
+      | {
+          ok: false;
+          reason: 'cancelled' | 'timeout' | 'load-failed' | 'bind-failed';
+          message?: string;
+        };
   };
   'miyoushe:logout': { req: void; res: { ok: true } };
   'miyoushe:auth-state': {
@@ -70,6 +81,9 @@ export interface IpcContract {
   'advisor:recommend': { req: AdvisorRequest; res: RecommendationResult };
   'advisor:compare': { req: AdvisorCompareRequest; res: AdvisorCompareResult };
   'advisor:cancel': { req: void; res: { ok: boolean } };
+  'advisor-v2:abyss-scenario': { req: void; res: AbyssScenarioView };
+  'advisor-v2:abyss-plan': { req: AbyssAdvisorPlanInput; res: AbyssAdvisorResult };
+  'advisor-v2:abyss-cancel': { req: void; res: { ok: boolean } };
 
   'scenario:list': { req: void; res: ScenarioListItem[] };
   'scenario:get': {
@@ -118,6 +132,9 @@ export const ALL_IPC_CHANNELS: IpcChannel[] = [
   'advisor:recommend',
   'advisor:compare',
   'advisor:cancel',
+  'advisor-v2:abyss-scenario',
+  'advisor-v2:abyss-plan',
+  'advisor-v2:abyss-cancel',
   'scenario:list',
   'scenario:get',
   'scenario:refresh',
@@ -150,7 +167,9 @@ export interface RendererApi {
   profile: {
     state: () => Promise<IpcResponse<'profile:state'>>;
     get: (input: IpcRequest<'profile:get'>) => Promise<IpcResponse<'profile:get'>>;
-    setActive: (input: IpcRequest<'profile:set-active'>) => Promise<IpcResponse<'profile:set-active'>>;
+    setActive: (
+      input: IpcRequest<'profile:set-active'>
+    ) => Promise<IpcResponse<'profile:set-active'>>;
     refresh: (input: IpcRequest<'profile:refresh'>) => Promise<IpcResponse<'profile:refresh'>>;
     importFromCookie: (
       input: IpcRequest<'profile:import-from-cookie'>
@@ -161,10 +180,20 @@ export interface RendererApi {
     delete: (input: IpcRequest<'profile:delete'>) => Promise<IpcResponse<'profile:delete'>>;
   };
   advisor: {
-    recommend: (input: IpcRequest<'advisor:recommend'>) => Promise<IpcResponse<'advisor:recommend'>>;
+    recommend: (
+      input: IpcRequest<'advisor:recommend'>
+    ) => Promise<IpcResponse<'advisor:recommend'>>;
     compare: (input: IpcRequest<'advisor:compare'>) => Promise<IpcResponse<'advisor:compare'>>;
     cancel: () => Promise<IpcResponse<'advisor:cancel'>>;
     onEvent: (cb: (event: AdvisorEvent) => void) => () => void;
+  };
+  abyssAdvisor: {
+    getScenario: () => Promise<IpcResponse<'advisor-v2:abyss-scenario'>>;
+    recommend: (
+      input: IpcRequest<'advisor-v2:abyss-plan'>
+    ) => Promise<IpcResponse<'advisor-v2:abyss-plan'>>;
+    cancel: () => Promise<IpcResponse<'advisor-v2:abyss-cancel'>>;
+    onEvent: (cb: (event: AbyssAdvisorEvent) => void) => () => void;
   };
   scenario: {
     list: () => Promise<IpcResponse<'scenario:list'>>;

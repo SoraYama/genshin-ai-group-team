@@ -78,6 +78,7 @@ async function launchApp(): Promise<void> {
       ...process.env,
       NODE_ENV: 'test',
       GTA_DISABLE_BACKGROUND_REFRESH: '1',
+      GTA_ENABLE_DEVELOPMENT_SCENARIOS: '1',
       GTA_E2E_USER_DATA_DIR: userDataDir,
       ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
     }
@@ -687,4 +688,128 @@ test('renders profile coverage and known build fields without fake zero values',
     .click();
   await expect(page.getByText('还没有绑定任何账号。')).toBeVisible();
   expect(rendererErrors).toEqual([]);
+});
+
+test('runs the abyss-specific development-sample flow with accessible interventions and fixed twin teams', async () => {
+  test.setTimeout(60_000);
+  await electronApp.close();
+  const fetchedAt = '2026-07-23T00:00:00.000Z';
+  const characters = Array.from({ length: 10 }, (_, index) => ({
+    id: 1001 + index,
+    name: `演练角色${index + 1}`,
+    element: [
+      'Pyro',
+      'Hydro',
+      'Anemo',
+      'Geo',
+      'Cryo',
+      'Electro',
+      'Dendro',
+      'Hydro',
+      'Pyro',
+      'Cryo'
+    ][index],
+    rarity: index < 4 ? 5 : 4,
+    imageUrl: '',
+    level: 90 - index,
+    build: {
+      stats: {
+        hp: 20000 + index * 1000,
+        atk: 1200 + index * 100,
+        def: 700 + index * 20,
+        critRate: 50 + index,
+        critDmg: 100 + index * 5,
+        energyRecharge: 110 + index * 10,
+        elementalMastery: index * 20
+      }
+    },
+    completeness: index < 6 ? 'detailed' : 'build',
+    missingFields: index < 6 ? [] : ['weapon', 'artifacts', 'talents'],
+    provenance: {
+      ownership: { source: 'miyoushe-list', fetchedAt },
+      stats: { source: 'enka', fetchedAt }
+    }
+  }));
+  await writeFile(
+    path.join(userDataDir, 'profiles.json'),
+    JSON.stringify({
+      schemaVersion: 2,
+      activeUid: '123456789',
+      profilesByUid: {
+        '123456789': {
+          schemaVersion: 2,
+          uid: '123456789',
+          nickname: '深渊演练账号',
+          source: 'merged',
+          fetchedAt,
+          characters,
+          coverage: {
+            expectedOwnedCount: 10,
+            ownedCount: 10,
+            detailedCount: 6,
+            buildCount: 10,
+            statsCount: 10,
+            enkaShowcaseCount: 10,
+            missingDetailCount: 4,
+            partial: true
+          }
+        }
+      }
+    })
+  );
+  await launchApp();
+  await page.getByRole('button', { name: '挑战配队' }).click();
+  await page.getByRole('button', { name: /深境螺旋/ }).click();
+
+  await expect(page.getByText('演练资料，不代表本期')).toBeVisible();
+  await expect(page.getByText('训练灵体')).toBeVisible();
+  await expect(page.locator('main')).not.toContainText(
+    /Training Sprite|development\.training|development-sample/
+  );
+  await expect(page.getByText('原创开发演示效果，不代表任何正式服祝福')).toBeVisible();
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.getByRole('heading', { name: '深境螺旋战线' }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(tmpdir(), 'gta-m4-abyss-input-1024x768.png') });
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await page.getByRole('heading', { name: '深境螺旋战线' }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(tmpdir(), 'gta-m4-abyss-input-1600x1000.png') });
+
+  for (const preference of ['操作简单', '生存优先', '低练度', '不换装备']) {
+    const chip = page.getByRole('button', { name: preference });
+    await chip.click();
+    await expect(chip).toHaveAttribute('aria-pressed', 'true');
+  }
+
+  const rosterSearch = page.getByRole('searchbox', { name: '搜索可用角色' });
+  await rosterSearch.fill('演练角色1');
+  await expect(page.getByText('演练角色1', { exact: true })).toBeVisible();
+  await rosterSearch.fill('');
+  const firstCharacter = page.getByRole('button', { name: /演练角色1，当前：未设置/ });
+  await firstCharacter.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('button', { name: /演练角色1，当前：锁定/ })).toBeFocused();
+  const secondCharacter = page.getByRole('button', { name: /演练角色2，当前：未设置/ });
+  await secondCharacter.click();
+  await page.getByRole('button', { name: /演练角色2，当前：锁定/ }).click();
+  await expect(page.getByRole('button', { name: /演练角色2，当前：排除/ })).toBeVisible();
+
+  await page.getByRole('button', { name: '生成上下半方案' }).click();
+  await expect(page.getByText('本地规则', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '上半队伍' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '下半队伍' })).toBeVisible();
+  const resultCharacters = await page
+    .locator('[data-result-character-id]')
+    .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-result-character-id')));
+  expect(resultCharacters).toHaveLength(8);
+  expect(new Set(resultCharacters).size).toBe(8);
+  await expect(page.getByText(/调整后重新生成完整双队/).first()).toBeVisible();
+  await expectNoForbiddenPlayerTerms();
+
+  await expectPageFitsEveryViewport('Abyss input and result');
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.getByRole('heading', { name: '上下半零重复' }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(tmpdir(), 'gta-m4-abyss-result-1024x768.png') });
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await page.getByRole('heading', { name: '上下半零重复' }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(tmpdir(), 'gta-m4-abyss-result-1600x1000.png') });
 });

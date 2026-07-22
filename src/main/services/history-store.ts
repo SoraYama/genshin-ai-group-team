@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import Store from 'electron-store';
 import type {
+  AbyssPlanHistoryEntry,
   HistoryQueryOptions,
   HistoryQueryResult,
   RecommendationHistoryEntry
@@ -8,6 +9,7 @@ import type {
 
 interface HistoryStoreSchema {
   entries: RecommendationHistoryEntry[];
+  abyssPlans: AbyssPlanHistoryEntry[];
 }
 
 const MAX_ENTRIES = 200;
@@ -15,7 +17,8 @@ const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
 
 const DEFAULTS: HistoryStoreSchema = {
-  entries: []
+  entries: [],
+  abyssPlans: []
 };
 
 export class HistoryStore {
@@ -38,6 +41,25 @@ export class HistoryStore {
     const next = [entry, ...this.store.get('entries')].slice(0, MAX_ENTRIES);
     this.store.set('entries', next);
     return entry;
+  }
+
+  appendAbyss(input: Omit<AbyssPlanHistoryEntry, 'id' | 'createdAt'>): AbyssPlanHistoryEntry {
+    const entry: AbyssPlanHistoryEntry = structuredClone({
+      id: randomUUID(),
+      createdAt: new Date().toISOString(),
+      ...input
+    });
+    const next = [entry, ...this.store.get('abyssPlans')].slice(0, MAX_ENTRIES);
+    this.store.set('abyssPlans', next);
+    return structuredClone(entry);
+  }
+
+  queryAbyss(options: { uid?: string } = {}): AbyssPlanHistoryEntry[] {
+    return structuredClone(
+      this.store
+        .get('abyssPlans')
+        .filter((entry) => options.uid === undefined || entry.uid === options.uid)
+    );
   }
 
   query(options: HistoryQueryOptions = {}): HistoryQueryResult {
@@ -90,11 +112,7 @@ export class HistoryStore {
     return true;
   }
 
-  removeMany(filter: {
-    uid?: string;
-    source?: 'llm' | 'fallback';
-    enemyKeyword?: string;
-  }): number {
+  removeMany(filter: { uid?: string; source?: 'llm' | 'fallback'; enemyKeyword?: string }): number {
     if (!filter.uid && !filter.source && !filter.enemyKeyword) {
       throw new Error(
         'removeMany requires at least one filter (uid / source / enemyKeyword) to prevent accidental clear'

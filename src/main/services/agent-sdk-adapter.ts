@@ -21,18 +21,20 @@ const DENIED_NATIVE_TOOLS = [
   'WebSearch'
 ];
 
-const denyEveryTool: HookCallback = async (input) => {
-  if (input.hook_event_name !== 'PreToolUse') {
-    return { continue: true };
-  }
-  return {
-    hookSpecificOutput: {
-      hookEventName: 'PreToolUse',
-      permissionDecision: 'deny',
-      permissionDecisionReason: `Tool is not registered for this agent: ${input.tool_name}`
+function businessToolGate(allowedTools: ReadonlySet<string>): HookCallback {
+  return async (input) => {
+    if (input.hook_event_name !== 'PreToolUse' || allowedTools.has(input.tool_name)) {
+      return { continue: true };
     }
+    return {
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason: `Tool is not registered for this agent: ${input.tool_name}`
+      }
+    };
   };
-};
+}
 
 export interface AgentSdkRunOptions {
   apiKey: string;
@@ -46,6 +48,8 @@ export interface AgentSdkRunOptions {
   pathToClaudeCodeExecutable?: string;
   customHeaders?: Record<string, string>;
   clientVersion?: string;
+  mcpServers?: SdkOptions['mcpServers'];
+  allowedBusinessTools?: string[];
 }
 
 function serializeCustomHeaders(headers: Record<string, string> | undefined): string | undefined {
@@ -80,9 +84,9 @@ export function resolvePackagedClaudeExecutable(
  * explicit allow-list here; user/project Claude settings are never inherited.
  */
 export function buildAgentSdkOptions(input: AgentSdkRunOptions): SdkOptions {
-  const bundledExecutable =
-    input.pathToClaudeCodeExecutable ?? resolvePackagedClaudeExecutable();
+  const bundledExecutable = input.pathToClaudeCodeExecutable ?? resolvePackagedClaudeExecutable();
   const customHeaders = serializeCustomHeaders(input.customHeaders);
+  const allowedBusinessTools = input.allowedBusinessTools ?? [];
   return {
     systemPrompt: input.systemPrompt,
     env: {
@@ -95,11 +99,11 @@ export function buildAgentSdkOptions(input: AgentSdkRunOptions): SdkOptions {
     },
     model: input.model,
     tools: [],
-    allowedTools: [],
+    allowedTools: allowedBusinessTools,
     disallowedTools: DENIED_NATIVE_TOOLS,
     permissionMode: 'dontAsk',
     hooks: {
-      PreToolUse: [{ hooks: [denyEveryTool] }]
+      PreToolUse: [{ hooks: [businessToolGate(new Set(allowedBusinessTools))] }]
     },
     maxTurns: input.maxTurns ?? 1,
     abortController: input.abortController,
@@ -107,10 +111,9 @@ export function buildAgentSdkOptions(input: AgentSdkRunOptions): SdkOptions {
     persistSession: false,
     settingSources: [],
     strictMcpConfig: true,
+    ...(input.mcpServers ? { mcpServers: input.mcpServers } : {}),
     stderr: input.stderr,
-    ...(bundledExecutable
-      ? { pathToClaudeCodeExecutable: bundledExecutable }
-      : {})
+    ...(bundledExecutable ? { pathToClaudeCodeExecutable: bundledExecutable } : {})
   };
 }
 

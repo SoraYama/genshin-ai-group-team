@@ -2,9 +2,11 @@ import { contextBridge, ipcRenderer } from 'electron';
 import {
   ALL_IPC_CHANNELS,
   ADVISOR_EVENT_CHANNEL,
+  ABYSS_ADVISOR_EVENT_CHANNEL,
   UPDATE_EVENT_CHANNEL
 } from '../shared/ipc-contract.js';
 import type { IpcChannel, IpcContract, RendererApi } from '../shared/ipc-contract.js';
+import type { AbyssAdvisorEvent } from '../shared/abyss-advisor.js';
 import type { AdvisorEvent, UpdateStatus } from '../shared/domain.js';
 
 interface IpcEnvelope<T> {
@@ -27,9 +29,7 @@ async function invoke<C extends IpcChannel>(
     throw new Error(`Channel not in whitelist: ${channel}`);
   }
 
-  const envelope = (await ipcRenderer.invoke(channel, payload)) as Envelope<
-    IpcContract[C]['res']
-  >;
+  const envelope = (await ipcRenderer.invoke(channel, payload)) as Envelope<IpcContract[C]['res']>;
 
   if (!envelope.ok) {
     const error = new Error(envelope.error.message) as Error & { code?: string };
@@ -85,6 +85,18 @@ const api: RendererApi = {
       ipcRenderer.on(ADVISOR_EVENT_CHANNEL, handler);
       return () => {
         ipcRenderer.removeListener(ADVISOR_EVENT_CHANNEL, handler);
+      };
+    }
+  },
+  abyssAdvisor: {
+    getScenario: () => invoke('advisor-v2:abyss-scenario', undefined),
+    recommend: (input) => invoke('advisor-v2:abyss-plan', input),
+    cancel: () => invoke('advisor-v2:abyss-cancel', undefined),
+    onEvent: (cb: (event: AbyssAdvisorEvent) => void): (() => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, value: AbyssAdvisorEvent) => cb(value);
+      ipcRenderer.on(ABYSS_ADVISOR_EVENT_CHANNEL, handler);
+      return () => {
+        ipcRenderer.removeListener(ABYSS_ADVISOR_EVENT_CHANNEL, handler);
       };
     }
   },
