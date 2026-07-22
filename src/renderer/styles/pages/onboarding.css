@@ -1,45 +1,329 @@
-.gta-role-list {
+.gta-onboarding-page {
+  width: min(100%, 1040px);
+  margin-inline: auto;
+  color: var(--gta-text-on-light);
+}
+
+.gta-onboarding-heading {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 22px;
+  padding: clamp(20px, 3vw, 34px);
+  border: 1px solid rgba(217, 228, 225, 0.76);
+  background: linear-gradient(105deg, rgba(239, 245, 242, 0.97), rgba(220, 232, 228, 0.9));
+  box-shadow: var(--gta-shadow-panel);
+  clip-path: polygon(
+    10px 0,
+    100% 0,
+    100% calc(100% - 10px),
+    calc(100% - 10px) 100%,
+    0 100%,
+    0 10px
+  );
+}
+
+.gta-onboarding-heading .gta-section-title {
+  margin-bottom: 10px;
+  color: var(--gta-text-on-light);
+  text-shadow: none;
+}
+
+.gta-onboarding-heading > div > p,
+.gta-onboarding-copy p,
+.gta-onboarding-note {
+  max-width: 630px;
+  margin: 0;
+  color: var(--gta-text-on-light-soft);
+  font-size: var(--gta-text-sm);
+  line-height: 1.7;
+}
+
+.gta-text-action {
+  min-height: 44px;
+  padding: 7px 10px;
+  border: 0;
+  border-bottom: 1px solid currentColor;
+  color: #615536;
+  background: transparent;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.gta-text-action:focus-visible {
+  outline: 3px solid var(--gta-focus);
+  outline-offset: 2px;
+}
+
+.gta-onboarding-steps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  margin: 0 0 14px;
+  padding: 0;
+  color: rgba(244, 247, 243, 0.66);
+  list-style: none;
+  background: rgba(218, 229, 226, 0.18);
+}
+
+.gta-onboarding-steps li {
+  display: flex;
+  min-height: 52px;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 14px;
+  background: rgba(13, 27, 41, 0.72);
+  font-size: var(--gta-text-xs);
+}
+
+.gta-onboarding-steps li span {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border: 1px solid currentColor;
+  font-family: var(--gta-font-mono);
+}
+
+.gta-onboarding-steps li.is-current,
+.gta-onboarding-steps li.is-done {
+  color: var(--gta-text-on-dark);
+}
+
+.gta-onboarding-steps li.is-current span {
+  border-color: var(--gta-gold);
+  color: #172a3a;
+  background: var(--gta-gold-strong);
+}
+
+.gta-onboarding-methods {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.gta-onboarding-method {
+  position: relative;
+  display: grid;
+  min-height: 210px;
+  align-content: center;
+  justify-items: start;
+  gap: 10px;
+  padding: clamp(24px, 4vw, 42px);
+  border: 1px solid rgba(215, 226, 223, 0.78);
+  color: var(--gta-text-on-light);
+  background: rgba(237, 243, 240, 0.96);
+  text-align: left;
+  cursor: pointer;
+  clip-path: polygon(
+    10px 0,
+    100% 0,
+    100% calc(100% - 10px),
+    calc(100% - 10px) 100%,
+    0 100%,
+    0 10px
+  );
+  transition:
+    transform var(--gta-dur-base),
+    border-color var(--gta-dur-base),
+    background var(--gta-dur-base);
+}
+
+.gta-onboarding-method:hover,
+.gta-onboarding-method:focus-visible {
+  border-color: var(--gta-gold);
+  outline: 0;
+  background: #f5f7f3;
+  transform: translateY(-3px);
+}
+
+.gta-onboarding-method strong {
+  font-size: clamp(20px, 2.2vw, 28px);
+}
+
+.gta-onboarding-method > span:not(.gta-onboarding-method-icon) {
+  color: var(--gta-text-on-light-soft);
+  font-size: var(--gta-text-sm);
+  line-height: 1.6;
+}
+
+.gta-onboarding-method small {
+  position: absolute;
+  top: 13px;
+  right: 13px;
+  padding: 4px 8px;
+  border: 1px solid var(--gta-gold);
+  color: #5b4e2e;
+  font-size: 10px;
+}
+
+.gta-onboarding-method-icon {
+  display: grid;
+  width: 46px;
+  height: 46px;
+  place-items: center;
+  border: 1px solid var(--gta-gold);
+  color: var(--gta-gold-strong);
+  background: var(--gta-panel-dark);
+  transform: rotate(45deg);
+}
+
+.gta-onboarding-workspace {
+  display: grid;
+  gap: 18px;
+  padding: clamp(24px, 4vw, 44px);
+  border: 1px solid rgba(215, 226, 223, 0.78);
+  color: var(--gta-text-on-light);
+  background: rgba(237, 243, 240, 0.97);
+  box-shadow: var(--gta-shadow-panel);
+  animation: gta-content-enter 260ms var(--gta-ease) both;
+}
+
+.gta-onboarding-copy h3 {
+  margin: 0 0 7px;
+  font-size: var(--gta-text-xl);
+}
+
+.gta-onboarding-uid-field {
+  width: min(100%, 520px);
+}
+
+.gta-onboarding-uid-field input {
+  min-height: 52px;
+  padding: 10px 14px;
+  border: 1px solid var(--gta-stroke);
+  border-radius: 0;
+  color: var(--gta-text-on-light);
+  background: rgba(255, 255, 255, 0.68);
+  font-family: var(--gta-font-mono);
+  font-size: var(--gta-text-lg);
+  letter-spacing: 0.08em;
+}
+
+.gta-onboarding-uid-field input:focus {
+  border-color: var(--gta-gold);
+  outline: 3px solid var(--gta-gold-soft);
+}
+
+.gta-onboarding-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.gta-onboarding-advanced {
+  margin-top: 8px;
+}
+
+.gta-onboarding-error {
+  margin-top: 12px;
+  color: #7a2930;
+  background: rgba(246, 236, 235, 0.97);
+}
+
+.gta-onboarding-sync {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin-top: 12px;
+  padding: 16px 18px;
+  border-left: 2px solid var(--gta-gold);
+  color: var(--gta-text-on-light);
+  background: rgba(237, 243, 240, 0.96);
+}
+
+.gta-onboarding-sync p {
+  margin: 3px 0 0;
+  color: var(--gta-text-on-light-soft);
+  font-size: var(--gta-text-xs);
+}
+
+.gta-onboarding-pulse {
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--gta-gold);
+  background: var(--gta-panel-dark);
+  animation: gta-onboarding-pulse 1.2s ease-in-out infinite;
+  transform: rotate(45deg);
+}
+
+.gta-role-list {
+  display: grid;
+  gap: 7px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
+
 .gta-role-list label {
   display: flex;
-  min-height: 52px;
+  min-height: 56px;
   align-items: center;
   gap: 12px;
   padding: 10px 14px;
   border: 1px solid var(--gta-stroke);
-  background: var(--gta-panel-2);
+  background: rgba(255, 255, 255, 0.42);
   cursor: pointer;
-  transition:
-    border-color var(--gta-dur-base),
-    background var(--gta-dur-base);
 }
+
 .gta-role-list label:hover,
 .gta-role-list label:has(input:checked) {
   border-color: var(--gta-gold);
-  background: var(--gta-panel);
+  background: #fff;
 }
+
 .gta-role-list input {
   accent-color: var(--gta-panel-dark);
 }
 .gta-role-line {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
 }
 .gta-role-line .uid {
-  color: var(--gta-text-on-light);
   font-family: var(--gta-font-mono);
-  font-size: var(--gta-text-sm);
-  font-weight: 700;
+  font-size: var(--gta-text-xs);
 }
 .gta-role-line .meta {
   color: var(--gta-text-on-light-soft);
   font-size: var(--gta-text-xs);
+}
+
+@keyframes gta-onboarding-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: rotate(45deg) scale(0.84);
+  }
+  50% {
+    opacity: 1;
+    transform: rotate(45deg) scale(1);
+  }
+}
+
+@media (max-width: 700px) {
+  .gta-onboarding-methods {
+    grid-template-columns: 1fr;
+  }
+  .gta-onboarding-heading {
+    flex-direction: column;
+  }
+  .gta-onboarding-steps li {
+    padding-inline: 8px;
+  }
+  .gta-onboarding-steps li span {
+    flex: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gta-onboarding-workspace,
+  .gta-onboarding-pulse {
+    animation: none;
+  }
 }

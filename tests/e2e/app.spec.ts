@@ -105,7 +105,21 @@ test('boots with isolated data and navigates through preload-backed pages', asyn
   await expect(page).toHaveTitle('Genshin Team Advisor');
   expect(launchDurationMs).toBeLessThan(15_000);
   await expect(page.getByRole('navigation', { name: '主导航' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: /绑定米游社账号/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /添加角色资料/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /登录米游社/ })).toContainText('完整资料');
+  await expect(page.getByRole('button', { name: /只用 UID 展示柜/ })).toContainText('无需登录');
+
+  await page.getByRole('button', { name: /登录米游社/ }).click();
+  await expect(page.getByRole('button', { name: '用内置浏览器登录米游社' })).toBeVisible();
+  await expect(page.getByText('高级：手动粘贴 Cookie（不推荐）')).toBeVisible();
+  await page.getByRole('button', { name: '返回选择方式' }).click();
+  await page.getByRole('button', { name: /只用 UID 展示柜/ }).click();
+  const uidInput = page.getByLabel('游戏 UID');
+  await uidInput.fill('12345678');
+  await page.getByRole('button', { name: '同步展示角色' }).click();
+  await expect(page.getByText('请输入 9 位数字 UID')).toBeVisible();
+  await expect(page.getByText(/Cookie/)).toBeHidden();
+  await page.getByRole('button', { name: '返回选择方式' }).click();
 
   const primaryNavigation = page.getByRole('navigation', { name: '主导航' });
   await expect(primaryNavigation.getByRole('button')).toHaveText([
@@ -157,7 +171,7 @@ test('boots with isolated data and navigates through preload-backed pages', asyn
 
   await page.getByRole('button', { name: '账号与设置' }).click();
   await page.getByRole('menuitem', { name: '资料绑定' }).click();
-  await expect(page.getByRole('heading', { name: /绑定米游社账号/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /添加角色资料/ })).toBeVisible();
   expect(rendererErrors).toEqual([]);
 });
 
@@ -185,7 +199,7 @@ test('supports the complete keyboard model for the account menu', async () => {
 
   await page.keyboard.press('Tab');
   await expect(accountMenu).toBeHidden();
-  await expect(page.getByRole('button', { name: '用内置浏览器登录米游社' })).toBeFocused();
+  await expect(page.getByRole('button', { name: /登录米游社/ })).toBeFocused();
 
   await accountButton.focus();
   await page.keyboard.press('Enter');
@@ -205,6 +219,8 @@ test('supports the complete keyboard model for the account menu', async () => {
 
 test('does not conceal horizontal content overflow', async () => {
   await expectPageFitsEveryViewport('Onboarding');
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.screenshot({ path: path.join(tmpdir(), 'gta-m3-onboarding-1280x800.png') });
 });
 
 test('keeps focus on the account trigger after every menu command', async () => {
@@ -213,7 +229,7 @@ test('keeps focus on the account trigger after every menu command', async () => 
   await accountButton.focus();
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Enter');
-  await expect(page.getByRole('heading', { name: /绑定米游社账号/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /添加角色资料/ })).toBeVisible();
   await expect(accountButton).toBeFocused();
 
   await page.keyboard.press('ArrowDown');
@@ -268,6 +284,72 @@ test('traps modal focus and restores it to the connected opener', async () => {
   await expect(accountButton).toBeFocused();
 });
 
+test('routes UID-only onboarding through the preload profile refresh contract', async () => {
+  const uid = '123456789';
+  await electronApp.evaluate(({ ipcMain }, testUid) => {
+    const scope = globalThis as typeof globalThis & {
+      __gtaM3UidCalls?: Array<{ channel: string; payload: unknown }>;
+    };
+    scope.__gtaM3UidCalls = [];
+    ipcMain.removeHandler('profile:refresh');
+    ipcMain.handle('profile:refresh', (_event, payload) => {
+      scope.__gtaM3UidCalls?.push({ channel: 'profile:refresh', payload });
+      return {
+        ok: true,
+        data: {
+          profile: {
+            schemaVersion: 2,
+            uid: testUid,
+            nickname: 'UID 测试账号',
+            source: 'enka',
+            fetchedAt: '2026-07-23T00:00:00.000Z',
+            characters: [],
+            coverage: {
+              ownedCount: 0,
+              detailedCount: 0,
+              buildCount: 0,
+              statsCount: 0,
+              enkaShowcaseCount: 0,
+              missingDetailCount: 0,
+              partial: true
+            }
+          },
+          summary: {
+            enka: 'ok',
+            enkaCharacterCount: 0,
+            miyoushe: 'no-cookie',
+            miyousheCharacterCount: 0,
+            totalCharacterCount: 0
+          }
+        }
+      };
+    });
+    ipcMain.removeHandler('profile:set-active');
+    ipcMain.handle('profile:set-active', (_event, payload) => {
+      scope.__gtaM3UidCalls?.push({ channel: 'profile:set-active', payload });
+      return { ok: true, data: { ok: true } };
+    });
+  }, uid);
+
+  await page.getByRole('button', { name: '账号与设置' }).click();
+  await page.getByRole('menuitem', { name: '资料绑定' }).click();
+  await page.getByRole('button', { name: /只用 UID 展示柜/ }).click();
+  await page.getByLabel('游戏 UID').fill(uid);
+  await page.getByRole('button', { name: '同步展示角色' }).click();
+  await expect(page.getByText('还没有绑定任何账号。')).toBeVisible();
+
+  const calls = await electronApp.evaluate(() => {
+    const scope = globalThis as typeof globalThis & {
+      __gtaM3UidCalls?: Array<{ channel: string; payload: unknown }>;
+    };
+    return scope.__gtaM3UidCalls ?? [];
+  });
+  expect(calls).toEqual([
+    { channel: 'profile:refresh', payload: { uid } },
+    { channel: 'profile:set-active', payload: { uid } }
+  ]);
+});
+
 test('renders profile coverage and known build fields without fake zero values', async () => {
   test.setTimeout(60_000);
   await electronApp.close();
@@ -282,6 +364,7 @@ test('renders profile coverage and known build fields without fake zero values',
           schemaVersion: 2,
           uid: '100000001',
           nickname: '脱敏测试账号',
+          credentialSource: 'partition',
           source: 'merged',
           fetchedAt,
           characters: [
@@ -290,10 +373,10 @@ test('renders profile coverage and known build fields without fake zero values',
               name: '测试角色',
               element: 'Pyro',
               rarity: 5,
-              imageUrl: '',
+              imageUrl: 'gtai-img://official-looking-portrait-should-never-render',
               level: 90,
               build: {
-                stats: { atk: 1800, critRate: 61.2 },
+                stats: { hp: 18800, atk: 1800, def: 780, critRate: 61.2 },
                 weapon: {
                   id: 1,
                   name: '测试武器',
@@ -341,14 +424,126 @@ test('renders profile coverage and known build fields without fake zero values',
   );
   await launchApp();
 
-  await expect(page.getByTestId('profile-coverage-summary')).toContainText('资料不完整');
-  await expect(page.getByText('米游社 + 展示柜资料融合', { exact: true })).toBeVisible();
-  await expect(page.getByText('测试武器 · Lv 90 · 精2')).toBeVisible();
-  await expect(page.getByText('6 / 9 / 10')).toBeVisible();
-  await expect(page.getByText(/测试套装×1/)).toBeVisible();
-  await expect(page.getByText('未知', { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: '更新角色资料' })).toHaveCount(1);
+  await expect(
+    page.getByRole('button', {
+      name: /更换米游社账号|连接诊断|退出米游社登录|绑定新 UID|删除本机角色资料/
+    })
+  ).toHaveCount(0);
+  await expect(page.getByTestId('profile-coverage-summary')).toContainText('已读取 1 名角色');
+  await expect(page.getByTestId('profile-coverage-summary')).toContainText('1 名有完整装备面板');
+  await expect(page.getByText(/融合|Enka|缓存/)).toHaveCount(0);
+
+  const maintenanceButton = page.getByRole('button', { name: '账号维护' });
+  await maintenanceButton.focus();
+  await page.keyboard.press('ArrowDown');
+  const maintenanceMenu = page.getByRole('menu', { name: '账号维护' });
+  await expect(maintenanceMenu).toBeVisible();
+  await expect(maintenanceMenu.getByRole('menuitem')).toHaveText([
+    '更换登录账号',
+    '连接诊断',
+    '退出米游社登录',
+    '绑定新 UID',
+    '删除本机角色资料'
+  ]);
+  await expect(maintenanceMenu.getByRole('menuitem').first()).toBeFocused();
+  await page.keyboard.press('ArrowUp');
+  await expect(maintenanceMenu.getByRole('menuitem').last()).toBeFocused();
+  await page.keyboard.press('Home');
+  await expect(maintenanceMenu.getByRole('menuitem').first()).toBeFocused();
+  await page.keyboard.press('End');
+  await expect(maintenanceMenu.getByRole('menuitem').last()).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(maintenanceMenu).toBeHidden();
+  await expect(maintenanceButton).toBeFocused();
+
+  await page.keyboard.press('ArrowDown');
+  await expect(maintenanceMenu.getByRole('menuitem').first()).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(maintenanceMenu).toBeHidden();
+  await expect(page.getByRole('tab', { name: /脱敏测试账号/ })).toBeFocused();
+  await maintenanceButton.focus();
+  await page.keyboard.press('ArrowDown');
+  await expect(maintenanceMenu.getByRole('menuitem').first()).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(maintenanceMenu).toBeHidden();
+  await expect(page.getByRole('button', { name: '账号与设置' })).toBeFocused();
+
+  await maintenanceButton.click();
+  await maintenanceMenu.getByRole('menuitem', { name: '退出米游社登录' }).click();
+  const logoutDialog = page.getByRole('dialog', { name: '退出米游社登录？' });
+  await expect(logoutDialog).toContainText('清除登录状态，不删除已同步角色资料');
+  await logoutDialog.getByRole('button', { name: '保留并返回' }).click();
+  await expect(page.getByText('登录状态已清除')).toHaveCount(0);
+
+  await maintenanceButton.click();
+  await maintenanceMenu.getByRole('menuitem', { name: '退出米游社登录' }).click();
+  await logoutDialog.getByRole('button', { name: '清除米游社登录状态' }).click();
+  await expect(page.getByText(/登录状态已清除/)).toBeVisible();
+
+  await maintenanceButton.click();
+  await maintenanceMenu.getByRole('menuitem', { name: '删除本机角色资料' }).click();
+  const deleteDialog = page.getByRole('dialog', { name: '删除脱敏测试账号的本机角色资料？' });
+  await expect(deleteDialog).toContainText('UID 100000001');
+  await expect(deleteDialog).toContainText('角色、装备面板和同步时间');
+  await expect(deleteDialog).toContainText('不会删除游戏账号或游戏内数据');
+  await expect(deleteDialog).toContainText('无法撤销');
+  await deleteDialog.getByRole('button', { name: '保留并返回' }).click();
+  await expect(page.getByText('测试角色', { exact: true })).toBeVisible();
+
+  await expect(page.locator('article').filter({ hasText: '测试角色' }).locator('img')).toHaveCount(
+    0
+  );
+  const characterCard = page.locator('article').filter({ hasText: '测试角色' });
+  await expect(characterCard).toContainText('1命');
+  await expect(characterCard).toContainText('火元素');
+  await expect(characterCard).toContainText('5星');
+  await expect(characterCard.getByTitle('命座')).toBeVisible();
+  await expect(characterCard.getByTitle('元素')).toBeVisible();
+  await expect(characterCard.getByTitle('稀有度')).toBeVisible();
+
+  await characterCard.getByRole('button', { name: '查看测试角色详细资料' }).click();
+  for (const title of [
+    '生命',
+    '攻击',
+    '防御',
+    '暴击率',
+    '暴击伤害',
+    '元素充能',
+    '元素精通',
+    '武器',
+    '天赋',
+    '圣遗物'
+  ]) {
+    await expect(characterCard.getByTitle(title, { exact: true })).toBeVisible();
+  }
+  await expect(characterCard.getByText('测试武器 · Lv 90 · 精2')).toBeVisible();
+  await expect(characterCard.getByText('6 / 9 / 10')).toBeVisible();
+  await expect(characterCard.getByText(/测试套装×1/)).toBeVisible();
+  await expect(characterCard.getByText('—', { exact: true }).first()).toBeVisible();
+  await expect(characterCard).not.toContainText(/(^|\D)0($|\D)/);
+
+  const searchInput = page.getByRole('searchbox', { name: '搜索角色' });
+  await searchInput.fill('不存在');
+  await expect(page.getByText('显示 0 / 1 名角色')).toBeVisible();
+  await expect(characterCard).toBeHidden();
+  await searchInput.fill('测试');
+  await expect(page.getByText('显示 1 / 1 名角色')).toBeVisible();
+  await page.getByRole('button', { name: '水元素' }).click();
+  await expect(characterCard).toBeHidden();
+  await page.getByRole('button', { name: '火元素' }).click();
+  await expect(characterCard).toBeVisible();
   await expectNoForbiddenPlayerTerms();
-  await expectPageFitsEveryViewport('Roster');
+  await characterCard.getByRole('button', { name: '查看测试角色详细资料' }).click();
+  await expectPageFitsEveryViewport('Roster expanded detail');
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.screenshot({ path: path.join(tmpdir(), 'gta-m3-roster-1024x768.png') });
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await page.screenshot({ path: path.join(tmpdir(), 'gta-m3-roster-1600x1000.png') });
+  await maintenanceButton.click();
+  await maintenanceMenu.getByRole('menuitem', { name: '删除本机角色资料' }).click();
+  await expectPageFitsEveryViewport('Roster delete dialog');
+  await deleteDialog.getByRole('button', { name: '保留并返回' }).click();
 
   await page.getByRole('button', { name: '挑战配队' }).click();
   await expect(page.getByRole('heading', { name: '选择挑战' })).toBeVisible();
@@ -416,5 +611,14 @@ test('renders profile coverage and known build fields without fake zero values',
   await expect(page.getByRole('heading', { name: /智能服务设置/ })).toBeVisible();
   await expectNoForbiddenPlayerTerms();
   await expectPageFitsEveryViewport('Settings');
+
+  await page.getByRole('button', { name: '角色一览' }).click();
+  await page.getByRole('button', { name: '账号维护' }).click();
+  await page.getByRole('menuitem', { name: '删除本机角色资料' }).click();
+  await page
+    .getByRole('dialog', { name: '删除脱敏测试账号的本机角色资料？' })
+    .getByRole('button', { name: '删除脱敏测试账号的本机角色资料' })
+    .click();
+  await expect(page.getByText('还没有绑定任何账号。')).toBeVisible();
   expect(rendererErrors).toEqual([]);
 });

@@ -109,6 +109,137 @@ export function PortraitFallback({ className, size = 60 }: SvgProps) {
   );
 }
 
+export type StatIconName =
+  | 'hp'
+  | 'atk'
+  | 'def'
+  | 'crit-rate'
+  | 'crit-dmg'
+  | 'energy-recharge'
+  | 'elemental-mastery';
+
+interface StatIconProps extends SvgProps {
+  name: StatIconName;
+}
+
+/** Original single-line symbols; deliberately distinct from the game's UI glyphs. */
+export function StatIcon({ className, name, size = 16 }: StatIconProps) {
+  const shared = {
+    width: size,
+    height: size,
+    viewBox: '0 0 20 20',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.6,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    className,
+    'aria-hidden': true
+  };
+  if (name === 'hp') {
+    return (
+      <svg {...shared}>
+        <path d="M10 17s-6-3.6-6-8.1A3.8 3.8 0 0 1 10 6a3.8 3.8 0 0 1 6 2.9C16 13.4 10 17 10 17Z" />
+      </svg>
+    );
+  }
+  if (name === 'atk') {
+    return (
+      <svg {...shared}>
+        <path d="m5 15 9-9M8 5l7-2-2 7M3.5 16.5l3-3" />
+      </svg>
+    );
+  }
+  if (name === 'def') {
+    return (
+      <svg {...shared}>
+        <path d="M10 2.7 16 5v4.6c0 3.7-2.2 6.3-6 7.8-3.8-1.5-6-4.1-6-7.8V5l6-2.3Z" />
+        <path d="M10 6v7" />
+      </svg>
+    );
+  }
+  if (name === 'crit-rate') {
+    return (
+      <svg {...shared}>
+        <circle cx="10" cy="10" r="6.5" />
+        <circle cx="10" cy="10" r="2" />
+        <path d="m14.5 5.5 2-2" />
+      </svg>
+    );
+  }
+  if (name === 'crit-dmg') {
+    return (
+      <svg {...shared}>
+        <path d="m10 2 1.6 5.1L17 8.6l-4.1 3.2.2 5.4-3.1-4.4-3.1 4.4.2-5.4L3 8.6l5.4-1.5L10 2Z" />
+      </svg>
+    );
+  }
+  if (name === 'energy-recharge') {
+    return (
+      <svg {...shared}>
+        <path d="M15.5 6.5A6 6 0 1 0 16 13" />
+        <path d="M15.5 3v3.5H12M10.5 6.5 8 10h3l-1.5 3.5" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...shared}>
+      <path d="M10 2.5v15M4 6l12 8M4 14l12-8" />
+      <circle cx="10" cy="10" r="3" />
+    </svg>
+  );
+}
+
+export type BuildIconName = 'weapon' | 'talents' | 'artifacts' | 'constellation';
+
+interface BuildIconProps extends SvgProps {
+  name: BuildIconName;
+}
+
+export function BuildIcon({ className, name, size = 17 }: BuildIconProps) {
+  const shared = {
+    width: size,
+    height: size,
+    viewBox: '0 0 20 20',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.5,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    className,
+    'aria-hidden': true
+  };
+  if (name === 'weapon') {
+    return (
+      <svg {...shared}>
+        <path d="m4 16 10-10M11 4l5-1-1 5M3 17l4-1-3-3-1 4Z" />
+      </svg>
+    );
+  }
+  if (name === 'talents') {
+    return (
+      <svg {...shared}>
+        <path d="M3.5 4.5c3-1 5-.6 6.5 1v10c-1.5-1.6-3.5-2-6.5-1v-10ZM16.5 4.5c-3-1-5-.6-6.5 1v10c1.5-1.6 3.5-2 6.5-1v-10Z" />
+      </svg>
+    );
+  }
+  if (name === 'artifacts') {
+    return (
+      <svg {...shared}>
+        <path d="m10 2.5 6 4.3-2.3 7H6.3L4 6.8 10 2.5Z" />
+        <path d="m10 6 2.4 1.8-.9 2.8h-3l-.9-2.8L10 6Z" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...shared}>
+      <path d="m10 2 1.5 4.6L16 8l-4.5 1.4L10 14l-1.5-4.6L4 8l4.5-1.4L10 2Z" />
+      <circle cx="4" cy="15.5" r="1.2" />
+      <path d="m5 14.7 3-2" />
+    </svg>
+  );
+}
+
 interface ButtonIconProps {
   name: 'check' | 'x' | 'plus' | 'refresh' | 'trash';
   size?: number;

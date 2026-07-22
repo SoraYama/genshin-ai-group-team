@@ -1434,6 +1434,33 @@ describe('profile:refresh roster integrity', () => {
     expect(deps.miyousheBridge.fetchRoster).not.toHaveBeenCalled();
   }
 
+  it('creates a UID-only profile from the injected public showcase without account access', async () => {
+    const deps = setup(undefined);
+    deps.enka.fetchProfile.mockResolvedValue({
+      uid: UID,
+      nickname: 'UID Traveler',
+      level: 58,
+      region: 'cn_gf01',
+      ttlSeconds: 60,
+      showcaseStatus: 'available',
+      characters: [enkaCharacter(1)]
+    });
+
+    const result = await refresh(UID);
+
+    expect(deps.enka.fetchProfile).toHaveBeenCalledWith(UID);
+    expect(result.profile).toMatchObject({
+      uid: UID,
+      nickname: 'UID Traveler',
+      level: 58,
+      source: 'enka'
+    });
+    expect(result.profile.characters).toHaveLength(1);
+    expect(result.summary.miyoushe).toBe('no-cookie');
+    expect(deps.store.upsert).toHaveBeenCalledWith(result.profile);
+    expectNoMiyousheNetwork(deps);
+  });
+
   it('revokes account A before browser B replacement and keeps only B partition-authorized after TTL or restart', async () => {
     let now = 1_000;
     vi.spyOn(Date, 'now').mockImplementation(() => now);

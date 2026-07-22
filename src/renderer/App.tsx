@@ -34,6 +34,7 @@ export default function App() {
             await refresh();
             setView('roster');
           }}
+          onCancel={state.profiles.length > 0 ? () => setView('roster') : undefined}
         />
       ) : view === 'advisor' ? (
         <AdvisorPage state={state} onGotoOnboarding={() => setView('onboarding')} />
