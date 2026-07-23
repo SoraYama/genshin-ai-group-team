@@ -95,11 +95,8 @@ export function TheaterWorkspace({ uid, onBack }: { uid: string; onBack: () => v
 
   const scenario = view?.status === 'ready' ? view.scenario : null;
   const preview = useMemo(
-    () =>
-      scenario && profile
-        ? qualificationPreview(scenario, profile.characters, selectedPools['special-guest'] ?? [])
-        : null,
-    [scenario, profile, selectedPools]
+    () => (scenario && profile ? qualificationPreview(scenario, profile.characters) : null),
+    [scenario, profile]
   );
   const scenarioReadOnly =
     view?.status === 'ready' && view.trust === 'production' && view.notCurrent;
@@ -578,20 +575,14 @@ function TheaterResult({
   );
 }
 
-function qualificationPreview(
-  scenario: TheaterScenario,
-  characters: CharacterProfile[],
-  specialGuests: string[]
-) {
+function qualificationPreview(scenario: TheaterScenario, characters: CharacterProfile[]) {
   const allowed = new Set(scenario.eligibility.elements);
-  const guests = new Set(specialGuests);
   const eligible: CharacterProfile[] = [];
   const ineligible: Array<{ character: CharacterProfile; reasons: Array<'element' | 'level'> }> =
     [];
   for (const character of characters) {
     const reasons: Array<'element' | 'level'> = [];
-    if (!allowed.has(character.element.toLowerCase() as never) && !guests.has(String(character.id)))
-      reasons.push('element');
+    if (!allowed.has(character.element.toLowerCase() as never)) reasons.push('element');
     if ((character.level ?? 0) < scenario.eligibility.minimumLevel) reasons.push('level');
     if (reasons.length) ineligible.push({ character, reasons });
     else eligible.push(character);

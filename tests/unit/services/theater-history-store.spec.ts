@@ -99,4 +99,18 @@ describe('Theater history deep validation', () => {
     invalid.vigorBudget[1]!.after = 0;
     expect(() => store.appendTheater(invalid)).toThrow();
   });
+
+  it('rejects an external actor snapshot whose source differs from the plan', () => {
+    const store = new HistoryStore();
+    const invalid = input();
+    invalid.interventions.selectedTrialCharacterIds = ['trial.1'];
+    invalid.plan.cast.trialCharacterIds = ['trial.1'];
+    invalid.cast.push({ id: 'trial.1', name: '试用演员一', source: 'support' });
+    expect(() => store.appendTheater(invalid)).toThrow();
+
+    invalid.cast[invalid.cast.length - 1]!.source = 'trial';
+    expect(store.appendTheater(invalid).cast).toContainEqual(
+      expect.objectContaining({ id: 'trial.1', source: 'trial' })
+    );
+  });
 });

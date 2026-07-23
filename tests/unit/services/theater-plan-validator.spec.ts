@@ -177,6 +177,29 @@ describe('validateTheaterPlan', () => {
     });
   });
 
+  it('does not count an owned profile character when the plan uses its external actor instance', () => {
+    const plan = validTheaterPlan();
+    plan.cast.selectedCharacterIds = plan.cast.selectedCharacterIds.filter((id) => id !== '1001');
+    plan.cast.openingCharacterIds = ['1001'];
+    expect(
+      validateTheaterPlan({
+        input: theaterInput({ selectedOpeningCharacterIds: ['1001'] }),
+        scenario: theaterScenario(),
+        characters: THEATER_CHARACTERS,
+        knowledge: groupingKnowledge,
+        plan
+      })
+    ).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([
+        expect.objectContaining({
+          code: 'CAST_ELIGIBILITY_INVALID',
+          details: expect.objectContaining({ required: 8, qualified: 7 })
+        })
+      ])
+    });
+  });
+
   it('rejects candidates outside the admitted cast and planned spend outside candidates', () => {
     const plan = validTheaterPlan();
     plan.acts[0]!.candidateCharacterIds = ['1001', '9999'];

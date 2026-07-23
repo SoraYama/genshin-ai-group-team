@@ -23,20 +23,21 @@ describe('evaluateTheaterEligibility', () => {
     );
   });
 
-  it('lets an owned special guest bypass element but not level', () => {
+  it('does not let an external special-guest instance contribute to owned hard eligibility', () => {
     const report = evaluateTheaterEligibility({
       input: theaterInput({ selectedSpecialGuestCharacterIds: ['1009'] }),
       scenario: theaterScenario(),
       characters: THEATER_CHARACTERS
     });
 
-    expect(report.hardQualifiedCount).toBe(10);
+    expect(report.hardQualifiedCount).toBe(9);
     expect(report.pools).toContainEqual(
       expect.objectContaining({
         id: '1009',
         source: 'special-guest',
-        qualification: 'qualified',
-        countsTowardRequirement: true
+        qualification: 'unknown',
+        countsTowardRequirement: false,
+        owned: true
       })
     );
   });

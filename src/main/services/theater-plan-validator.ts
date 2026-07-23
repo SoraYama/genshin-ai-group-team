@@ -52,7 +52,6 @@ export function validateTheaterPlan(options: {
   const allowedElements = new Set(
     scenario.eligibility.elements.map((value) => value.toLowerCase())
   );
-  const configuredSpecialGuests = new Set(scenario.pools.specialGuest.map(({ id }) => id));
   for (const [index, id] of plan.cast.selectedCharacterIds.entries()) {
     if (!owned.has(id)) {
       issues.push(
@@ -131,10 +130,9 @@ export function validateTheaterPlan(options: {
         )
       );
     }
+    if (source !== 'owned') continue;
     const levelQualified = (character.level ?? 0) >= scenario.eligibility.minimumLevel;
-    const elementQualified =
-      allowedElements.has(character.element.toLowerCase()) ||
-      (source === 'special-guest' && configuredSpecialGuests.has(id));
+    const elementQualified = allowedElements.has(character.element.toLowerCase());
     if (levelQualified && elementQualified) qualifiedOwnedIds.add(id);
     else {
       issues.push(

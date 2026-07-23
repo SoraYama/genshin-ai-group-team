@@ -21,11 +21,8 @@ export function evaluateTheaterEligibility({
   knowledge
 }: EvaluateTheaterEligibilityOptions): TheaterEligibilityReport {
   const allowed = new Set(scenario.eligibility.elements.map((value) => value.toLowerCase()));
-  const specialGuestIds = new Set(scenario.pools.specialGuest.map(({ id }) => id));
-  const selectedSpecialGuests = new Set(input.selectedSpecialGuestCharacterIds);
   const excluded = new Set(input.excludedCharacterIds);
   const ownedById = new Map(characters.map((character) => [String(character.id), character]));
-  const isSelectedGuest = (id: string) => specialGuestIds.has(id) && selectedSpecialGuests.has(id);
   const eligibleOwned: string[] = [];
   const ineligibleOwned: TheaterEligibilityReport['ineligibleOwned'] = [];
 
@@ -33,7 +30,7 @@ export function evaluateTheaterEligibility({
     const id = String(character.id);
     if (excluded.has(id)) continue;
     const levelQualified = (character.level ?? 0) >= scenario.eligibility.minimumLevel;
-    const elementQualified = allowed.has(character.element.toLowerCase()) || isSelectedGuest(id);
+    const elementQualified = allowed.has(character.element.toLowerCase());
     if (levelQualified && elementQualified) {
       eligibleOwned.push(id);
       continue;
@@ -72,19 +69,13 @@ export function evaluateTheaterEligibility({
         continue;
       }
       if (owned) {
-        const levelQualified = (owned.level ?? 0) >= scenario.eligibility.minimumLevel;
-        const elementQualified =
-          allowed.has(owned.element.toLowerCase()) || source === 'special-guest';
-        const qualified = levelQualified && elementQualified;
         pools.push({
           id,
           source,
-          qualification: qualified ? 'qualified' : 'unqualified',
-          countsTowardRequirement: qualified,
+          qualification: 'unknown',
+          countsTowardRequirement: false,
           owned: true,
-          note: qualified
-            ? '已按玩家自有角色的元素与等级验证。'
-            : '该自有角色不满足当期元素或等级要求。'
+          note: '本次选择的是外部来源演员实例，即使玩家拥有同角色，也不计入自有硬资格。'
         });
       } else {
         pools.push({

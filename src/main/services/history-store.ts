@@ -129,6 +129,34 @@ const theaterHistoryEntrySchema = z
         message: 'Theater history cast IDs must be unique'
       });
     const byId = new Map(entry.cast.map((item) => [item.id, item]));
+    const plannedCastSources = [
+      ['owned', entry.plan.cast.selectedCharacterIds],
+      ['opening', entry.plan.cast.openingCharacterIds],
+      ['trial', entry.plan.cast.trialCharacterIds],
+      ['special-guest', entry.plan.cast.specialGuestCharacterIds],
+      ['support', entry.plan.cast.supportCharacterIds]
+    ] as const;
+    const expectedSourceById = new Map<string, (typeof plannedCastSources)[number][0]>();
+    for (const [source, sourceIds] of plannedCastSources) {
+      sourceIds.forEach((id) => {
+        const previous = expectedSourceById.get(id);
+        if (previous && previous !== source)
+          context.addIssue({
+            code: 'custom',
+            path: ['plan', 'cast'],
+            message: 'Theater history plan cannot assign one actor to multiple sources'
+          });
+        else expectedSourceById.set(id, source);
+      });
+    }
+    entry.cast.forEach(({ id, source }, index) => {
+      if (expectedSourceById.get(id) !== source)
+        context.addIssue({
+          code: 'custom',
+          path: ['cast', index, 'source'],
+          message: 'Theater history actor source must exactly match the plan'
+        });
+    });
     entry.plan.cast.selectedCharacterIds.forEach((id) => {
       if (byId.get(id)?.source !== 'owned')
         context.addIssue({
