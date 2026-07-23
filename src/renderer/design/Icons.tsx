@@ -1,6 +1,6 @@
-/** Original geometric SVG primitives shared across pages. */
+/** Shared visual primitives, including credited official element assets. */
 import type { Element } from './tokens';
-import { elementPalette } from './tokens';
+import { elementIconAssets } from './element-assets';
 
 interface SvgProps {
   className?: string;
@@ -29,53 +29,17 @@ interface ElementIconProps extends SvgProps {
 }
 
 export function ElementIcon({ element, className, size = 18 }: ElementIconProps) {
-  const { gradientStart, gradientEnd } = elementPalette[element];
-  const gid = `gta-grad-${element}`;
   return (
-    <svg
+    <img
       className={className}
+      src={elementIconAssets[element]}
       width={size}
       height={size}
-      viewBox="0 0 24 24"
-      fill={`url(#${gid})`}
+      alt=""
       aria-hidden="true"
-    >
-      <defs>
-        <linearGradient id={gid} x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor={gradientStart} />
-          <stop offset="100%" stopColor={gradientEnd} />
-        </linearGradient>
-      </defs>
-      <ElementShape element={element} />
-    </svg>
+      draggable={false}
+    />
   );
-}
-
-function ElementShape({ element }: { element: Element }) {
-  switch (element) {
-    case 'pyro':
-      return <path d="M12 2.5 C 14 6.5 18 8.5 18 13 a 6 6 0 0 1 -12 0 C 6 9 9 8.5 12 2.5 Z" />;
-    case 'hydro':
-      return <path d="M12 3 C 7 11 6.5 15 6.5 17 a 5.5 5.5 0 0 0 11 0 C 17.5 15 17 11 12 3 Z" />;
-    case 'electro':
-      return <path d="M13.5 2 L 5 13.5 L 11 13.5 L 9.5 22 L 19 9 L 13.5 9 L 15 2 Z" />;
-    case 'anemo':
-      return (
-        <path d="M 5 12 Q 5 5 12 5 Q 19 5 19 12 Q 19 19 12 19 Q 5 19 5 12 Z M 10 9 Q 13 9 13 12 Q 13 15 10 15" />
-      );
-    case 'geo':
-      return <path d="M12 3 L 21 9 L 18 20 L 6 20 L 3 9 Z" />;
-    case 'cryo':
-      return (
-        <g stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-          <path d="M 12 2 L 12 22" />
-          <path d="M 4 7 L 20 17" />
-          <path d="M 4 17 L 20 7" />
-        </g>
-      );
-    case 'dendro':
-      return <path d="M 12 22 C 6 17 6 9 12 3 C 18 9 18 17 12 22 Z" />;
-  }
 }
 
 export function StarIcon({ className, size = 9 }: SvgProps) {
