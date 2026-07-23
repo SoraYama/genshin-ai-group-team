@@ -643,6 +643,12 @@ test('renders profile coverage and known build fields without fake zero values',
   test.setTimeout(60_000);
   await electronApp.close();
   const fetchedAt = '2026-07-16T00:00:00.000Z';
+  const iconCacheDirectory = path.join(userDataDir, 'cache', 'icons');
+  await mkdir(iconCacheDirectory, { recursive: true });
+  await writeFile(
+    path.join(iconCacheDirectory, 'UI_AvatarIcon_E2ETest.png'),
+    await readFile(path.resolve('resources/official/genshin-elements/pyro.png'))
+  );
   await writeFile(
     path.join(userDataDir, 'profiles.json'),
     JSON.stringify({
@@ -663,7 +669,7 @@ test('renders profile coverage and known build fields without fake zero values',
               name: '测试角色',
               element: 'Pyro',
               rarity: 5,
-              imageUrl: 'gtai-img://official-looking-portrait-should-never-render',
+              imageUrl: 'gtai-img://avatar/UI_AvatarIcon_E2ETest.png',
               level: 90,
               build: {
                 stats: {
@@ -851,10 +857,8 @@ test('renders profile coverage and known build fields without fake zero values',
   await expect(page.getByText('测试角色', { exact: true })).toBeVisible();
   await expect(maintenanceButton).toBeFocused();
 
-  await expect(page.locator('article').filter({ hasText: '测试角色' }).locator('img')).toHaveCount(
-    0
-  );
   const characterCard = page.locator('article').filter({ hasText: '测试角色' });
+  await expect(characterCard.locator('.gta-character-mark.has-image img')).toBeVisible();
   await expect(characterCard).toContainText('1命');
   await expect(characterCard).toContainText('火元素');
   await expect(characterCard).toContainText('5星');
