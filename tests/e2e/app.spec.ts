@@ -1121,6 +1121,9 @@ test('runs the abyss-specific development-sample flow with accessible interventi
   await expect(
     page.getByText('已按本地规则核对上下半队伍与逐间敌情。', { exact: true })
   ).toBeVisible();
+  await expect(
+    page.getByText('这个目标没有保存可验证的本地化指引。', { exact: true })
+  ).toHaveCount(4);
   await expect(page.getByRole('heading', { name: '上半队伍' })).toBeVisible();
   await expect(page.getByRole('heading', { name: '下半队伍' })).toBeVisible();
   const resultCharacters = await page
@@ -1196,6 +1199,9 @@ test('runs the abyss-specific development-sample flow with accessible interventi
   await expect(page.locator('main')).not.toContainText(/development\.|development-sample/);
   const abyssHistory = page.getByRole('button', { name: /深境螺旋 12 层/ }).first();
   await abyssHistory.click();
+  await expect(
+    page.getByText('这个目标没有保存可验证的本地化指引。', { exact: true })
+  ).toHaveCount(4);
   await expect(page.getByText('循环手法').first()).toBeVisible();
   await expect(page.getByText('上半打法').first()).toBeVisible();
   await expect(page.getByText('风险').first()).toBeVisible();
@@ -1367,6 +1373,9 @@ test('plans three Stygian phases from the development scenario without leaking r
   await expect(
     page.getByText('已按本地规则核对三阶段队伍、复用限制与机制覆盖。', { exact: true })
   ).toBeVisible();
+  await expect(
+    page.getByText('这个目标没有保存可验证的本地化指引。', { exact: true })
+  ).toHaveCount(3);
   await page.getByRole('button', { name: '改选演示难度 5' }).click();
   await expect(page.getByRole('button', { name: '冲高难奖励' })).toHaveAttribute(
     'aria-pressed',
@@ -1454,6 +1463,9 @@ test('plans three Stygian phases from the development scenario without leaking r
   await expect(page.getByText('演练资料', { exact: true }).first()).toBeVisible();
   const stygianHistory = page.getByRole('button', { name: /幽境危战 · 演示难度 6/ }).first();
   await stygianHistory.click();
+  await expect(
+    page.getByText('这个目标没有保存可验证的本地化指引。', { exact: true })
+  ).toHaveCount(3);
   await expect(page.getByText('第 1 阶段', { exact: true })).toBeVisible();
   await expect(page.getByText('循环手法').first()).toBeVisible();
   await expect(page.getByRole('button', { name: '删除这份方案' })).toBeVisible();
@@ -1683,6 +1695,9 @@ test('checks Theater eligibility and renders a cast-vigor route instead of team 
   await expect(
     page.getByText('已按本地规则核对演员池、活力预算与逐幕路线。', { exact: true })
   ).toBeVisible();
+  await expect(
+    page.getByText('这个目标没有保存可验证的本地化指引。', { exact: true })
+  ).toHaveCount(2);
   await expect(page.getByRole('heading', { name: '入场演员池' })).toBeVisible();
   await expect(page.getByRole('heading', { name: '逐幕活力预算' })).toBeVisible();
   await expect(page.getByRole('heading', { name: '保留与分支优先级' })).toBeVisible();
@@ -1762,6 +1777,9 @@ test('checks Theater eligibility and renders a cast-vigor route instead of team 
   await expect(page.getByRole('heading', { name: '推荐记录' })).toBeVisible();
   const theaterHistory = page.getByRole('button', { name: /幻想真境剧诗/ }).first();
   await theaterHistory.click();
+  await expect(
+    page.getByText('这个目标没有保存可验证的本地化指引。', { exact: true })
+  ).toHaveCount(1);
   await expect(page.locator('.gta-history-theater-cast')).toContainText('演示试用角色');
   await expect(page.locator('.gta-history-theater-cast')).toContainText('试用演员');
   await expect(page.locator('.gta-history-theater-route')).toContainText('第 1 幕');

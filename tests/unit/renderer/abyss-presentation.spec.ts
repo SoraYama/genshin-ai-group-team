@@ -58,6 +58,25 @@ describe('abyss presentation', () => {
     });
   });
 
+  it('never lets raw plan prose override a missing exact narrative section', async () => {
+    const presentation = (await import(
+      '../../../src/renderer/pages/Advisor/abyss-presentation.js'
+    )) as Record<string, unknown>;
+    expect(presentation.narrativeTargetBody).toBeTypeOf('function');
+    const narrativeTargetBody = presentation.narrativeTargetBody as (
+      narrative: { sections: [] },
+      targetKey: string,
+      locale: 'zh' | 'en'
+    ) => string;
+
+    expect(narrativeTargetBody({ sections: [] }, 'abyss-team:first', 'en')).toBe(
+      'No localized guidance was saved for this target.'
+    );
+    expect(narrativeTargetBody({ sections: [] }, 'abyss-team:first', 'zh')).toBe(
+      '这个目标没有保存可验证的本地化指引。'
+    );
+  });
+
   it('does not turn foreign-language saved prose into a generic semantic placeholder', async () => {
     const presentation =
       (await import('../../../src/renderer/pages/Advisor/abyss-presentation.js')) as Record<

@@ -18,7 +18,7 @@ import {
   localizedPlanText,
   localizedProfileName,
   mechanicLabels,
-  narrativeTargetPresentation,
+  narrativeTargetBody,
   progressStepLabel,
   type CharacterInterventionState,
   type PresentationLocale
@@ -852,12 +852,6 @@ function AbyssResult({
     ...result.plan.firstHalfTeam.characterIds,
     ...result.plan.secondHalfTeam.characterIds
   ];
-  const targetGuidance = (targetKey: string, rawText: string) => {
-    const presentation = narrativeTargetPresentation(result.narrative, targetKey, locale);
-    return presentation.status === 'localized'
-      ? presentation.body
-      : (localizedPlanText(rawText, locale) ?? presentation.body);
-  };
   const localizedDetails = (items: string[]) =>
     items.flatMap((item) => {
       const localized = localizedPlanText(item, locale);
@@ -894,7 +888,7 @@ function AbyssResult({
         <ResultTeam
           title={isEnglish ? 'First-half team' : '上半队伍'}
           ids={result.plan.firstHalfTeam.characterIds}
-          purpose={targetGuidance('abyss-team:first', result.plan.firstHalfTeam.purpose)}
+          purpose={narrativeTargetBody(result.narrative, 'abyss-team:first', locale)}
           rotationNotes={localizedDetails(result.plan.firstHalfTeam.rotationNotes)}
           characters={characterById}
           orderedCharacterIds={selectedCharacterIds}
@@ -903,7 +897,7 @@ function AbyssResult({
         <ResultTeam
           title={isEnglish ? 'Second-half team' : '下半队伍'}
           ids={result.plan.secondHalfTeam.characterIds}
-          purpose={targetGuidance('abyss-team:second', result.plan.secondHalfTeam.purpose)}
+          purpose={narrativeTargetBody(result.narrative, 'abyss-team:second', locale)}
           rotationNotes={localizedDetails(result.plan.secondHalfTeam.rotationNotes)}
           characters={characterById}
           orderedCharacterIds={selectedCharacterIds}
@@ -930,24 +924,20 @@ function AbyssResult({
       )}
       <div className="gta-abyss-tactics">
         {result.plan.chambers.map((chamber) => {
-          const firstTarget = narrativeTargetPresentation(
-            result.narrative,
-            `abyss-chamber:${chamber.floor}:${chamber.chamber}:first`,
-            locale
-          );
-          const secondTarget = narrativeTargetPresentation(
-            result.narrative,
-            `abyss-chamber:${chamber.floor}:${chamber.chamber}:second`,
-            locale
-          );
-          const firstTactics =
-            firstTarget.status === 'localized'
-              ? [firstTarget.body]
-              : localizedDetails(chamber.firstHalf.tactics);
-          const secondTactics =
-            secondTarget.status === 'localized'
-              ? [secondTarget.body]
-              : localizedDetails(chamber.secondHalf.tactics);
+          const firstTactics = [
+            narrativeTargetBody(
+              result.narrative,
+              `abyss-chamber:${chamber.floor}:${chamber.chamber}:first`,
+              locale
+            )
+          ];
+          const secondTactics = [
+            narrativeTargetBody(
+              result.narrative,
+              `abyss-chamber:${chamber.floor}:${chamber.chamber}:second`,
+              locale
+            )
+          ];
           return (
             <article key={`${chamber.floor}-${chamber.chamber}`}>
               <h5>
@@ -957,7 +947,7 @@ function AbyssResult({
               </h5>
               <div>
                 <strong>{isEnglish ? 'First-half tactics' : '上半怎么打'}</strong>
-                {(firstTactics.length > 0 ? firstTactics : [firstTarget.body]).map((text) => (
+                {firstTactics.map((text) => (
                   <p key={text}>{text}</p>
                 ))}
                 <small>
@@ -977,7 +967,7 @@ function AbyssResult({
               </div>
               <div>
                 <strong>{isEnglish ? 'Second-half tactics' : '下半怎么打'}</strong>
-                {(secondTactics.length > 0 ? secondTactics : [secondTarget.body]).map((text) => (
+                {secondTactics.map((text) => (
                   <p key={text}>{text}</p>
                 ))}
                 <small>

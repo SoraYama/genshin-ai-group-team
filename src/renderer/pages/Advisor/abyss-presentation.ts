@@ -122,6 +122,14 @@ export function narrativeTargetPresentation(
   };
 }
 
+export function narrativeTargetBody(
+  narrative: Pick<AdvisorNarrative, 'sections'> | undefined,
+  targetKey: string,
+  locale: PresentationLocale
+): string {
+  return narrativeTargetPresentation(narrative, targetKey, locale).body;
+}
+
 export function enemyDisplayName(enemy: EnemyInstance, locale: PresentationLocale = 'zh'): string {
   return localizedEntityName(enemy.enemy.names, locale, {
     zh: '未命名敌人',

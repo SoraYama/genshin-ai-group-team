@@ -21,7 +21,7 @@ import {
   characterElementLabel,
   localizedPlanText,
   localizedProfileName,
-  narrativeTargetPresentation,
+  narrativeTargetBody,
   type PresentationLocale
 } from './abyss-presentation';
 import {
@@ -835,12 +835,6 @@ function StygianResult({
           .sort((left, right) => left.phase - right.phase)
           .map((phase) => {
             const guidance = result.phaseGuidance.find((item) => item.phase === phase.phase);
-            const narrative = narrativeTargetPresentation(
-              result.narrative,
-              `stygian-phase:${phase.phase}`,
-              locale
-            );
-            const localizedPurpose = localizedPlanText(phase.team.purpose, locale);
             const rotationNotes = localizedDetails(phase.team.rotationNotes);
             const mechanismBasis = localizedDetails(guidance?.mechanismBasis ?? []);
             const risks = localizedDetails(guidance?.risks ?? []);
@@ -848,9 +842,11 @@ function StygianResult({
               <article key={phase.phase}>
                 <span>{isEnglish ? `Phase ${phase.phase}` : `第 ${phase.phase} 阶段`}</span>
                 <h5>
-                  {narrative.status === 'localized'
-                    ? narrative.body
-                    : (localizedPurpose ?? narrative.body)}
+                  {narrativeTargetBody(
+                    result.narrative,
+                    `stygian-phase:${phase.phase}`,
+                    locale
+                  )}
                 </h5>
                 <div className="gta-stygian-result-roster">
                   {phase.team.characterIds.map((id) => {

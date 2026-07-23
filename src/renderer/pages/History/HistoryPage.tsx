@@ -10,8 +10,8 @@ import { GtaDialog } from '../../components/ui/GtaDialog';
 import { destructiveErrorRecovery, getErrorCode, localizeError, useI18n } from '../../i18n';
 import { api } from '../../ipc';
 import { rewardTargetLabel, reuseRuleSummary } from '../Advisor/stygian-presentation';
-import { objectiveLabel, pathChoiceLabel, poolSourceLabel } from '../Advisor/theater-presentation';
-import { localizedPlanText, narrativeTargetPresentation } from '../Advisor/abyss-presentation';
+import { objectiveLabel, poolSourceLabel } from '../Advisor/theater-presentation';
+import { localizedPlanText, narrativeTargetBody } from '../Advisor/abyss-presentation';
 import {
   createHistoryRerunIntent,
   groupChallengeHistory,
@@ -465,12 +465,8 @@ function AbyssDetails({ entry, isEnglish }: { entry: AbyssPlanHistoryEntry; isEn
           })
       )
       .join(' · ');
-  const targetGuidance = (targetKey: string, rawText: string) => {
-    const narrative = narrativeTargetPresentation(entry.narrative, targetKey, locale);
-    return narrative.status === 'localized'
-      ? narrative.body
-      : (localizedPlanText(rawText, locale) ?? narrative.body);
-  };
+  const targetGuidance = (targetKey: string) =>
+    narrativeTargetBody(entry.narrative, targetKey, locale);
   return (
     <div className="gta-history-plan-grid">
       <p>
@@ -502,7 +498,7 @@ function AbyssDetails({ entry, isEnglish }: { entry: AbyssPlanHistoryEntry; isEn
       <article>
         <span>{isEnglish ? 'First half' : '上半队伍'}</span>
         <strong>{teamNames(entry.plan.firstHalfTeam.characterIds)}</strong>
-        <p>{targetGuidance('abyss-team:first', entry.plan.firstHalfTeam.purpose)}</p>
+        <p>{targetGuidance('abyss-team:first')}</p>
         <DetailList
           label={isEnglish ? 'Rotation' : '循环手法'}
           items={entry.plan.firstHalfTeam.rotationNotes}
@@ -511,7 +507,7 @@ function AbyssDetails({ entry, isEnglish }: { entry: AbyssPlanHistoryEntry; isEn
       <article>
         <span>{isEnglish ? 'Second half' : '下半队伍'}</span>
         <strong>{teamNames(entry.plan.secondHalfTeam.characterIds)}</strong>
-        <p>{targetGuidance('abyss-team:second', entry.plan.secondHalfTeam.purpose)}</p>
+        <p>{targetGuidance('abyss-team:second')}</p>
         <DetailList
           label={isEnglish ? 'Rotation' : '循环手法'}
           items={entry.plan.secondHalfTeam.rotationNotes}
@@ -542,8 +538,7 @@ function AbyssDetails({ entry, isEnglish }: { entry: AbyssPlanHistoryEntry; isEn
                   label={isEnglish ? 'Tactics' : '要点'}
                   items={[
                     targetGuidance(
-                      `abyss-chamber:${chamber.floor}:${chamber.chamber}:first`,
-                      chamber.firstHalf.tactics.join(isEnglish ? '; ' : '；')
+                      `abyss-chamber:${chamber.floor}:${chamber.chamber}:first`
                     )
                   ]}
                 />
@@ -559,8 +554,7 @@ function AbyssDetails({ entry, isEnglish }: { entry: AbyssPlanHistoryEntry; isEn
                   label={isEnglish ? 'Tactics' : '要点'}
                   items={[
                     targetGuidance(
-                      `abyss-chamber:${chamber.floor}:${chamber.chamber}:second`,
-                      chamber.secondHalf.tactics.join(isEnglish ? '; ' : '；')
+                      `abyss-chamber:${chamber.floor}:${chamber.chamber}:second`
                     )
                   ]}
                 />
@@ -619,11 +613,6 @@ function StygianDetails({
           .slice()
           .sort((left, right) => left.phase - right.phase)
           .map((phase) => {
-            const narrative = narrativeTargetPresentation(
-              entry.narrative,
-              `stygian-phase:${phase.phase}`,
-              locale
-            );
             return (
               <article key={phase.phase}>
                 <span>{isEnglish ? `Phase ${phase.phase}` : `第 ${phase.phase} 阶段`}</span>
@@ -642,9 +631,11 @@ function StygianDetails({
                     .join(' · ')}
                 </strong>
                 <p>
-                  {narrative.status === 'localized'
-                    ? narrative.body
-                    : (localizedPlanText(phase.team.purpose, locale) ?? narrative.body)}
+                  {narrativeTargetBody(
+                    entry.narrative,
+                    `stygian-phase:${phase.phase}`,
+                    locale
+                  )}
                 </p>
                 <DetailList
                   label={isEnglish ? 'Rotation' : '循环手法'}
@@ -817,12 +808,6 @@ function TheaterDetails({
       </div>
       <ol className="gta-history-theater-route">
         {entry.plan.acts.map((act) => {
-          const narrative = narrativeTargetPresentation(
-            entry.narrative,
-            `theater-act:${act.act}`,
-            locale
-          );
-          const localizedPathNote = localizedPlanText(act.pathChoice.note, locale);
           return (
             <li key={act.act}>
               <strong>{isEnglish ? `Act ${act.act}` : `第 ${act.act} 幕`}</strong>
@@ -841,11 +826,7 @@ function TheaterDetails({
                   .join(isEnglish ? ', ' : '、')}
               </span>
               <small>
-                {narrative.status === 'localized'
-                  ? narrative.body
-                  : localizedPathNote
-                    ? pathChoiceLabel(act.pathChoice, locale)
-                    : narrative.body}
+                {narrativeTargetBody(entry.narrative, `theater-act:${act.act}`, locale)}
               </small>
               <small>
                 {isEnglish ? 'Planned Vigor: ' : '计划活力：'}

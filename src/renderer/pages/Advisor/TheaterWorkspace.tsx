@@ -17,6 +17,7 @@ import {
   localizedEntityName,
   localizedPlanText,
   localizedProfileName,
+  narrativeTargetBody,
   narrativeTargetPresentation,
   type PresentationLocale
 } from './abyss-presentation';
@@ -24,7 +25,6 @@ import {
   eligibilityReasonLabel,
   elementLabel,
   objectiveLabel,
-  pathChoiceLabel,
   poolSourceLabel,
   progressStepLabel,
   scenarioVersionLabel,
@@ -875,18 +875,11 @@ function TheaterResult({
         {result.plan.acts.map((act) => {
           const scenarioAct = scenario.acts.find((item) => item.act === act.act);
           const presentation = scenarioAct ? theaterActPresentation(scenarioAct, locale) : null;
-          const actNarrative = narrativeTargetPresentation(
+          const rationale = narrativeTargetBody(
             result.narrative,
             `theater-act:${act.act}`,
             locale
           );
-          const localizedPathNote = localizedPlanText(act.pathChoice.note, locale);
-          const rationale =
-            actNarrative.status === 'localized'
-              ? actNarrative.body
-              : localizedPathNote
-                ? pathChoiceLabel(act.pathChoice, locale)
-                : actNarrative.body;
           return (
             <article key={act.act}>
               <div className="gta-theater-route-node">
