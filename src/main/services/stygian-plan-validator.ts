@@ -96,6 +96,21 @@ export function validateStygianPlan({
         '同一阶段的队伍内不能重复角色。'
       );
     }
+    const rawPhase = rawPhases[index];
+    const rawTeam = isRecord(rawPhase) && isRecord(rawPhase['team']) ? rawPhase['team'] : undefined;
+    const rotationNotes = rawTeam?.['rotationNotes'];
+    if (
+      !Array.isArray(rotationNotes) ||
+      rotationNotes.length === 0 ||
+      rotationNotes.some((note) => typeof note !== 'string' || note.trim().length === 0)
+    ) {
+      addIssue(
+        issues,
+        'PLAN_SCHEMA_INVALID',
+        ['phases', index, 'team', 'rotationNotes'],
+        '每个阶段必须保留至少一条可执行的循环依据。'
+      );
+    }
   });
 
   unique(allIds).forEach((id) => {

@@ -269,6 +269,7 @@
 .gta-theater-objectives button[aria-pressed='true'],
 .gta-theater-preferences button[aria-pressed='true'] {
   border-color: #9e8247;
+  box-shadow: inset 4px 0 0 #745f31;
   background: #eee2c4;
   color: #2c342d;
 }

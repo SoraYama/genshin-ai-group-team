@@ -32,6 +32,15 @@ describe('tsup dev readiness', () => {
     expect(main?.clean).toBe(true);
     expect(main?.onSuccess).toBeUndefined();
     expect(preload?.onSuccess).toBeUndefined();
+    expect(main?.sourcemap).toBe(false);
+    expect(preload?.sourcemap).toBe(false);
+  });
+
+  it('keeps source maps available only during local watch development', () => {
+    const [main, preload] = createTsupOptions({ devWatch: true });
+
+    expect(main?.sourcemap).toBe(true);
+    expect(preload?.sourcemap).toBe(true);
   });
 });
 

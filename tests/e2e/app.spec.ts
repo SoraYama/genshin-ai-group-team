@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -14,11 +14,13 @@ let page: Page;
 let userDataDir: string;
 let launchDurationMs = 0;
 const rendererErrors: string[] = [];
+const rendererExternalRequests: string[] = [];
 const FORBIDDEN_PLAYER_TERMS =
-  /LLM|Enka|API Key|Base URL|\bpartial\b|\bfallback\b|team-composer|下一阶段接入|开发中/iu;
+  /LLM|Enka|API Key|Base URL|\bpartial\b|\bfallback\b|\bstage\b|team-composer|abyss-mage|ruin-guard|development\.|下一阶段接入|开发中/iu;
 const REQUIRED_VIEWPORTS = [
   { width: 1024, height: 768 },
   { width: 1280, height: 800 },
+  { width: 1440, height: 900 },
   { width: 1600, height: 1000 }
 ] as const;
 
@@ -66,6 +68,15 @@ async function expectPageFitsEveryViewport(label: string): Promise<void> {
     ).toBeLessThanOrEqual(measurements.clientWidth);
     expect(measurements.clientWidth).toBeLessThanOrEqual(measurements.viewportWidth);
     expect(measurements.escapedControls, `${label} ${viewport.width}px control bounds`).toEqual([]);
+    if (process.env.GTA_E2E_CAPTURE_VIEWPORTS === '1') {
+      const artifactDirectory = path.resolve('test-results/visual-matrix');
+      await mkdir(artifactDirectory, { recursive: true });
+      const safeLabel = label.toLocaleLowerCase().replace(/[^a-z0-9]+/gu, '-');
+      await page.screenshot({
+        path: path.join(artifactDirectory, `${safeLabel}-${viewport.width}x${viewport.height}.png`),
+        fullPage: false
+      });
+    }
   }
 }
 
@@ -88,6 +99,9 @@ async function launchApp(): Promise<void> {
   launchDurationMs = Date.now() - startedAt;
   page.on('pageerror', (error) => {
     rendererErrors.push(error.message);
+  });
+  page.on('request', (request) => {
+    if (/^(?:https?|wss?):/iu.test(request.url())) rendererExternalRequests.push(request.url());
   });
 }
 
@@ -185,6 +199,30 @@ test('boots with isolated data and navigates through preload-backed pages', asyn
   await page.getByRole('menuitem', { name: '资料绑定' }).click();
   await expect(page.getByRole('heading', { name: /添加角色资料/ })).toBeVisible();
   expect(rendererErrors).toEqual([]);
+});
+
+test('keeps the renderer sandboxed and denies external windows and network', async () => {
+  const runtime = await page.evaluate(() => {
+    const browser = globalThis as unknown as {
+      require?: unknown;
+      process?: unknown;
+      Buffer?: unknown;
+      open: (url: string, target: string) => unknown;
+    };
+    return {
+      requireType: typeof browser.require,
+      processType: typeof browser.process,
+      bufferType: typeof browser.Buffer,
+      openedWindow: browser.open('https://example.invalid', '_blank') !== null
+    };
+  });
+  expect(runtime).toEqual({
+    requireType: 'undefined',
+    processType: 'undefined',
+    bufferType: 'undefined',
+    openedWindow: false
+  });
+  expect(rendererExternalRequests).toEqual([]);
 });
 
 test('supports the complete keyboard model for the account menu', async () => {
@@ -296,36 +334,106 @@ test('traps modal focus and restores it to the connected opener', async () => {
   await expect(accountButton).toBeFocused();
 });
 
+test('keeps the core keyboard surface named and removes motion when requested', async () => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const accountButton = page.getByRole('button', { name: '账号与设置' });
+  await accountButton.click();
+  await page.getByRole('menuitem', { name: '资料绑定' }).click();
+  const backButton = page.getByRole('button', { name: '返回选择方式' });
+  if (await backButton.isVisible().catch(() => false)) await backButton.click();
+
+  const uidMethod = page.getByRole('button', { name: /只用 UID 展示柜/ });
+  await uidMethod.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByLabel('游戏 UID')).toBeVisible();
+  await expect(page.getByRole('heading', { name: '输入游戏 UID' })).toBeVisible();
+
+  const unnamedControls = await page
+    .locator('main input, main select, main textarea')
+    .evaluateAll((controls) =>
+      controls
+        .filter((control) => {
+          const rect = control.getBoundingClientRect();
+          const style = control.ownerDocument.defaultView?.getComputedStyle(control);
+          return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden';
+        })
+        .filter((control) => {
+          const id = control.getAttribute('id');
+          const labelled = id ? control.ownerDocument.querySelector(`label[for="${id}"]`) : null;
+          const wrappingLabel = control.closest('label');
+          return !(
+            control.getAttribute('aria-label') ||
+            control.getAttribute('aria-labelledby') ||
+            labelled ||
+            wrappingLabel
+          );
+        })
+        .map((control) => control.outerHTML)
+    );
+  expect(unnamedControls).toEqual([]);
+
+  const motion = await page
+    .locator('main button, main section, main article')
+    .evaluateAll((elements) => {
+      const durations = (value: string) =>
+        value
+          .split(',')
+          .map((part) => part.trim())
+          .map((part) =>
+            part.endsWith('ms') ? Number(part.slice(0, -2)) : Number(part.slice(0, -1)) * 1000
+          );
+      return elements
+        .filter((element) => {
+          const rect = element.getBoundingClientRect();
+          return rect.width > 0 && rect.height > 0;
+        })
+        .flatMap((element) => {
+          const style = element.ownerDocument.defaultView?.getComputedStyle(element);
+          if (!style) return [];
+          return [
+            ...durations(style.animationDuration),
+            ...durations(style.transitionDuration)
+          ].filter((duration) => Number.isFinite(duration) && duration > 1.1);
+        });
+    });
+  expect(motion).toEqual([]);
+  await page.getByRole('button', { name: '返回选择方式' }).click();
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+});
+
 test('routes UID-only onboarding through the preload profile refresh contract', async () => {
   const uid = '123456789';
   await electronApp.evaluate(({ ipcMain }, testUid) => {
     const scope = globalThis as typeof globalThis & {
       __gtaM3UidCalls?: Array<{ channel: string; payload: unknown }>;
+      __gtaM3UidActivated?: boolean;
     };
     scope.__gtaM3UidCalls = [];
+    scope.__gtaM3UidActivated = false;
+    const profile = {
+      schemaVersion: 2,
+      uid: testUid,
+      nickname: 'UID 测试账号',
+      source: 'enka',
+      fetchedAt: '2026-07-23T00:00:00.000Z',
+      characters: [],
+      coverage: {
+        ownedCount: 0,
+        detailedCount: 0,
+        buildCount: 0,
+        statsCount: 0,
+        enkaShowcaseCount: 0,
+        missingDetailCount: 0,
+        partial: true
+      }
+    };
     ipcMain.removeHandler('profile:refresh');
     ipcMain.handle('profile:refresh', (_event, payload) => {
       scope.__gtaM3UidCalls?.push({ channel: 'profile:refresh', payload });
       return {
         ok: true,
         data: {
-          profile: {
-            schemaVersion: 2,
-            uid: testUid,
-            nickname: 'UID 测试账号',
-            source: 'enka',
-            fetchedAt: '2026-07-23T00:00:00.000Z',
-            characters: [],
-            coverage: {
-              ownedCount: 0,
-              detailedCount: 0,
-              buildCount: 0,
-              statsCount: 0,
-              enkaShowcaseCount: 0,
-              missingDetailCount: 0,
-              partial: true
-            }
-          },
+          profile,
           summary: {
             enka: 'ok',
             enkaCharacterCount: 0,
@@ -339,8 +447,28 @@ test('routes UID-only onboarding through the preload profile refresh contract', 
     ipcMain.removeHandler('profile:set-active');
     ipcMain.handle('profile:set-active', (_event, payload) => {
       scope.__gtaM3UidCalls?.push({ channel: 'profile:set-active', payload });
+      scope.__gtaM3UidActivated = true;
       return { ok: true, data: { ok: true } };
     });
+    ipcMain.removeHandler('profile:state');
+    ipcMain.handle('profile:state', () => ({
+      ok: true,
+      data: scope.__gtaM3UidActivated
+        ? {
+            activeUid: testUid,
+            profiles: [
+              {
+                uid: testUid,
+                nickname: 'UID 测试账号',
+                characterCount: 0,
+                fetchedAt: profile.fetchedAt
+              }
+            ]
+          }
+        : { profiles: [] }
+    }));
+    ipcMain.removeHandler('profile:get');
+    ipcMain.handle('profile:get', () => ({ ok: true, data: profile }));
   }, uid);
 
   await page.getByRole('button', { name: '账号与设置' }).click();
@@ -348,7 +476,12 @@ test('routes UID-only onboarding through the preload profile refresh contract', 
   await page.getByRole('button', { name: /只用 UID 展示柜/ }).click();
   await page.getByLabel('游戏 UID').fill(uid);
   await page.getByRole('button', { name: '同步展示角色' }).click();
-  await expect(page.getByText('还没有绑定任何账号。')).toBeVisible();
+  await expect(page.getByRole('heading', { name: '我的角色' })).toBeVisible();
+  await expect(page.getByRole('tab', { name: /UID 测试账号/ })).toHaveAttribute(
+    'aria-selected',
+    'true'
+  );
+  await expect(page.getByText(/当前没有角色面板数据/)).toBeVisible();
 
   const calls = await electronApp.evaluate(() => {
     const scope = globalThis as typeof globalThis & {
@@ -458,6 +591,24 @@ test('renders profile coverage and known build fields without fake zero values',
             missingDetailCount: 1,
             partial: true
           }
+        },
+        '100000002': {
+          schemaVersion: 2,
+          uid: '100000002',
+          nickname: '备用测试账号',
+          source: 'enka',
+          fetchedAt,
+          characters: [],
+          coverage: {
+            expectedOwnedCount: 0,
+            ownedCount: 0,
+            detailedCount: 0,
+            buildCount: 0,
+            statsCount: 0,
+            enkaShowcaseCount: 0,
+            missingDetailCount: 0,
+            partial: true
+          }
         }
       }
     })
@@ -475,6 +626,26 @@ test('renders profile coverage and known build fields without fake zero values',
   await expect(page.getByText('冒险等阶 58')).toBeVisible();
   await expect(page.getByText(/世界等级/)).toHaveCount(0);
   await expect(page.getByText(/融合|Enka|缓存/)).toHaveCount(0);
+
+  const primaryAccountTab = page.getByRole('tab', { name: /脱敏测试账号/ });
+  const secondaryAccountTab = page.getByRole('tab', { name: /备用测试账号/ });
+  await expect(primaryAccountTab).toHaveAttribute('tabindex', '0');
+  await expect(secondaryAccountTab).toHaveAttribute('tabindex', '-1');
+  await expect(primaryAccountTab).toHaveAttribute('aria-controls', 'profile-panel');
+  await expect(secondaryAccountTab).toHaveAttribute('aria-controls', 'profile-panel');
+  await expect(page.locator('#profile-panel')).toHaveCount(1);
+  await expect(page.getByRole('tabpanel')).toHaveAttribute(
+    'aria-labelledby',
+    'profile-tab-100000001'
+  );
+  await primaryAccountTab.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(secondaryAccountTab).toBeFocused();
+  await expect(secondaryAccountTab).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('ArrowLeft');
+  await expect(primaryAccountTab).toBeFocused();
+  await expect(primaryAccountTab).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByText('测试角色', { exact: true })).toBeVisible();
 
   const maintenanceButton = page.getByRole('button', { name: '账号维护' });
   await maintenanceButton.focus();
@@ -681,7 +852,12 @@ test('renders profile coverage and known build fields without fake zero values',
     .getByRole('dialog', { name: '删除脱敏测试账号的本机角色资料？' })
     .getByRole('button', { name: '删除脱敏测试账号的本机角色资料' })
     .click();
-  await expect(page.getByText('还没有绑定任何账号。')).toBeVisible();
+  await expect(page.getByRole('tab', { name: /备用测试账号/ })).toHaveAttribute(
+    'aria-selected',
+    'true'
+  );
+  await expect(page.getByText(/当前没有角色面板数据/)).toBeVisible();
+  expect(await page.evaluate<string>("document.activeElement?.tagName ?? ''")).not.toBe('BODY');
   expect(rendererErrors).toEqual([]);
 });
 
@@ -776,6 +952,11 @@ test('runs the abyss-specific development-sample flow with accessible interventi
     await chip.click();
     await expect(chip).toHaveAttribute('aria-pressed', 'true');
   }
+  expect(
+    await page
+      .getByRole('button', { name: '操作简单' })
+      .evaluate((element) => element.ownerDocument.defaultView?.getComputedStyle(element).boxShadow)
+  ).not.toBe('none');
 
   const rosterSearch = page.getByRole('searchbox', { name: '搜索可用角色' });
   await rosterSearch.fill('演练角色1');

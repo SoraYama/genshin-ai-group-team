@@ -9,10 +9,7 @@ interface CreateTsupOptionsInput {
   writeReady?: () => Promise<void>;
 }
 
-export function createTsupOptions({
-  devWatch,
-  writeReady
-}: CreateTsupOptionsInput): Options[] {
+export function createTsupOptions({ devWatch, writeReady }: CreateTsupOptionsInput): Options[] {
   const successfulTargets = new Set<DevTarget>();
   let publishPromise: Promise<void> | undefined;
 
@@ -38,7 +35,7 @@ export function createTsupOptions({
       format: ['esm'],
       target: 'node20',
       platform: 'node',
-      sourcemap: true,
+      sourcemap: devWatch,
       clean: !devWatch,
       splitting: false,
       bundle: true,
@@ -52,7 +49,7 @@ export function createTsupOptions({
       format: ['cjs'],
       target: 'node20',
       platform: 'node',
-      sourcemap: true,
+      sourcemap: devWatch,
       clean: false,
       splitting: false,
       bundle: true,

@@ -76,7 +76,24 @@ export function GtaDialog({
       cancelAnimationFrame(frame);
       document.removeEventListener('keydown', handleKeyDown);
       const opener = openerRef.current;
-      if (opener?.isConnected) opener.focus();
+      requestAnimationFrame(() => {
+        if (opener?.isConnected) {
+          opener.focus();
+          return;
+        }
+        const fallback = document.querySelector<HTMLElement>(
+          'main [data-dialog-focus-fallback], main button:not([disabled]), main [tabindex="0"]'
+        );
+        if (fallback) {
+          fallback.focus();
+          return;
+        }
+        const heading = document.querySelector<HTMLElement>('main h1, main h2');
+        if (heading) {
+          heading.tabIndex = -1;
+          heading.focus();
+        }
+      });
       openerRef.current = null;
     };
   }, [initialFocusRef, open]);

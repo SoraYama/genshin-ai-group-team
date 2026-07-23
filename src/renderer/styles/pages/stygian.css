@@ -177,6 +177,7 @@
 .gta-stygian-targets button[aria-pressed='true'],
 .gta-stygian-preferences button[aria-pressed='true'] {
   border-color: var(--gta-gold-strong);
+  box-shadow: inset 4px 0 0 var(--gta-gold-strong);
   color: #fff8e4;
   background: rgba(130, 103, 55, 0.42);
 }
@@ -276,6 +277,7 @@
 }
 
 .gta-stygian-preferences button[aria-pressed='true'] {
+  box-shadow: inset 4px 0 0 #745f31;
   color: #273126;
   background: rgba(211, 189, 130, 0.46);
 }

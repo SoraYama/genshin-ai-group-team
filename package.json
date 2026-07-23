@@ -29,7 +29,11 @@
     "test:watch": "vitest",
     "test:e2e": "npm run build && playwright test",
     "test:e2e:run": "playwright test",
+    "test:e2e:visual": "npm run build && cross-env GTA_E2E_CAPTURE_VIEWPORTS=1 playwright test tests/e2e/app.spec.ts",
+    "test:golden": "vitest run tests/eval/advisor-golden-constraints.spec.ts tests/eval/advisor-offline-cases.spec.ts tests/unit/services/abyss-plan-agent.spec.ts tests/unit/services/stygian-plan-agent.spec.ts tests/unit/services/theater-plan-agent.spec.ts",
+    "test:renderer-budget": "node tests/packaged/renderer-budget.mjs",
     "test:packaged:sdk": "node tests/packaged/sdk-smoke.mjs",
+    "test:packaged:app": "node tests/packaged/app-smoke.mjs",
     "test:packaged:sdk:mac": "npm run test:packaged:sdk",
     "test:package-budget": "node tests/packaged/package-budget.mjs",
     "test:update-metadata": "node tests/packaged/update-metadata.mjs",
@@ -39,13 +43,13 @@
     "gate:miyoushe-detail": "npm run build:main && electron dist/main/miyoushe-detail-gate.mjs",
     "gate:provider-contract": "node tests/external/provider-gate.mjs",
     "gate:provider-saved": "npm run build:main && electron dist/main/provider-saved-gate.mjs",
-    "gate:local": "npm run lint && npm run typecheck && npm run test && npm run build",
+    "gate:local": "npm run lint && npm run typecheck && npm run test && npm run build && npm run test:renderer-budget",
     "gate:all": "npm run gate:local && npm run test:e2e:run && npm run audit:all",
     "pack": "npm run build && electron-builder --publish never",
     "pack:mac": "npm run build && electron-builder --mac --publish never",
     "pack:mac:universal": "npm run build && electron-builder --mac --universal --publish never",
     "pack:win": "npm run build && electron-builder --win --publish never",
-    "pack:dir": "npm run build && electron-builder --dir",
+    "pack:dir": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --dir --config.mac.identity=null",
     "pack:dir:mac": "npm run build && electron-builder --dir --mac",
     "pack:dir:win": "npm run build && electron-builder --dir --win"
   },
@@ -87,6 +91,7 @@
     "wait-on": "^8.0.2"
   },
   "overrides": {
-    "esbuild": "0.28.1"
+    "esbuild": "0.28.1",
+    "fast-uri": "3.1.4"
   }
 }

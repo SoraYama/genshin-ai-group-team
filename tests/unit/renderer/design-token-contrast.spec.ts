@@ -52,6 +52,26 @@ describe('renderer text contrast tokens', () => {
       )
     ).toBeGreaterThanOrEqual(4.5);
   });
+
+  test.each([
+    { foreground: '--gta-text-on-dark', background: '--gta-canvas', minimum: 4.5 },
+    { foreground: '--gta-text-on-dark-soft', background: '--gta-canvas-soft', minimum: 4.5 },
+    { foreground: '--gta-gold-strong', background: '--gta-canvas', minimum: 4.5 },
+    { foreground: '--gta-focus', background: '--gta-canvas', minimum: 3 },
+    { foreground: '--gta-ok-color', background: '--gta-panel', minimum: 4.5 },
+    { foreground: '--gta-danger', background: '--gta-panel', minimum: 4.5 }
+  ])(
+    'keeps $foreground on $background at its WCAG contrast budget',
+    async ({ foreground, background, minimum }) => {
+      const tokens = await readTokens();
+      const canvas = parseColor(requireToken(tokens, '--gta-canvas'));
+      const backgroundColor = composite(parseColor(requireToken(tokens, background)), canvas);
+      expect(
+        contrast(parseColor(requireToken(tokens, foreground)), backgroundColor),
+        `${foreground} on ${background}`
+      ).toBeGreaterThanOrEqual(minimum);
+    }
+  );
 });
 
 async function readTokens(): Promise<Record<string, string>> {

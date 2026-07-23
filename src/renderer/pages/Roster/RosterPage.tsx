@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from 'react';
 import type { PersistedProfile, ProfileStateView, RefreshSummary } from '../../../shared/domain';
 import { ButtonGlyph } from '../../design/Icons';
 import { normalizeElement } from '../../design/tokens';
@@ -69,6 +69,25 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
     setQuery('');
     setElementFilter('all');
     await onStateChange();
+  }
+
+  function handleAccountTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    const lastIndex = state.profiles.length - 1;
+    let nextIndex: number | undefined;
+    if (event.key === 'ArrowRight') nextIndex = index === lastIndex ? 0 : index + 1;
+    if (event.key === 'ArrowLeft') nextIndex = index === 0 ? lastIndex : index - 1;
+    if (event.key === 'Home') nextIndex = 0;
+    if (event.key === 'End') nextIndex = lastIndex;
+    if (nextIndex === undefined || nextIndex === index) return;
+    event.preventDefault();
+    const nextProfile = state.profiles[nextIndex];
+    if (nextProfile) {
+      void handleSetActive(nextProfile.uid).then(() => {
+        requestAnimationFrame(() =>
+          document.getElementById(`profile-tab-${nextProfile.uid}`)?.focus()
+        );
+      });
+    }
   }
 
   async function handleRefresh() {
@@ -191,14 +210,18 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
       </div>
 
       <div className="gta-uid-tabs" role="tablist" aria-label={t('roster.accountList')}>
-        {state.profiles.map((item) => (
+        {state.profiles.map((item, index) => (
           <button
             key={item.uid}
+            id={`profile-tab-${item.uid}`}
             type="button"
             role="tab"
             aria-selected={item.uid === activeUid}
+            aria-controls="profile-panel"
+            tabIndex={item.uid === activeUid ? 0 : -1}
             className={item.uid === activeUid ? 'gta-uid-tab is-active' : 'gta-uid-tab'}
             onClick={() => void handleSetActive(item.uid)}
+            onKeyDown={(event) => handleAccountTabKeyDown(event, index)}
           >
             <span>{item.nickname ?? t('roster.unnamedAccount')}</span>
             <small>
@@ -208,57 +231,64 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
         ))}
       </div>
 
-      {status.kind === 'error' && (
-        <p className="gta-error" role="alert">
-          {status.message}
-        </p>
-      )}
-      {status.kind === 'success' && (
-        <p className="gta-success" role="status">
-          {status.message}
-        </p>
-      )}
-      {status.kind === 'loading' && (
-        <p className="gta-hint" role="status">
-          {status.label}
-        </p>
-      )}
-      {lastRefresh && status.kind !== 'loading' && <RefreshNotice summary={lastRefresh} />}
+      <div
+        id="profile-panel"
+        role="tabpanel"
+        aria-labelledby={activeUid ? `profile-tab-${activeUid}` : undefined}
+        className="gta-roster-tabpanel"
+      >
+        {status.kind === 'error' && (
+          <p className="gta-error" role="alert">
+            {status.message}
+          </p>
+        )}
+        {status.kind === 'success' && (
+          <p className="gta-success" role="status">
+            {status.message}
+          </p>
+        )}
+        {status.kind === 'loading' && (
+          <p className="gta-hint" role="status">
+            {status.label}
+          </p>
+        )}
+        {lastRefresh && status.kind !== 'loading' && <RefreshNotice summary={lastRefresh} />}
 
-      {profile && (
-        <>
-          <ProfileSummary
-            profile={profile}
-            loading={status.kind === 'loading'}
-            onRefresh={() => void handleRefresh()}
-          />
-          {profile.characters.length === 0 ? (
-            <div className="gta-roster-empty">
-              <p>{t('roster.emptyProfile')}</p>
-            </div>
-          ) : (
-            <>
-              <RosterToolbar
-                query={query}
-                filter={elementFilter}
-                totalCount={profile.characters.length}
-                filteredCount={filteredCharacters.length}
-                onQueryChange={setQuery}
-                onFilterChange={setElementFilter}
-              />
-              {filteredCharacters.length === 0 ? (
-                <p className="gta-roster-no-results">{t('roster.noResults')}</p>
-              ) : (
-                <div className="gta-character-list">
-                  {filteredCharacters.map((character) => (
-                    <CharacterCard key={character.id} character={character} />
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-        </>
-      )}
+        {profile && (
+          <>
+            <ProfileSummary
+              profile={profile}
+              loading={status.kind === 'loading'}
+              onRefresh={() => void handleRefresh()}
+            />
+            {profile.characters.length === 0 ? (
+              <div className="gta-roster-empty">
+                <p>{t('roster.emptyProfile')}</p>
+              </div>
+            ) : (
+              <>
+                <RosterToolbar
+                  query={query}
+                  filter={elementFilter}
+                  totalCount={profile.characters.length}
+                  filteredCount={filteredCharacters.length}
+                  onQueryChange={setQuery}
+                  onFilterChange={setElementFilter}
+                />
+                {filteredCharacters.length === 0 ? (
+                  <p className="gta-roster-no-results">{t('roster.noResults')}</p>
+                ) : (
+                  <div className="gta-character-list">
+                    {filteredCharacters.map((character) => (
+                      <CharacterCard key={character.id} character={character} />
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </>
+        )}
+      </div>
     </section>
   );
 }
