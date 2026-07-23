@@ -1,4 +1,5 @@
 import type { PersistedProfile, TheaterPlanHistoryEntry } from '../../shared/domain.js';
+import { createPlayerCycleSnapshot } from '../../shared/history-snapshot.js';
 import {
   theaterAdvisorPlanInputSchema,
   theaterAdvisorResultSchema,
@@ -382,6 +383,7 @@ export class TheaterAdvisorService {
       this.options.history.appendTheater({
         uid: input.uid,
         scenarioId: result.plan.scenarioId,
+        playerCycle: createPlayerCycleSnapshot(scenario.meta),
         schemaVersion: 2,
         dataVersion: result.plan.dataVersion,
         mode: 'imaginarium-theater',

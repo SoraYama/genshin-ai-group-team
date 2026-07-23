@@ -11,6 +11,7 @@ import {
   type AbyssScenarioView
 } from '../../shared/abyss-advisor.js';
 import type { AbyssPlanHistoryEntry } from '../../shared/domain.js';
+import { createPlayerCycleSnapshot } from '../../shared/history-snapshot.js';
 import type { CharacterKnowledgeReader } from '../../shared/character-knowledge.js';
 import {
   ABYSS_MCP_TOOL_NAMES,
@@ -304,6 +305,7 @@ export class AbyssAdvisorService {
       this.options.history.appendAbyss({
         uid: input.uid,
         scenarioId: result.plan.scenarioId,
+        playerCycle: createPlayerCycleSnapshot(scenarioView.scenario.meta),
         schemaVersion: result.plan.schemaVersion,
         dataVersion: result.plan.dataVersion,
         mode: 'spiral-abyss',

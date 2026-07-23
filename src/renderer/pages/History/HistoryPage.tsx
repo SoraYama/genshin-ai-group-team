@@ -15,6 +15,7 @@ import {
   createHistoryRerunIntent,
   groupChallengeHistory,
   historyCardTitle,
+  historyConfidenceLabel,
   historySavedVersion,
   type ChallengeHistoryEntry,
   type ChallengeHistoryGroup,
@@ -321,6 +322,9 @@ function HistoryEntry({
               ? 'Local rules'
               : '本地规则'}
         </span>
+        <span className="gta-history-confidence">
+          {historyConfidenceLabel(entry, isEnglish ? 'en' : 'zh')}
+        </span>
         <time dateTime={entry.createdAt}>{formatTime(entry.createdAt)}</time>
         {entry.scenarioTrust === 'development-sample' && (
           <span className="gta-history-sample">{isEnglish ? 'Practice data' : '演练资料'}</span>
@@ -484,6 +488,52 @@ function StygianDetails({
             </article>
           ))}
       </div>
+      <section className="gta-history-stygian-guidance">
+        <h4>{isEnglish ? 'Saved phase guidance' : '当时的阶段依据'}</h4>
+        {entry.phaseGuidance ? (
+          entry.phaseGuidance.map((guidance) => (
+            <article key={guidance.phase}>
+              <strong>
+                {isEnglish ? `Phase ${guidance.phase}` : `第 ${guidance.phase} 阶段`}
+              </strong>
+              <DetailList
+                label={isEnglish ? 'Mechanism basis' : '机制依据'}
+                items={guidance.mechanismBasis}
+              />
+              <DetailList label={isEnglish ? 'Risks' : '主要风险'} items={guidance.risks} />
+            </article>
+          ))
+        ) : (
+          <p>
+            {isEnglish
+              ? 'Phase guidance was not saved with this older record.'
+              : '这条旧记录保存时未记录阶段依据。'}
+          </p>
+        )}
+      </section>
+      <section className="gta-history-stygian-assessment">
+        <h4>{isEnglish ? 'Saved difficulty assessment' : '当时的难度判断'}</h4>
+        {entry.difficultyAssessment ? (
+          <>
+            <strong>
+              {difficultyRecommendationLabel(
+                entry.difficultyAssessment.recommendation,
+                isEnglish
+              )}
+            </strong>
+            <DetailList
+              label={isEnglish ? 'Evidence' : '判断依据'}
+              items={entry.difficultyAssessment.evidence}
+            />
+          </>
+        ) : (
+          <p>
+            {isEnglish
+              ? 'Difficulty assessment was not saved with this older record.'
+              : '这条旧记录保存时未记录难度判断。'}
+          </p>
+        )}
+      </section>
       <InterventionSummary
         locked={entry.interventions.lockedCharacterIds.length}
         excluded={entry.interventions.excludedCharacterIds.length}
@@ -496,6 +546,17 @@ function StygianDetails({
       />
     </>
   );
+}
+
+function difficultyRecommendationLabel(
+  recommendation: NonNullable<StygianPlanHistoryEntry['difficultyAssessment']>['recommendation'],
+  isEnglish: boolean
+): string {
+  if (recommendation === 'proceed')
+    return isEnglish ? 'Recommended to continue' : '建议继续挑战当前难度';
+  if (recommendation === 'proceed-with-caution')
+    return isEnglish ? 'Continue with caution' : '可以挑战，但需要谨慎';
+  return isEnglish ? 'A lower difficulty is recommended' : '建议改选更低难度';
 }
 
 function TheaterDetails({

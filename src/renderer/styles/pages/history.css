@@ -57,7 +57,7 @@
   display: grid;
   width: 100%;
   min-height: 72px;
-  grid-template-columns: minmax(240px, 1fr) auto minmax(150px, auto) auto;
+  grid-template-columns: minmax(240px, 1fr) auto auto minmax(150px, auto) auto;
   align-items: center;
   gap: 14px;
   padding: 14px 18px;
@@ -76,12 +76,17 @@
   font-weight: 650;
 }
 .gta-history-source,
-.gta-history-sample {
+.gta-history-sample,
+.gta-history-confidence {
   padding: 4px 9px;
   border: 1px solid rgba(112, 136, 139, 0.3);
   color: var(--gta-text-on-light-soft);
   font-size: var(--gta-text-xs);
   letter-spacing: 0.04em;
+}
+.gta-history-confidence {
+  border-color: rgba(161, 132, 63, 0.32);
+  color: #69531f;
 }
 .gta-history-source.is-smart-service {
   border-color: rgba(161, 132, 63, 0.5);
@@ -225,12 +230,32 @@
   font-size: var(--gta-text-xs);
 }
 .gta-history-theater-guidance,
-.gta-history-node-budget {
+.gta-history-node-budget,
+.gta-history-stygian-guidance,
+.gta-history-stygian-assessment {
   display: grid;
   gap: 10px;
   padding: 14px;
   border: 1px solid var(--gta-stroke-soft);
   background: rgba(248, 250, 247, 0.92);
+}
+.gta-history-stygian-guidance {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.gta-history-stygian-guidance h4,
+.gta-history-stygian-guidance > p {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+.gta-history-stygian-guidance article {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding: 12px;
+  background: #f8faf7;
+}
+.gta-history-stygian-assessment p {
+  margin: 0;
 }
 .gta-history-theater-guidance article p,
 .gta-history-theater-guidance article small {
@@ -304,6 +329,9 @@
     grid-column: 1;
   }
   .gta-history-plan-grid.is-three {
+    grid-template-columns: 1fr;
+  }
+  .gta-history-stygian-guidance {
     grid-template-columns: 1fr;
   }
   .gta-history-chambers > section > div {

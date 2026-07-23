@@ -49,9 +49,34 @@ const MODE_LABELS: Record<ChallengeHistoryEntry['mode'], string> = {
   'imaginarium-theater': '幻想真境剧诗'
 };
 
-export function periodLabelFromScenario(scenarioId: string): string {
-  const match = scenarioId.match(/(?:^|[._-])((?:20)\d{2})[._-](0[1-9]|1[0-2])(?:$|[._-])/u);
-  return match ? `${match[1]}-${match[2]}` : '记录周期';
+export function periodLabelFromScenario(_scenarioId: string): string {
+  return '保存时未记录周期';
+}
+
+function historyPeriodLabel(
+  entry: ChallengeHistoryEntry,
+  locale: 'zh' | 'en' = 'zh'
+): string {
+  if (entry.playerCycle.status === 'known') return entry.playerCycle.label;
+  return locale === 'en' ? 'Period not saved' : '保存时未记录周期';
+}
+
+export function historyConfidenceLabel(
+  entry: ChallengeHistoryEntry,
+  locale: 'zh' | 'en'
+): string {
+  const confidence =
+    'confidence' in entry.plan &&
+    (entry.plan.confidence === 'low' ||
+      entry.plan.confidence === 'medium' ||
+      entry.plan.confidence === 'high')
+      ? entry.plan.confidence
+      : 'unknown';
+  const zh = { low: '低', medium: '中', high: '高', unknown: '未知' } as const;
+  const en = { low: 'Low', medium: 'Medium', high: 'High', unknown: 'Unknown' } as const;
+  return locale === 'en'
+    ? `Suggestion confidence: ${en[confidence]}`
+    : `建议把握：${zh[confidence]}`;
 }
 
 export function historyCardTitle(entry: ChallengeHistoryEntry): string {
@@ -76,7 +101,7 @@ export function historySavedVersion(
       ? { scenario: 'Practice cycle', data: 'Practice data' }
       : { scenario: '演练周期', data: '演练资料' };
   }
-  return { scenario: entry.scenarioId, data: entry.dataVersion };
+  return { scenario: historyPeriodLabel(entry, locale), data: entry.dataVersion };
 }
 
 export function historyDetailSemanticSnapshot(entry: ChallengeHistoryEntry) {
@@ -98,7 +123,9 @@ export function historyDetailSemanticSnapshot(entry: ChallengeHistoryEntry) {
         phases: entry.plan.phases,
         reusePolicy: entry.reusePolicy,
         warnings: entry.plan.warnings,
-        assumptions: entry.plan.assumptions
+        assumptions: entry.plan.assumptions,
+        phaseGuidance: entry.phaseGuidance,
+        difficultyAssessment: entry.difficultyAssessment
       });
     case 'imaginarium-theater':
       return structuredClone({
@@ -125,7 +152,7 @@ export function groupChallengeHistory(entries: ChallengeHistoryEntry[]): Challen
         .slice()
         .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
       const first = sortedEntries[0]!;
-      const periodLabel = periodLabelFromScenario(first.scenarioId);
+      const periodLabel = historyPeriodLabel(first);
       return {
         key,
         mode: first.mode,

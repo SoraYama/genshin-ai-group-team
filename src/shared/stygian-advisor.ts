@@ -199,7 +199,7 @@ const resultCommonShape = {
   assumptions: z.array(playerFacingTextSchema)
 };
 
-const phaseGuidanceSchema = z
+export const stygianPhaseGuidanceSchema = z
   .array(
     z
       .object({
@@ -211,6 +211,14 @@ const phaseGuidanceSchema = z
   )
   .length(3)
   .refine((items) => new Set(items.map(({ phase }) => phase)).size === 3);
+
+export const stygianDifficultyAssessmentSchema = z
+  .object({
+    recommendation: z.enum(['proceed', 'proceed-with-caution', 'lower-difficulty']),
+    evidence: z.array(playerFacingTextSchema).min(1),
+    suggestedDifficultyId: z.string().trim().min(1).optional()
+  })
+  .strict();
 
 export const stygianAdvisorPlanSchema = stygianPlanSchema.superRefine(
   ({ phases, warnings, assumptions }, context) => {
@@ -258,14 +266,8 @@ export const stygianAdvisorResultSchema = z.discriminatedUnion('status', [
       status: z.literal('planned'),
       ...resultCommonShape,
       plan: stygianAdvisorPlanSchema,
-      phaseGuidance: phaseGuidanceSchema,
-      difficultyAssessment: z
-        .object({
-          recommendation: z.enum(['proceed', 'proceed-with-caution', 'lower-difficulty']),
-          evidence: z.array(playerFacingTextSchema).min(1),
-          suggestedDifficultyId: z.string().trim().min(1).optional()
-        })
-        .strict()
+      phaseGuidance: stygianPhaseGuidanceSchema,
+      difficultyAssessment: stygianDifficultyAssessmentSchema
     })
     .strict(),
   z
@@ -290,6 +292,8 @@ export type StygianPlanIssueCode = z.infer<typeof stygianPlanIssueCodeSchema>;
 export type StygianPlanIssue = z.infer<typeof stygianPlanIssueSchema>;
 export type StygianScenarioView = z.infer<typeof stygianScenarioViewSchema>;
 export type StygianAdvisorResult = z.infer<typeof stygianAdvisorResultSchema>;
+export type StygianPhaseGuidance = z.infer<typeof stygianPhaseGuidanceSchema>;
+export type StygianDifficultyAssessment = z.infer<typeof stygianDifficultyAssessmentSchema>;
 export type StygianAdvisorProgressStep = z.infer<typeof stygianAdvisorProgressStepSchema>;
 export type StygianAdvisorProgressEvent = {
   correlationId: string;

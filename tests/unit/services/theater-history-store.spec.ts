@@ -33,6 +33,7 @@ function input(): Omit<TheaterPlanHistoryEntry, 'id' | 'createdAt'> {
   return {
     uid: '123456789',
     scenarioId: plan.scenarioId,
+    playerCycle: { status: 'unknown' },
     schemaVersion: 2,
     dataVersion: plan.dataVersion,
     mode: 'imaginarium-theater',

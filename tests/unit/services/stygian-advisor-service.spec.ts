@@ -158,6 +158,7 @@ describe('StygianAdvisorService', () => {
     expect(
       progress.mock.calls.every(([event]) => event.correlationId === 'stygian-test-request')
     ).toBe(true);
+    if (result.status !== 'planned') throw new Error('Expected planned result');
     expect(history).toHaveBeenCalledWith(
       expect.objectContaining({
         mode: 'stygian-onslaught',
@@ -167,6 +168,14 @@ describe('StygianAdvisorService', () => {
         reusePolicy: { rule: 'forbidden', notes: [] },
         scenarioTrust: 'production',
         scenarioFreshness: 'fresh',
+        playerCycle: {
+          status: 'known',
+          label: '2026-01-01 — 2026-02-01',
+          effectiveFrom: '2026-01-01T00:00:00.000Z',
+          effectiveTo: '2026-02-01T00:00:00.000Z'
+        },
+        phaseGuidance: result.phaseGuidance,
+        difficultyAssessment: result.difficultyAssessment,
         characters: expect.arrayContaining([expect.objectContaining({ name: '幽境角色1' })])
       })
     );

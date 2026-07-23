@@ -67,6 +67,7 @@ function stygianHistoryInput(): Omit<StygianPlanHistoryEntry, 'id' | 'createdAt'
   return {
     uid: input.uid,
     scenarioId: input.scenarioId,
+    playerCycle: { status: 'unknown' },
     schemaVersion: 2,
     dataVersion: input.dataVersion,
     mode: 'stygian-onslaught',
@@ -91,6 +92,8 @@ function stygianHistoryInput(): Omit<StygianPlanHistoryEntry, 'id' | 'createdAt'
       element,
       level
     })),
+    phaseGuidance: null,
+    difficultyAssessment: null,
     plan: validStygianPlan()
   };
 }
@@ -563,6 +566,7 @@ describe('HistoryStore', () => {
     const entry = store.appendAbyss({
       uid: input.uid,
       scenarioId: input.scenarioId,
+      playerCycle: { status: 'unknown' },
       schemaVersion: 2,
       dataVersion: input.dataVersion,
       mode: 'spiral-abyss',
@@ -635,6 +639,27 @@ describe('HistoryStore', () => {
     ]);
   });
 
+  it('keeps old Stygian history readable with honest unknown period and missing guidance', async () => {
+    storeState.set('stygianPlans', [
+      {
+        id: 'legacy-stygian-history',
+        createdAt: '2026-07-22T00:00:00.000Z',
+        ...stygianHistoryInput()
+      }
+    ]);
+    const { HistoryStore } = await import('../../../src/main/services/history-store.js');
+    const store = new HistoryStore();
+
+    expect(store.queryStygian()).toEqual([
+      expect.objectContaining({
+        id: 'legacy-stygian-history',
+        playerCycle: { status: 'unknown' },
+        phaseGuidance: null,
+        difficultyAssessment: null
+      })
+    ]);
+  });
+
   it('keeps legacy recommendation entries readable after abyss history is introduced', async () => {
     const { HistoryStore } = await import('../../../src/main/services/history-store.js');
     const store = new HistoryStore();
@@ -647,6 +672,7 @@ describe('HistoryStore', () => {
     store.appendAbyss({
       uid: '111111111',
       scenarioId: 'abyss.2026-07',
+      playerCycle: { status: 'unknown' },
       schemaVersion: 2,
       dataVersion: '2026.07.1',
       mode: 'spiral-abyss',
@@ -685,6 +711,7 @@ describe('HistoryStore', () => {
     const entry = store.appendStygian({
       uid: input.uid,
       scenarioId: input.scenarioId,
+      playerCycle: { status: 'unknown' },
       schemaVersion: 2,
       dataVersion: input.dataVersion,
       mode: 'stygian-onslaught',
@@ -710,6 +737,8 @@ describe('HistoryStore', () => {
         element,
         level
       })),
+      phaseGuidance: null,
+      difficultyAssessment: null,
       plan
     });
 
@@ -743,6 +772,7 @@ describe('HistoryStore', () => {
     const valid = store.appendStygian({
       uid: input.uid,
       scenarioId: input.scenarioId,
+      playerCycle: { status: 'unknown' },
       schemaVersion: 2,
       dataVersion: input.dataVersion,
       mode: 'stygian-onslaught',
@@ -767,6 +797,8 @@ describe('HistoryStore', () => {
         element,
         level
       })),
+      phaseGuidance: null,
+      difficultyAssessment: null,
       plan: validStygianPlan()
     });
     storeState.set('stygianPlans', [
@@ -845,6 +877,7 @@ function abyssEntryForScope(scenarioId: string): Omit<AbyssPlanHistoryEntry, 'id
   return {
     uid: input.uid,
     scenarioId,
+    playerCycle: { status: 'unknown' },
     schemaVersion: 2,
     dataVersion: input.dataVersion,
     mode: 'spiral-abyss',

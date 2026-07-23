@@ -111,6 +111,12 @@ describe('TheaterAdvisorService', () => {
         mode: 'imaginarium-theater',
         target: 'safe-clear',
         scenarioTrust: 'production',
+        playerCycle: {
+          status: 'known',
+          label: '2026-01-01 — 2026-02-01',
+          effectiveFrom: '2026-01-01T00:00:00.000Z',
+          effectiveTo: '2026-02-01T00:00:00.000Z'
+        },
         eligibility: expect.objectContaining({ hardQualifiedCount: 9 }),
         vigorBudget: expect.arrayContaining([
           expect.objectContaining({

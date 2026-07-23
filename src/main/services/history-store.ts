@@ -14,6 +14,8 @@ import type { ScenarioMode } from '../../shared/domain.js';
 import {
   canonicalCharacterIdSchema,
   stygianAdvisorPlanSchema,
+  stygianDifficultyAssessmentSchema,
+  stygianPhaseGuidanceSchema,
   stygianRewardTargetSchema
 } from '../../shared/stygian-advisor.js';
 import {
@@ -96,12 +98,25 @@ const RAW_HISTORY_COLLECTIONS: RawHistoryCollection[] = [
   { key: 'theaterPlans', mode: 'imaginarium-theater' }
 ];
 
+const playerCycleSnapshotSchema = z.discriminatedUnion('status', [
+  z
+    .object({
+      status: z.literal('known'),
+      label: z.string().trim().min(1),
+      effectiveFrom: z.iso.datetime({ offset: true }),
+      effectiveTo: z.iso.datetime({ offset: true }).optional()
+    })
+    .strict(),
+  z.object({ status: z.literal('unknown') }).strict()
+]);
+
 const theaterHistoryEntrySchema = z
   .object({
     id: z.string().trim().min(8),
     createdAt: z.iso.datetime({ offset: true }),
     uid: z.string().regex(/^\d{9}$/),
     scenarioId: z.string().trim().min(1),
+    playerCycle: playerCycleSnapshotSchema.default({ status: 'unknown' }),
     schemaVersion: z.literal(2),
     dataVersion: z.string().trim().min(1),
     mode: z.literal('imaginarium-theater'),
@@ -344,6 +359,7 @@ const stygianHistoryEntrySchema = z
     createdAt: z.iso.datetime({ offset: true }),
     uid: z.string().regex(/^\d{9}$/),
     scenarioId: z.string().trim().min(1),
+    playerCycle: playerCycleSnapshotSchema.default({ status: 'unknown' }),
     schemaVersion: z.literal(2),
     dataVersion: z.string().trim().min(1),
     mode: z.literal('stygian-onslaught'),
@@ -377,6 +393,8 @@ const stygianHistoryEntrySchema = z
           .strict()
       )
       .min(1),
+    phaseGuidance: stygianPhaseGuidanceSchema.nullable().default(null),
+    difficultyAssessment: stygianDifficultyAssessmentSchema.nullable().default(null),
     plan: stygianAdvisorPlanSchema
   })
   .strict()
@@ -967,6 +985,10 @@ function normalizeAbyssPlanHistoryEntry(value: unknown): AbyssPlanHistoryEntry |
   return structuredClone({
     ...value,
     characters,
+    playerCycle:
+      playerCycleSnapshotSchema.safeParse(value.playerCycle).success
+        ? value.playerCycle
+        : { status: 'unknown' },
     scenarioTrust: isScenarioTrust(value.scenarioTrust)
       ? value.scenarioTrust
       : inferredDevelopment

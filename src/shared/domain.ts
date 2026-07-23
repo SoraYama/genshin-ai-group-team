@@ -303,11 +303,21 @@ export interface RecommendationHistoryEntry {
   compareGroupId?: string;
 }
 
+export type PlayerCycleSnapshot =
+  | {
+      status: 'known';
+      label: string;
+      effectiveFrom: string;
+      effectiveTo?: string;
+    }
+  | { status: 'unknown' };
+
 export interface AbyssPlanHistoryEntry {
   id: string;
   createdAt: string;
   uid: string;
   scenarioId: string;
+  playerCycle: PlayerCycleSnapshot;
   schemaVersion: 2;
   dataVersion: string;
   mode: 'spiral-abyss';
@@ -336,6 +346,7 @@ export interface StygianPlanHistoryEntry {
   createdAt: string;
   uid: string;
   scenarioId: string;
+  playerCycle: PlayerCycleSnapshot;
   schemaVersion: 2;
   dataVersion: string;
   mode: 'stygian-onslaught';
@@ -361,6 +372,8 @@ export interface StygianPlanHistoryEntry {
     element: string;
     level?: number;
   }>;
+  phaseGuidance: import('./stygian-advisor.js').StygianPhaseGuidance | null;
+  difficultyAssessment: import('./stygian-advisor.js').StygianDifficultyAssessment | null;
   plan: import('./scenario-v2.js').StygianPlan;
 }
 
@@ -369,6 +382,7 @@ export interface TheaterPlanHistoryEntry {
   createdAt: string;
   uid: string;
   scenarioId: string;
+  playerCycle: PlayerCycleSnapshot;
   schemaVersion: 2;
   dataVersion: string;
   mode: 'imaginarium-theater';

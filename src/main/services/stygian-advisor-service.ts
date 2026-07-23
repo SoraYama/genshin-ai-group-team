@@ -1,4 +1,5 @@
 import type { PersistedProfile, StygianPlanHistoryEntry } from '../../shared/domain.js';
+import { createPlayerCycleSnapshot } from '../../shared/history-snapshot.js';
 import {
   stygianAdvisorPlanInputSchema,
   stygianAdvisorResultSchema,
@@ -312,6 +313,7 @@ export class StygianAdvisorService {
       this.options.history.appendStygian({
         uid: input.uid,
         scenarioId: result.plan.scenarioId,
+        playerCycle: createPlayerCycleSnapshot(scenarioView.scenario.meta),
         schemaVersion: result.plan.schemaVersion,
         dataVersion: result.plan.dataVersion,
         mode: 'stygian-onslaught',
@@ -347,6 +349,8 @@ export class StygianAdvisorService {
               ]
             : [];
         }),
+        phaseGuidance: result.phaseGuidance,
+        difficultyAssessment: result.difficultyAssessment,
         plan: result.plan
       });
     } catch {

@@ -8,6 +8,7 @@ import {
   createHistoryRerunIntent,
   groupChallengeHistory,
   historyCardTitle,
+  historyConfidenceLabel,
   historyDetailSemanticSnapshot,
   historySavedVersion,
   periodLabelFromScenario
@@ -23,6 +24,7 @@ function abyssEntry(): AbyssPlanHistoryEntry {
     createdAt: '2026-07-23T08:00:00.000Z',
     uid: input.uid,
     scenarioId: input.scenarioId,
+    playerCycle: { status: 'unknown' },
     schemaVersion: 2,
     dataVersion: input.dataVersion,
     mode: 'spiral-abyss',
@@ -51,6 +53,7 @@ function stygianEntry(): StygianPlanHistoryEntry {
     createdAt: '2026-07-22T08:00:00.000Z',
     uid: input.uid,
     scenarioId: input.scenarioId,
+    playerCycle: { status: 'unknown' },
     schemaVersion: 2,
     dataVersion: input.dataVersion,
     mode: 'stygian-onslaught',
@@ -70,6 +73,8 @@ function stygianEntry(): StygianPlanHistoryEntry {
       preferences: input.preferences
     },
     characters: [],
+    phaseGuidance: null,
+    difficultyAssessment: null,
     plan: validStygianPlan()
   };
 }
@@ -86,6 +91,7 @@ function theaterEntry(): TheaterPlanHistoryEntry {
     createdAt: '2026-07-21T08:00:00.000Z',
     uid: input.uid,
     scenarioId: input.scenarioId,
+    playerCycle: { status: 'unknown' },
     schemaVersion: 2,
     dataVersion: input.dataVersion,
     mode: 'imaginarium-theater',
@@ -125,8 +131,38 @@ describe('history presentation', () => {
     expect(historyCardTitle(abyssEntry())).toBe('深境螺旋 12 层 · 第 2 间');
     expect(historyCardTitle(stygianEntry())).toBe('幽境危战 · 难度 5');
     expect(historyCardTitle(theaterEntry())).toBe('幻想真境剧诗 · 第 8 幕');
-    expect(periodLabelFromScenario('theater.2026-07-season')).toBe('2026-07');
-    expect(periodLabelFromScenario('opaque-cycle')).toBe('记录周期');
+    expect(periodLabelFromScenario('theater.2026-07-season')).toBe('保存时未记录周期');
+    expect(periodLabelFromScenario('opaque-cycle')).toBe('保存时未记录周期');
+  });
+
+  it('uses the immutable player period for opaque scenario identities and never exposes the slug', () => {
+    const entry = {
+      ...abyssEntry(),
+      scenarioId: 'opaque.internal.slug-without-a-date',
+      playerCycle: {
+        status: 'known' as const,
+        label: '2026-07-01 — 2026-07-15',
+        effectiveFrom: '2026-07-01T00:00:00.000Z',
+        effectiveTo: '2026-07-15T00:00:00.000Z'
+      }
+    };
+
+    expect(historySavedVersion(entry, 'zh')).toEqual({
+      scenario: '2026-07-01 — 2026-07-15',
+      data: '2026.07.1'
+    });
+    expect(groupChallengeHistory([entry])[0]?.title).toBe(
+      '深境螺旋 · 2026-07-01 — 2026-07-15'
+    );
+    expect(JSON.stringify(historySavedVersion(entry, 'zh'))).not.toContain(entry.scenarioId);
+  });
+
+  it('renders plan confidence as an honest player-facing suggestion level', () => {
+    expect(historyConfidenceLabel(abyssEntry(), 'zh')).toBe('建议把握：中');
+    const unknown = abyssEntry() as AbyssPlanHistoryEntry;
+    delete (unknown.plan as { confidence?: string }).confidence;
+    expect(historyConfidenceLabel(unknown, 'zh')).toBe('建议把握：未知');
+    expect(historyConfidenceLabel(theaterEntry(), 'en')).toBe('Suggestion confidence: Medium');
   });
 
   it('keeps development identifiers out of player-facing saved-version details', () => {
@@ -204,7 +240,17 @@ describe('history presentation', () => {
     abyss.plan.chambers[0]!.firstHalf.risks = ['深渊风险'];
     abyss.plan.chambers[0]!.firstHalf.substitutionNotes = ['深渊替换'];
 
-    const stygian = stygianEntry();
+    const stygian = Object.assign(stygianEntry(), {
+      phaseGuidance: [1, 2, 3].map((phase) => ({
+        phase,
+        mechanismBasis: [`第 ${phase} 阶段机制依据`],
+        risks: [`第 ${phase} 阶段风险`]
+      })),
+      difficultyAssessment: {
+        recommendation: 'proceed-with-caution' as const,
+        evidence: ['当前难度需要谨慎。']
+      }
+    });
     stygian.plan.phases[0]!.team.rotationNotes = ['危战循环'];
     stygian.plan.warnings = ['危战提醒'];
     stygian.plan.assumptions = ['危战前提'];
@@ -252,7 +298,9 @@ describe('history presentation', () => {
         expect.objectContaining({ team: expect.objectContaining({ rotationNotes: ['危战循环'] }) })
       ]),
       warnings: ['危战提醒'],
-      assumptions: ['危战前提']
+      assumptions: ['危战前提'],
+      phaseGuidance: stygian.phaseGuidance,
+      difficultyAssessment: stygian.difficultyAssessment
     });
     expect(historyDetailSemanticSnapshot(theater)).toMatchObject({
       mode: 'imaginarium-theater',
