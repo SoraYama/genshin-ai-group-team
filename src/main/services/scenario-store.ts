@@ -29,6 +29,26 @@ interface RemoteManifest {
   scenarios?: Partial<Record<ScenarioMode, { url: string; sha256?: string; expiresAt?: string }>>;
 }
 
+type ManagedScenarioFileInspection =
+  | {
+      key: string;
+      filePath: string;
+      state: 'present';
+      size: number;
+      modifiedAt: string;
+      hash: string;
+    }
+  | { key: string; filePath: string; state: 'missing'; hash: 'missing' }
+  | { key: string; filePath: string; state: 'unknown'; hash: 'unknown' };
+
+interface ScenarioDataManagementSnapshot {
+  count: number;
+  clearableCount: number;
+  sizeBytes?: number;
+  updatedAt?: string;
+  fingerprint: string;
+}
+
 const STALE_GRACE_MS = 24 * 60 * 60 * 1000;
 
 function isScenarioEnvelope(value: unknown): value is ScenarioEnvelope<ScenarioPayload> {
@@ -191,30 +211,23 @@ export class ScenarioStore {
     return this.manifestFailureCount;
   }
 
-  async getDataManagementSnapshot(): Promise<{
-    count: number;
-    clearableCount: number;
-    sizeBytes?: number;
-    updatedAt?: string;
-    fingerprint: string;
-  }> {
+  async getDataManagementSnapshot(): Promise<ScenarioDataManagementSnapshot> {
     return this.runScenarioFilesExclusive(() => this.getDataManagementSnapshotOnce());
   }
 
-  private async getDataManagementSnapshotOnce(): Promise<{
-    count: number;
-    clearableCount: number;
-    sizeBytes?: number;
-    updatedAt?: string;
-    fingerprint: string;
-  }> {
-    const files = await Promise.all(
+  private async getDataManagementSnapshotOnce(): Promise<ScenarioDataManagementSnapshot> {
+    return this.summarizeDataManagementFiles(await this.inspectDataManagementFiles());
+  }
+
+  private async inspectDataManagementFiles(): Promise<ManagedScenarioFileInspection[]> {
+    return Promise.all(
       this.dataManagementCacheFiles().map(async ({ key, filePath }) => {
         try {
           const stat = await fs.stat(filePath);
           const bytes = await fs.readFile(filePath);
           return {
             key,
+            filePath,
             state: 'present' as const,
             size: stat.size,
             modifiedAt: stat.mtime.toISOString(),
@@ -222,11 +235,16 @@ export class ScenarioStore {
           };
         } catch (error) {
           return (error as NodeJS.ErrnoException).code === 'ENOENT'
-            ? { key, state: 'missing' as const, hash: 'missing' }
-            : { key, state: 'unknown' as const, hash: 'unknown' };
+            ? { key, filePath, state: 'missing' as const, hash: 'missing' as const }
+            : { key, filePath, state: 'unknown' as const, hash: 'unknown' as const };
         }
       })
     );
+  }
+
+  private summarizeDataManagementFiles(
+    files: ManagedScenarioFileInspection[]
+  ): ScenarioDataManagementSnapshot {
     const updatedAt = files
       .flatMap((file) => (file.state === 'present' ? [file.modifiedAt] : []))
       .sort((left, right) => right.localeCompare(left))[0];
@@ -246,7 +264,11 @@ export class ScenarioStore {
 
   async clearDownloadedCache(expected: { count: number; fingerprint: string }): Promise<number> {
     return this.runScenarioFilesExclusive(async () => {
-      const current = await this.getDataManagementSnapshotOnce();
+      const files = await this.inspectDataManagementFiles();
+      if (files.some(({ state }) => state === 'unknown')) {
+        throw new Error('Scenario data could not be fully inspected; nothing was deleted');
+      }
+      const current = this.summarizeDataManagementFiles(files);
       if (
         current.clearableCount !== expected.count ||
         current.fingerprint !== expected.fingerprint
@@ -254,9 +276,10 @@ export class ScenarioStore {
         throw new Error('Scenario data selection changed; confirm again');
       }
       let removed = 0;
-      for (const { filePath } of this.dataManagementCacheFiles()) {
+      for (const file of files) {
+        if (file.state !== 'present') continue;
         try {
-          await fs.unlink(filePath);
+          await fs.unlink(file.filePath);
           removed += 1;
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;

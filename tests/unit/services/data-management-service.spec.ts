@@ -150,4 +150,13 @@ describe('DataManagementService', () => {
       fingerprint: 's1'
     });
   });
+
+  it('does not prepare scenario deletion when any managed file is unreadable', async () => {
+    const deps = createDeps();
+    deps.state.scenarios.sizeBytes = undefined as never;
+    const service = new DataManagementService(deps);
+
+    await expect(service.prepareClear('scenarios')).rejects.toThrow(/fully inspected/i);
+    expect(deps.scenarios.clearDownloadedCache).not.toHaveBeenCalled();
+  });
 });

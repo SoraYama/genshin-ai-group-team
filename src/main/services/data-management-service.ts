@@ -150,6 +150,9 @@ export class DataManagementService {
       }
       case 'scenarios': {
         const value = await this.deps.scenarios.getDataManagementSnapshot();
+        if (value.sizeBytes === undefined) {
+          throw new Error('Scenario files could not be fully inspected; clear is unavailable');
+        }
         return { count: value.clearableCount, fingerprint: value.fingerprint };
       }
       case 'history': {

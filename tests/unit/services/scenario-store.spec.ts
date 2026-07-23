@@ -128,6 +128,15 @@ describe('ScenarioStore', () => {
     expect(summary.sizeBytes).toBeUndefined();
     expect(summary.updatedAt).toBe('2026-07-22T00:00:00.000Z');
     expect(summary.clearableCount).toBe(2);
+    await expect(
+      store.clearDownloadedCache({
+        count: summary.clearableCount,
+        fingerprint: summary.fingerprint
+      })
+    ).rejects.toThrow(/fully inspected/i);
+    await expect(fs.readFile(older, 'utf8')).resolves.toContain('older');
+    await expect(fs.readFile(newer, 'utf8')).resolves.toContain('newer');
+    expect((await fs.stat(unknown)).isDirectory()).toBe(true);
   });
 
   it('serializes confirmed clear with production writers and rejects a queued replacement', async () => {
