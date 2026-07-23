@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   dataClearCopy,
-  formatStorageSize
+  formatStorageSize,
+  settingsLoadPresentation
 } from '../../../src/renderer/pages/Settings/settings-presentation.js';
 
 describe('settings presentation', () => {
@@ -18,5 +19,16 @@ describe('settings presentation', () => {
     expect(dataClearCopy('scenarios', 3, 'zh').effect).toContain('下载');
     expect(dataClearCopy('history', 4, 'zh').effect).toContain('4 条');
     expect(dataClearCopy('service-key', 1, 'en').title).toBe('Clear the saved service key?');
+  });
+
+  it('turns a load failure into a retryable state instead of endless loading', () => {
+    expect(settingsLoadPresentation('', 'zh')).toEqual({
+      state: 'loading',
+      loadingLabel: '正在读取…'
+    });
+    expect(settingsLoadPresentation('读取失败', 'zh')).toEqual({
+      state: 'error',
+      retryLabel: '重新读取设置'
+    });
   });
 });

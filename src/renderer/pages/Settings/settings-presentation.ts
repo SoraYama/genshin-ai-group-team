@@ -1,5 +1,17 @@
 import type { DataManagementScope } from '../../../shared/domain';
 
+export function settingsLoadPresentation(failure: string, locale: 'zh' | 'en') {
+  return failure
+    ? {
+        state: 'error' as const,
+        retryLabel: locale === 'en' ? 'Retry settings' : '重新读取设置'
+      }
+    : {
+        state: 'loading' as const,
+        loadingLabel: locale === 'en' ? 'Loading…' : '正在读取…'
+      };
+}
+
 export function formatStorageSize(value: number | undefined, locale: 'zh' | 'en'): string {
   if (value === undefined) return locale === 'en' ? 'Not calculated' : '暂未统计';
   if (value < 1024) return `${value} B`;

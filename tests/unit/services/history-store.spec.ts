@@ -281,6 +281,66 @@ describe('HistoryStore', () => {
         confirmationToken: confirmation.confirmationToken
       })
     ).toBe(2);
+    expect(() =>
+      store.removeChallengeScope({
+        scope: 'group',
+        uid: first.uid,
+        mode: 'spiral-abyss',
+        scenarioId: first.scenarioId,
+        expectedCount: 2,
+        confirmationToken: confirmation.confirmationToken
+      })
+    ).toThrow(/expired/i);
+    expect(store.queryAbyss()).toHaveLength(1);
+  });
+
+  it('uses opaque expiring confirmations bound to one exact scope', async () => {
+    const { HistoryStore } = await import('../../../src/main/services/history-store.js');
+    let now = 1_000;
+    const store = new HistoryStore(() => now);
+    const entry = store.appendAbyss(abyssEntryForScope('abyss.2026-07'));
+    const confirmation = store.getChallengeScopeConfirmation({
+      scope: 'group',
+      uid: entry.uid,
+      mode: entry.mode,
+      scenarioId: entry.scenarioId
+    });
+
+    expect(confirmation.confirmationToken).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu
+    );
+    expect(confirmation.confirmationToken).not.toBe(
+      store.getChallengeScopeSnapshot({ scope: 'all' }).fingerprint
+    );
+    expect(() =>
+      store.removeChallengeScope({
+        scope: 'uid',
+        uid: entry.uid,
+        expectedCount: confirmation.count,
+        confirmationToken: confirmation.confirmationToken
+      })
+    ).toThrow(/changed/i);
+    expect(() =>
+      store.removeChallengeScope({
+        scope: 'group',
+        uid: entry.uid,
+        mode: entry.mode,
+        scenarioId: entry.scenarioId,
+        expectedCount: confirmation.count,
+        confirmationToken: confirmation.confirmationToken
+      })
+    ).toThrow(/expired/i);
+
+    const expired = store.getChallengeScopeConfirmation({ scope: 'uid', uid: entry.uid });
+    now += 5 * 60_000 + 1;
+    expect(() =>
+      store.removeChallengeScope({
+        scope: 'uid',
+        uid: entry.uid,
+        expectedCount: expired.count,
+        confirmationToken: expired.confirmationToken
+      })
+    ).toThrow(/expired/i);
     expect(store.queryAbyss()).toHaveLength(1);
   });
 
@@ -624,9 +684,7 @@ describe('HistoryStore', () => {
   });
 });
 
-function abyssEntryForScope(
-  scenarioId: string
-): Omit<AbyssPlanHistoryEntry, 'id' | 'createdAt'> {
+function abyssEntryForScope(scenarioId: string): Omit<AbyssPlanHistoryEntry, 'id' | 'createdAt'> {
   const input = abyssInput();
   return {
     uid: input.uid,

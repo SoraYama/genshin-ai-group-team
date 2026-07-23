@@ -34,6 +34,21 @@ interface HistoryStoreSchema {
   theaterPlans: TheaterPlanHistoryEntry[];
 }
 
+type ChallengeScope =
+  | {
+      scope: 'group';
+      uid: string;
+      mode: ScenarioMode;
+      scenarioId: string;
+    }
+  | { scope: 'uid'; uid: string }
+  | { scope: 'all' };
+
+type ConfirmedChallengeScope = ChallengeScope & {
+  expectedCount: number;
+  confirmationToken: string;
+};
+
 const MAX_ENTRIES = 200;
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
@@ -436,8 +451,12 @@ const stygianHistoryEntrySchema = z
 
 export class HistoryStore {
   private readonly store: Store<HistoryStoreSchema>;
+  private readonly challengeConfirmations = new Map<
+    string,
+    { scopeKey: string; count: number; fingerprint: string; expiresAt: number }
+  >();
 
-  constructor() {
+  constructor(private readonly now: () => number = Date.now) {
     this.store = new Store<HistoryStoreSchema>({
       name: 'history',
       defaults: DEFAULTS
@@ -663,12 +682,9 @@ export class HistoryStore {
     const abyssPlans = this.readAbyssPlans();
     const stygianPlans = this.readStygianPlans();
     const theaterPlans = this.readTheaterPlans();
-    const allCreatedAt = [
-      ...entries,
-      ...abyssPlans,
-      ...stygianPlans,
-      ...theaterPlans
-    ].map(({ createdAt }) => createdAt);
+    const allCreatedAt = [...entries, ...abyssPlans, ...stygianPlans, ...theaterPlans].map(
+      ({ createdAt }) => createdAt
+    );
     let sizeBytes: number | undefined;
     try {
       if (this.store.path) sizeBytes = statSync(this.store.path).size;
@@ -684,65 +700,70 @@ export class HistoryStore {
     };
   }
 
-  getChallengeScopeConfirmation(
-    scope:
-      | {
-          scope: 'group';
-          uid: string;
-          mode: ScenarioMode;
-          scenarioId: string;
-        }
-      | { scope: 'uid'; uid: string }
-      | { scope: 'all' }
-  ): { count: number; confirmationToken: string } {
-    const snapshot = this.challengeScopeSnapshot(scope);
+  getChallengeScopeConfirmation(scope: ChallengeScope): {
+    count: number;
+    confirmationToken: string;
+  } {
+    const snapshot = this.getChallengeScopeSnapshot(scope);
+    const confirmationToken = randomUUID();
+    this.challengeConfirmations.set(confirmationToken, {
+      scopeKey: challengeScopeKey(scope),
+      count: snapshot.count,
+      fingerprint: snapshot.fingerprint,
+      expiresAt: this.now() + 5 * 60_000
+    });
     return {
-      count: snapshot.ids.length,
-      confirmationToken: createHistoryConfirmationToken(snapshot.ids)
+      count: snapshot.count,
+      confirmationToken
     };
   }
 
-  removeChallengeScope(
-    scope:
-      | {
-          scope: 'group';
-          uid: string;
-          mode: ScenarioMode;
-          scenarioId: string;
-          expectedCount: number;
-          confirmationToken: string;
-        }
-      | { scope: 'uid'; uid: string; expectedCount: number; confirmationToken: string }
-      | { scope: 'all'; expectedCount: number; confirmationToken: string }
-  ): number {
+  getChallengeScopeSnapshot(scope: ChallengeScope): { count: number; fingerprint: string } {
     const snapshot = this.challengeScopeSnapshot(scope);
-    const confirmationToken = createHistoryConfirmationToken(snapshot.ids);
+    return {
+      count: snapshot.ids.length,
+      fingerprint: createHistorySelectionFingerprint(snapshot.ids)
+    };
+  }
+
+  removeChallengeScope(scope: ConfirmedChallengeScope): number {
+    const confirmation = this.challengeConfirmations.get(scope.confirmationToken);
+    this.challengeConfirmations.delete(scope.confirmationToken);
+    if (!confirmation || confirmation.expiresAt < this.now()) {
+      throw new Error('History confirmation expired; confirm again');
+    }
+    const snapshot = this.challengeScopeSnapshot(scope);
+    const fingerprint = createHistorySelectionFingerprint(snapshot.ids);
     if (
-      snapshot.ids.length !== scope.expectedCount ||
-      confirmationToken !== scope.confirmationToken
+      confirmation.scopeKey !== challengeScopeKey(scope) ||
+      confirmation.count !== scope.expectedCount ||
+      snapshot.ids.length !== confirmation.count ||
+      fingerprint !== confirmation.fingerprint
     ) {
       throw new Error(
         `History selection changed: expected ${scope.expectedCount}, found ${snapshot.ids.length}`
       );
     }
-    this.store.set('entries', snapshot.legacy.filter((entry) => !snapshot.matches(entry)));
-    this.store.set('abyssPlans', snapshot.abyss.filter((entry) => !snapshot.matches(entry)));
-    this.store.set('stygianPlans', snapshot.stygian.filter((entry) => !snapshot.matches(entry)));
-    this.store.set('theaterPlans', snapshot.theater.filter((entry) => !snapshot.matches(entry)));
+    this.store.set(
+      'entries',
+      snapshot.legacy.filter((entry) => !snapshot.matches(entry))
+    );
+    this.store.set(
+      'abyssPlans',
+      snapshot.abyss.filter((entry) => !snapshot.matches(entry))
+    );
+    this.store.set(
+      'stygianPlans',
+      snapshot.stygian.filter((entry) => !snapshot.matches(entry))
+    );
+    this.store.set(
+      'theaterPlans',
+      snapshot.theater.filter((entry) => !snapshot.matches(entry))
+    );
     return snapshot.ids.length;
   }
 
-  private challengeScopeSnapshot(
-    scope:
-      | {
-          scope: 'group';
-          uid: string;
-          mode: ScenarioMode;
-          scenarioId: string;
-        }
-      | { scope: 'uid'; uid: string }
-      | { scope: 'all' }
-  ) {
+  private challengeScopeSnapshot(scope: ChallengeScope) {
     const legacy = this.store.get('entries');
     const abyss = this.readAbyssPlans();
     const stygian = this.readStygianPlans();
@@ -763,8 +784,18 @@ export class HistoryStore {
   }
 }
 
-function createHistoryConfirmationToken(ids: string[]): string {
+function createHistorySelectionFingerprint(ids: string[]): string {
   return createHash('sha256').update(JSON.stringify(ids)).digest('hex');
+}
+
+function challengeScopeKey(scope: ChallengeScope): string {
+  return JSON.stringify(
+    scope.scope === 'group'
+      ? [scope.scope, scope.uid, scope.mode, scope.scenarioId]
+      : scope.scope === 'uid'
+        ? [scope.scope, scope.uid]
+        : [scope.scope]
+  );
 }
 
 function normalizeAbyssPlanHistoryEntry(value: unknown): AbyssPlanHistoryEntry | undefined {

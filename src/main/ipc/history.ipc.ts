@@ -63,7 +63,7 @@ const deleteScopeSchema = z.discriminatedUnion('scope', [
       mode: z.enum(['spiral-abyss', 'stygian-onslaught', 'imaginarium-theater']),
       scenarioId: z.string().trim().min(1).max(256),
       expectedCount: z.number().int().positive(),
-      confirmationToken: z.string().regex(/^[a-f0-9]{64}$/)
+      confirmationToken: z.string().trim().min(8).max(128)
     })
     .strict(),
   z
@@ -71,14 +71,14 @@ const deleteScopeSchema = z.discriminatedUnion('scope', [
       scope: z.literal('uid'),
       uid: z.string().regex(/^\d{9}$/),
       expectedCount: z.number().int().positive(),
-      confirmationToken: z.string().regex(/^[a-f0-9]{64}$/)
+      confirmationToken: z.string().trim().min(8).max(128)
     })
     .strict(),
   z
     .object({
       scope: z.literal('all'),
       expectedCount: z.number().int().positive(),
-      confirmationToken: z.string().regex(/^[a-f0-9]{64}$/)
+      confirmationToken: z.string().trim().min(8).max(128)
     })
     .strict()
 ]);

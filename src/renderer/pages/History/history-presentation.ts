@@ -79,10 +79,44 @@ export function historySavedVersion(
   return { scenario: entry.scenarioId, data: entry.dataVersion };
 }
 
+export function historyDetailSemanticSnapshot(entry: ChallengeHistoryEntry) {
+  switch (entry.mode) {
+    case 'spiral-abyss':
+      return structuredClone({
+        mode: entry.mode,
+        teams: {
+          first: entry.plan.firstHalfTeam,
+          second: entry.plan.secondHalfTeam
+        },
+        chambers: entry.plan.chambers,
+        warnings: entry.plan.warnings,
+        assumptions: entry.plan.assumptions
+      });
+    case 'stygian-onslaught':
+      return structuredClone({
+        mode: entry.mode,
+        phases: entry.plan.phases,
+        reusePolicy: entry.reusePolicy,
+        warnings: entry.plan.warnings,
+        assumptions: entry.plan.assumptions
+      });
+    case 'imaginarium-theater':
+      return structuredClone({
+        mode: entry.mode,
+        acts: entry.plan.acts,
+        vigorBudget: entry.vigorBudget,
+        nodeBudget: entry.nodeBudget,
+        routeGuidance: entry.routeGuidance,
+        warnings: entry.plan.warnings,
+        assumptions: entry.plan.assumptions
+      });
+  }
+}
+
 export function groupChallengeHistory(entries: ChallengeHistoryEntry[]): ChallengeHistoryGroup[] {
   const byKey = new Map<string, ChallengeHistoryEntry[]>();
   for (const entry of entries) {
-    const key = `${entry.mode}:${entry.scenarioId}`;
+    const key = `${entry.uid}:${entry.mode}:${entry.scenarioId}`;
     byKey.set(key, [...(byKey.get(key) ?? []), entry]);
   }
   return [...byKey.entries()]

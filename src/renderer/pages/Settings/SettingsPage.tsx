@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   DataManagementScope,
   DataManagementSummary,
@@ -12,6 +12,7 @@ import { GtaDialog } from '../../components/ui/GtaDialog';
 import { localizeError, useI18n } from '../../i18n';
 import { api } from '../../ipc';
 import { dataClearCopy, formatStorageSize } from './settings-presentation';
+import { SettingsLoadState } from './SettingsLoadState';
 
 type SaveStatus =
   | { kind: 'idle' }
@@ -53,9 +54,10 @@ export function SettingsPage({
   const [updateActionError, setUpdateActionError] = useState('');
   const [pendingClear, setPendingClear] = useState<PendingClear | null>(null);
   const [dataError, setDataError] = useState('');
+  const [loadFailure, setLoadFailure] = useState('');
   const cancelClearRef = useRef<HTMLButtonElement>(null);
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     const [nextConfig, nextData] = await Promise.all([
       api.config.getPublic(),
       api.dataManagement.summary()
@@ -64,16 +66,23 @@ export function SettingsPage({
     setDataSummary(nextData);
     setBaseUrl(nextConfig.llm.baseUrl);
     setModel(nextConfig.llm.model);
-  }
+  }, []);
+
+  const loadSettings = useCallback(async () => {
+    setLoadFailure('');
+    try {
+      await refresh();
+    } catch (error) {
+      setLoadFailure(localizeError(error, locale, t, 'common.error.unknown'));
+    }
+  }, [locale, refresh, t]);
 
   useEffect(() => {
-    void refresh().catch((error) =>
-      setDataError(localizeError(error, locale, t, 'common.error.unknown'))
-    );
+    void loadSettings();
     const unsubscribe = api.update.onEvent(setUpdateStatus);
     void api.update.getState().then(setUpdateStatus);
     return unsubscribe;
-  }, [locale, t]);
+  }, [loadSettings]);
 
   async function handleSave() {
     setSaveStatus({ kind: 'saving' });
@@ -161,7 +170,13 @@ export function SettingsPage({
   }
 
   if (!config || !dataSummary) {
-    return <p className="gta-hint gta-on-bg">{t('common.loading')}</p>;
+    return (
+      <SettingsLoadState
+        failure={loadFailure}
+        isEnglish={isEnglish}
+        onRetry={() => void loadSettings()}
+      />
+    );
   }
 
   const serviceState =

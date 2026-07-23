@@ -5,6 +5,7 @@ import { z } from 'zod';
 
 import type { ScenarioPublicationSnapshot } from './contracts.js';
 import type { ScenarioModeV2 } from './contracts.js';
+import { runScenarioDataFilesExclusive } from './file-coordinator.js';
 import { HttpScenarioPublicationReader, type ScenarioHttpRequest } from './readers.js';
 import { ScenePublicationService } from './service.js';
 import { FileScenarioPublicationStorage } from './storage.js';
@@ -56,22 +57,22 @@ export async function createProductionScenarioPublicationSource({
   if (config.status !== 'configured') return config;
   try {
     const publicKeys = parsePublicKeys(config.publicKeys);
+    const cacheDirectory = path.join(userDataDir, 'cache', 'scenario-publications-v2');
     const service = new ScenePublicationService({
       reader: new HttpScenarioPublicationReader({
         manifestUrl: config.manifestUrl,
         requestJson,
         allowInsecureLoopback: env.GTA_SCENARIO_ALLOW_INSECURE_LOOPBACK === '1'
       }),
-      storage: new FileScenarioPublicationStorage(
-        path.join(userDataDir, 'cache', 'scenario-publications-v2')
-      ),
+      storage: new FileScenarioPublicationStorage(cacheDirectory),
       publicKeys,
       expectedUse: 'production',
       now
     });
     return {
       status: 'configured',
-      refresh: (mode) => service.refresh(mode)
+      refresh: (mode) =>
+        runScenarioDataFilesExclusive(cacheDirectory, 'production', () => service.refresh(mode))
     };
   } catch {
     return { status: 'unavailable', reason: 'production-config-invalid' };

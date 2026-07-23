@@ -44,6 +44,10 @@ function createDeps() {
     },
     history: {
       getSummary: vi.fn(() => state.history),
+      getChallengeScopeSnapshot: vi.fn(() => ({
+        count: state.history.count,
+        fingerprint: state.historyToken
+      })),
       getChallengeScopeConfirmation: vi.fn(() => ({
         count: state.history.count,
         confirmationToken: state.historyToken
@@ -128,5 +132,22 @@ describe('DataManagementService', () => {
     });
     expect(deps.config.clearApiKey).toHaveBeenCalledOnce();
     await expect(service.clear(request)).rejects.toThrow(/expired/i);
+  });
+
+  it('passes the confirmed scenario snapshot into the serialized clear operation', async () => {
+    const deps = createDeps();
+    const service = new DataManagementService(deps);
+    const confirmation = await service.prepareClear('scenarios');
+
+    await service.clear({
+      scope: 'scenarios',
+      expectedCount: confirmation.count,
+      confirmationToken: confirmation.confirmationToken
+    });
+
+    expect(deps.scenarios.clearDownloadedCache).toHaveBeenCalledWith({
+      count: 2,
+      fingerprint: 's1'
+    });
   });
 });

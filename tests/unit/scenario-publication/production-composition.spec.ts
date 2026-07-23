@@ -8,6 +8,7 @@ import {
   createProductionScenarioPublicationSource,
   type ProductionScenarioPublicationSource
 } from '../../../src/main/scenario-publication/production-composition.js';
+import { runScenarioDataFilesExclusive } from '../../../src/main/scenario-publication/file-coordinator.js';
 import { createScenarioPublication } from '../../../src/main/scenario-publication/publication.js';
 import type { ScenarioHttpRequest } from '../../../src/main/scenario-publication/readers.js';
 import type { ScenarioPublicationManifest } from '../../../src/main/scenario-publication/contracts.js';
@@ -111,6 +112,61 @@ describe('production scenario publication composition', () => {
       freshness: 'fresh',
       publication: { payload: { id: scenario.id } }
     });
+  });
+
+  it('holds the shared data-file lock for the complete production refresh workflow', async () => {
+    const userDataDir = await mkdtemp(path.join(os.tmpdir(), 'gta-production-lock-'));
+    temporaryDirectories.push(userDataDir);
+    const keys = generateKeyPairSync('ed25519');
+    const scenario = makeScenario('spiral-abyss', 'production', '2026.07.1');
+    scenario.meta.effectiveFrom = '2026-07-01T00:00:00.000Z';
+    scenario.meta.effectiveTo = '2026-08-01T00:00:00.000Z';
+    const publication = createScenarioPublication(scenario, {
+      keyId: 'release',
+      privateKey: keys.privateKey
+    });
+    const payloadPath = 'publications/abyss/payload.json';
+    const integrityPath = 'publications/abyss/integrity.json';
+    const documents = new Map<string, unknown>([
+      ['/manifest.json', manifestFor(publication.payload, payloadPath, integrityPath)],
+      [`/${payloadPath}`, publication.payload],
+      [`/${integrityPath}`, publication.integrity]
+    ]);
+    let requestCount = 0;
+    const source = await configuredSource({
+      userDataDir,
+      publicKeyPem: keys.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+      requestJson: async (url) => {
+        requestCount += 1;
+        return jsonResponse(documents.get(url.pathname), documents.has(url.pathname) ? 200 : 404);
+      }
+    });
+    if (source.status !== 'configured') throw new Error('Expected configured source');
+
+    let release!: () => void;
+    const hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const cacheDirectory = path.join(userDataDir, 'cache', 'scenario-publications-v2');
+    const blocker = runScenarioDataFilesExclusive(cacheDirectory, 'production', async () => {
+      markStarted();
+      await hold;
+    });
+    await started;
+
+    const refresh = source.refresh('spiral-abyss');
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(requestCount).toBe(0);
+
+    release();
+    await blocker;
+    await expect(refresh).resolves.toMatchObject({ status: 'ready' });
+    expect(requestCount).toBeGreaterThan(0);
   });
 
   it('returns a verified last-known-good snapshot when the configured endpoint later returns 404', async () => {

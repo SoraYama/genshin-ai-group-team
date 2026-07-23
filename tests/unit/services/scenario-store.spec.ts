@@ -4,6 +4,7 @@ import os from 'node:os';
 import { promises as fs } from 'node:fs';
 import { createHash } from 'node:crypto';
 import type { ScenarioEnvelope, SpiralAbyssScenario } from '../../../src/shared/domain.js';
+import { runScenarioDataFilesExclusive } from '../../../src/main/scenario-publication/file-coordinator.js';
 
 async function makeTempDirs() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'gta-scenario-'));
@@ -78,12 +79,18 @@ describe('ScenarioStore', () => {
     });
     await store.init();
 
-    await expect(store.getDataManagementSnapshot()).resolves.toMatchObject({
+    const confirmation = await store.getDataManagementSnapshot();
+    expect(confirmation).toMatchObject({
       count: 3,
       clearableCount: 2,
       fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/)
     });
-    await expect(store.clearDownloadedCache()).resolves.toBe(2);
+    await expect(
+      store.clearDownloadedCache({
+        count: confirmation.clearableCount,
+        fingerprint: confirmation.fingerprint
+      })
+    ).resolves.toBe(2);
     expect(store.getScenario('spiral-abyss').meta.sourceVersion).toBe('bundled-spiral-abyss');
     await expect(store.getDataManagementSnapshot()).resolves.toMatchObject({
       count: 3,
@@ -92,6 +99,77 @@ describe('ScenarioStore', () => {
     await expect(
       fs.stat(path.join(publicationCache, 'production', 'spiral-abyss.json'))
     ).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('reports unknown size on read errors and uses the newest managed file mtime', async () => {
+    const { root, bundled, cache } = await makeTempDirs();
+    const publicationCache = path.join(root, 'scenario-publications-v2');
+    tempRoot = root;
+    await writeBundled(bundled);
+    const older = path.join(cache, 'spiral-abyss.json');
+    await fs.writeFile(older, JSON.stringify(abyssEnvelope('older')));
+    await fs.mkdir(path.join(publicationCache, 'production'), { recursive: true });
+    const newer = path.join(publicationCache, 'production', 'stygian-onslaught.json');
+    await fs.writeFile(newer, JSON.stringify({ signed: 'newer' }));
+    const unknown = path.join(cache, 'imaginarium-theater.json');
+    await fs.mkdir(unknown);
+    await fs.utimes(older, new Date('2026-07-20T00:00:00Z'), new Date('2026-07-20T00:00:00Z'));
+    await fs.utimes(newer, new Date('2026-07-22T00:00:00Z'), new Date('2026-07-22T00:00:00Z'));
+
+    const { ScenarioStore } = await import('../../../src/main/services/scenario-store.js');
+    const store = new ScenarioStore({
+      bundledDir: bundled,
+      cacheDir: cache,
+      productionCacheDir: publicationCache
+    });
+    await store.init();
+    const summary = await store.getDataManagementSnapshot();
+
+    expect(summary.sizeBytes).toBeUndefined();
+    expect(summary.updatedAt).toBe('2026-07-22T00:00:00.000Z');
+    expect(summary.clearableCount).toBe(2);
+  });
+
+  it('serializes confirmed clear with production writers and rejects a queued replacement', async () => {
+    const { root, bundled, cache } = await makeTempDirs();
+    const publicationCache = path.join(root, 'scenario-publications-v2');
+    const productionDir = path.join(publicationCache, 'production');
+    tempRoot = root;
+    await writeBundled(bundled);
+    await fs.mkdir(productionDir, { recursive: true });
+    const target = path.join(productionDir, 'spiral-abyss.json');
+    await fs.writeFile(target, JSON.stringify({ signed: 'first' }));
+    const { ScenarioStore } = await import('../../../src/main/services/scenario-store.js');
+    const store = new ScenarioStore({
+      bundledDir: bundled,
+      cacheDir: cache,
+      productionCacheDir: publicationCache
+    });
+    await store.init();
+    const confirmation = await store.getDataManagementSnapshot();
+    let releaseWriter!: () => void;
+    const holdWriter = new Promise<void>((resolve) => {
+      releaseWriter = resolve;
+    });
+    let writerStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      writerStarted = resolve;
+    });
+    const writer = runScenarioDataFilesExclusive(publicationCache, 'production', async () => {
+      writerStarted();
+      await holdWriter;
+      await fs.writeFile(target, JSON.stringify({ signed: 'replacement' }));
+    });
+    await started;
+    const clear = store.clearDownloadedCache({
+      count: confirmation.clearableCount,
+      fingerprint: confirmation.fingerprint
+    });
+    releaseWriter();
+    await writer;
+
+    await expect(clear).rejects.toThrow(/changed/i);
+    await expect(fs.readFile(target, 'utf8')).resolves.toContain('replacement');
   });
 
   it('loads bundled JSON on first init and exposes meta via list()', async () => {

@@ -158,9 +158,7 @@ test('boots with isolated data and navigates through preload-backed pages', asyn
   await advancedSettings.click();
   await expect(advancedSettings).toHaveAttribute('aria-expanded', 'true');
   await page.getByLabel('本次保存时替换附加请求信息').check();
-  await page
-    .getByRole('textbox', { name: /附加请求信息/ })
-    .fill('X-E2E-Key: e2e-header-secret');
+  await page.getByRole('textbox', { name: /附加请求信息/ }).fill('X-E2E-Key: e2e-header-secret');
   await page.getByRole('button', { name: '保存服务设置' }).click();
   await expect(page.getByText('服务设置已保存。')).toBeVisible();
   await expect(page.getByText('已安全保存', { exact: true }).first()).toBeVisible();
@@ -840,6 +838,10 @@ test('runs the abyss-specific development-sample flow with accessible interventi
   await expect(page.locator('main')).not.toContainText(/development\.|development-sample/);
   const abyssHistory = page.getByRole('button', { name: /深境螺旋 12 层/ }).first();
   await abyssHistory.click();
+  await expect(page.getByText('循环手法').first()).toBeVisible();
+  await expect(page.getByText('上半打法').first()).toBeVisible();
+  await expect(page.getByText('风险').first()).toBeVisible();
+  await expect(page.getByText('替换建议').first()).toBeVisible();
   await expect(page.getByRole('button', { name: '删除这份方案' })).toBeVisible();
   await page.setViewportSize({ width: 1024, height: 768 });
   await page.screenshot({ path: path.join(tmpdir(), 'gta-m7-history-1024x768.png') });
@@ -1043,6 +1045,7 @@ test('plans three Stygian phases from the development scenario without leaking r
   const stygianHistory = page.getByRole('button', { name: /幽境危战 · 演示难度 6/ }).first();
   await stygianHistory.click();
   await expect(page.getByText('第 1 阶段', { exact: true })).toBeVisible();
+  await expect(page.getByText('循环手法').first()).toBeVisible();
   await expect(page.getByRole('button', { name: '删除这份方案' })).toBeVisible();
   await expect(page.locator('main')).not.toContainText(
     /development\.|development-sample|dire-challenge/
@@ -1299,5 +1302,9 @@ test('checks Theater eligibility and renders a cast-vigor route instead of team 
   await expect(page.locator('.gta-history-theater-cast')).toContainText('演示试用角色');
   await expect(page.locator('.gta-history-theater-cast')).toContainText('试用演员');
   await expect(page.locator('.gta-history-theater-route')).toContainText('第 1 幕');
+  await expect(page.getByText('计划活力').first()).toBeVisible();
+  await expect(page.getByRole('heading', { name: '当时的路线指引' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '秘法节点预算' })).toBeVisible();
+  await expect(page.getByText(/演示聚敌秘法：1/)).toBeVisible();
   await expect(page.getByRole('button', { name: '删除这份方案' })).toBeVisible();
 });

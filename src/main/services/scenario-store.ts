@@ -10,6 +10,7 @@ import {
   type ScenarioMode,
   type ScenarioPayload
 } from '../../shared/domain.js';
+import { runScenarioDataFilesExclusive } from '../scenario-publication/file-coordinator.js';
 
 export const DEFAULT_MANIFEST_URL =
   'https://raw.githubusercontent.com/sorayama/genshin-team-advisor-data/main/manifest.json';
@@ -45,6 +46,12 @@ function sha256(buffer: Buffer): string {
   return createHash('sha256').update(buffer).digest('hex');
 }
 
+function scenarioFileFingerprint(files: Array<{ key: string; hash: string }>): string {
+  return createHash('sha256')
+    .update(JSON.stringify(files.map(({ key, hash }) => ({ key, hash }))))
+    .digest('hex');
+}
+
 function isStale(meta: ScenarioMeta, now = Date.now()): boolean {
   const expiresAt = Date.parse(meta.expiresAt);
   if (!Number.isFinite(expiresAt)) return false;
@@ -60,6 +67,7 @@ export class ScenarioStore {
   private readonly cache = new Map<ScenarioMode, ScenarioEnvelope<ScenarioPayload>>();
   private readonly fetchImpl: typeof request;
   private manifestFailureCount = 0;
+  private fileOperationTail: Promise<void> = Promise.resolve();
 
   constructor(options: ScenarioStoreOptions) {
     this.bundledDir = options.bundledDir;
@@ -75,6 +83,10 @@ export class ScenarioStore {
    * synchronous-by-spirit — every call resolves with a value even on first run.
    */
   async init(): Promise<void> {
+    await this.runScenarioFilesExclusive(() => this.initOnce());
+  }
+
+  private async initOnce(): Promise<void> {
     await fs.mkdir(this.cacheDir, { recursive: true });
     await Promise.all(
       ALL_SCENARIO_MODES.map(async (mode) => {
@@ -111,6 +123,12 @@ export class ScenarioStore {
    * than what we have on disk. Caller decides cadence (startup, every 6h, etc.).
    */
   async refresh(opts: { mode?: ScenarioMode; force?: boolean } = {}): Promise<ScenarioMode[]> {
+    return this.runScenarioFilesExclusive(() => this.refreshOnce(opts));
+  }
+
+  private async refreshOnce(
+    opts: { mode?: ScenarioMode; force?: boolean } = {}
+  ): Promise<ScenarioMode[]> {
     let manifest: RemoteManifest | undefined;
     try {
       manifest = await this.fetchManifest();
@@ -180,47 +198,73 @@ export class ScenarioStore {
     updatedAt?: string;
     fingerprint: string;
   }> {
+    return this.runScenarioFilesExclusive(() => this.getDataManagementSnapshotOnce());
+  }
+
+  private async getDataManagementSnapshotOnce(): Promise<{
+    count: number;
+    clearableCount: number;
+    sizeBytes?: number;
+    updatedAt?: string;
+    fingerprint: string;
+  }> {
     const files = await Promise.all(
       this.dataManagementCacheFiles().map(async ({ key, filePath }) => {
         try {
-          const [bytes, stat] = await Promise.all([fs.readFile(filePath), fs.stat(filePath)]);
+          const stat = await fs.stat(filePath);
+          const bytes = await fs.readFile(filePath);
           return {
             key,
+            state: 'present' as const,
             size: stat.size,
+            modifiedAt: stat.mtime.toISOString(),
             hash: createHash('sha256').update(bytes).digest('hex')
           };
-        } catch {
-          return { key, size: 0, hash: 'missing' };
+        } catch (error) {
+          return (error as NodeJS.ErrnoException).code === 'ENOENT'
+            ? { key, state: 'missing' as const, hash: 'missing' }
+            : { key, state: 'unknown' as const, hash: 'unknown' };
         }
       })
     );
-    const updatedAt = [...this.cache.values()]
-      .map(({ meta }) => meta.fetchedAt)
+    const updatedAt = files
+      .flatMap((file) => (file.state === 'present' ? [file.modifiedAt] : []))
       .sort((left, right) => right.localeCompare(left))[0];
-    const clearable = files.filter(({ hash }) => hash !== 'missing');
+    const clearable = files.filter(
+      (file): file is Extract<(typeof files)[number], { state: 'present' }> =>
+        file.state === 'present'
+    );
+    const hasUnknown = files.some(({ state }) => state === 'unknown');
     return {
       count: this.cache.size,
       clearableCount: clearable.length,
-      sizeBytes: clearable.reduce((total, { size }) => total + size, 0),
+      ...(hasUnknown ? {} : { sizeBytes: clearable.reduce((total, { size }) => total + size, 0) }),
       ...(updatedAt ? { updatedAt } : {}),
-      fingerprint: createHash('sha256')
-        .update(JSON.stringify(files.map(({ key, hash }) => ({ key, hash }))))
-        .digest('hex')
+      fingerprint: scenarioFileFingerprint(files)
     };
   }
 
-  async clearDownloadedCache(): Promise<number> {
-    let removed = 0;
-    for (const { filePath } of this.dataManagementCacheFiles()) {
-      try {
-        await fs.unlink(filePath);
-        removed += 1;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  async clearDownloadedCache(expected: { count: number; fingerprint: string }): Promise<number> {
+    return this.runScenarioFilesExclusive(async () => {
+      const current = await this.getDataManagementSnapshotOnce();
+      if (
+        current.clearableCount !== expected.count ||
+        current.fingerprint !== expected.fingerprint
+      ) {
+        throw new Error('Scenario data selection changed; confirm again');
       }
-    }
-    await this.init();
-    return removed;
+      let removed = 0;
+      for (const { filePath } of this.dataManagementCacheFiles()) {
+        try {
+          await fs.unlink(filePath);
+          removed += 1;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        }
+      }
+      await this.initOnce();
+      return removed;
+    });
   }
 
   private dataManagementCacheFiles(): Array<{ key: string; filePath: string }> {
@@ -235,6 +279,24 @@ export class ScenarioStore {
         }))
       : [];
     return [...legacy, ...production];
+  }
+
+  private runScenarioFilesExclusive<T>(operation: () => Promise<T>): Promise<T> {
+    const run = this.fileOperationTail.then(
+      () =>
+        this.productionCacheDir
+          ? runScenarioDataFilesExclusive(this.productionCacheDir, 'production', operation)
+          : operation(),
+      () =>
+        this.productionCacheDir
+          ? runScenarioDataFilesExclusive(this.productionCacheDir, 'production', operation)
+          : operation()
+    );
+    this.fileOperationTail = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
   }
 
   private async loadFromDisk(mode: ScenarioMode): Promise<ScenarioEnvelope<ScenarioPayload>> {

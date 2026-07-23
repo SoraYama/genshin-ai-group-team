@@ -58,7 +58,7 @@ describe('history IPC abyss plans', () => {
       removeTheaterById: vi.fn(),
       getChallengeScopeConfirmation: vi.fn().mockReturnValue({
         count: 3,
-        confirmationToken: 'a'.repeat(64)
+        confirmationToken: 'opaque-confirmation-token'
       }),
       removeChallengeScope: vi.fn().mockReturnValue(3)
     };
@@ -71,7 +71,7 @@ describe('history IPC abyss plans', () => {
         mode: 'spiral-abyss',
         scenarioId: 'abyss.2026-07'
       })
-    ).resolves.toEqual({ count: 3, confirmationToken: 'a'.repeat(64) });
+    ).resolves.toEqual({ count: 3, confirmationToken: 'opaque-confirmation-token' });
     await expect(
       handlers.get('history:delete-scope')?.({
         scope: 'group',
@@ -79,7 +79,7 @@ describe('history IPC abyss plans', () => {
         mode: 'spiral-abyss',
         scenarioId: 'abyss.2026-07',
         expectedCount: 3,
-        confirmationToken: 'a'.repeat(64)
+        confirmationToken: 'opaque-confirmation-token'
       })
     ).resolves.toEqual({ removed: 3 });
     expect(history.removeChallengeScope).toHaveBeenCalledWith({
@@ -88,11 +88,11 @@ describe('history IPC abyss plans', () => {
       mode: 'spiral-abyss',
       scenarioId: 'abyss.2026-07',
       expectedCount: 3,
-      confirmationToken: 'a'.repeat(64)
+      confirmationToken: 'opaque-confirmation-token'
     });
 
-    await expect(
-      handlers.get('history:delete-scope')?.({ scope: 'all' })
-    ).rejects.toMatchObject({ code: 'IPC_VALIDATION_FAILED' });
+    await expect(handlers.get('history:delete-scope')?.({ scope: 'all' })).rejects.toMatchObject({
+      code: 'IPC_VALIDATION_FAILED'
+    });
   });
 });

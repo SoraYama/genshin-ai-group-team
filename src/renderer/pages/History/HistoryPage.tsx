@@ -34,7 +34,7 @@ type PendingDelete =
       count: number;
       confirmationToken: string;
     }
-  | { kind: 'all'; count: number; confirmationToken: string };
+  | { kind: 'uid'; uid: string; count: number; confirmationToken: string };
 
 export function HistoryPage({ state, onRerun }: HistoryPageProps) {
   const { locale, t } = useI18n();
@@ -51,12 +51,18 @@ export function HistoryPage({ state, onRerun }: HistoryPageProps) {
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
+    if (!activeUid) {
+      setAllEntries([]);
+      setLegacyCount(0);
+      setLoading(false);
+      return;
+    }
     try {
       const [abyss, stygian, theater, legacy] = await Promise.all([
-        api.history.listAbyss({}),
-        api.history.listStygian({}),
-        api.history.listTheater({}),
-        api.history.list({ offset: 0, limit: 1 })
+        api.history.listAbyss({ uid: activeUid }),
+        api.history.listStygian({ uid: activeUid }),
+        api.history.listTheater({ uid: activeUid }),
+        api.history.list({ uid: activeUid, offset: 0, limit: 1 })
       ]);
       setAllEntries([...abyss, ...stygian, ...theater]);
       setLegacyCount(legacy.total);
@@ -65,17 +71,13 @@ export function HistoryPage({ state, onRerun }: HistoryPageProps) {
     } finally {
       setLoading(false);
     }
-  }, [locale, t]);
+  }, [activeUid, locale, t]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const visibleEntries = useMemo(
-    () => allEntries.filter((entry) => !activeUid || entry.uid === activeUid),
-    [activeUid, allEntries]
-  );
-  const groups = useMemo(() => groupChallengeHistory(visibleEntries), [visibleEntries]);
+  const groups = useMemo(() => groupChallengeHistory(allEntries), [allEntries]);
   const totalCount = allEntries.length + legacyCount;
 
   async function confirmDelete() {
@@ -98,7 +100,8 @@ export function HistoryPage({ state, onRerun }: HistoryPageProps) {
         });
       } else {
         await api.history.deleteScope({
-          scope: 'all',
+          scope: 'uid',
+          uid: pendingDelete.uid,
           expectedCount: pendingDelete.count,
           confirmationToken: pendingDelete.confirmationToken
         });
@@ -129,9 +132,11 @@ export function HistoryPage({ state, onRerun }: HistoryPageProps) {
   }
 
   async function prepareAllDelete() {
+    if (!activeUid) return;
     try {
-      const confirmation = await api.history.prepareDeleteScope({ scope: 'all' });
-      if (confirmation.count > 0) setPendingDelete({ kind: 'all', ...confirmation });
+      const confirmation = await api.history.prepareDeleteScope({ scope: 'uid', uid: activeUid });
+      if (confirmation.count > 0)
+        setPendingDelete({ kind: 'uid', uid: activeUid, ...confirmation });
     } catch (prepareError) {
       setError(localizeError(prepareError, locale, t, 'history.error.clear'));
     }
@@ -165,13 +170,15 @@ export function HistoryPage({ state, onRerun }: HistoryPageProps) {
               : '旧方案会连同当时的挑战规则与角色选择一起保存，不会被本期资料改写。'}
           </p>
         </div>
-        {totalCount > 0 && (
+        {activeUid && totalCount > 0 && (
           <button
             type="button"
             className="gta-btn gta-btn--danger"
             onClick={() => void prepareAllDelete()}
           >
-            {isEnglish ? `Clear all ${totalCount} records` : `清除全部 ${totalCount} 条记录`}
+            {isEnglish
+              ? `Clear ${totalCount} records for this UID`
+              : `清除当前 UID 的 ${totalCount} 条记录`}
           </button>
         )}
       </header>
@@ -188,7 +195,7 @@ export function HistoryPage({ state, onRerun }: HistoryPageProps) {
 
       {loading ? (
         <p className="gta-hint gta-on-bg">{t('common.loading')}</p>
-      ) : visibleEntries.length === 0 ? (
+      ) : allEntries.length === 0 ? (
         <EmptyState kind="history" locale={isEnglish ? 'en' : 'zh'} />
       ) : (
         <div className="gta-history-groups">
@@ -321,13 +328,7 @@ function HistoryEntry({
       </button>
       {expanded && (
         <div className="gta-history-body">
-          {entry.mode === 'spiral-abyss' ? (
-            <AbyssDetails entry={entry} isEnglish={isEnglish} />
-          ) : entry.mode === 'stygian-onslaught' ? (
-            <StygianDetails entry={entry} isEnglish={isEnglish} />
-          ) : (
-            <TheaterDetails entry={entry} isEnglish={isEnglish} />
-          )}
+          <HistoryDetails entry={entry} isEnglish={isEnglish} />
           <details className="gta-history-version">
             <summary>{isEnglish ? 'Saved version details' : '保存版本详情'}</summary>
             <dl>
@@ -359,6 +360,22 @@ function HistoryEntry({
   );
 }
 
+export function HistoryDetails({
+  entry,
+  isEnglish
+}: {
+  entry: ChallengeHistoryEntry;
+  isEnglish: boolean;
+}) {
+  return entry.mode === 'spiral-abyss' ? (
+    <AbyssDetails entry={entry} isEnglish={isEnglish} />
+  ) : entry.mode === 'stygian-onslaught' ? (
+    <StygianDetails entry={entry} isEnglish={isEnglish} />
+  ) : (
+    <TheaterDetails entry={entry} isEnglish={isEnglish} />
+  );
+}
+
 function AbyssDetails({ entry, isEnglish }: { entry: AbyssPlanHistoryEntry; isEnglish: boolean }) {
   const names = new Map(entry.characters.map((character) => [character.id, character.name]));
   const teamNames = (ids: string[]) =>
@@ -368,18 +385,68 @@ function AbyssDetails({ entry, isEnglish }: { entry: AbyssPlanHistoryEntry; isEn
       <article>
         <span>{isEnglish ? 'First half' : '上半队伍'}</span>
         <strong>{teamNames(entry.plan.firstHalfTeam.characterIds)}</strong>
-        <p>{entry.plan.firstHalfTeam.rotationNotes.join(isEnglish ? '; ' : '；')}</p>
+        <p>{entry.plan.firstHalfTeam.purpose}</p>
+        <DetailList
+          label={isEnglish ? 'Rotation' : '循环手法'}
+          items={entry.plan.firstHalfTeam.rotationNotes}
+        />
       </article>
       <article>
         <span>{isEnglish ? 'Second half' : '下半队伍'}</span>
         <strong>{teamNames(entry.plan.secondHalfTeam.characterIds)}</strong>
-        <p>{entry.plan.secondHalfTeam.rotationNotes.join(isEnglish ? '; ' : '；')}</p>
+        <p>{entry.plan.secondHalfTeam.purpose}</p>
+        <DetailList
+          label={isEnglish ? 'Rotation' : '循环手法'}
+          items={entry.plan.secondHalfTeam.rotationNotes}
+        />
       </article>
       <InterventionSummary
         locked={entry.interventions.lockedCharacterIds.length}
         excluded={entry.interventions.excludedCharacterIds.length}
         isEnglish={isEnglish}
       />
+      <PlanContext
+        warnings={entry.plan.warnings}
+        assumptions={entry.plan.assumptions}
+        isEnglish={isEnglish}
+      />
+      <div className="gta-history-chambers">
+        {entry.plan.chambers.map((chamber) => (
+          <section key={`${chamber.floor}:${chamber.chamber}`}>
+            <h4>
+              {isEnglish
+                ? `Floor ${chamber.floor}, chamber ${chamber.chamber}`
+                : `${chamber.floor} 层 · 第 ${chamber.chamber} 间`}
+            </h4>
+            <div>
+              <article>
+                <strong>{isEnglish ? 'First-half tactics' : '上半打法'}</strong>
+                <DetailList
+                  label={isEnglish ? 'Tactics' : '要点'}
+                  items={chamber.firstHalf.tactics}
+                />
+                <DetailList label={isEnglish ? 'Risks' : '风险'} items={chamber.firstHalf.risks} />
+                <DetailList
+                  label={isEnglish ? 'Substitutions' : '替换建议'}
+                  items={chamber.firstHalf.substitutionNotes}
+                />
+              </article>
+              <article>
+                <strong>{isEnglish ? 'Second-half tactics' : '下半打法'}</strong>
+                <DetailList
+                  label={isEnglish ? 'Tactics' : '要点'}
+                  items={chamber.secondHalf.tactics}
+                />
+                <DetailList label={isEnglish ? 'Risks' : '风险'} items={chamber.secondHalf.risks} />
+                <DetailList
+                  label={isEnglish ? 'Substitutions' : '替换建议'}
+                  items={chamber.secondHalf.substitutionNotes}
+                />
+              </article>
+            </div>
+          </section>
+        ))}
+      </div>
     </div>
   );
 }
@@ -410,12 +477,21 @@ function StygianDetails({
                   .join(' · ')}
               </strong>
               <p>{phase.team.purpose}</p>
+              <DetailList
+                label={isEnglish ? 'Rotation' : '循环手法'}
+                items={phase.team.rotationNotes}
+              />
             </article>
           ))}
       </div>
       <InterventionSummary
         locked={entry.interventions.lockedCharacterIds.length}
         excluded={entry.interventions.excludedCharacterIds.length}
+        isEnglish={isEnglish}
+      />
+      <PlanContext
+        warnings={entry.plan.warnings}
+        assumptions={entry.plan.assumptions}
         isEnglish={isEnglish}
       />
     </>
@@ -460,6 +536,19 @@ function TheaterDetails({
                 .join(isEnglish ? ', ' : '、')}
             </span>
             <small>{pathChoiceLabel(act.pathChoice)}</small>
+            <small>
+              {isEnglish ? 'Planned vigor' : '计划活力'}：
+              {act.plannedVigorSpend.length > 0
+                ? act.plannedVigorSpend
+                    .map(
+                      ({ characterId, cost }) =>
+                        `${names.get(characterId) ?? (isEnglish ? 'Saved actor' : '已保存演员')} −${cost}`
+                    )
+                    .join(isEnglish ? ', ' : '、')
+                : isEnglish
+                  ? 'No spend recorded'
+                  : '未记录消耗'}
+            </small>
           </li>
         ))}
       </ol>
@@ -469,12 +558,84 @@ function TheaterDetails({
             <span key={`${item.act}:${item.characterId}`}>
               {isEnglish ? `Act ${item.act}` : `第 ${item.act} 幕`} ·{' '}
               {names.get(item.characterId) ?? (isEnglish ? 'Saved actor' : '已保存演员')}：
-              {item.before} → {item.after}
+              {item.before} − {item.spent} → {item.after}
             </span>
           ))}
         </div>
       )}
+      <section className="gta-history-theater-guidance">
+        <h4>{isEnglish ? 'Saved route guidance' : '当时的路线指引'}</h4>
+        <DetailList
+          label={isEnglish ? 'Preserve' : '建议保留'}
+          items={entry.routeGuidance.preserveCharacterIds.map(
+            (id) => names.get(id) ?? (isEnglish ? 'Saved actor' : '已保存演员')
+          )}
+        />
+        <DetailList
+          label={isEnglish ? 'Route notes' : '路线说明'}
+          items={entry.routeGuidance.notes}
+        />
+        {entry.routeGuidance.arcanaPriorities.map((priority) => (
+          <article key={priority.nodeId}>
+            <strong>{priority.name}</strong>
+            <p>{priority.condition}</p>
+            <small>{priority.reason}</small>
+          </article>
+        ))}
+      </section>
+      <section className="gta-history-node-budget">
+        <h4>{isEnglish ? 'Arcana node budget' : '秘法节点预算'}</h4>
+        {entry.nodeBudget.length > 0 ? (
+          entry.nodeBudget.map((node) => (
+            <span key={node.nodeId}>
+              {entry.routeGuidance.arcanaPriorities.find(
+                (priority) => priority.nodeId === node.nodeId
+              )?.name ?? (isEnglish ? 'Saved node' : '已保存节点')}
+              ：{node.cost}
+            </span>
+          ))
+        ) : (
+          <span>{isEnglish ? 'No node spending recorded.' : '未记录节点消耗。'}</span>
+        )}
+      </section>
+      <PlanContext
+        warnings={entry.plan.warnings}
+        assumptions={entry.plan.assumptions}
+        isEnglish={isEnglish}
+      />
     </>
+  );
+}
+
+function DetailList({ items, label }: { items: string[]; label: string }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="gta-history-detail-list">
+      <span>{label}</span>
+      <ul>
+        {items.map((item, index) => (
+          <li key={`${index}:${item}`}>{item}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function PlanContext({
+  assumptions,
+  isEnglish,
+  warnings
+}: {
+  assumptions: string[];
+  isEnglish: boolean;
+  warnings: string[];
+}) {
+  if (warnings.length === 0 && assumptions.length === 0) return null;
+  return (
+    <section className="gta-history-plan-context">
+      <DetailList label={isEnglish ? 'Warnings' : '当时的提醒'} items={warnings} />
+      <DetailList label={isEnglish ? 'Assumptions' : '当时的前提'} items={assumptions} />
+    </section>
   );
 }
 
@@ -502,7 +663,9 @@ function deleteDialogTitle(pending: PendingDelete | null, isEnglish: boolean): s
     return isEnglish ? 'Delete this recommendation?' : '删除这份推荐方案？';
   if (pending.kind === 'group')
     return isEnglish ? `Delete ${pending.group.title}?` : `删除${pending.group.title}？`;
-  return isEnglish ? 'Clear all recommendation history?' : '清除全部推荐记录？';
+  return isEnglish
+    ? `Clear recommendation history for UID ${pending.uid}?`
+    : `清除 UID ${pending.uid} 的推荐记录？`;
 }
 
 function deleteDialogBody(pending: PendingDelete, isEnglish: boolean): string {

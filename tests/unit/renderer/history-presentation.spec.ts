@@ -8,6 +8,7 @@ import {
   createHistoryRerunIntent,
   groupChallengeHistory,
   historyCardTitle,
+  historyDetailSemanticSnapshot,
   historySavedVersion,
   periodLabelFromScenario
 } from '../../../src/renderer/pages/History/history-presentation.js';
@@ -156,6 +157,21 @@ describe('history presentation', () => {
     });
   });
 
+  it('never merges identical challenge cycles across UIDs', () => {
+    const first = abyssEntry();
+    const second = { ...abyssEntry(), id: 'abyss-history-2', uid: '987654321' };
+
+    const groups = groupChallengeHistory([first, second]);
+
+    expect(groups).toHaveLength(2);
+    expect(groups.map(({ key }) => key)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(first.uid),
+        expect.stringContaining(second.uid)
+      ])
+    );
+  });
+
   it('preserves each mode intervention as a prefill-only rerun intent', () => {
     expect(createHistoryRerunIntent(abyssEntry())).toMatchObject({
       mode: 'spiral-abyss',
@@ -175,6 +191,90 @@ describe('history presentation', () => {
       target: 'safe-clear',
       selectedCharacterIds: ['1001'],
       selectedSupportCharacterIds: ['support:1']
+    });
+  });
+
+  it('preserves the complete immutable semantic snapshot for all three challenge modes', () => {
+    const abyss = abyssEntry();
+    abyss.plan.firstHalfTeam.purpose = '深渊队伍用途';
+    abyss.plan.firstHalfTeam.rotationNotes = ['深渊循环'];
+    abyss.plan.warnings = ['深渊提醒'];
+    abyss.plan.assumptions = ['深渊前提'];
+    abyss.plan.chambers[0]!.firstHalf.tactics = ['深渊打法'];
+    abyss.plan.chambers[0]!.firstHalf.risks = ['深渊风险'];
+    abyss.plan.chambers[0]!.firstHalf.substitutionNotes = ['深渊替换'];
+
+    const stygian = stygianEntry();
+    stygian.plan.phases[0]!.team.rotationNotes = ['危战循环'];
+    stygian.plan.warnings = ['危战提醒'];
+    stygian.plan.assumptions = ['危战前提'];
+
+    const theater = theaterEntry();
+    theater.plan.acts[0]!.plannedVigorSpend = [{ characterId: '1001', cost: 2 }];
+    theater.vigorBudget = [{ act: 1, characterId: '1001', before: 2, spent: 1, after: 1 }];
+    theater.nodeBudget = [{ nodeId: 'arcana:1', cost: 1 }];
+    theater.routeGuidance = {
+      preserveCharacterIds: ['1001'],
+      arcanaPriorityIds: ['arcana:1'],
+      arcanaPriorities: [
+        {
+          nodeId: 'arcana:1',
+          name: '剧诗秘法',
+          condition: '出现聚怪路线时',
+          reason: '补足路线能力'
+        }
+      ],
+      notes: ['剧诗路线说明']
+    };
+    theater.plan.warnings = ['剧诗提醒'];
+    theater.plan.assumptions = ['剧诗前提'];
+
+    expect(historyDetailSemanticSnapshot(abyss)).toMatchObject({
+      mode: 'spiral-abyss',
+      teams: {
+        first: { purpose: '深渊队伍用途', rotationNotes: ['深渊循环'] }
+      },
+      chambers: expect.arrayContaining([
+        expect.objectContaining({
+          firstHalf: {
+            tactics: ['深渊打法'],
+            risks: ['深渊风险'],
+            substitutionNotes: ['深渊替换']
+          }
+        })
+      ]),
+      warnings: ['深渊提醒'],
+      assumptions: ['深渊前提']
+    });
+    expect(historyDetailSemanticSnapshot(stygian)).toMatchObject({
+      mode: 'stygian-onslaught',
+      phases: expect.arrayContaining([
+        expect.objectContaining({ team: expect.objectContaining({ rotationNotes: ['危战循环'] }) })
+      ]),
+      warnings: ['危战提醒'],
+      assumptions: ['危战前提']
+    });
+    expect(historyDetailSemanticSnapshot(theater)).toMatchObject({
+      mode: 'imaginarium-theater',
+      acts: expect.arrayContaining([
+        expect.objectContaining({
+          plannedVigorSpend: [{ characterId: '1001', cost: 2 }]
+        })
+      ]),
+      vigorBudget: [{ before: 2, spent: 1, after: 1 }],
+      nodeBudget: [{ nodeId: 'arcana:1', cost: 1 }],
+      routeGuidance: {
+        arcanaPriorities: [
+          {
+            name: '剧诗秘法',
+            condition: '出现聚怪路线时',
+            reason: '补足路线能力'
+          }
+        ],
+        notes: ['剧诗路线说明']
+      },
+      warnings: ['剧诗提醒'],
+      assumptions: ['剧诗前提']
     });
   });
 });

@@ -28,11 +28,12 @@ interface ScenarioDataManager {
     updatedAt?: string;
     fingerprint: string;
   }>;
-  clearDownloadedCache(): Promise<number>;
+  clearDownloadedCache(expected: { count: number; fingerprint: string }): Promise<number>;
 }
 
 interface HistoryDataManager {
   getSummary(): { count: number; sizeBytes?: number; updatedAt?: string };
+  getChallengeScopeSnapshot(scope: { scope: 'all' }): { count: number; fingerprint: string };
   getChallengeScopeConfirmation(scope: { scope: 'all' }): {
     count: number;
     confirmationToken: string;
@@ -108,6 +109,11 @@ export class DataManagementService {
     ) {
       throw new Error('Clear scope changed; confirm again');
     }
+    let removed = 0;
+    if (request.scope === 'scenarios') {
+      removed = await this.deps.scenarios.clearDownloadedCache(confirmation.snapshot);
+      return { removed, summary: await this.getSummary() };
+    }
     const current = await this.snapshot(request.scope);
     if (
       current.count !== confirmation.snapshot.count ||
@@ -115,14 +121,9 @@ export class DataManagementService {
     ) {
       throw new Error('Data selection changed; confirm again');
     }
-
-    let removed = 0;
     switch (request.scope) {
       case 'profiles':
         removed = this.deps.profiles.clearAll();
-        break;
-      case 'scenarios':
-        removed = await this.deps.scenarios.clearDownloadedCache();
         break;
       case 'history': {
         const fresh = this.deps.history.getChallengeScopeConfirmation({ scope: 'all' });
@@ -152,8 +153,7 @@ export class DataManagementService {
         return { count: value.clearableCount, fingerprint: value.fingerprint };
       }
       case 'history': {
-        const value = this.deps.history.getChallengeScopeConfirmation({ scope: 'all' });
-        return { count: value.count, fingerprint: value.confirmationToken };
+        return this.deps.history.getChallengeScopeSnapshot({ scope: 'all' });
       }
       case 'service-key':
         return {
