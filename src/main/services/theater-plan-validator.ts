@@ -191,6 +191,15 @@ export function validateTheaterPlan(options: {
       );
       continue;
     }
+    if (actPlan.candidateCharacterIds.length !== 4) {
+      issues.push(
+        issue(
+          'PLAN_SCHEMA_INVALID',
+          ['acts', actPlan.act, 'candidateCharacterIds'],
+          '每幕必须安排 4 名演员。'
+        )
+      );
+    }
     const candidateSet = new Set(actPlan.candidateCharacterIds);
     actPlan.candidateCharacterIds.forEach((id, index) => {
       if (!admitted.has(id)) {

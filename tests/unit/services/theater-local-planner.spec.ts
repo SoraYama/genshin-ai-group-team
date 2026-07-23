@@ -274,7 +274,7 @@ describe('buildLocalTheaterPlan', () => {
     expect(result.plan.acts[1]?.candidateCharacterIds).not.toContain('1001');
   });
 
-  it('does not spend every known mechanism substitute as optional filler', () => {
+  it('blocks instead of emitting undersized parties when preserving mechanism substitutes', () => {
     const scenario = theaterScenario();
     scenario.eligibility.requiredHeadcount = 4;
     scenario.vigor.initial = 1;
@@ -314,10 +314,10 @@ describe('buildLocalTheaterPlan', () => {
       knowledge: allGrouping
     });
 
-    expect(result.status).toBe('planned');
-    if (result.status !== 'planned') throw new Error('Expected planned');
-    expect(result.plan.acts[0]?.candidateCharacterIds).toEqual(['1001']);
-    expect(result.plan.acts[1]?.candidateCharacterIds).toEqual(['1002']);
+    expect(result).toMatchObject({
+      status: 'blocked',
+      issues: expect.arrayContaining([expect.objectContaining({ code: 'PLAN_SCHEMA_INVALID' })])
+    });
   });
 
   it('blocks immediately when an exhausted mechanism actor has no viable substitute', () => {

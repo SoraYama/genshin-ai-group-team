@@ -51,6 +51,11 @@ describe('release security and copyright gates', () => {
   });
 
   it('keeps text-only perceptual baselines for every release viewport and key surface', async () => {
+    const packageJson = JSON.parse(
+      await readFile(path.join(REPO_ROOT, 'package.json'), 'utf8')
+    ) as { scripts: Record<string, string> };
+    expect(packageJson.scripts['test:e2e:visual']).toContain('GTA_E2E_VERIFY_VISUALS=1');
+    expect(packageJson.scripts['gate:all']).toContain('test:e2e:visual');
     const baselines = JSON.parse(
       await readFile(path.join(REPO_ROOT, 'tests/e2e/visual-signatures.json'), 'utf8')
     ) as Record<string, { hash: string; maxDistance: number }>;
