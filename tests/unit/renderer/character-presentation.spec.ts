@@ -3,6 +3,7 @@ import { normalizeElement } from '../../../src/renderer/design/tokens.js';
 import {
   classifyEnergyRecharge,
   ENERGY_RECHARGE_THRESHOLDS,
+  isRenderableCharacterPortrait,
   presentArtifactStatKey,
   reactionTagsForElement
 } from '../../../src/renderer/pages/Roster/character-presentation.js';
@@ -29,6 +30,17 @@ describe('character presentation decisions', () => {
     expect(classifyEnergyRecharge(120)).toBe('medium');
     expect(classifyEnergyRecharge(179.9)).toBe('medium');
     expect(classifyEnergyRecharge(180)).toBe('high');
+  });
+
+  it('accepts only the existing main-process image proxy for portraits', () => {
+    expect(
+      isRenderableCharacterPortrait('gtai-img://avatar/UI_AvatarIcon_Kazuha.png')
+    ).toBe(true);
+    expect(isRenderableCharacterPortrait('gtai-img://remote/abc123')).toBe(true);
+    expect(isRenderableCharacterPortrait('https://enka.network/ui/a.png')).toBe(false);
+    expect(isRenderableCharacterPortrait('file:///tmp/a.png')).toBe(false);
+    expect(isRenderableCharacterPortrait('')).toBe(false);
+    expect(isRenderableCharacterPortrait(undefined)).toBe(false);
   });
 
   it('localizes common artifact stats and safely preserves a bounded unknown key', () => {

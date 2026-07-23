@@ -11,6 +11,7 @@ import { useI18n, type TranslationKey } from '../../i18n';
 import {
   artifactStatUsesPercent,
   classifyEnergyRecharge,
+  isRenderableCharacterPortrait,
   presentArtifactStatKey,
   reactionTagsForElement
 } from './character-presentation';
@@ -59,7 +60,11 @@ export function CharacterCard({ character }: CharacterCardProps) {
       data-element={element ?? 'unknown'}
     >
       <div className="gta-character-main">
-        <IdentityMark name={character.name} element={element} />
+        <CharacterPortrait
+          name={character.name}
+          element={element}
+          imageUrl={character.imageUrl}
+        />
         <div className="gta-character-identity">
           <div className="gta-character-title-row">
             <h3 className="gta-name">{character.name}</h3>
@@ -181,6 +186,37 @@ function TeamFact({ label, value }: { label: string; value: string }) {
     <div className="gta-character-team-fact">
       <span>{label}</span>
       <strong>{value}</strong>
+    </div>
+  );
+}
+
+export function CharacterPortrait({
+  element,
+  imageUrl,
+  name
+}: {
+  element: Element | undefined;
+  imageUrl: string | undefined;
+  name: string;
+}) {
+  const [failedImageUrl, setFailedImageUrl] = useState<string>();
+  const canShowImage =
+    isRenderableCharacterPortrait(imageUrl) && failedImageUrl !== imageUrl;
+
+  if (!canShowImage) {
+    return <IdentityMark name={name} element={element} />;
+  }
+
+  return (
+    <div className="gta-character-mark has-image">
+      <img
+        src={imageUrl}
+        alt={name}
+        loading="lazy"
+        decoding="async"
+        draggable={false}
+        onError={() => setFailedImageUrl(imageUrl)}
+      />
     </div>
   );
 }

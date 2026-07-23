@@ -1,5 +1,17 @@
 import type { Element } from '../../design/tokens';
 
+export function isRenderableCharacterPortrait(
+  value: string | undefined
+): value is string {
+  if (!value) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'gtai-img:' && (url.host === 'avatar' || url.host === 'remote');
+  } catch {
+    return false;
+  }
+}
+
 export const ENERGY_RECHARGE_THRESHOLDS = {
   medium: 120,
   high: 180
