@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "scope": "verified-historical-facts-only",
+  "retrievedAt": "2026-07-23",
+  "license": "CC BY-SA 3.0",
+  "attribution": "Genshin Impact Wiki contributors (Fandom)",
+  "currentProductionScenarioAvailable": false,
+  "spiralAbyss": {
+    "snapshot": "2026-05-16",
+    "sourceUrl": "https://genshin-impact.fandom.com/wiki/Spiral_Abyss/Floors/2026-05-16",
+    "rulesSourceUrl": "https://genshin-impact.fandom.com/wiki/Spiral_Abyss",
+    "chambersPerFloor": 3,
+    "teamsFromFloor": 5,
+    "halvesPerChamber": 2,
+    "partySizePerHalf": 4,
+    "sameCharacterAcrossHalves": false
+  },
+  "imaginariumTheater": {
+    "snapshot": "Season 13 (2025-07-01)",
+    "sourceUrl": "https://genshin-impact.fandom.com/wiki/Imaginarium_Theater/Seasons/2025-07-01",
+    "rulesSourceUrl": "https://genshin-impact.fandom.com/wiki/Imaginarium_Theater",
+    "acts": 10,
+    "partySizePerAct": 4,
+    "vigorPerCharacter": 2,
+    "vigorCostPerAct": 1,
+    "hardMinimumLevel": 70,
+    "eligibleElements": ["Pyro", "Hydro", "Cryo"],
+    "openingCharacters": [
+      "Lyney",
+      "Xiangling",
+      "Tartaglia",
+      "Dahlia",
+      "Wriothesley",
+      "Rosaria"
+    ],
+    "specialGuests": ["Emilie", "Kinich", "Lan Yan", "Noelle"]
+  },
+  "stygianOnslaught": {
+    "snapshot": "2026-05-27",
+    "sourceUrl": "https://genshin-impact.fandom.com/wiki/Stygian_Onslaught/2026-05-27",
+    "rulesSourceUrl": "https://genshin-impact.fandom.com/wiki/Stygian_Onslaught",
+    "battlefields": 3,
+    "timedPhases": 3,
+    "battlefieldNames": ["Glacial Wolf", "Hydro Tulpa", "The Open-Eyed"],
+    "difficultyNames": [
+      "Normal",
+      "Advancing",
+      "Hard",
+      "Menacing",
+      "Fearless",
+      "Dire"
+    ]
+  }
+}

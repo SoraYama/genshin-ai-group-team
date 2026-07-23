@@ -38,6 +38,45 @@ describe('release security and copyright gates', () => {
     expect(violations).toEqual([]);
   });
 
+  it('replaces the renderer HTML CSP placeholder with a strict production policy', async () => {
+    const html = await readFile(path.join(RENDERER_ROOT, 'index.html'), 'utf8');
+    const vite = await readFile(path.join(REPO_ROOT, 'vite.config.ts'), 'utf8');
+    const main = await readFile(path.join(REPO_ROOT, 'src/main/index.ts'), 'utf8');
+    expect(html).toContain('content="__GTA_RENDERER_CSP__"');
+    expect(vite).toContain("connect-src 'none'");
+    expect(vite).toContain("object-src 'none'");
+    expect(vite).toContain("form-action 'none'");
+    expect(main).toContain('webRequest.onBeforeRequest');
+    expect(main).toContain("callback({ cancel: !allowedDevelopmentTransport })");
+  });
+
+  it('keeps text-only perceptual baselines for every release viewport and key surface', async () => {
+    const baselines = JSON.parse(
+      await readFile(path.join(REPO_ROOT, 'tests/e2e/visual-signatures.json'), 'utf8')
+    ) as Record<string, { hash: string; maxDistance: number }>;
+    const surfaces = [
+      'onboarding',
+      'roster-expanded-detail',
+      'roster-delete-dialog',
+      'advisor-details',
+      'history',
+      'settings',
+      'abyss-input-and-result',
+      'stygian-input-and-result',
+      'theater-eligibility',
+      'theater-route'
+    ];
+    const viewports = ['1024x768', '1280x800', '1440x900', '1600x1000'];
+    expect(Object.keys(baselines).sort()).toEqual(
+      surfaces.flatMap((surface) => viewports.map((viewport) => `${surface}-${viewport}`)).sort()
+    );
+    for (const baseline of Object.values(baselines)) {
+      expect(baseline.hash).toMatch(/^[0-9a-f]{64}$/u);
+      expect(baseline.maxDistance).toBeGreaterThan(0);
+      expect(baseline.maxDistance).toBeLessThanOrEqual(24);
+    }
+  });
+
   it('accounts for every generated background and original/OFL visual family in credits', async () => {
     const credits = await readFile(path.join(RESOURCES_ROOT, 'credits.md'), 'utf8');
     const backgrounds = (await readdir(path.join(RESOURCES_ROOT, 'backgrounds')))

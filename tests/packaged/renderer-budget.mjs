@@ -70,6 +70,23 @@ if (remoteReferences.length > 0) {
   throw new Error(`Renderer bundle contains remote URL references: ${remoteReferences.join(', ')}`);
 }
 
+const productionHtml = await readFile(path.join(rendererDir, 'index.html'), 'utf8');
+const cspMatch = productionHtml.match(
+  /<meta\s+http-equiv=["']Content-Security-Policy["']\s+content="([^"]+)"/iu
+);
+if (!cspMatch) throw new Error('Production renderer is missing its Content-Security-Policy');
+const productionCsp = cspMatch[1];
+for (const forbidden of ["'unsafe-eval'", 'http://', 'https://', 'ws://', 'wss://']) {
+  if (productionCsp.includes(forbidden)) {
+    throw new Error(`Production renderer CSP contains forbidden source: ${forbidden}`);
+  }
+}
+for (const required of ["script-src 'self'", "connect-src 'none'", "object-src 'none'"]) {
+  if (!productionCsp.includes(required)) {
+    throw new Error(`Production renderer CSP is missing: ${required}`);
+  }
+}
+
 console.log(
   JSON.stringify({
     gate: 'renderer-budget',

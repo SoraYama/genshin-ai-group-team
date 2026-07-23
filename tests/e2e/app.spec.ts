@@ -15,6 +15,7 @@ let userDataDir: string;
 let launchDurationMs = 0;
 const rendererErrors: string[] = [];
 const rendererExternalRequests: string[] = [];
+const observedPages = new WeakSet<Page>();
 const FORBIDDEN_PLAYER_TERMS =
   /LLM|Enka|API Key|Base URL|\bpartial\b|\bfallback\b|\bstage\b|team-composer|abyss-mage|ruin-guard|development\.|下一阶段接入|开发中/iu;
 const REQUIRED_VIEWPORTS = [
@@ -23,6 +24,10 @@ const REQUIRED_VIEWPORTS = [
   { width: 1440, height: 900 },
   { width: 1600, height: 1000 }
 ] as const;
+const VISUAL_SIGNATURES_PATH = path.resolve('tests/e2e/visual-signatures.json');
+let visualSignaturesPromise:
+  | Promise<Record<string, { hash: string; maxDistance: number }>>
+  | undefined;
 
 async function expectNoForbiddenPlayerTerms(): Promise<void> {
   const content = (await page.locator('main').textContent()) ?? '';
@@ -68,16 +73,98 @@ async function expectPageFitsEveryViewport(label: string): Promise<void> {
     ).toBeLessThanOrEqual(measurements.clientWidth);
     expect(measurements.clientWidth).toBeLessThanOrEqual(measurements.viewportWidth);
     expect(measurements.escapedControls, `${label} ${viewport.width}px control bounds`).toEqual([]);
-    if (process.env.GTA_E2E_CAPTURE_VIEWPORTS === '1') {
+    const shouldCapture = process.env.GTA_E2E_CAPTURE_VIEWPORTS === '1';
+    const shouldVerify = process.env.GTA_E2E_VERIFY_VISUALS === '1';
+    const shouldPrint = process.env.GTA_E2E_PRINT_VISUAL_SIGNATURES === '1';
+    if (shouldCapture || shouldVerify || shouldPrint) {
       const artifactDirectory = path.resolve('test-results/visual-matrix');
-      await mkdir(artifactDirectory, { recursive: true });
       const safeLabel = label.toLocaleLowerCase().replace(/[^a-z0-9]+/gu, '-');
-      await page.screenshot({
-        path: path.join(artifactDirectory, `${safeLabel}-${viewport.width}x${viewport.height}.png`),
+      const signatureKey = `${safeLabel}-${viewport.width}x${viewport.height}`;
+      if (shouldCapture) await mkdir(artifactDirectory, { recursive: true });
+      const screenshot = await page.screenshot({
+        path: shouldCapture ? path.join(artifactDirectory, `${signatureKey}.png`) : undefined,
         fullPage: false
       });
+      const actualHash = await perceptualHash(screenshot);
+      if (shouldPrint) {
+        console.log(`VISUAL_SIGNATURE ${signatureKey} ${actualHash}`);
+      }
+      if (shouldVerify) {
+        const signatures = await loadVisualSignatures();
+        const baseline = signatures[signatureKey];
+        if (!baseline) throw new Error(`Missing visual signature for ${signatureKey}`);
+        expect(
+          hammingDistance(actualHash, baseline.hash),
+          `${signatureKey} perceptual change`
+        ).toBeLessThanOrEqual(baseline.maxDistance);
+      }
     }
   }
+}
+
+async function loadVisualSignatures(): Promise<
+  Record<string, { hash: string; maxDistance: number }>
+> {
+  visualSignaturesPromise ??= readFile(VISUAL_SIGNATURES_PATH, 'utf8').then((source) =>
+    JSON.parse(source)
+  );
+  return visualSignaturesPromise;
+}
+
+async function perceptualHash(png: Buffer): Promise<string> {
+  const dataUrl = `data:image/png;base64,${png.toString('base64')}`;
+  return page.evaluate<string>(`new Promise((resolve, reject) => {
+        const image = new Image();
+        image.addEventListener('error', () => reject(new Error('Unable to decode visual sample')));
+        image.addEventListener('load', () => {
+          const width = 17;
+          const height = 16;
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const context = canvas.getContext('2d', { willReadFrequently: true });
+          if (!context) {
+            reject(new Error('Unable to create visual sampling context'));
+            return;
+          }
+          context.drawImage(image, 0, 0, width, height);
+          const pixels = context.getImageData(0, 0, width, height).data;
+          let bits = '';
+          for (let y = 0; y < height; y += 1) {
+            for (let x = 0; x < width - 1; x += 1) {
+              const left = (y * width + x) * 4;
+              const right = left + 4;
+              const leftLuminance =
+                pixels[left] * 0.299 + pixels[left + 1] * 0.587 + pixels[left + 2] * 0.114;
+              const rightLuminance =
+                pixels[right] * 0.299 +
+                pixels[right + 1] * 0.587 +
+                pixels[right + 2] * 0.114;
+              bits += leftLuminance > rightLuminance ? '1' : '0';
+            }
+          }
+          resolve(
+            (bits.match(/.{4}/gu) || [])
+              .map((nibble) => Number.parseInt(nibble, 2).toString(16))
+              .join('')
+          );
+        });
+        image.src = ${JSON.stringify(dataUrl)};
+      })`);
+}
+
+function hammingDistance(left: string, right: string): number {
+  expect(left.length).toBe(right.length);
+  let distance = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    let difference =
+      Number.parseInt(left.charAt(index), 16) ^ Number.parseInt(right.charAt(index), 16);
+    while (difference > 0) {
+      distance += difference & 1;
+      difference >>>= 1;
+    }
+  }
+  return distance;
 }
 
 async function launchApp(): Promise<void> {
@@ -97,10 +184,17 @@ async function launchApp(): Promise<void> {
   });
   page = await electronApp.firstWindow();
   launchDurationMs = Date.now() - startedAt;
-  page.on('pageerror', (error) => {
+  observeRenderer(page);
+  electronApp.on('window', observeRenderer);
+}
+
+function observeRenderer(rendererPage: Page): void {
+  if (observedPages.has(rendererPage)) return;
+  observedPages.add(rendererPage);
+  rendererPage.on('pageerror', (error) => {
     rendererErrors.push(error.message);
   });
-  page.on('request', (request) => {
+  rendererPage.on('request', (request) => {
     if (/^(?:https?|wss?):/iu.test(request.url())) rendererExternalRequests.push(request.url());
   });
 }
@@ -111,10 +205,17 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
+  expect(rendererErrors).toEqual([]);
+  expect(rendererExternalRequests).toEqual([]);
   await electronApp?.close();
   if (userDataDir) {
     await rm(userDataDir, { recursive: true, force: true });
   }
+});
+
+test.afterEach(() => {
+  expect(rendererErrors).toEqual([]);
+  expect(rendererExternalRequests).toEqual([]);
 });
 
 test('boots with isolated data and navigates through preload-backed pages', async () => {

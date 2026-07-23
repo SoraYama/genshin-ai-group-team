@@ -284,10 +284,18 @@ function applyContentSecurityPolicy(): void {
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
     callback(false);
   });
+  session.defaultSession.webRequest.onBeforeRequest(
+    { urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] },
+    (details, callback) => {
+      const allowedDevelopmentTransport =
+        isDev && /^(?:http|ws):\/\/localhost:5294(?:\/|$)/u.test(details.url);
+      callback({ cancel: !allowedDevelopmentTransport });
+    }
+  );
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     const csp = isDev
       ? "default-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:5294 ws://localhost:5294 data:; img-src 'self' gtai-img: data:"
-      : "default-src 'self'; img-src 'self' gtai-img: data:; style-src 'self' 'unsafe-inline'; script-src 'self'";
+      : "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' gtai-img: data:; font-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'";
 
     callback({
       responseHeaders: {
