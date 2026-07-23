@@ -286,7 +286,7 @@ describe('StygianAdvisorService', () => {
         difficultyId: 'difficulty-6',
         difficultyNames: expect.objectContaining({
           'zh-CN': '难度 6',
-          en: 'Difficulty 6'
+          'en-US': 'Difficulty 6'
         }),
         target: 'dire-challenge',
         reusePolicy: { rule: 'forbidden', notes: [] },

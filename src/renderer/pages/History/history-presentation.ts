@@ -91,16 +91,7 @@ export function historyCardTitle(entry: ChallengeHistoryEntry, locale: 'zh' | 'e
           entry.target.chamber ? ` · Chamber ${entry.target.chamber}` : ''
         }`;
       case 'stygian-onslaught': {
-        const legacyName = entry.difficultyName;
-        const difficulty =
-          entry.difficultyNames?.['en-US'] ??
-          entry.difficultyNames?.['en'] ??
-          (legacyName && !/[\u3400-\u9fff]/u.test(legacyName) ? legacyName : undefined) ??
-          `Difficulty ${
-            (legacyName ? /(\d+)(?!.*\d)/u.exec(legacyName)?.[1] : undefined) ??
-            difficultyOrder(entry.difficultyId)
-          }`;
-        return `Stygian Onslaught · ${difficulty}`;
+        return `Stygian Onslaught · ${historyDifficultyLabel(entry, locale)}`;
       }
       case 'imaginarium-theater':
         return `Imaginarium Theater · ${entry.act ? `Act ${entry.act}` : 'All acts'}`;
@@ -112,16 +103,28 @@ export function historyCardTitle(entry: ChallengeHistoryEntry, locale: 'zh' | 'e
         entry.target.chamber ? ` · 第 ${entry.target.chamber} 间` : ''
       }`;
     case 'stygian-onslaught':
-      return `幽境危战 · ${
-        entry.difficultyNames?.['zh-CN'] ?? entry.difficultyName ?? entry.difficultyId
-      }`;
+      return `幽境危战 · ${historyDifficultyLabel(entry, locale)}`;
     case 'imaginarium-theater':
       return `幻想真境剧诗${entry.act ? ` · 第 ${entry.act} 幕` : ' · 全部幕次'}`;
   }
 }
 
-function difficultyOrder(difficultyId: string): string {
-  return /(\d+)(?!.*\d)/u.exec(difficultyId)?.[1] ?? 'saved';
+export function historyDifficultyLabel(
+  entry: StygianPlanHistoryEntry,
+  locale: 'zh' | 'en'
+): string {
+  const localized =
+    locale === 'en' ? entry.difficultyNames?.['en-US'] : entry.difficultyNames?.['zh-CN'];
+  if (localized) return localized;
+
+  const legacy =
+    entry.legacyDifficultyName ??
+    (entry.difficultyName ? { text: entry.difficultyName, locale: null } : undefined);
+  if (locale === 'zh' && legacy) return `旧记录原始名称：${legacy.text}`;
+  if (locale === 'en' && legacy?.locale === 'en-US') return legacy.text;
+  return locale === 'en'
+    ? `Legacy difficulty · ${entry.difficultyId} (original label not localized)`
+    : `旧难度记录 · ${entry.difficultyId}`;
 }
 
 export function historySavedVersion(

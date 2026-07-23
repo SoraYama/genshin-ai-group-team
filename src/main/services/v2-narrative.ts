@@ -6,14 +6,16 @@ import type {
 } from '../agents/contracts.js';
 import type {
   AbyssTeamRisk,
+  AdvisorFactRef,
   AdvisorLocale,
   AdvisorNarrative,
+  AdvisorNarrativeReasonCode,
   LocalizedAdvisorText
 } from '../../shared/advisor-narrative.js';
 
 type Directive = V2RotationOutput['rotations'][number] | V2ExplainOutput['explanations'][number];
 
-const REASON_TEXT: Record<string, LocalizedAdvisorText> = {
+const REASON_TEXT: Record<AdvisorNarrativeReasonCode, LocalizedAdvisorText> = {
   'setup-order': {
     'zh-CN': '先完成辅助布置再进入主要输出。',
     'en-US': 'Set up support effects before committing to the main damage window.'
@@ -72,9 +74,7 @@ export function renderV2Narrative(options: {
     summary: modeSummary(options.mode),
     sections: [...grouped.entries()].map(([key, { target, directives }]) => {
       const reasonCodes = unique(directives.flatMap(({ reasonCodes }) => reasonCodes));
-      const factRefs = unique(
-        directives.flatMap(({ factRefs }) => factRefs.map((ref) => factRefKey(ref)))
-      );
+      const factRefs = uniqueFactRefs(directives.flatMap(({ factRefs }) => factRefs));
       const tone = directives.some(({ tone }) => tone === 'cautious')
         ? ('cautious' as const)
         : directives.some(({ tone }) => tone === 'technical')
@@ -169,11 +169,7 @@ function targetTitle(target: V2AgentTarget): LocalizedAdvisorText {
 }
 
 function factRefKey(
-  ref:
-    | { kind: 'plan'; field: string }
-    | { kind: 'mechanic'; target: string; factIndex: number }
-    | { kind: 'profile'; characterId: string; field: string }
-    | { kind: 'knowledge'; characterId: string }
+  ref: AdvisorFactRef
 ): string {
   switch (ref.kind) {
     case 'plan':
@@ -185,6 +181,16 @@ function factRefKey(
     case 'knowledge':
       return `knowledge:${ref.characterId}`;
   }
+}
+
+function uniqueFactRefs(refs: AdvisorFactRef[]): AdvisorFactRef[] {
+  const seen = new Set<string>();
+  return refs.filter((ref) => {
+    const key = factRefKey(ref);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function unique<T>(values: T[]): T[] {

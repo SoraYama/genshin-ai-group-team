@@ -18,6 +18,10 @@ import { CRITIQUE_PROMPT_V2 } from '../agents/critique/prompt.js';
 import { EXPLAIN_PROMPT_V2 } from '../agents/explain/prompt.js';
 import { ROTATION_COACH_PROMPT_V2 } from '../agents/rotation-coach/prompt.js';
 import type { RecommendationPlan } from '../../shared/scenario-v2.js';
+import type {
+  AdvisorFactRef,
+  AdvisorNarrativeReasonCode
+} from '../../shared/advisor-narrative.js';
 import type { AgentSdkRunOptions } from './agent-sdk-adapter.js';
 import {
   addAgentUsage,
@@ -26,6 +30,10 @@ import {
   type AuditedAgentRunner,
   type ToolAudit
 } from './agent-turn-audit.js';
+import {
+  AgentPayloadTooLargeError,
+  stringifyAgentPayload
+} from './agent-payload-budget.js';
 
 export type { V2PipelineContext } from '../agents/contracts.js';
 
@@ -86,20 +94,40 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
   while (true) {
     const stage: V2AgentStage = repairs === 0 ? 'compose' : repairs === 1 ? 'repair-1' : 'repair-2';
     const composerOptions = options.sdkOptionsForStage(stage);
+    let composerPrompt: string;
+    try {
+      composerPrompt =
+        stage === 'compose'
+          ? stringifyAgentPayload(
+              {
+                request: parseJsonOrRaw(options.composer.initialPrompt),
+                context
+              },
+              'compose-prompt'
+            )
+          : stringifyAgentPayload(
+              {
+                instruction: '只修复具体 issue，返回完整方案。',
+                issues: pendingIssues,
+                previousPlan,
+                context
+              },
+              'repair-prompt'
+            );
+    } catch (error) {
+      if (error instanceof AgentPayloadTooLargeError) {
+        return {
+          ok: false,
+          repairs,
+          issues: [options.invalidIssue(stage, error.message)],
+          usage
+        };
+      }
+      throw error;
+    }
     const composerTurn = await runAuditedAgentTurn({
       runner: options.runner,
-      prompt:
-        stage === 'compose'
-          ? JSON.stringify({
-              request: parseJsonOrRaw(options.composer.initialPrompt),
-              context
-            })
-          : JSON.stringify({
-              instruction: '只修复具体 issue，返回完整方案。',
-              issues: pendingIssues,
-              previousPlan,
-              context
-            }),
+      prompt: composerPrompt,
       sdkOptions: composerOptions,
       systemPrompt:
         stage === 'compose'
@@ -223,8 +251,8 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
         usage
       };
     }
-    const rotationFactError = firstInvalidFactRef(
-      rotationResult.value.rotations.flatMap(({ factRefs }) => factRefs),
+    const rotationFactError = firstGroundingError(
+      rotationResult.value.rotations,
       context
     );
     if (rotationFactError) {
@@ -272,8 +300,8 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
         usage
       };
     }
-    const explainFactError = firstInvalidFactRef(
-      explainResult.value.explanations.flatMap(({ factRefs }) => factRefs),
+    const explainFactError = firstGroundingError(
+      explainResult.value.explanations,
       context
     );
     if (explainFactError) {
@@ -296,33 +324,102 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
   }
 }
 
-function firstInvalidFactRef(
-  refs: Array<
-    | { kind: 'plan'; field: string }
-    | { kind: 'mechanic'; target: string; factIndex: number }
-    | { kind: 'profile'; characterId: string; field: string }
-    | { kind: 'knowledge'; characterId: string }
-  >,
+function firstGroundingError(
+  directives: Array<{
+    reasonCodes: AdvisorNarrativeReasonCode[];
+    factRefs: AdvisorFactRef[];
+  }>,
   context: V2PipelineContext
 ): string | undefined {
-  const profileIds = new Set(context.profile.minimalIndex.map(({ id }) => String(id)));
   const eligibleIds = new Set(context.candidate.eligibleCharacterIds);
-  for (const ref of refs) {
-    if (ref.kind === 'plan') continue;
-    if (ref.kind === 'profile' && !profileIds.has(ref.characterId)) {
-      return `Stage referenced a profile fact outside the bounded roster: ${ref.characterId}`;
+  const unknownKnowledgeIds = new Set(context.knowledge.unknownCharacterIds);
+  const detailedProfiles = new Map(
+    context.profile.detailedProfiles.map((profile) => [String(profile.id), profile])
+  );
+  for (const directive of directives) {
+    for (const ref of directive.factRefs) {
+      if (ref.kind === 'plan') continue;
+      if (ref.kind === 'profile') {
+        const profile = detailedProfiles.get(ref.characterId);
+        if (!profile) {
+          return `Stage referenced a profile fact outside the bounded roster: ${ref.characterId}`;
+        }
+        if (!profileFieldAvailable(profile, ref.field)) {
+          return `Stage profile field is unavailable: ${ref.characterId}:${ref.field}`;
+        }
+      }
+      if (ref.kind === 'knowledge') {
+        if (!eligibleIds.has(ref.characterId)) {
+          return `Stage referenced knowledge outside the eligible pool: ${ref.characterId}`;
+        }
+        if (unknownKnowledgeIds.has(ref.characterId)) {
+          return `Stage knowledge is explicitly unknown: ${ref.characterId}`;
+        }
+      }
+      if (ref.kind === 'mechanic') {
+        const mechanic = context.mechanics.find(({ target }) => target === ref.target);
+        if (!mechanic || ref.factIndex >= mechanic.facts.length) {
+          return `Stage referenced an unknown mechanic fact: ${ref.target}#${ref.factIndex}`;
+        }
+      }
     }
-    if (ref.kind === 'knowledge' && !eligibleIds.has(ref.characterId)) {
-      return `Stage referenced knowledge outside the eligible pool: ${ref.characterId}`;
-    }
-    if (ref.kind === 'mechanic') {
-      const mechanic = context.mechanics.find(({ target }) => target === ref.target);
-      if (!mechanic || ref.factIndex >= mechanic.facts.length) {
-        return `Stage referenced an unknown mechanic fact: ${ref.target}#${ref.factIndex}`;
+    for (const reason of directive.reasonCodes) {
+      if (!directive.factRefs.some((ref) => factSupportsReason(ref, reason))) {
+        return `Stage reason lacks a compatible fact reference: ${reason}`;
       }
     }
   }
   return undefined;
+}
+
+function profileFieldAvailable(
+  profile: V2PipelineContext['profile']['detailedProfiles'][number],
+  field: Extract<AdvisorFactRef, { kind: 'profile' }>['field']
+): boolean {
+  switch (field) {
+    case 'level':
+      return profile.level !== undefined;
+    case 'stats':
+      return profile.stats !== undefined;
+    case 'build':
+      return (
+        profile.weapon !== undefined ||
+        profile.artifactSummary !== undefined ||
+        profile.talents !== undefined ||
+        profile.stats !== undefined
+      );
+    case 'completeness':
+      return true;
+  }
+}
+
+function factSupportsReason(ref: AdvisorFactRef, reason: AdvisorNarrativeReasonCode): boolean {
+  switch (reason) {
+    case 'setup-order':
+      return ref.kind === 'plan';
+    case 'energy-cycle':
+      return (
+        ref.kind === 'knowledge' ||
+        (ref.kind === 'profile' && (ref.field === 'stats' || ref.field === 'build'))
+      );
+    case 'survival-window':
+      return (
+        ref.kind === 'mechanic' ||
+        ref.kind === 'knowledge' ||
+        (ref.kind === 'profile' && (ref.field === 'stats' || ref.field === 'build'))
+      );
+    case 'reaction-chain':
+      return ref.kind === 'plan' || ref.kind === 'knowledge';
+    case 'mechanic-response':
+    case 'target-priority':
+      return ref.kind === 'mechanic';
+    case 'vigor-budget':
+      return ref.kind === 'plan' && ref.field === 'vigor-ledger';
+    case 'cast-flexibility':
+      return ref.kind === 'plan' && ref.field === 'cast-allocation';
+    case 'uncertainty':
+      return true;
+  }
 }
 
 async function runStrictStage<T>(options: {
@@ -336,9 +433,18 @@ async function runStrictStage<T>(options: {
 }): Promise<
   { ok: true; value: T; usage: AgentUsage } | { ok: false; message: string; usage: AgentUsage }
 > {
+  let prompt: string;
+  try {
+    prompt = stringifyAgentPayload(options.prompt, 'strict-stage-prompt');
+  } catch (error) {
+    if (error instanceof AgentPayloadTooLargeError) {
+      return { ok: false, message: error.message, usage: zeroUsage() };
+    }
+    throw error;
+  }
   const turn = await runAuditedAgentTurn({
     runner: options.runner,
-    prompt: JSON.stringify(options.prompt),
+    prompt,
     sdkOptions: options.sdkOptions,
     systemPrompt: options.systemPrompt,
     auditContext: { correlationId: options.correlationId, round: 'single' },

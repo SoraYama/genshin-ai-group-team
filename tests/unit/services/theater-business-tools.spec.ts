@@ -4,6 +4,7 @@ import {
   THEATER_MCP_TOOL_NAMES,
   createTheaterBusinessTools
 } from '../../../src/main/services/theater-business-tools.js';
+import type { CharacterKnowledgeReader } from '../../../src/shared/character-knowledge.js';
 import { THEATER_CHARACTERS, theaterScenario } from './theater-test-fixtures.js';
 
 function payload(result: { content: Array<{ type: string; text?: string }> }) {
@@ -100,6 +101,60 @@ describe('theater business tools', () => {
     const external = payload(await tools[2]!.handler({ characterIds: ['trial.1'] }, {}));
     expect(external).toMatchObject({
       characters: [expect.objectContaining({ id: 'trial.1', status: 'unknown' })]
+    });
+  });
+
+  it('fails closed with typed errors for oversized act and knowledge payloads', async () => {
+    const scenario = theaterScenario();
+    scenario.acts[0]!.pathNotes = [
+      { kind: 'fixed', text: '界'.repeat(17_000) }
+    ];
+    const verboseKnowledge: CharacterKnowledgeReader = {
+      version: 'verbose-test',
+      coverage: { characterCount: 32, notes: 'test' },
+      lookup: (id) => ({
+        status: 'known',
+        knowledgeVersion: 'verbose-test',
+        id,
+        name: `角色 ${id}`,
+        weaponType: 'sword',
+        roles: ['support'],
+        energyCost: 60,
+        energyNeeds: 'medium',
+        capabilities: ['off-field'],
+        applicationNotes: Array.from({ length: 8 }, () => '界'.repeat(240)),
+        kitNotes: Array.from({ length: 8 }, () => '界'.repeat(240)),
+        unknownFields: []
+      }),
+      coverageFor: (ids) => ({
+        knowledgeVersion: 'verbose-test',
+        requested: ids.length,
+        known: ids.length,
+        unknownCharacterIds: []
+      })
+    };
+    const tools = createTheaterBusinessTools({
+      getProfile: () => null,
+      getScenario: () => scenario,
+      knowledge: verboseKnowledge
+    });
+
+    const act = await tools[1]!.handler(
+      { scenarioId: scenario.id, dataVersion: scenario.meta.dataVersion, act: 1 },
+      {}
+    );
+    const knowledge = await tools[2]!.handler(
+      { characterIds: Array.from({ length: 32 }, (_, index) => String(20_000 + index)) },
+      {}
+    );
+
+    expect(act.isError).toBe(true);
+    expect(payload(act)).toMatchObject({
+      error: { code: 'AGENT_PAYLOAD_TOO_LARGE', scope: 'business-tool-result' }
+    });
+    expect(knowledge.isError).toBe(true);
+    expect(payload(knowledge)).toMatchObject({
+      error: { code: 'AGENT_PAYLOAD_TOO_LARGE', scope: 'business-tool-result' }
     });
   });
 });

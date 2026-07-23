@@ -10,6 +10,7 @@ import {
   historyCardTitle,
   historyConfidenceLabel,
   historyDeleteRecoveryKind,
+  historyDifficultyLabel,
   historyDetailSemanticSnapshot,
   historySavedVersion,
   periodLabelFromScenario
@@ -59,7 +60,7 @@ function stygianEntry(): StygianPlanHistoryEntry {
     dataVersion: input.dataVersion,
     mode: 'stygian-onslaught',
     difficultyId: input.difficultyId,
-    difficultyName: '难度 5',
+    difficultyNames: { 'zh-CN': '难度 5', 'en-US': 'Difficulty 5' },
     target: input.target,
     reusePolicy: { rule: 'forbidden', notes: [] },
     source: 'local-rules',
@@ -148,13 +149,28 @@ describe('history presentation', () => {
         {
           ...stygianEntry(),
           difficultyName: undefined,
-          difficultyNames: { 'zh-CN': '险境', en: 'Perilous' }
+          difficultyNames: { 'zh-CN': '险境', 'en-US': 'Perilous' }
         },
         'en'
       )
     ).toBe('Stygian Onslaught · Perilous');
     expect(historyCardTitle(theaterEntry(), 'en')).toBe('Imaginarium Theater · Act 8');
     expect(periodLabelFromScenario('opaque-cycle', 'en')).toBe('Period not saved');
+  });
+
+  it('never presents a legacy Chinese-only difficulty label as localized English', () => {
+    const legacy = {
+      ...stygianEntry(),
+      difficultyName: undefined,
+      difficultyNames: undefined,
+      legacyDifficultyName: { text: '绝境', locale: null }
+    };
+
+    expect(historyDifficultyLabel(legacy, 'en')).toBe(
+      `Legacy difficulty · ${legacy.difficultyId} (original label not localized)`
+    );
+    expect(historyDifficultyLabel(legacy, 'en')).not.toContain('绝境');
+    expect(historyDifficultyLabel(legacy, 'zh')).toBe('旧记录原始名称：绝境');
   });
 
   it('uses the immutable player period for opaque scenario identities and never exposes the slug', () => {

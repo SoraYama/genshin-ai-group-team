@@ -2,15 +2,21 @@ import type { PersistedProfile } from '../../shared/domain.js';
 import type { PlayerPreferences, RecommendationPlan } from '../../shared/scenario-v2.js';
 import { v2PipelineContextSchema, type V2PipelineContext } from '../agents/contracts.js';
 import { buildAdvisorProfileView, toAdvisorCharacter } from './advisor-profile-serializer.js';
+import {
+  AgentPayloadTooLargeError,
+  MAX_AGENT_PAYLOAD_BYTES,
+  stringifyAgentPayload
+} from './agent-payload-budget.js';
 
-export const MAX_V2_AGENT_CONTEXT_BYTES = 48 * 1024;
+export const MAX_V2_AGENT_CONTEXT_BYTES = MAX_AGENT_PAYLOAD_BYTES;
 const MAX_DETAILED_PROFILES = 24;
 
-export class V2ContextBudgetError extends Error {
+export class V2ContextBudgetError extends AgentPayloadTooLargeError {
   override readonly name = 'V2ContextBudgetError';
 
-  constructor(readonly actualBytes: number) {
-    super(`V2 agent context exceeds ${MAX_V2_AGENT_CONTEXT_BYTES} bytes: ${actualBytes}`);
+  constructor(actualBytes: number) {
+    super('pipeline-context', actualBytes, MAX_V2_AGENT_CONTEXT_BYTES);
+    this.message = `V2 agent context exceeds ${MAX_V2_AGENT_CONTEXT_BYTES} bytes: ${actualBytes}`;
   }
 }
 
@@ -89,8 +95,14 @@ export function buildV2PipelineContext(options: BuildV2PipelineContextOptions): 
       unknownCharacterIds: uniqueBoundedIds(options.knowledge.unknownCharacterIds)
     }
   };
-  const size = Buffer.byteLength(JSON.stringify(baseContext), 'utf8');
-  if (size > MAX_V2_AGENT_CONTEXT_BYTES) throw new V2ContextBudgetError(size);
+  try {
+    stringifyAgentPayload(baseContext, 'pipeline-context', MAX_V2_AGENT_CONTEXT_BYTES);
+  } catch (error) {
+    if (error instanceof AgentPayloadTooLargeError) {
+      throw new V2ContextBudgetError(error.actualBytes);
+    }
+    throw error;
+  }
   return v2PipelineContextSchema.parse(baseContext);
 }
 

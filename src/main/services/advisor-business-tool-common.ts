@@ -5,6 +5,10 @@ import {
   type CharacterKnowledgeReader
 } from '../../shared/character-knowledge.js';
 import { buildAdvisorProfileView, toAdvisorCharacter } from './advisor-profile-serializer.js';
+import {
+  AgentPayloadTooLargeError,
+  stringifyAgentPayload
+} from './agent-payload-budget.js';
 
 export const UNKNOWN_CHARACTER_KNOWLEDGE: CharacterKnowledgeReader = {
   version: 'unavailable',
@@ -59,18 +63,10 @@ export function profileCacheView(profile: PersistedProfile, query: ProfileCacheT
       const character = byId.get(id);
       return character ? [character] : [];
     });
-    let view;
-    try {
-      view = buildAdvisorProfileView(
-        { ...profile, characters: selected },
-        Math.max(1, selected.length)
-      );
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('exceeds 49152 bytes')) {
-        throw new Error('PROFILE_RESPONSE_TOO_LARGE');
-      }
-      throw error;
-    }
+    const view = buildAdvisorProfileView(
+      { ...profile, characters: selected },
+      Math.max(1, selected.length)
+    );
     const found = new Set(selected.map(({ id }) => String(id)));
     return boundedProfileResponse({
       kind: 'details' as const,
@@ -109,9 +105,7 @@ export function profileCacheView(profile: PersistedProfile, query: ProfileCacheT
 }
 
 function boundedProfileResponse<T>(value: T): T {
-  if (Buffer.byteLength(JSON.stringify(value), 'utf8') > 48 * 1024) {
-    throw new Error('PROFILE_RESPONSE_TOO_LARGE');
-  }
+  stringifyAgentPayload(value, 'profile-tool-result');
   return value;
 }
 
@@ -127,12 +121,18 @@ export function characterKnowledgeView(
 }
 
 export function textToolResult(value: unknown) {
-  return { content: [{ type: 'text' as const, text: JSON.stringify(value) }] };
+  return {
+    content: [{ type: 'text' as const, text: stringifyAgentPayload(value, 'business-tool-result') }]
+  };
 }
 
-export function errorToolResult(message: string) {
+export function errorToolResult(error: unknown) {
+  const payload =
+    error instanceof AgentPayloadTooLargeError
+      ? { error: error.toDescriptor() }
+      : { error: error instanceof Error ? error.message : 'Tool request failed' };
   return {
-    content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }],
+    content: [{ type: 'text' as const, text: JSON.stringify(payload) }],
     isError: true
   };
 }

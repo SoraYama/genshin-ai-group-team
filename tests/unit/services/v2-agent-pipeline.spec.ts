@@ -7,6 +7,10 @@ import {
 } from '../../../src/main/services/v2-agent-pipeline.js';
 import type { ToolAudit } from '../../../src/main/services/agent-turn-audit.js';
 import type { RecommendationPlan } from '../../../src/shared/scenario-v2.js';
+import type {
+  V2ExplainOutput,
+  V2RotationOutput
+} from '../../../src/main/agents/contracts.js';
 import { validAbyssPlan } from './abyss-test-fixtures.js';
 import { validStygianPlan } from './stygian-test-fixtures.js';
 import { validTheaterPlan } from './theater-test-fixtures.js';
@@ -212,13 +216,13 @@ function targets(plan: RecommendationPlan) {
   }
 }
 
-function rotationOutput(plan: RecommendationPlan) {
+function rotationOutput(plan: RecommendationPlan): V2RotationOutput {
   return {
     rotations: targets(plan).rotations.map((target) => directive(target))
   };
 }
 
-function explainOutput(plan: RecommendationPlan) {
+function explainOutput(plan: RecommendationPlan): V2ExplainOutput {
   return {
     explanations: targets(plan).explanations.map((target) => directive(target))
   };
@@ -227,9 +231,9 @@ function explainOutput(plan: RecommendationPlan) {
 function directive<T>(target: T) {
   return {
     target,
-    tone: 'steady',
-    reasonCodes: ['setup-order'],
-    factRefs: [{ kind: 'plan', field: 'validated-target' }]
+    tone: 'steady' as const,
+    reasonCodes: ['setup-order' as const],
+    factRefs: [{ kind: 'plan' as const, field: 'validated-target' as const }]
   };
 }
 
@@ -241,11 +245,12 @@ function run(
     tools: ToolAudit[]
   ) =>
     | { ok: true; plan: RecommendationPlan }
-    | { ok: false; issues: Array<{ code: string; path: Array<string | number>; message: string }> }
+    | { ok: false; issues: Array<{ code: string; path: Array<string | number>; message: string }> },
+  pipelineContext: V2PipelineContext = context(baseline)
 ) {
   return runV2AgentPipeline({
     runner,
-    context: context(baseline),
+    context: pipelineContext,
     sdkOptionsForStage: () => sdkOptions(),
     composer: {
       initialPrompt: JSON.stringify({ request: 'compose' }),
@@ -359,6 +364,79 @@ describe.each([
 });
 
 describe('V2 agent pipeline repair and grounding', () => {
+  it('fails closed before the runner when the final Compose prompt exceeds 48 KiB UTF-8', async () => {
+    const baseline = validAbyssPlan();
+    const runner = new StageRunner([baseline]);
+    const result = await runV2AgentPipeline({
+      runner,
+      context: context(baseline),
+      sdkOptionsForStage: () => sdkOptions(),
+      composer: {
+        initialPrompt: JSON.stringify({ padding: '界'.repeat(17_000) }),
+        systemPrompt: 'composer:oversized',
+        repairPrompt: 'repair',
+        validate: (text) => ({ ok: true, plan: JSON.parse(text) as RecommendationPlan })
+      },
+      invalidIssue: (stage, message) => ({
+        code: 'AGENT_OUTPUT_INVALID',
+        path: [stage],
+        message
+      })
+    });
+
+    expect(runner.calls).toHaveLength(0);
+    expect(result).toMatchObject({
+      ok: false,
+      issues: [
+        expect.objectContaining({
+          path: ['compose'],
+          message: expect.stringContaining('AGENT_PAYLOAD_TOO_LARGE')
+        })
+      ]
+    });
+  });
+
+  it('fails closed before a Repair send when the complete repair prompt exceeds 48 KiB', async () => {
+    const baseline = validAbyssPlan();
+    const oversizedInvalid = { padding: '界'.repeat(17_000) };
+    const runner = new StageRunner([oversizedInvalid, baseline]);
+    const result = await run(runner, baseline, () => ({
+      ok: false,
+      issues: [{ code: 'PLAN_SCHEMA_INVALID', path: [], message: '结构无效' }]
+    }));
+
+    expect(runner.calls).toHaveLength(1);
+    expect(result).toMatchObject({
+      ok: false,
+      issues: [
+        expect.objectContaining({
+          path: ['repair-1'],
+          message: expect.stringContaining('AGENT_PAYLOAD_TOO_LARGE')
+        })
+      ]
+    });
+  });
+
+  it('fails closed before a strict-stage send when the complete plan prompt exceeds 48 KiB', async () => {
+    const baseline = validAbyssPlan({ warnings: ['界'.repeat(17_000)] });
+    const runner = new StageRunner([baseline]);
+    const result = await run(runner, baseline, (text) => ({
+      ok: true,
+      plan: JSON.parse(text) as RecommendationPlan
+    }));
+
+    expect(runner.calls).toHaveLength(1);
+    expect(result).toMatchObject({
+      ok: false,
+      issues: [
+        expect.objectContaining({
+          path: ['critique'],
+          message: expect.stringContaining('AGENT_PAYLOAD_TOO_LARGE')
+        })
+      ]
+    });
+  });
+
   it('uses at most two concrete repair rounds and critiques each valid attempt exactly once', async () => {
     const baseline = validAbyssPlan();
     const target = targets(baseline);
@@ -482,13 +560,7 @@ describe('V2 agent pipeline repair and grounding', () => {
 
   it('rejects a structured fact reference outside the bounded context', async () => {
     const baseline = validAbyssPlan();
-    const explanation = explainOutput(baseline) as ReturnType<typeof explainOutput> & {
-      explanations: Array<{
-        factRefs: Array<
-          { kind: 'plan'; field: string } | { kind: 'profile'; characterId: string; field: string }
-        >;
-      }>;
-    };
+    const explanation = explainOutput(baseline);
     explanation.explanations[0]!.factRefs = [
       { kind: 'profile', characterId: '999999', field: 'stats' }
     ];
@@ -509,6 +581,128 @@ describe('V2 agent pipeline repair and grounding', () => {
         expect.objectContaining({
           path: ['explain'],
           message: expect.stringContaining('outside the bounded roster')
+        })
+      ]
+    });
+  });
+
+  it.each(['stats', 'build'] as const)(
+    'rejects a profile %s reference when that field is absent from detailedProfiles',
+    async (field) => {
+      const baseline = validAbyssPlan();
+      const pipelineContext = structuredClone(context(baseline));
+      const detailed = pipelineContext.profile.detailedProfiles[0]!;
+      if (field === 'stats') delete detailed.stats;
+      else {
+        delete detailed.weapon;
+        delete detailed.artifactSummary;
+        delete detailed.talents;
+        delete detailed.stats;
+      }
+      const characterId = String(detailed.id);
+      const explanation = explainOutput(baseline);
+      explanation.explanations = explanation.explanations.map((item, index) =>
+        index === 0
+          ? {
+              ...item,
+              reasonCodes: ['energy-cycle'],
+              factRefs: [{ kind: 'profile', characterId, field }]
+            }
+          : item
+      );
+      const runner = new StageRunner([
+        baseline,
+        { decision: 'accept', issues: [] },
+        rotationOutput(baseline),
+        explanation
+      ]);
+      const result = await run(
+        runner,
+        baseline,
+        (text) => ({ ok: true, plan: JSON.parse(text) as RecommendationPlan }),
+        pipelineContext
+      );
+
+      expect(result).toMatchObject({
+        ok: false,
+        issues: [
+          expect.objectContaining({
+            path: ['explain'],
+            message: expect.stringContaining(`profile field is unavailable: ${characterId}:${field}`)
+          })
+        ]
+      });
+    }
+  );
+
+  it('rejects a knowledge reference explicitly marked unknown in the bounded context', async () => {
+    const baseline = validAbyssPlan();
+    const pipelineContext = structuredClone(context(baseline));
+    const characterId = String(pipelineContext.profile.detailedProfiles[0]!.id);
+    pipelineContext.knowledge.unknownCharacterIds = [characterId];
+    const explanation = explainOutput(baseline);
+    explanation.explanations = explanation.explanations.map((item, index) =>
+      index === 0
+        ? {
+            ...item,
+            reasonCodes: ['reaction-chain'],
+            factRefs: [{ kind: 'knowledge', characterId }]
+          }
+        : item
+    );
+    const runner = new StageRunner([
+      baseline,
+      { decision: 'accept', issues: [] },
+      rotationOutput(baseline),
+      explanation
+    ]);
+    const result = await run(
+      runner,
+      baseline,
+      (text) => ({ ok: true, plan: JSON.parse(text) as RecommendationPlan }),
+      pipelineContext
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      issues: [
+        expect.objectContaining({
+          path: ['explain'],
+          message: expect.stringContaining(`knowledge is explicitly unknown: ${characterId}`)
+        })
+      ]
+    });
+  });
+
+  it('rejects a reason code that has no compatible supporting fact reference', async () => {
+    const baseline = validAbyssPlan();
+    const explanation = explainOutput(baseline);
+    explanation.explanations = explanation.explanations.map((item, index) =>
+      index === 0
+        ? {
+            ...item,
+            reasonCodes: ['mechanic-response'],
+            factRefs: [{ kind: 'plan', field: 'validated-target' }]
+          }
+        : item
+    );
+    const runner = new StageRunner([
+      baseline,
+      { decision: 'accept', issues: [] },
+      rotationOutput(baseline),
+      explanation
+    ]);
+    const result = await run(runner, baseline, (text) => ({
+      ok: true,
+      plan: JSON.parse(text) as RecommendationPlan
+    }));
+
+    expect(result).toMatchObject({
+      ok: false,
+      issues: [
+        expect.objectContaining({
+          path: ['explain'],
+          message: expect.stringContaining('reason lacks a compatible fact reference')
         })
       ]
     });

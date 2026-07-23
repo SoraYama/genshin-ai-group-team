@@ -1,6 +1,10 @@
 import { z } from 'zod';
 import { playerPreferencesSchema, recommendationPlanSchema } from '../../shared/scenario-v2.js';
-import { advisorLocaleSchema } from '../../shared/advisor-narrative.js';
+import {
+  advisorFactRefSchema,
+  advisorLocaleSchema,
+  advisorNarrativeReasonCodeSchema
+} from '../../shared/advisor-narrative.js';
 
 export const dataCuratorOutputSchema = z.object({
   usableCharacterIds: z.array(z.number().int()).min(4),
@@ -421,46 +425,9 @@ export const v2RotationInputSchema = z
   })
   .strict();
 
-export const v2NarrativeReasonCodeSchema = z.enum([
-  'setup-order',
-  'energy-cycle',
-  'survival-window',
-  'reaction-chain',
-  'mechanic-response',
-  'target-priority',
-  'vigor-budget',
-  'cast-flexibility',
-  'uncertainty'
-]);
+export const v2NarrativeReasonCodeSchema = advisorNarrativeReasonCodeSchema;
 
-export const v2FactRefSchema = z.discriminatedUnion('kind', [
-  z
-    .object({
-      kind: z.literal('plan'),
-      field: z.enum(['validated-target', 'selected-team', 'cast-allocation', 'vigor-ledger'])
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal('mechanic'),
-      target: z.string().trim().min(1).max(128),
-      factIndex: z.number().int().nonnegative().max(15)
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal('profile'),
-      characterId: boundedIdSchema,
-      field: z.enum(['level', 'build', 'stats', 'completeness'])
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal('knowledge'),
-      characterId: boundedIdSchema
-    })
-    .strict()
-]);
+export const v2FactRefSchema = advisorFactRefSchema;
 
 const v2NarrativeDirectiveShape = {
   tone: z.enum(['steady', 'cautious', 'technical']),

@@ -362,6 +362,12 @@ export class StygianAdvisorService {
         ({ id }) => id === input.difficultyId
       );
       if (!difficulty) return;
+      const zhDifficultyName = difficulty.name.names['zh-CN'];
+      const enDifficultyName =
+        difficulty.name.names['en-US'] ?? difficulty.name.names['en'];
+      if (!zhDifficultyName || !enDifficultyName) {
+        throw new Error('Stygian difficulty snapshot is missing a bilingual display name.');
+      }
       const usedIds = Array.from(
         new Set(result.plan.phases.flatMap(({ team }) => team.characterIds))
       );
@@ -373,7 +379,10 @@ export class StygianAdvisorService {
         dataVersion: result.plan.dataVersion,
         mode: 'stygian-onslaught',
         difficultyId: input.difficultyId,
-        difficultyNames: difficulty.name.names,
+        difficultyNames: {
+          'zh-CN': zhDifficultyName,
+          'en-US': enDifficultyName
+        },
         ...(input.phase === undefined ? {} : { phase: input.phase }),
         target: input.target,
         reusePolicy: scenarioView.scenario.crossPartyReusePolicy,

@@ -5,10 +5,17 @@ import {
   v2RotationOutputSchema
 } from '../../../src/main/agents/contracts.js';
 import { renderV2Narrative } from '../../../src/main/services/v2-narrative.js';
-
-const planFact = [{ kind: 'plan' as const, field: 'validated-target' as const }];
+import { advisorNarrativeSchema } from '../../../src/shared/advisor-narrative.js';
+import { defaultAdvisorNarrative } from '../../../src/shared/advisor-narrative.js';
 
 describe('V2 structured narrative contract', () => {
+  it('marks a legacy narrative locale as explicitly unknown', () => {
+    expect(defaultAdvisorNarrative('spiral-abyss', 'legacy-unavailable')).toMatchObject({
+      origin: 'legacy-unavailable',
+      requestedLocale: null
+    });
+  });
+
   it('rejects arbitrary factual prose from Rotation and Explain', () => {
     expect(
       v2RotationOutputSchema.safeParse({
@@ -16,6 +23,23 @@ describe('V2 structured narrative contract', () => {
           {
             target: { kind: 'abyss-team', half: 'first' },
             notes: ['Invented combat claim']
+          }
+        ]
+      }).success
+    ).toBe(false);
+    expect(
+      advisorNarrativeSchema.safeParse({
+        origin: 'agent-structured',
+        requestedLocale: 'zh-CN',
+        summary: { 'zh-CN': '摘要', 'en-US': 'Summary' },
+        sections: [
+          {
+            targetKey: 'abyss-team:first',
+            tone: 'steady',
+            reasonCodes: ['invented-reason'],
+            factRefs: ['invented:free-form-reference'],
+            title: { 'zh-CN': '上半', 'en-US': 'First half' },
+            body: { 'zh-CN': '说明', 'en-US': 'Explanation' }
           }
         ]
       }).success
@@ -43,7 +67,7 @@ describe('V2 structured narrative contract', () => {
             target: { kind: 'abyss-team', half: 'first' },
             tone: 'cautious',
             reasonCodes: ['energy-cycle'],
-            factRefs: planFact
+            factRefs: [{ kind: 'profile', characterId: '1001', field: 'stats' }]
           }
         ]
       },
@@ -53,7 +77,7 @@ describe('V2 structured narrative contract', () => {
             target: { kind: 'abyss-chamber', floor: 12, chamber: 1, half: 'first' },
             tone: 'steady',
             reasonCodes: ['mechanic-response'],
-            factRefs: planFact
+            factRefs: [{ kind: 'mechanic', target: '12-1:first', factIndex: 0 }]
           }
         ]
       }
@@ -65,9 +89,9 @@ describe('V2 structured narrative contract', () => {
       summary: { 'zh-CN': expect.any(String), 'en-US': expect.any(String) }
     });
     expect(narrative.sections).toHaveLength(2);
-    expect(JSON.stringify(narrative.sections.map(({ factRefs }) => factRefs))).toContain(
-      'plan:validated-target'
-    );
+    expect(narrative.sections[0]?.factRefs).toEqual([
+      { kind: 'profile', characterId: '1001', field: 'stats' }
+    ]);
     expect(narrative.summary['en-US']).not.toMatch(/[\u3400-\u9fff]/u);
     expect(narrative.sections[0]!.body['en-US']).not.toMatch(/[\u3400-\u9fff]/u);
   });

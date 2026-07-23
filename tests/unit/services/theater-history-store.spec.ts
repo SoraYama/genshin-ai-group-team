@@ -170,6 +170,24 @@ describe('Theater history deep validation', () => {
     expect(store.removeTheaterById(stored.id)).toBe(true);
   });
 
+  it('migrates a Theater record with no saved locale to explicit unknown', () => {
+    const store = new HistoryStore();
+    const stored = store.appendTheater(input());
+    const legacy = structuredClone(stored) as unknown as Record<string, unknown>;
+    const interventions = {
+      ...(legacy['interventions'] as Record<string, unknown>)
+    };
+    delete interventions['locale'];
+    legacy['interventions'] = interventions;
+    delete legacy['narrative'];
+    storeState.set('theaterPlans', [legacy]);
+
+    expect(store.queryTheater()[0]).toMatchObject({
+      interventions: { locale: null },
+      narrative: { origin: 'legacy-unavailable', requestedLocale: null }
+    });
+  });
+
   it('rejects cast source drift, missing snapshots, and invalid vigor history', () => {
     const store = new HistoryStore();
     const invalid = input();

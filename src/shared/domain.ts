@@ -327,7 +327,7 @@ export interface AbyssPlanHistoryEntry {
   scenarioFreshness: 'fresh' | 'expiring' | 'stale' | 'unknown';
   scenarioNotCurrent: boolean;
   interventions: {
-    locale?: import('./advisor-narrative.js').AdvisorLocale;
+    locale?: import('./advisor-narrative.js').AdvisorLocale | null;
     lockedCharacterIds: string[];
     excludedCharacterIds: string[];
     preferences: import('./scenario-v2.js').PlayerPreferences;
@@ -354,9 +354,13 @@ export interface StygianPlanHistoryEntry {
   dataVersion: string;
   mode: 'stygian-onslaught';
   difficultyId: string;
-  difficultyNames?: Record<string, string>;
-  /** Legacy v2 records are migrated to difficultyNames when read. */
+  difficultyNames?: import('./advisor-narrative.js').LocalizedAdvisorText;
+  /** Raw compatibility field accepted only while reading legacy v2 records. */
   difficultyName?: string;
+  legacyDifficultyName?: {
+    text: string;
+    locale: import('./advisor-narrative.js').AdvisorLocale | null;
+  };
   phase?: number;
   target: import('./stygian-advisor.js').StygianRewardTarget;
   reusePolicy: import('./scenario-v2.js').CrossPartyReusePolicy;
@@ -365,7 +369,7 @@ export interface StygianPlanHistoryEntry {
   scenarioFreshness: 'fresh' | 'expiring' | 'stale' | 'unknown';
   scenarioNotCurrent: boolean;
   interventions: {
-    locale?: import('./advisor-narrative.js').AdvisorLocale;
+    locale?: import('./advisor-narrative.js').AdvisorLocale | null;
     lockedCharacterIds: string[];
     excludedCharacterIds: string[];
     target: import('./stygian-advisor.js').StygianRewardTarget;
@@ -399,7 +403,9 @@ export interface TheaterPlanHistoryEntry {
   scenarioTrust: 'production' | 'development-sample';
   scenarioFreshness: 'fresh' | 'expiring' | 'stale' | 'unknown';
   scenarioNotCurrent: boolean;
-  interventions: import('./theater-advisor.js').TheaterAdvisorPlanInput;
+  interventions: Omit<import('./theater-advisor.js').TheaterAdvisorPlanInput, 'locale'> & {
+    locale?: import('./advisor-narrative.js').AdvisorLocale | null;
+  };
   eligibility: import('./theater-advisor.js').TheaterEligibilityReport;
   cast: Array<{
     id: string;

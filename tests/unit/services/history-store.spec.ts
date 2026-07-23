@@ -72,7 +72,7 @@ function stygianHistoryInput(): Omit<StygianPlanHistoryEntry, 'id' | 'createdAt'
     dataVersion: input.dataVersion,
     mode: 'stygian-onslaught',
     difficultyId: input.difficultyId,
-    difficultyName: '难度 6',
+    difficultyNames: { 'zh-CN': '难度 6', 'en-US': 'Difficulty 6' },
     target: input.target,
     reusePolicy: { rule: 'forbidden', notes: [] },
     source: 'local-rules',
@@ -635,7 +635,11 @@ describe('HistoryStore', () => {
         id: 'legacy-abyss',
         characters: [],
         scenarioTrust: 'development-sample',
-        narrative: expect.objectContaining({ origin: 'legacy-unavailable' })
+        interventions: expect.objectContaining({ locale: null }),
+        narrative: expect.objectContaining({
+          origin: 'legacy-unavailable',
+          requestedLocale: null
+        })
       })
     ]);
   });
@@ -661,11 +665,14 @@ describe('HistoryStore', () => {
   });
 
   it('keeps old Stygian history readable with honest unknown period and missing guidance', async () => {
+    const legacy = stygianHistoryInput();
+    legacy.difficultyName = '难度 6';
+    legacy.difficultyNames = undefined;
     storeState.set('stygianPlans', [
       {
         id: 'legacy-stygian-history',
         createdAt: '2026-07-22T00:00:00.000Z',
-        ...stygianHistoryInput()
+        ...legacy
       }
     ]);
     const { HistoryStore } = await import('../../../src/main/services/history-store.js');
@@ -677,9 +684,26 @@ describe('HistoryStore', () => {
         playerCycle: { status: 'unknown' },
         phaseGuidance: null,
         difficultyAssessment: null,
-        narrative: expect.objectContaining({ origin: 'legacy-unavailable' })
+        legacyDifficultyName: { text: '难度 6', locale: null },
+        interventions: expect.objectContaining({ locale: null }),
+        narrative: expect.objectContaining({
+          origin: 'legacy-unavailable',
+          requestedLocale: null
+        })
       })
     ]);
+  });
+
+  it('rejects a new Stygian history entry without strict zh-CN and en-US difficulty names', async () => {
+    const { HistoryStore } = await import('../../../src/main/services/history-store.js');
+    const store = new HistoryStore();
+    const invalid = stygianHistoryInput();
+    invalid.difficultyName = undefined;
+    invalid.difficultyNames = { 'zh-CN': '难度 6' } as unknown as NonNullable<
+      typeof invalid.difficultyNames
+    >;
+
+    expect(() => store.appendStygian(invalid)).toThrow(/difficulty/i);
   });
 
   it('keeps legacy recommendation entries readable after abyss history is introduced', async () => {
@@ -738,7 +762,7 @@ describe('HistoryStore', () => {
       dataVersion: input.dataVersion,
       mode: 'stygian-onslaught',
       difficultyId: input.difficultyId,
-      difficultyNames: { 'zh-CN': '难度 6' },
+      difficultyNames: { 'zh-CN': '难度 6', 'en-US': 'Difficulty 6' },
       phase: input.phase,
       target: input.target,
       reusePolicy: { rule: 'forbidden', notes: [] },
@@ -770,7 +794,7 @@ describe('HistoryStore', () => {
     expect(stored).toMatchObject({
       mode: 'stygian-onslaught',
       difficultyId: 'difficulty-6',
-      difficultyNames: { 'zh-CN': '难度 6' },
+      difficultyNames: { 'zh-CN': '难度 6', 'en-US': 'Difficulty 6' },
       target: 'dire-challenge',
       phase: 2,
       reusePolicy: { rule: 'forbidden' },
@@ -799,7 +823,7 @@ describe('HistoryStore', () => {
       dataVersion: input.dataVersion,
       mode: 'stygian-onslaught',
       difficultyId: input.difficultyId,
-      difficultyName: '难度 6',
+      difficultyNames: { 'zh-CN': '难度 6', 'en-US': 'Difficulty 6' },
       target: input.target,
       reusePolicy: { rule: 'forbidden', notes: [] },
       source: 'local-rules',

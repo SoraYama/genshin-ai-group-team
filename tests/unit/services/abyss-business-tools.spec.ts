@@ -236,7 +236,41 @@ describe('abyss in-process business tools', () => {
     );
 
     expect(result.isError).toBe(true);
-    expect(JSON.stringify(result)).toContain('PROFILE_RESPONSE_TOO_LARGE');
+    expect(textPayload(result)).toMatchObject({
+      error: {
+        code: 'AGENT_PAYLOAD_TOO_LARGE',
+        scope: 'profile-tool-result',
+        maxBytes: 48 * 1024,
+        actualBytes: expect.any(Number)
+      }
+    });
+  });
+
+  it('fails closed with a typed error for an oversized enemy payload', async () => {
+    const scenario = abyssScenario();
+    scenario.blessing.description = '界'.repeat(17_000);
+    const tools = createAbyssBusinessTools({
+      getProfile: () => null,
+      getScenario: () => scenario
+    });
+
+    const result = await tools[1]!.handler(
+      {
+        scenarioId: scenario.id,
+        dataVersion: scenario.meta.dataVersion,
+        floor: 12,
+        chamber: 1
+      },
+      {}
+    );
+
+    expect(result.isError).toBe(true);
+    expect(textPayload(result)).toMatchObject({
+      error: {
+        code: 'AGENT_PAYLOAD_TOO_LARGE',
+        scope: 'business-tool-result'
+      }
+    });
   });
 
   it('rejects scenario identity drift and returns only the selected localized enemy fields', async () => {

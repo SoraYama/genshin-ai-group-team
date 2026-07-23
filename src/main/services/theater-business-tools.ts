@@ -70,6 +70,7 @@ export function createTheaterBusinessTools(options: TheaterBusinessToolsOptions)
     const startedAt = now();
     try {
       const value = operation();
+      const result = textToolResult(value);
       options.log?.({
         tool: toolName,
         itemCount,
@@ -80,7 +81,7 @@ export function createTheaterBusinessTools(options: TheaterBusinessToolsOptions)
         parameterSummary,
         issueCodes: []
       });
-      return textToolResult(value);
+      return result;
     } catch (error) {
       options.log?.({
         tool: toolName,
@@ -92,7 +93,7 @@ export function createTheaterBusinessTools(options: TheaterBusinessToolsOptions)
         parameterSummary,
         issueCodes: [failure]
       });
-      return errorToolResult(error instanceof Error ? error.message : 'Tool request failed');
+      return errorToolResult(error);
     }
   };
   return [

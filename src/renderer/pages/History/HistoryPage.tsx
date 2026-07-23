@@ -18,6 +18,7 @@ import {
   historyCardTitle,
   historyConfidenceLabel,
   historyDeleteRecoveryKind,
+  historyDifficultyLabel,
   historySavedVersion,
   type ChallengeHistoryEntry,
   type ChallengeHistoryGroup,
@@ -555,12 +556,7 @@ function StygianDetails({
   return (
     <>
       <p className="gta-history-rule">
-        {isEnglish
-          ? (entry.difficultyNames?.['en-US'] ??
-            entry.difficultyNames?.['en'] ??
-            entry.difficultyName ??
-            entry.difficultyId)
-          : (entry.difficultyNames?.['zh-CN'] ?? entry.difficultyName ?? entry.difficultyId)}{' '}
+        {historyDifficultyLabel(entry, isEnglish ? 'en' : 'zh')}{' '}
         · {rewardTargetLabel(entry.target, isEnglish ? 'en' : 'zh')} ·{' '}
         {reuseRuleSummary(entry.reusePolicy, isEnglish ? 'en' : 'zh')}
       </p>

@@ -9,12 +9,53 @@ export const localizedAdvisorTextSchema = z
   })
   .strict();
 
+export const advisorNarrativeReasonCodeSchema = z.enum([
+  'setup-order',
+  'energy-cycle',
+  'survival-window',
+  'reaction-chain',
+  'mechanic-response',
+  'target-priority',
+  'vigor-budget',
+  'cast-flexibility',
+  'uncertainty'
+]);
+
+export const advisorFactRefSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('plan'),
+      field: z.enum(['validated-target', 'selected-team', 'cast-allocation', 'vigor-ledger'])
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('mechanic'),
+      target: z.string().trim().min(1).max(128),
+      factIndex: z.number().int().nonnegative().max(15)
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('profile'),
+      characterId: z.string().trim().min(1).max(128),
+      field: z.enum(['level', 'build', 'stats', 'completeness'])
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('knowledge'),
+      characterId: z.string().trim().min(1).max(128)
+    })
+    .strict()
+]);
+
 export const advisorNarrativeSectionSchema = z
   .object({
     targetKey: z.string().trim().min(1).max(128),
     tone: z.enum(['steady', 'cautious', 'technical']),
-    reasonCodes: z.array(z.string().trim().min(1).max(80)).min(1).max(12),
-    factRefs: z.array(z.string().trim().min(1).max(180)).min(1).max(24),
+    reasonCodes: z.array(advisorNarrativeReasonCodeSchema).min(1).max(12),
+    factRefs: z.array(advisorFactRefSchema).min(1).max(24),
     title: localizedAdvisorTextSchema,
     body: localizedAdvisorTextSchema
   })
@@ -23,7 +64,7 @@ export const advisorNarrativeSectionSchema = z
 export const advisorNarrativeSchema = z
   .object({
     origin: z.enum(['agent-structured', 'local-rules', 'legacy-unavailable']),
-    requestedLocale: advisorLocaleSchema,
+    requestedLocale: advisorLocaleSchema.nullable(),
     summary: localizedAdvisorTextSchema,
     sections: z.array(advisorNarrativeSectionSchema).max(32)
   })
@@ -45,13 +86,15 @@ export const abyssTeamRiskSchema = z
 
 export type AdvisorLocale = z.infer<typeof advisorLocaleSchema>;
 export type LocalizedAdvisorText = z.infer<typeof localizedAdvisorTextSchema>;
+export type AdvisorNarrativeReasonCode = z.infer<typeof advisorNarrativeReasonCodeSchema>;
+export type AdvisorFactRef = z.infer<typeof advisorFactRefSchema>;
 export type AdvisorNarrative = z.infer<typeof advisorNarrativeSchema>;
 export type AbyssTeamRisk = z.infer<typeof abyssTeamRiskSchema>;
 
 export function defaultAdvisorNarrative(
   mode: 'spiral-abyss' | 'stygian-onslaught' | 'imaginarium-theater',
   origin: AdvisorNarrative['origin'] = 'local-rules',
-  requestedLocale: AdvisorLocale = 'zh-CN'
+  requestedLocale?: AdvisorLocale | null
 ): AdvisorNarrative {
   const summary =
     origin === 'legacy-unavailable'
@@ -75,7 +118,12 @@ export function defaultAdvisorNarrative(
             };
   return {
     origin,
-    requestedLocale,
+    requestedLocale:
+      requestedLocale === undefined
+        ? origin === 'legacy-unavailable'
+          ? null
+          : 'zh-CN'
+        : requestedLocale,
     summary,
     sections: []
   };

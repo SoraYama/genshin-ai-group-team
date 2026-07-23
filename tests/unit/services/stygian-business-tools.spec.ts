@@ -205,4 +205,31 @@ describe('stygian in-process business tools', () => {
     expect(payload.bossModifiers).toEqual(['挑战修正暂无中文说明']);
     expect(JSON.stringify(payload)).not.toMatch(/Energy pressure|phase_damage_up|Boss gains/i);
   });
+
+  it('fails closed with a typed error for an oversized phase payload', async () => {
+    const scenario = stygianScenario();
+    scenario.crossPartyReusePolicy.notes = ['界'.repeat(17_000)];
+    const tools = createStygianBusinessTools({
+      getProfile: () => null,
+      getScenario: () => scenario
+    });
+
+    const result = await tools[1]!.handler(
+      {
+        scenarioId: scenario.id,
+        dataVersion: scenario.meta.dataVersion,
+        difficultyId: 'difficulty-6',
+        phase: 1
+      },
+      {}
+    );
+
+    expect(result.isError).toBe(true);
+    expect(textPayload(result)).toMatchObject({
+      error: {
+        code: 'AGENT_PAYLOAD_TOO_LARGE',
+        scope: 'business-tool-result'
+      }
+    });
+  });
 });

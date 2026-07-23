@@ -32,7 +32,8 @@ import {
   abyssTeamRiskSchema,
   advisorLocaleSchema,
   advisorNarrativeSchema,
-  defaultAdvisorNarrative
+  defaultAdvisorNarrative,
+  localizedAdvisorTextSchema
 } from '../../shared/advisor-narrative.js';
 
 interface HistoryStoreSchema {
@@ -116,6 +117,29 @@ const playerCycleSnapshotSchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('unknown') }).strict()
 ]);
 
+const theaterHistoryInterventionsSchema = z.preprocess(
+  (value) =>
+    isRecord(value) && value['locale'] === undefined ? { ...value, locale: null } : value,
+  z
+    .object({
+      ...theaterAdvisorPlanInputSchema.shape,
+      locale: advisorLocaleSchema.nullable()
+    })
+    .strict()
+    .superRefine(({ selectedCharacterIds, excludedCharacterIds }, context) => {
+      const excluded = new Set(excludedCharacterIds);
+      selectedCharacterIds.forEach((id, index) => {
+        if (excluded.has(id)) {
+          context.addIssue({
+            code: 'custom',
+            path: ['selectedCharacterIds', index],
+            message: 'Selected owned characters cannot also be excluded'
+          });
+        }
+      });
+    })
+);
+
 const theaterHistoryEntrySchema = z
   .object({
     id: z.string().trim().min(8),
@@ -132,7 +156,7 @@ const theaterHistoryEntrySchema = z
     scenarioTrust: z.enum(['production', 'development-sample']),
     scenarioFreshness: z.enum(['fresh', 'expiring', 'stale', 'unknown']),
     scenarioNotCurrent: z.boolean(),
-    interventions: theaterAdvisorPlanInputSchema,
+    interventions: theaterHistoryInterventionsSchema,
     eligibility: theaterEligibilityReportSchema,
     cast: z
       .array(
@@ -439,14 +463,19 @@ const theaterHistoryEntrySchema = z
 const stygianHistoryEntrySchema = z.preprocess(
   (value) => {
     if (!isRecord(value)) return value;
-    const { difficultyName, ...rest } = value;
+    const { difficultyName, difficultyNames, legacyDifficultyName, interventions, ...rest } = value;
+    const normalizedDifficulty = normalizeStygianDifficultyHistory(
+      difficultyName,
+      difficultyNames,
+      legacyDifficultyName
+    );
     return {
       ...rest,
-      difficultyNames: isRecord(value['difficultyNames'])
-        ? value['difficultyNames']
-        : typeof difficultyName === 'string'
-          ? { 'zh-CN': difficultyName }
-          : undefined
+      ...normalizedDifficulty,
+      interventions:
+        isRecord(interventions) && interventions['locale'] === undefined
+          ? { ...interventions, locale: null }
+          : interventions
     };
   },
   z
@@ -460,9 +489,14 @@ const stygianHistoryEntrySchema = z.preprocess(
       dataVersion: z.string().trim().min(1),
       mode: z.literal('stygian-onslaught'),
       difficultyId: z.string().trim().min(1),
-      difficultyNames: z
-        .record(z.string().trim().min(1), z.string().trim().min(1))
-        .refine((names) => Object.keys(names).length > 0),
+      difficultyNames: localizedAdvisorTextSchema.optional(),
+      legacyDifficultyName: z
+        .object({
+          text: z.string().trim().min(1).max(1200),
+          locale: advisorLocaleSchema.nullable()
+        })
+        .strict()
+        .optional(),
       phase: z.number().int().min(1).max(3).optional(),
       target: stygianRewardTargetSchema,
       reusePolicy: crossPartyReusePolicySchema,
@@ -472,7 +506,7 @@ const stygianHistoryEntrySchema = z.preprocess(
       scenarioNotCurrent: z.boolean(),
       interventions: z
         .object({
-          locale: advisorLocaleSchema.default('zh-CN'),
+          locale: advisorLocaleSchema.nullable(),
           lockedCharacterIds: z.array(canonicalCharacterIdSchema),
           excludedCharacterIds: z.array(canonicalCharacterIdSchema),
           target: stygianRewardTargetSchema,
@@ -501,6 +535,13 @@ const stygianHistoryEntrySchema = z.preprocess(
     })
     .strict()
     .superRefine((entry, context) => {
+      if ((entry.difficultyNames === undefined) === (entry.legacyDifficultyName === undefined)) {
+        context.addIssue({
+          code: 'custom',
+          message: 'History requires either bilingual difficulty names or one marked legacy name',
+          path: ['difficultyNames']
+        });
+      }
       const characterIds = entry.characters.map(({ id }) => id);
       const plannedTeams = entry.plan.phases.map(({ team }) => team.characterIds);
       const plannedIds = plannedTeams.flat();
@@ -658,6 +699,16 @@ export class HistoryStore {
   }
 
   appendStygian(input: Omit<StygianPlanHistoryEntry, 'id' | 'createdAt'>): StygianPlanHistoryEntry {
+    if (
+      input.difficultyName !== undefined ||
+      input.legacyDifficultyName !== undefined ||
+      input.difficultyNames?.['zh-CN'] === undefined ||
+      input.difficultyNames['en-US'] === undefined
+    ) {
+      throw new Error(
+        'Current Stygian history requires strict bilingual difficultyNames (zh-CN and en-US).'
+      );
+    }
     const entry = stygianHistoryEntrySchema.parse(
       structuredClone({
         id: randomUUID(),
@@ -1098,7 +1149,11 @@ function normalizeAbyssPlanHistoryEntry(value: unknown): AbyssPlanHistoryEntry |
     interventions: isRecord(value.interventions)
       ? {
           ...value.interventions,
-          locale: value.interventions['locale'] === 'en-US' ? 'en-US' : 'zh-CN'
+          locale:
+            value.interventions['locale'] === 'en-US' ||
+            value.interventions['locale'] === 'zh-CN'
+              ? value.interventions['locale']
+              : null
         }
       : value.interventions,
     narrative:
@@ -1118,6 +1173,51 @@ function normalizeAbyssPlanHistoryEntry(value: unknown): AbyssPlanHistoryEntry |
     scenarioNotCurrent:
       typeof value.scenarioNotCurrent === 'boolean' ? value.scenarioNotCurrent : true
   }) as AbyssPlanHistoryEntry;
+}
+
+function normalizeStygianDifficultyHistory(
+  difficultyName: unknown,
+  difficultyNames: unknown,
+  legacyDifficultyName: unknown
+):
+  | { difficultyNames: { 'zh-CN': string; 'en-US': string } }
+  | { legacyDifficultyName: { text: string; locale: 'zh-CN' | 'en-US' | null } }
+  | Record<string, never> {
+  if (isRecord(difficultyNames)) {
+    const zh = difficultyNames['zh-CN'];
+    const en = difficultyNames['en-US'] ?? difficultyNames['en'];
+    if (typeof zh === 'string' && zh.trim() && typeof en === 'string' && en.trim()) {
+      return { difficultyNames: { 'zh-CN': zh, 'en-US': en } };
+    }
+  }
+  if (
+    isRecord(legacyDifficultyName) &&
+    typeof legacyDifficultyName['text'] === 'string' &&
+    (legacyDifficultyName['locale'] === 'zh-CN' ||
+      legacyDifficultyName['locale'] === 'en-US' ||
+      legacyDifficultyName['locale'] === null)
+  ) {
+    return {
+      legacyDifficultyName: {
+        text: legacyDifficultyName['text'],
+        locale: legacyDifficultyName['locale']
+      }
+    };
+  }
+  if (typeof difficultyName === 'string' && difficultyName.trim()) {
+    return { legacyDifficultyName: { text: difficultyName, locale: null } };
+  }
+  if (isRecord(difficultyNames)) {
+    const zh = difficultyNames['zh-CN'];
+    if (typeof zh === 'string' && zh.trim()) {
+      return { legacyDifficultyName: { text: zh, locale: 'zh-CN' } };
+    }
+    const en = difficultyNames['en-US'] ?? difficultyNames['en'];
+    if (typeof en === 'string' && en.trim()) {
+      return { legacyDifficultyName: { text: en, locale: 'en-US' } };
+    }
+  }
+  return {};
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

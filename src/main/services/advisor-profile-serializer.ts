@@ -5,8 +5,12 @@ import type {
   FieldSource,
   PersistedProfile
 } from '../../shared/domain.js';
+import {
+  MAX_AGENT_PAYLOAD_BYTES,
+  assertAgentPayloadSize
+} from './agent-payload-budget.js';
 
-export const MAX_ADVISOR_PROFILE_BYTES = 48 * 1024;
+export const MAX_ADVISOR_PROFILE_BYTES = MAX_AGENT_PAYLOAD_BYTES;
 export const MAX_ADVISOR_PROFILE_CHARACTERS = 100;
 
 interface AdvisorArtifactSummary {
@@ -139,10 +143,7 @@ export function buildAdvisorProfileView(
     provenanceSummaries: [...groupedProvenance.values()],
     characters
   };
-  const size = Buffer.byteLength(JSON.stringify(view), 'utf8');
-  if (size > MAX_ADVISOR_PROFILE_BYTES) {
-    throw new Error(`Advisor profile exceeds ${MAX_ADVISOR_PROFILE_BYTES} bytes: ${size}`);
-  }
+  assertAgentPayloadSize(JSON.stringify(view), 'profile-tool-result', MAX_ADVISOR_PROFILE_BYTES);
   return view;
 }
 
@@ -155,9 +156,6 @@ export function serializeAdvisorProfile(
     enemies: input.enemyNames,
     preference: input.preference ?? ''
   });
-  const size = Buffer.byteLength(serialized, 'utf8');
-  if (size > MAX_ADVISOR_PROFILE_BYTES) {
-    throw new Error(`Advisor profile exceeds ${MAX_ADVISOR_PROFILE_BYTES} bytes: ${size}`);
-  }
+  assertAgentPayloadSize(serialized, 'profile-tool-result', MAX_ADVISOR_PROFILE_BYTES);
   return serialized;
 }
