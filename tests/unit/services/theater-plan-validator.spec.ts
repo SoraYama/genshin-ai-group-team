@@ -200,6 +200,55 @@ describe('validateTheaterPlan', () => {
     });
   });
 
+  it('counts a level-qualified owned special guest without relabeling its cast source', () => {
+    const plan = validTheaterPlan();
+    plan.cast.selectedCharacterIds = plan.cast.selectedCharacterIds.filter((id) => id !== '1008');
+    plan.cast.specialGuestCharacterIds = ['1009'];
+    plan.acts[1]!.candidateCharacterIds[3] = '1009';
+    plan.acts[1]!.plannedVigorSpend[3] = { characterId: '1009', cost: 1 };
+    const result = validateTheaterPlan({
+      input: theaterInput({ selectedSpecialGuestCharacterIds: ['1009'] }),
+      scenario: theaterScenario(),
+      characters: THEATER_CHARACTERS,
+      knowledge: groupingKnowledge,
+      plan
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('Expected owned special guest to satisfy hard eligibility');
+    expect(result.plan.cast.specialGuestCharacterIds).toEqual(['1009']);
+    expect(result.plan.cast.selectedCharacterIds).not.toContain('1009');
+  });
+
+  it('rejects an owned special guest below the minimum level', () => {
+    const plan = validTheaterPlan();
+    plan.cast.selectedCharacterIds = plan.cast.selectedCharacterIds.filter((id) => id !== '1008');
+    plan.cast.specialGuestCharacterIds = ['1009'];
+    plan.acts[1]!.candidateCharacterIds[3] = '1009';
+    plan.acts[1]!.plannedVigorSpend[3] = { characterId: '1009', cost: 1 };
+    const characters = THEATER_CHARACTERS.map((character) =>
+      character.id === 1009 ? { ...character, level: 60 } : character
+    );
+
+    expect(
+      validateTheaterPlan({
+        input: theaterInput({ selectedSpecialGuestCharacterIds: ['1009'] }),
+        scenario: theaterScenario(),
+        characters,
+        knowledge: groupingKnowledge,
+        plan
+      })
+    ).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([
+        expect.objectContaining({
+          code: 'CAST_ELIGIBILITY_INVALID',
+          details: expect.objectContaining({ characterId: '1009', levelQualified: false })
+        })
+      ])
+    });
+  });
+
   it('rejects candidates outside the admitted cast and planned spend outside candidates', () => {
     const plan = validTheaterPlan();
     plan.acts[0]!.candidateCharacterIds = ['1001', '9999'];
@@ -248,6 +297,29 @@ describe('validateTheaterPlan', () => {
         input: theaterInput(),
         scenario: theaterScenario(),
         characters: THEATER_CHARACTERS,
+        plan
+      })
+    ).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([expect.objectContaining({ code: 'PATH_CHOICE_INVALID' })])
+    });
+  });
+
+  it('rejects a fixed claim when the same act mixes fixed and random path notes', () => {
+    const scenario = theaterScenario();
+    scenario.acts[0]!.pathNotes = [
+      { kind: 'fixed', text: '先完成当前战斗。' },
+      { kind: 'random', text: '之后节点随机揭示。' }
+    ];
+    const plan = validTheaterPlan();
+    plan.acts[0]!.pathChoice = { kind: 'fixed', note: '路线已经完全确定。' };
+
+    expect(
+      validateTheaterPlan({
+        input: theaterInput(),
+        scenario,
+        characters: THEATER_CHARACTERS,
+        knowledge: groupingKnowledge,
         plan
       })
     ).toMatchObject({

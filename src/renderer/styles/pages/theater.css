@@ -26,6 +26,15 @@
   justify-items: start;
   gap: 8px;
 }
+.gta-theater-heading .gta-btn--ghost {
+  border-color: rgba(213, 190, 128, 0.68);
+  color: var(--gta-text-on-dark);
+  background: rgba(3, 12, 22, 0.56);
+}
+.gta-theater-heading .gta-btn--ghost:hover:not(:disabled) {
+  color: #fff;
+  background: rgba(43, 58, 69, 0.82);
+}
 .gta-theater-heading h3,
 .gta-theater-section-head h4,
 .gta-theater-result h4 {
@@ -346,7 +355,7 @@
 .gta-theater-route {
   display: grid;
   grid-auto-flow: column;
-  grid-auto-columns: minmax(260px, 1fr);
+  grid-auto-columns: minmax(340px, 1fr);
   overflow: auto;
   margin-top: 26px;
   padding: 18px 0;
@@ -382,6 +391,67 @@
   color: var(--gta-text-on-light-soft);
   font-size: var(--gta-text-xs);
   line-height: 1.55;
+}
+.gta-theater-act-encounters {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0;
+}
+.gta-theater-act-encounters > section {
+  padding-left: 10px;
+  border-left: 2px solid rgba(164, 137, 80, 0.48);
+}
+.gta-theater-act-encounters > section > strong,
+.gta-theater-act-encounters > section > small {
+  display: block;
+}
+.gta-theater-act-encounters > section > small {
+  margin: 2px 0 6px;
+}
+.gta-theater-act-encounters > section > div {
+  margin-top: 7px;
+  color: var(--gta-text-on-light-soft);
+  font-size: var(--gta-text-xs);
+}
+.gta-theater-act-encounters ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  color: #725d30;
+  font-size: 10px;
+}
+.gta-theater-act-rationale {
+  margin: 12px 0 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--gta-stroke-soft);
+}
+.gta-theater-act-rationale > strong {
+  font-size: 11px;
+  letter-spacing: 0.05em;
+}
+.gta-theater-arcana {
+  display: grid;
+  gap: 1px;
+  margin: 16px 0 0;
+  padding: 0;
+  background: var(--gta-stroke-soft);
+  list-style: none;
+}
+.gta-theater-arcana li {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.65fr) 1fr 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  background: #f8faf7;
+  color: var(--gta-text-on-light-soft);
+  font-size: var(--gta-text-xs);
+}
+.gta-theater-arcana li > strong {
+  color: var(--gta-text-on-light);
 }
 .gta-theater-preserve p,
 .gta-theater-result footer p {
@@ -420,6 +490,10 @@
     padding: 18px 6px;
     border-right: 0;
     border-bottom: 1px solid var(--gta-stroke-soft);
+  }
+  .gta-theater-arcana li {
+    grid-template-columns: 1fr;
+    gap: 4px;
   }
 }
 @media (max-width: 760px) {

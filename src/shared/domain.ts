@@ -370,6 +370,7 @@ export interface TheaterPlanHistoryEntry {
     spent: number;
     after: number;
   }>;
+  nodeBudget: import('./theater-advisor.js').TheaterNodeBudgetItem[];
   routeGuidance: import('./theater-advisor.js').TheaterRouteGuidance;
   plan: import('./scenario-v2.js').TheaterPlan;
 }

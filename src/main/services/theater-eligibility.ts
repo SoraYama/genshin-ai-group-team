@@ -23,16 +23,26 @@ export function evaluateTheaterEligibility({
   const allowed = new Set(scenario.eligibility.elements.map((value) => value.toLowerCase()));
   const excluded = new Set(input.excludedCharacterIds);
   const ownedById = new Map(characters.map((character) => [String(character.id), character]));
-  const eligibleOwned: string[] = [];
+  const selectedNonGuestExternalIds = new Set([
+    ...input.selectedOpeningCharacterIds,
+    ...input.selectedTrialCharacterIds,
+    ...input.selectedSupportCharacterIds
+  ]);
+  const selectedSpecialGuestIds = new Set(input.selectedSpecialGuestCharacterIds);
+  const configuredSpecialGuestIds = new Set(scenario.pools.specialGuest.map(({ id }) => id));
+  const eligibleOwned = new Set<string>();
   const ineligibleOwned: TheaterEligibilityReport['ineligibleOwned'] = [];
 
   for (const character of characters) {
     const id = String(character.id);
-    if (excluded.has(id)) continue;
+    if (excluded.has(id) || selectedNonGuestExternalIds.has(id)) continue;
     const levelQualified = (character.level ?? 0) >= scenario.eligibility.minimumLevel;
-    const elementQualified = allowed.has(character.element.toLowerCase());
+    const selectedOwnedSpecialGuest =
+      selectedSpecialGuestIds.has(id) && configuredSpecialGuestIds.has(id);
+    const elementQualified =
+      allowed.has(character.element.toLowerCase()) || selectedOwnedSpecialGuest;
     if (levelQualified && elementQualified) {
-      eligibleOwned.push(id);
+      eligibleOwned.add(id);
       continue;
     }
     const reasons: Array<'element' | 'level'> = [];
@@ -69,6 +79,21 @@ export function evaluateTheaterEligibility({
         continue;
       }
       if (owned) {
+        if (source === 'special-guest') {
+          const levelQualified =
+            !excluded.has(id) && (owned.level ?? 0) >= scenario.eligibility.minimumLevel;
+          pools.push({
+            id,
+            source,
+            qualification: levelQualified ? 'qualified' : 'unqualified',
+            countsTowardRequirement: levelQualified,
+            owned: true,
+            note: levelQualified
+              ? '该特邀演员来自玩家自有角色，等级达标，可按特邀规则绕过当期元素限制。'
+              : `该自有特邀演员仍需达到 ${scenario.eligibility.minimumLevel} 级。`
+          });
+          continue;
+        }
         pools.push({
           id,
           source,
@@ -90,7 +115,7 @@ export function evaluateTheaterEligibility({
     }
   }
 
-  const hardQualifiedCount = new Set(eligibleOwned).size;
+  const hardQualifiedCount = eligibleOwned.size;
   const shortage = Math.max(0, scenario.eligibility.requiredHeadcount - hardQualifiedCount);
   const constructionAdvice: TheaterEligibilityReport['constructionAdvice'] = [];
   if (shortage > 0) {
@@ -121,7 +146,7 @@ export function evaluateTheaterEligibility({
     )
   );
   for (const capability of requiredCapabilities) {
-    const covered = eligibleOwned.some((id) => {
+    const covered = [...eligibleOwned].some((id) => {
       const record = knowledge?.lookup(id);
       return (
         record?.status === 'known' &&
@@ -140,10 +165,10 @@ export function evaluateTheaterEligibility({
   return {
     status: shortage === 0 ? 'eligible' : 'blocked',
     requiredHeadcount: scenario.eligibility.requiredHeadcount,
-    eligibleOwnedCount: eligibleOwned.length,
+    eligibleOwnedCount: eligibleOwned.size,
     hardQualifiedCount,
     shortage,
-    eligibleOwnedCharacterIds: eligibleOwned,
+    eligibleOwnedCharacterIds: [...eligibleOwned],
     ineligibleOwned,
     pools,
     constructionAdvice

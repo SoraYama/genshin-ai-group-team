@@ -510,6 +510,14 @@ function TheaterHistoryListItem({
             {entry.routeGuidance.notes.map((note) => (
               <p key={note}>{note}</p>
             ))}
+            {entry.routeGuidance.arcanaPriorities.map((priority) => (
+              <p key={priority.nodeId}>
+                <strong>{priority.name}</strong> · 触发条件：{priority.condition} · 选择依据：
+                {priority.reason} · 节点资源消耗：
+                {entry.nodeBudget.find(({ nodeId }) => nodeId === priority.nodeId)?.cost ??
+                  '资料未确认'}
+              </p>
+            ))}
           </section>
           <div className="gta-actions">
             <button type="button" className="gta-btn gta-btn--danger" onClick={onDelete}>

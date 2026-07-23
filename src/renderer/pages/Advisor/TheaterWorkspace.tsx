@@ -19,6 +19,7 @@ import {
   poolSourceLabel,
   progressStepLabel,
   scenarioVersionLabel,
+  theaterActPresentation,
   theaterEntityName
 } from './theater-presentation';
 
@@ -95,8 +96,11 @@ export function TheaterWorkspace({ uid, onBack }: { uid: string; onBack: () => v
 
   const scenario = view?.status === 'ready' ? view.scenario : null;
   const preview = useMemo(
-    () => (scenario && profile ? qualificationPreview(scenario, profile.characters) : null),
-    [scenario, profile]
+    () =>
+      scenario && profile
+        ? qualificationPreview(scenario, profile.characters, selectedPools)
+        : null,
+    [scenario, profile, selectedPools]
   );
   const scenarioReadOnly =
     view?.status === 'ready' && view.trust === 'production' && view.notCurrent;
@@ -524,24 +528,55 @@ function TheaterResult({
         </div>
       </section>
       <div className="gta-theater-route" aria-label="剧诗幕次路线">
-        {result.plan.acts.map((act) => (
-          <article key={act.act}>
-            <div className="gta-theater-route-node">
-              <span>{String(act.act).padStart(2, '0')}</span>
-            </div>
-            <div>
-              <h5>第 {act.act} 幕候选</h5>
-              <p>{act.candidateCharacterIds.map(actorName).join('、')}</p>
-              <p>{pathChoiceLabel(act.pathChoice)}</p>
-              <small>
-                预计活力：
-                {act.plannedVigorSpend
-                  .map((item) => `${actorName(item.characterId)} ${item.cost}`)
-                  .join('、') || '现场保留'}
-              </small>
-            </div>
-          </article>
-        ))}
+        {result.plan.acts.map((act) => {
+          const scenarioAct = scenario.acts.find((item) => item.act === act.act);
+          const presentation = scenarioAct ? theaterActPresentation(scenarioAct) : null;
+          return (
+            <article key={act.act}>
+              <div className="gta-theater-route-node">
+                <span>{String(act.act).padStart(2, '0')}</span>
+              </div>
+              <div>
+                <h5>第 {act.act} 幕候选</h5>
+                <p>{act.candidateCharacterIds.map(actorName).join('、')}</p>
+                {presentation && (
+                  <div className="gta-theater-act-encounters">
+                    {presentation.waves.map((wave) => (
+                      <section key={`${act.act}:${wave.label}`}>
+                        <strong>{wave.label}</strong>
+                        {wave.spawnCondition && <small>{wave.spawnCondition}</small>}
+                        {wave.enemies.map((enemy, index) => (
+                          <div key={`${enemy.name}:${index}`}>
+                            <span>
+                              {enemy.name} ×{enemy.count} · {enemy.level} 级
+                            </span>
+                            {enemy.mechanics.length > 0 && (
+                              <ul>
+                                {enemy.mechanics.map((mechanic) => (
+                                  <li key={mechanic}>{mechanic}</li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        ))}
+                      </section>
+                    ))}
+                  </div>
+                )}
+                <div className="gta-theater-act-rationale">
+                  <strong>为什么这样安排</strong>
+                  <p>{pathChoiceLabel(act.pathChoice)}</p>
+                </div>
+                <small>
+                  预计活力：
+                  {act.plannedVigorSpend
+                    .map((item) => `${actorName(item.characterId)} ${item.cost}`)
+                    .join('、') || '现场保留'}
+                </small>
+              </div>
+            </article>
+          );
+        })}
       </div>
       <section className="gta-theater-preserve">
         <h5>保留与分支优先级</h5>
@@ -554,6 +589,21 @@ function TheaterResult({
         {result.routeGuidance.notes.map((note) => (
           <p key={note}>{note}</p>
         ))}
+        {result.routeGuidance.arcanaPriorities.length > 0 && (
+          <ol className="gta-theater-arcana">
+            {result.routeGuidance.arcanaPriorities.map((priority) => {
+              const budget = result.nodeBudget.find(({ nodeId }) => nodeId === priority.nodeId);
+              return (
+                <li key={priority.nodeId}>
+                  <strong>{priority.name}</strong>
+                  <span>触发条件：{priority.condition}</span>
+                  <span>选择依据：{priority.reason}</span>
+                  <small>节点资源消耗：{budget?.cost ?? '资料未确认'}</small>
+                </li>
+              );
+            })}
+          </ol>
+        )}
       </section>
       {(result.warnings.length > 0 || result.assumptions.length > 0) && (
         <footer>
@@ -575,14 +625,29 @@ function TheaterResult({
   );
 }
 
-function qualificationPreview(scenario: TheaterScenario, characters: CharacterProfile[]) {
+function qualificationPreview(
+  scenario: TheaterScenario,
+  characters: CharacterProfile[],
+  selectedPools: Record<string, string[]>
+) {
   const allowed = new Set(scenario.eligibility.elements);
+  const selectedNonGuestExternal = new Set([
+    ...(selectedPools['opening'] ?? []),
+    ...(selectedPools['trial'] ?? []),
+    ...(selectedPools['support'] ?? [])
+  ]);
+  const selectedSpecialGuests = new Set(selectedPools['special-guest'] ?? []);
+  const configuredSpecialGuests = new Set(scenario.pools.specialGuest.map(({ id }) => id));
   const eligible: CharacterProfile[] = [];
   const ineligible: Array<{ character: CharacterProfile; reasons: Array<'element' | 'level'> }> =
     [];
   for (const character of characters) {
+    const id = String(character.id);
+    if (selectedNonGuestExternal.has(id)) continue;
     const reasons: Array<'element' | 'level'> = [];
-    if (!allowed.has(character.element.toLowerCase() as never)) reasons.push('element');
+    const specialGuest = selectedSpecialGuests.has(id) && configuredSpecialGuests.has(id);
+    if (!allowed.has(character.element.toLowerCase() as never) && !specialGuest)
+      reasons.push('element');
     if ((character.level ?? 0) < scenario.eligibility.minimumLevel) reasons.push('level');
     if (reasons.length) ineligible.push({ character, reasons });
     else eligible.push(character);

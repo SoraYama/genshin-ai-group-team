@@ -136,8 +136,43 @@ export function buildLocalTheaterPlan({
       assumptions: ['未知活力消耗不会被自动视为零。']
     });
   }
+  const warnings = [
+    ...eligibility.pools
+      .filter(({ qualification }) => qualification === 'unknown')
+      .map(({ source }) => `${poolLabel(source)}的硬资格计入规则未说明，本次不依赖其达标。`)
+  ];
+  const assumptions = [
+    '路线计划只使用当期场景中已声明的幕次、活力和机制。',
+    '随机节点只给出条件策略，不承诺实际出现顺序。'
+  ];
+  const allRequirements = unique(
+    targetActs.flatMap(({ encounters }) =>
+      encounters.flatMap(({ waves }) =>
+        waves.flatMap(({ enemies }) =>
+          enemies.flatMap(({ mechanics }) =>
+            parseRequiredCapabilities(mechanics.tags).map(({ value }) => value)
+          )
+        )
+      )
+    )
+  );
+  const mechanismActorIds = new Set(
+    actorPool
+      .filter((actor) =>
+        allRequirements.some((requirement) =>
+          characterSatisfiesRequirement(actor.id, requirement, knowledge)
+        )
+      )
+      .map(({ id }) => id)
+  );
   const scarceIds = new Set<string>();
-  const acts = targetActs.map((act, actIndex) => {
+  const remainingByCharacter = new Map(actorPool.map(({ id }) => [id, scenario.vigor.initial]));
+  const acts = [];
+  for (const [actIndex, act] of targetActs.entries()) {
+    const scenarioCost = configuredActCosts.get(act.act)!;
+    const availableActors = actorPool.filter(
+      ({ id }) => (remainingByCharacter.get(id) ?? scenario.vigor.initial) >= scenarioCost
+    );
     const requirements = unique(
       act.encounters.flatMap(({ waves }) =>
         waves.flatMap(({ enemies }) =>
@@ -148,19 +183,63 @@ export function buildLocalTheaterPlan({
       )
     );
     const required = requirements.flatMap((requirement) => {
-      const match = actorPool.find((actor) =>
+      const match = availableActors.find((actor) =>
         characterSatisfiesRequirement(actor.id, requirement, knowledge)
       );
       if (match?.source === 'owned') scarceIds.add(match.id);
       return match ? [match] : [];
     });
-    const preferred = actorPool.filter(
-      ({ id }) => !scarceIds.has(id) || required.some((item) => item.id === id)
+    const missingRequirement = requirements.find(
+      (requirement) =>
+        !required.some((actor) => characterSatisfiesRequirement(actor.id, requirement, knowledge))
     );
-    const rotated = [...preferred.slice(actIndex * 4), ...preferred.slice(0, actIndex * 4)];
+    if (missingRequirement) {
+      return theaterAdvisorResultSchema.parse({
+        status: 'blocked',
+        ...common,
+        issues: [
+          {
+            code: 'MECHANIC_COVERAGE_INVALID',
+            path: ['acts', act.act, 'candidateCharacterIds'],
+            message: `第 ${act.act} 幕需要已确认的机制对策，但可用演员已无足够活力。`,
+            details: { act: act.act, requirement: missingRequirement }
+          }
+        ],
+        warnings,
+        assumptions
+      });
+    }
+    const requiredIds = new Set(required.map(({ id }) => id));
+    const ordinaryActors = availableActors.filter(
+      ({ id }) => !mechanismActorIds.has(id) || requiredIds.has(id)
+    );
+    const preferred = ordinaryActors;
+    const rotationOffset = preferred.length === 0 ? 0 : (actIndex * 4) % preferred.length;
+    const rotated = [...preferred.slice(rotationOffset), ...preferred.slice(0, rotationOffset)];
     const candidates = uniqueActors([...required, ...rotated]).slice(0, 4);
-    const scenarioCost = configuredActCosts.get(act.act)!;
-    return {
+    if (candidates.length === 0) {
+      return theaterAdvisorResultSchema.parse({
+        status: 'blocked',
+        ...common,
+        issues: [
+          {
+            code: 'VIGOR_BUDGET_INVALID',
+            path: ['acts', act.act, 'candidateCharacterIds'],
+            message: `第 ${act.act} 幕没有剩余活力足够的演员。`,
+            details: { act: act.act }
+          }
+        ],
+        warnings,
+        assumptions
+      });
+    }
+    candidates.forEach(({ id }) =>
+      remainingByCharacter.set(
+        id,
+        (remainingByCharacter.get(id) ?? scenario.vigor.initial) - scenarioCost
+      )
+    );
+    acts.push({
       act: act.act,
       candidateCharacterIds: candidates.map(({ id }) => id),
       plannedVigorSpend: candidates.map(({ id }) => ({
@@ -168,17 +247,10 @@ export function buildLocalTheaterPlan({
         cost: scenarioCost
       })),
       pathChoice: pathChoiceFor(act.pathNotes)
-    };
-  });
-  const warnings = [
-    ...eligibility.pools
-      .filter(({ qualification }) => qualification === 'unknown')
-      .map(({ source }) => `${poolLabel(source)}的硬资格计入规则未说明，本次不依赖其达标。`)
-  ];
-  const assumptions = [
-    '路线计划只使用当期场景中已声明的幕次、活力和机制。',
-    '随机节点只给出条件策略，不承诺实际出现顺序。'
-  ];
+    });
+  }
+  const arcana = buildArcanaGuidance(scenario);
+  warnings.push(...arcana.warnings);
   const plan = {
     mode: 'imaginarium-theater' as const,
     schemaVersion: 2 as const,
@@ -214,9 +286,11 @@ export function buildLocalTheaterPlan({
     assumptions,
     plan: validation.plan,
     vigorBudget: validation.vigorBudget,
+    nodeBudget: arcana.nodeBudget,
     routeGuidance: {
       preserveCharacterIds: [...scarceIds],
-      arcanaPriorityIds: scenario.arcanaNodes?.map(({ id }) => id) ?? [],
+      arcanaPriorityIds: arcana.priorities.map(({ nodeId }) => nodeId),
+      arcanaPriorities: arcana.priorities,
       notes: [
         scarceIds.size > 0
           ? '保留稀缺机制角色到对应幕次，其他幕优先轮换资料完整的演员。'
@@ -245,8 +319,12 @@ function completenessScore(character: CharacterProfile): number {
 function pathChoiceFor(notes: TheaterScenario['acts'][number]['pathNotes']) {
   if (notes.length === 0)
     return { kind: 'fixed' as const, note: '当期资料没有声明分支节点，按单一路线规划。' };
-  const fixed = notes.find(({ kind }) => kind === 'fixed');
-  if (fixed) return { kind: 'fixed' as const, note: fixed.text };
+  const random = notes.find(({ kind }) => kind === 'random');
+  if (random)
+    return {
+      kind: 'conditional' as const,
+      note: `如果随机分支出现，${random.text}`
+    };
   const conditional = notes.find(
     (note): note is Extract<(typeof notes)[number], { kind: 'conditional' }> =>
       note.kind === 'conditional'
@@ -256,9 +334,49 @@ function pathChoiceFor(notes: TheaterScenario['acts'][number]['pathNotes']) {
       kind: 'conditional' as const,
       note: `如果${conditional.condition}，${conditional.text}。`
     };
+  const fixed = notes.find(({ kind }) => kind === 'fixed');
+  return fixed
+    ? { kind: 'fixed' as const, note: fixed.text }
+    : { kind: 'conditional' as const, note: '如果路线条件揭示，再按当期资料应对。' };
+}
+
+function buildArcanaGuidance(scenario: TheaterScenario) {
+  const costs = new Map(scenario.vigor.nodeCosts.map(({ nodeId, cost }) => [nodeId, cost]));
+  const warnings: string[] = [];
+  const ranked = (scenario.arcanaNodes ?? []).flatMap((node, index) => {
+    const cost = costs.get(node.id);
+    const name = node.name.names['zh-CN'] ?? node.name.names['zh-Hans'] ?? '未命名增益';
+    if (cost === undefined) {
+      warnings.push(`${name}缺少已确认的节点资源消耗，未纳入优先级。`);
+      return [];
+    }
+    const random = node.pathNotes.find(({ kind }) => kind === 'random');
+    const conditional = node.pathNotes.find(
+      (note): note is Extract<(typeof node.pathNotes)[number], { kind: 'conditional' }> =>
+        note.kind === 'conditional'
+    );
+    const fixed = node.pathNotes.find(({ kind }) => kind === 'fixed');
+    const certaintyRank = random ? 2 : conditional ? 1 : 0;
+    const condition = random
+      ? '随机出现该节点时'
+      : conditional
+        ? conditional.condition
+        : '节点可选时';
+    const reason = random?.text ?? conditional?.text ?? fixed?.text ?? node.description;
+    return [{ index, certaintyRank, nodeId: node.id, name, condition, reason, cost }];
+  });
+  ranked.sort(
+    (left, right) => left.certaintyRank - right.certaintyRank || left.index - right.index
+  );
   return {
-    kind: 'conditional' as const,
-    note: '如果实际出现该随机分支，再按当前敌人与剩余活力选择应对路线。'
+    priorities: ranked.map(({ nodeId, name, condition, reason }) => ({
+      nodeId,
+      name,
+      condition,
+      reason
+    })),
+    nodeBudget: ranked.map(({ nodeId, cost }) => ({ nodeId, cost })),
+    warnings
   };
 }
 

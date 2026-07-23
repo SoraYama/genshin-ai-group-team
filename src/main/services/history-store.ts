@@ -87,10 +87,32 @@ const theaterHistoryEntrySchema = z
         })
         .strict()
     ),
+    nodeBudget: z
+      .array(
+        z
+          .object({
+            nodeId: z.string().trim().min(1),
+            cost: z.number().int().nonnegative()
+          })
+          .strict()
+      )
+      .default([]),
     routeGuidance: z
       .object({
         preserveCharacterIds: z.array(canonicalCharacterIdSchema),
         arcanaPriorityIds: z.array(z.string().trim().min(1)),
+        arcanaPriorities: z
+          .array(
+            z
+              .object({
+                nodeId: z.string().trim().min(1),
+                name: z.string().trim().min(1),
+                condition: z.string().trim().min(1),
+                reason: z.string().trim().min(1)
+              })
+              .strict()
+          )
+          .default([]),
         notes: z.array(z.string().trim().min(1)).min(1)
       })
       .strict(),
@@ -246,6 +268,21 @@ const theaterHistoryEntrySchema = z
         message: 'Only owned actors can be preserved by canonical ID'
       });
     }
+    const priorityIds = entry.routeGuidance.arcanaPriorityIds;
+    const detailIds = entry.routeGuidance.arcanaPriorities.map(({ nodeId }) => nodeId);
+    const budgetIds = entry.nodeBudget.map(({ nodeId }) => nodeId);
+    if (
+      new Set(priorityIds).size !== priorityIds.length ||
+      priorityIds.length !== detailIds.length ||
+      priorityIds.some((id, index) => id !== detailIds[index]) ||
+      priorityIds.length !== budgetIds.length ||
+      priorityIds.some((id, index) => id !== budgetIds[index])
+    )
+      context.addIssue({
+        code: 'custom',
+        path: ['nodeBudget'],
+        message: 'Theater history Arcana details and node resource budget must match priority order'
+      });
   });
 
 const stygianHistoryEntrySchema = z

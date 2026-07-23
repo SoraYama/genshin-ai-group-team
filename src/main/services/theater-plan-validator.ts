@@ -52,6 +52,7 @@ export function validateTheaterPlan(options: {
   const allowedElements = new Set(
     scenario.eligibility.elements.map((value) => value.toLowerCase())
   );
+  const configuredSpecialGuestIds = new Set(scenario.pools.specialGuest.map(({ id }) => id));
   for (const [index, id] of plan.cast.selectedCharacterIds.entries()) {
     if (!owned.has(id)) {
       issues.push(
@@ -129,10 +130,14 @@ export function validateTheaterPlan(options: {
           }
         )
       );
+      continue;
     }
-    if (source !== 'owned') continue;
     const levelQualified = (character.level ?? 0) >= scenario.eligibility.minimumLevel;
-    const elementQualified = allowedElements.has(character.element.toLowerCase());
+    const elementQualified =
+      source === 'owned'
+        ? allowedElements.has(character.element.toLowerCase())
+        : source === 'special-guest' && configuredSpecialGuestIds.has(id);
+    if (source !== 'owned' && source !== 'special-guest') continue;
     if (levelQualified && elementQualified) qualifiedOwnedIds.add(id);
     else {
       issues.push(
@@ -252,8 +257,10 @@ export function validateTheaterPlan(options: {
       }
     }
     const availableKinds = new Set(scenarioAct.pathNotes.map(({ kind }) => kind));
+    const hasUncertainPath = availableKinds.has('random') || availableKinds.has('conditional');
     const validPath =
       (actPlan.pathChoice.kind === 'fixed' &&
+        !hasUncertainPath &&
         (availableKinds.size === 0 || availableKinds.has('fixed'))) ||
       (actPlan.pathChoice.kind === 'random' && availableKinds.has('random')) ||
       (actPlan.pathChoice.kind === 'conditional' &&

@@ -420,6 +420,7 @@ export class TheaterAdvisorService {
           };
         }),
         vigorBudget: result.vigorBudget,
+        nodeBudget: result.nodeBudget,
         routeGuidance: result.routeGuidance,
         plan: result.plan
       });

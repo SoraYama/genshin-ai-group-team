@@ -265,10 +265,41 @@ const vigorBudgetSchema = z
     'Vigor ledger entries must be unique per act and actor'
   );
 
+const nodeBudgetSchema = z
+  .array(
+    z
+      .object({
+        nodeId: externalCastIdSchema,
+        cost: z.number().int().nonnegative()
+      })
+      .strict()
+  )
+  .refine(
+    (items) => new Set(items.map(({ nodeId }) => nodeId)).size === items.length,
+    'Node resource-budget IDs must be unique'
+  );
+
+const arcanaPrioritiesSchema = z
+  .array(
+    z
+      .object({
+        nodeId: externalCastIdSchema,
+        name: playerTextSchema,
+        condition: playerTextSchema,
+        reason: playerTextSchema
+      })
+      .strict()
+  )
+  .refine(
+    (items) => new Set(items.map(({ nodeId }) => nodeId)).size === items.length,
+    'Arcana priority node IDs must be unique'
+  );
+
 const routeGuidanceSchema = z
   .object({
     preserveCharacterIds: uniqueOwnedIdsSchema,
     arcanaPriorityIds: uniqueCastIdsSchema,
+    arcanaPriorities: arcanaPrioritiesSchema,
     notes: z.array(playerTextSchema).min(1)
   })
   .strict();
@@ -284,23 +315,48 @@ const resultCommonShape = {
   eligibility: theaterEligibilityReportSchema
 };
 
-export const theaterAdvisorResultSchema = z.discriminatedUnion('status', [
-  z
-    .object({
-      status: z.literal('planned'),
-      ...resultCommonShape,
-      plan: theaterPlanSchema,
-      vigorBudget: vigorBudgetSchema,
-      routeGuidance: routeGuidanceSchema
-    })
-    .strict(),
-  z
-    .object({
-      status: z.literal('blocked'),
-      ...resultCommonShape
-    })
-    .strict()
-]);
+export const theaterAdvisorResultSchema = z
+  .discriminatedUnion('status', [
+    z
+      .object({
+        status: z.literal('planned'),
+        ...resultCommonShape,
+        plan: theaterPlanSchema,
+        vigorBudget: vigorBudgetSchema,
+        nodeBudget: nodeBudgetSchema,
+        routeGuidance: routeGuidanceSchema
+      })
+      .strict(),
+    z
+      .object({
+        status: z.literal('blocked'),
+        ...resultCommonShape
+      })
+      .strict()
+  ])
+  .superRefine((result, context) => {
+    if (result.status !== 'planned') return;
+    const detailIds = result.routeGuidance.arcanaPriorities.map(({ nodeId }) => nodeId);
+    const budgetIds = result.nodeBudget.map(({ nodeId }) => nodeId);
+    if (
+      result.routeGuidance.arcanaPriorityIds.length !== detailIds.length ||
+      result.routeGuidance.arcanaPriorityIds.some((id, index) => id !== detailIds[index])
+    )
+      context.addIssue({
+        code: 'custom',
+        path: ['routeGuidance', 'arcanaPriorityIds'],
+        message: 'Arcana priority IDs must exactly match the detailed priority order'
+      });
+    if (
+      result.routeGuidance.arcanaPriorityIds.length !== budgetIds.length ||
+      result.routeGuidance.arcanaPriorityIds.some((id, index) => id !== budgetIds[index])
+    )
+      context.addIssue({
+        code: 'custom',
+        path: ['nodeBudget'],
+        message: 'Node resource budget must exactly match the Arcana priority order'
+      });
+  });
 
 export const theaterAdvisorProgressStepSchema = z.enum([
   'reading-roster',
@@ -316,6 +372,7 @@ export type TheaterPlanIssue = z.infer<typeof theaterPlanIssueSchema>;
 export type TheaterEligibilityReport = z.infer<typeof theaterEligibilityReportSchema>;
 export type TheaterRouteGuidance = z.infer<typeof routeGuidanceSchema>;
 export type TheaterVigorBudgetItem = z.infer<typeof vigorBudgetSchema>[number];
+export type TheaterNodeBudgetItem = z.infer<typeof nodeBudgetSchema>[number];
 export type TheaterScenarioView = z.infer<typeof theaterScenarioViewSchema>;
 export type TheaterAdvisorResult = z.infer<typeof theaterAdvisorResultSchema>;
 export type TheaterAdvisorProgressStep = z.infer<typeof theaterAdvisorProgressStepSchema>;

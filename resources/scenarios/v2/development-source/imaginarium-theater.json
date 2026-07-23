@@ -58,7 +58,7 @@
       "initial": 2,
       "max": 4,
       "actCosts": [{ "act": 1, "cost": 1 }],
-      "nodeCosts": []
+      "nodeCosts": [{ "nodeId": "development.arcana.grouping", "cost": 1 }]
     },
     "acts": [
       {
@@ -92,6 +92,22 @@
         "pathNotes": [{ "kind": "random", "text": "原创开发样例中的随机分支" }]
       }
     ],
-    "arcanaNodes": []
+    "arcanaNodes": [
+      {
+        "id": "development.arcana.grouping",
+        "name": {
+          "id": "development.arcana.grouping.name",
+          "names": { "zh-CN": "演示聚敌秘法", "en": "Demo Grouping Arcana" }
+        },
+        "description": "为分散敌人提供聚拢窗口。",
+        "pathNotes": [
+          {
+            "kind": "conditional",
+            "condition": "出现分散群怪",
+            "text": "缺少聚怪时优先"
+          }
+        ]
+      }
+    ]
   }
 }

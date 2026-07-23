@@ -23,21 +23,66 @@ describe('evaluateTheaterEligibility', () => {
     );
   });
 
-  it('does not let an external special-guest instance contribute to owned hard eligibility', () => {
+  it('counts a selected special guest from the owned roster when its level is qualified', () => {
+    const scenario = theaterScenario();
+    scenario.eligibility.requiredHeadcount = 9;
     const report = evaluateTheaterEligibility({
       input: theaterInput({ selectedSpecialGuestCharacterIds: ['1009'] }),
-      scenario: theaterScenario(),
-      characters: THEATER_CHARACTERS
+      scenario,
+      characters: THEATER_CHARACTERS.slice(0, 9)
     });
 
     expect(report.hardQualifiedCount).toBe(9);
+    expect(report.status).toBe('eligible');
     expect(report.pools).toContainEqual(
       expect.objectContaining({
         id: '1009',
         source: 'special-guest',
-        qualification: 'unknown',
-        countsTowardRequirement: false,
+        qualification: 'qualified',
+        countsTowardRequirement: true,
         owned: true
+      })
+    );
+  });
+
+  it('rejects a selected owned special guest below the minimum level', () => {
+    const scenario = theaterScenario();
+    scenario.eligibility.requiredHeadcount = 9;
+    const characters = THEATER_CHARACTERS.slice(0, 9).map((character) =>
+      character.id === 1009 ? { ...character, level: 60 } : character
+    );
+    const report = evaluateTheaterEligibility({
+      input: theaterInput({ selectedSpecialGuestCharacterIds: ['1009'] }),
+      scenario,
+      characters
+    });
+
+    expect(report).toMatchObject({ status: 'blocked', hardQualifiedCount: 8, shortage: 1 });
+    expect(report.pools).toContainEqual(
+      expect.objectContaining({
+        id: '1009',
+        source: 'special-guest',
+        qualification: 'unqualified',
+        countsTowardRequirement: false
+      })
+    );
+  });
+
+  it('does not count an owned actor when the selected instance comes from opening cast', () => {
+    const scenario = theaterScenario();
+    const report = evaluateTheaterEligibility({
+      input: theaterInput({ selectedOpeningCharacterIds: ['1001'] }),
+      scenario,
+      characters: THEATER_CHARACTERS.slice(0, 8)
+    });
+
+    expect(report).toMatchObject({ status: 'blocked', hardQualifiedCount: 7, shortage: 1 });
+    expect(report.pools).toContainEqual(
+      expect.objectContaining({
+        id: '1001',
+        source: 'opening',
+        qualification: 'unknown',
+        countsTowardRequirement: false
       })
     );
   });

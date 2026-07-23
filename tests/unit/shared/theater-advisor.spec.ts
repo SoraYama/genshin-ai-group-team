@@ -92,9 +92,18 @@ describe('theater advisor contracts', () => {
       },
       plan: validTheaterPlan(),
       vigorBudget: [{ act: 1, characterId: '1001', before: 2, spent: 1, after: 1 }],
+      nodeBudget: [{ nodeId: 'node.1', cost: 1 }],
       routeGuidance: {
         preserveCharacterIds: ['1001'],
-        arcanaPriorityIds: [],
+        arcanaPriorityIds: ['node.1'],
+        arcanaPriorities: [
+          {
+            nodeId: 'node.1',
+            name: '聚敌增益',
+            condition: '演员没有聚怪能力',
+            reason: '缺少聚怪时优先'
+          }
+        ],
         notes: ['保留稀缺机制角色到对应幕次。']
       }
     };
@@ -102,6 +111,12 @@ describe('theater advisor contracts', () => {
     expect(theaterAdvisorResultSchema.safeParse(result).success).toBe(true);
     expect(
       theaterAdvisorResultSchema.safeParse({ ...result, correlationId: undefined }).success
+    ).toBe(false);
+    expect(
+      theaterAdvisorResultSchema.safeParse({
+        ...result,
+        nodeBudget: [{ nodeId: 'other-node', cost: 1 }]
+      }).success
     ).toBe(false);
   });
 });

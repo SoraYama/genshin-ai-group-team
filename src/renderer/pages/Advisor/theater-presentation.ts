@@ -1,9 +1,15 @@
 import type {
   TheaterAdvisorProgressStep,
   TheaterObjective,
+  TheaterScenario,
   TheaterScenarioView
 } from '../../../shared/theater-advisor.js';
-import type { TheaterPlan } from '../../../shared/scenario-v2.js';
+import {
+  localizedCapabilityRequirement,
+  localizedMechanicTerm,
+  parseRequiredCapabilities
+} from '../../../shared/abyss-mechanics.js';
+import type { EnemyMechanics, TheaterPlan } from '../../../shared/scenario-v2.js';
 
 const PROGRESS: Record<TheaterAdvisorProgressStep, string> = {
   'reading-roster': '读取角色',
@@ -54,6 +60,49 @@ export function pathChoiceLabel(choice: TheaterPlan['acts'][number]['pathChoice'
 
 export function theaterEntityName(reference: { names: Record<string, string> }): string {
   return reference.names['zh-CN'] ?? reference.names['zh-Hans'] ?? '未命名演员';
+}
+
+export function theaterActPresentation(act: TheaterScenario['acts'][number]) {
+  let waveNumber = 0;
+  return {
+    waves: act.encounters.flatMap(({ waves }) =>
+      waves.map((wave) => {
+        waveNumber += 1;
+        return {
+          label: `第 ${waveNumber} 波`,
+          ...(wave.spawnCondition ? { spawnCondition: wave.spawnCondition } : {}),
+          enemies: wave.enemies.map((enemy) => ({
+            name: enemy.enemy.names['zh-CN'] ?? enemy.enemy.names['zh-Hans'] ?? '未命名敌人',
+            level: enemy.level,
+            count: enemy.count,
+            mechanics: theaterMechanicLabels(enemy.mechanics)
+          }))
+        };
+      })
+    )
+  };
+}
+
+function theaterMechanicLabels(mechanics: EnemyMechanics): string[] {
+  return [
+    ...mechanics.shields.map(
+      ({ element, strength }) =>
+        `${elementLabel(element)}元素护盾${strength === undefined ? '' : ` · 强度 ${strength}`}`
+    ),
+    ...mechanics.resistances.map(({ damageType, percent }) => {
+      const localized = localizedMechanicTerm(damageType);
+      const label =
+        localized === '未本地化机制' ? '其他伤害' : localized.replace(/(?:元素)?伤害$/u, '');
+      return `${label}抗性 ${percent}%`;
+    }),
+    ...mechanics.immunities.map((immunity) => `免疫：${localizedMechanicTerm(immunity)}`),
+    ...parseRequiredCapabilities(mechanics.tags).map(
+      (requirement) => `需要${localizedCapabilityRequirement(requirement)}`
+    ),
+    ...mechanics.tags.filter(
+      (tag) => !tag.startsWith('requires-capability:') && /[\u3400-\u9fff]/u.test(tag)
+    )
+  ];
 }
 
 export function scenarioVersionLabel(

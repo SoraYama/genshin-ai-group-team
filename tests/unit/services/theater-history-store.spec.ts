@@ -70,9 +70,18 @@ function input(): Omit<TheaterPlanHistoryEntry, 'id' | 'createdAt'> {
         after: 1
       }))
     ],
+    nodeBudget: [{ nodeId: 'node.1', cost: 1 }],
     routeGuidance: {
       preserveCharacterIds: ['1001'],
-      arcanaPriorityIds: [],
+      arcanaPriorityIds: ['node.1'],
+      arcanaPriorities: [
+        {
+          nodeId: 'node.1',
+          name: '聚敌增益',
+          condition: '演员没有聚怪能力',
+          reason: '缺少聚怪时优先'
+        }
+      ],
       notes: ['保留稀缺机制角色。']
     },
     plan
@@ -112,5 +121,12 @@ describe('Theater history deep validation', () => {
     expect(store.appendTheater(invalid).cast).toContainEqual(
       expect.objectContaining({ id: 'trial.1', source: 'trial' })
     );
+  });
+
+  it('rejects a node resource snapshot that drifts from Arcana priority order', () => {
+    const store = new HistoryStore();
+    const invalid = input();
+    invalid.nodeBudget = [{ nodeId: 'other-node', cost: 1 }];
+    expect(() => store.appendTheater(invalid)).toThrow();
   });
 });

@@ -1178,6 +1178,11 @@ test('checks Theater eligibility and renders a cast-vigor route instead of team 
   await page.getByRole('button', { name: /幻想真境剧诗/ }).click();
 
   await expect(page.getByRole('heading', { name: '幻想真境剧诗手册' })).toBeVisible();
+  expect(
+    await page
+      .getByRole('button', { name: '返回挑战入口' })
+      .evaluate((element) => element.ownerDocument.defaultView?.getComputedStyle(element).color)
+  ).toBe('rgb(247, 245, 236)');
   await expect(page.getByText('演练资料，不代表本期')).toBeVisible();
   await expect(page.getByText('8 / 8 名可入场')).toBeVisible();
   await expect(page.getByText('当期元素：风、岩')).toBeVisible();
@@ -1219,6 +1224,14 @@ test('checks Theater eligibility and renders a cast-vigor route instead of team 
   await expect(page.getByRole('heading', { name: '入场演员池' })).toBeVisible();
   await expect(page.getByRole('heading', { name: '逐幕活力预算' })).toBeVisible();
   await expect(page.getByRole('heading', { name: '保留与分支优先级' })).toBeVisible();
+  await expect(page.locator('.gta-theater-act-encounters')).toContainText('第 1 波');
+  await expect(page.locator('.gta-theater-act-encounters')).toContainText('纸页幻影');
+  await expect(page.locator('.gta-theater-act-encounters')).toContainText('100 级');
+  await expect(page.getByText('为什么这样安排')).toBeVisible();
+  await expect(page.getByText('演示聚敌秘法')).toBeVisible();
+  await expect(page.getByText('触发条件：出现分散群怪')).toBeVisible();
+  await expect(page.getByText('选择依据：缺少聚怪时优先')).toBeVisible();
+  await expect(page.getByText('节点资源消耗：1')).toBeVisible();
   await expect(page.locator('[data-theater-actor-id]')).toHaveCount(9);
   await expect(page.locator('.gta-theater-result-cast')).toContainText('演示试用角色');
   await expect(page.locator('.gta-theater-result-cast')).toContainText('试用演员');
@@ -1258,5 +1271,7 @@ test('checks Theater eligibility and renders a cast-vigor route instead of team 
   await expect(page.getByRole('heading', { name: '逐幕活力预算' })).toBeVisible();
   await expect(page.locator('.gta-history-theater-cast')).toContainText('演示试用角色');
   await expect(page.locator('.gta-history-theater-cast')).toContainText('试用演员');
+  await expect(page.locator('.gta-history-theater-body')).toContainText('演示聚敌秘法');
+  await expect(page.locator('.gta-history-theater-body')).toContainText('节点资源消耗：1');
   await expect(page.getByRole('button', { name: '删除这条幻想真境剧诗方案' })).toBeVisible();
 });

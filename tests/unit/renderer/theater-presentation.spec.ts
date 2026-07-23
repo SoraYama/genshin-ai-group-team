@@ -8,6 +8,7 @@ import {
   poolSourceLabel,
   progressStepLabel,
   scenarioVersionLabel,
+  theaterActPresentation,
   theaterEntityName
 } from '../../../src/renderer/pages/Advisor/theater-presentation.js';
 import { theaterScenario } from '../services/theater-test-fixtures.js';
@@ -46,5 +47,43 @@ describe('Theater presentation', () => {
         poolSourceLabel('trial')
       ].join(' ')
     ).not.toMatch(/trial\.1|safe-clear|imaginarium|development/i);
+  });
+
+  it('presents localized waves, enemies, and mechanics without leaking slugs or internal tags', () => {
+    const scenario = theaterScenario();
+    const enemy = scenario.acts[0]!.encounters[0]!.waves[0]!.enemies[0]!;
+    enemy.enemy = {
+      id: 'enemy.internal-training-slug',
+      names: { 'zh-CN': '训练灵体', en: 'Internal Training Enemy' }
+    };
+    enemy.mechanics = {
+      shields: [{ element: 'hydro', strength: 2 }],
+      resistances: [{ damageType: 'physical', percent: 30 }],
+      immunities: ['pyro'],
+      tags: ['requires-capability:grouping', 'internal-only-tag']
+    };
+    scenario.acts[0]!.encounters[0]!.waves[0]!.spawnCondition = '击败上一波后出现';
+
+    const presentation = theaterActPresentation(scenario.acts[0]!);
+    expect(presentation.waves[0]).toMatchObject({
+      label: '第 1 波',
+      spawnCondition: '击败上一波后出现',
+      enemies: [
+        expect.objectContaining({
+          name: '训练灵体',
+          count: enemy.count,
+          level: enemy.level,
+          mechanics: expect.arrayContaining([
+            '水元素护盾 · 强度 2',
+            '物理抗性 30%',
+            '免疫：火元素伤害',
+            '需要聚怪能力'
+          ])
+        })
+      ]
+    });
+    expect(JSON.stringify(presentation)).not.toMatch(
+      /enemy\.internal|Internal Training|internal-only|requires-capability/
+    );
   });
 });
