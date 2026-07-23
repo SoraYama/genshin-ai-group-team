@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { resolveConfig } from 'vite';
 import { describe, expect, it } from 'vitest';
 
 interface PackageJson {
@@ -19,6 +20,13 @@ interface NodemonConfig {
 const packageJson = JSON.parse(readFileSync(path.resolve('package.json'), 'utf8')) as PackageJson;
 
 describe('development process scripts', () => {
+  it('pre-bundles renderer dependencies for the same Electron Chromium target as production', async () => {
+    const config = await resolveConfig({}, 'serve');
+
+    expect(config.build.target).toBe('chrome142');
+    expect(config.optimizeDeps.esbuildOptions?.target).toEqual(config.build.target);
+  });
+
   it('waits for a current-run marker and launches through nodemon', () => {
     expect(packageJson.scripts.dev).toContain('npm run dev:prepare');
     expect(packageJson.scripts['dev:main']).toContain('GTA_DEV_WATCH=1');

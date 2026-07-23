@@ -8,6 +8,8 @@ export const PRODUCTION_RENDERER_CSP =
 const DEVELOPMENT_RENDERER_CSP =
   "default-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:5294 ws://localhost:5294 data:; img-src 'self' gtai-img: data:";
 
+const RENDERER_BROWSER_TARGET = 'chrome142';
+
 export default defineConfig(({ command }) => {
   const rendererCsp = command === 'serve' ? DEVELOPMENT_RENDERER_CSP : PRODUCTION_RENDERER_CSP;
   return {
@@ -32,9 +34,15 @@ export default defineConfig(({ command }) => {
       port: 5294,
       strictPort: true
     },
+    optimizeDeps: {
+      // Dev dependency pre-bundling does not inherit build.target.
+      esbuildOptions: {
+        target: RENDERER_BROWSER_TARGET
+      }
+    },
     build: {
       // Renderer runs only in Electron 43 (Chromium 142), not in legacy browsers.
-      target: 'chrome142',
+      target: RENDERER_BROWSER_TARGET,
       outDir: path.resolve(__dirname, 'dist/renderer'),
       emptyOutDir: true,
       sourcemap: command === 'serve'
