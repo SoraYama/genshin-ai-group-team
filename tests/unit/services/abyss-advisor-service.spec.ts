@@ -304,10 +304,18 @@ describe('AbyssAdvisorService', () => {
   it('runs two repairs then falls back to the local joint optimizer when all attempts fail', async () => {
     const invalid = { ...validAbyssPlan(), chambers: [] };
     const runner = new FixtureRunner([invalid, invalid, invalid]);
-    const result = await service({ runner, apiKey: 'secret' }).recommend(abyssInput());
+    const appendAbyss = vi.fn();
+    const result = await service({ runner, apiKey: 'secret', appendAbyss }).recommend(abyssInput());
 
     expect(runner.calls).toBe(3);
     expect(result).toMatchObject({ status: 'planned', source: 'local-rules' });
+    if (result.status !== 'planned') throw new Error('Expected local fallback');
+    expect(result.narrative.sections.map(({ targetKey }) => targetKey)).toEqual(
+      localAbyssNarrativeTargets()
+    );
+    expect(appendAbyss).toHaveBeenCalledWith(
+      expect.objectContaining({ narrative: result.narrative })
+    );
     expect(result.warnings.join(' ')).toContain('智能服务');
   });
 
@@ -349,9 +357,17 @@ describe('AbyssAdvisorService', () => {
 
   it('uses local rules without invoking the agent when the smart service is not configured', async () => {
     const runner = new FixtureRunner([validAbyssPlan()]);
-    const result = await service({ runner }).recommend(abyssInput());
+    const appendAbyss = vi.fn();
+    const result = await service({ runner, appendAbyss }).recommend(abyssInput());
     expect(runner.calls).toBe(0);
     expect(result).toMatchObject({ status: 'planned', source: 'local-rules' });
+    if (result.status !== 'planned') throw new Error('Expected local plan');
+    expect(result.narrative.sections.map(({ targetKey }) => targetKey)).toEqual(
+      localAbyssNarrativeTargets()
+    );
+    expect(appendAbyss).toHaveBeenCalledWith(
+      expect.objectContaining({ narrative: result.narrative })
+    );
   });
 
   it('returns blocked instead of an invalid agent request when the roster has fewer than eight characters', async () => {
@@ -556,3 +572,14 @@ describe('AbyssAdvisorService', () => {
     );
   });
 });
+
+function localAbyssNarrativeTargets(): string[] {
+  return [
+    'abyss-team:first',
+    'abyss-team:second',
+    'abyss-chamber:12:1:first',
+    'abyss-chamber:12:1:second',
+    'abyss-chamber:12:2:first',
+    'abyss-chamber:12:2:second'
+  ];
+}

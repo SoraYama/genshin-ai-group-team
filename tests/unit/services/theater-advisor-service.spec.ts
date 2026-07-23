@@ -220,6 +220,12 @@ describe('TheaterAdvisorService', () => {
     const progress = vi.fn();
     const result = await service({ history }).recommend(theaterInput(), progress);
     expect(result).toMatchObject({ status: 'planned', source: 'local-rules' });
+    if (result.status !== 'planned') throw new Error('Expected local plan');
+    expect(result.narrative.sections.map(({ targetKey }) => targetKey)).toEqual([
+      'theater-cast',
+      'theater-act:1',
+      'theater-act:2'
+    ]);
     expect(progress.mock.calls.map(([event]) => event.step)).toEqual([
       'reading-roster',
       'checking-eligibility',
@@ -239,6 +245,7 @@ describe('TheaterAdvisorService', () => {
           effectiveTo: '2026-02-01T00:00:00.000Z'
         },
         eligibility: expect.objectContaining({ hardQualifiedCount: 9 }),
+        narrative: result.narrative,
         vigorBudget: expect.arrayContaining([
           expect.objectContaining({
             act: 1,
@@ -366,9 +373,17 @@ describe('TheaterAdvisorService', () => {
 
   it('uses two repair rounds then falls back to the checked local route', async () => {
     const runner = new InvalidRunner();
-    const result = await service({ runner, apiKey: 'secret' }).recommend(theaterInput());
+    const history = vi.fn();
+    const result = await service({ runner, apiKey: 'secret', history }).recommend(theaterInput());
     expect(runner.calls).toBe(3);
     expect(result).toMatchObject({ status: 'planned', source: 'local-rules' });
+    if (result.status !== 'planned') throw new Error('Expected local fallback');
+    expect(result.narrative.sections.map(({ targetKey }) => targetKey)).toEqual([
+      'theater-cast',
+      'theater-act:1',
+      'theater-act:2'
+    ]);
+    expect(history).toHaveBeenCalledWith(expect.objectContaining({ narrative: result.narrative }));
     expect(result.warnings.join('')).toContain('本地规则');
   });
 

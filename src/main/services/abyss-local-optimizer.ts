@@ -17,6 +17,7 @@ import {
 } from '../../shared/abyss-mechanics.js';
 import type { CharacterKnowledgeReader } from '../../shared/character-knowledge.js';
 import { validateAbyssPlan } from './abyss-plan-validator.js';
+import { renderLocalPlanNarrative } from './local-advisor-narrative.js';
 
 export interface BuildLocalAbyssPlanOptions {
   input: AbyssAdvisorPlanInput;
@@ -168,6 +169,7 @@ export function buildLocalAbyssPlan({
     issues: [],
     warnings,
     assumptions,
+    narrative: renderLocalPlanNarrative(validation.plan, input.locale),
     plan: validation.plan
   });
 }
@@ -341,6 +343,7 @@ function buildPartialPlan({
     issues: [],
     warnings,
     assumptions,
+    narrative: renderLocalPlanNarrative(validation.plan, input.locale),
     plan: validation.plan
   });
 }

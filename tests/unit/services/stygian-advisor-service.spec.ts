@@ -280,6 +280,12 @@ describe('StygianAdvisorService', () => {
       progress.mock.calls.every(([event]) => event.correlationId === 'stygian-test-request')
     ).toBe(true);
     if (result.status !== 'planned') throw new Error('Expected planned result');
+    expect(result.narrative).toMatchObject({ origin: 'local-rules' });
+    expect(result.narrative.sections.map(({ targetKey }) => targetKey)).toEqual([
+      'stygian-phase:1',
+      'stygian-phase:2',
+      'stygian-phase:3'
+    ]);
     expect(history).toHaveBeenCalledWith(
       expect.objectContaining({
         mode: 'stygian-onslaught',
@@ -300,6 +306,7 @@ describe('StygianAdvisorService', () => {
         },
         phaseGuidance: result.phaseGuidance,
         difficultyAssessment: result.difficultyAssessment,
+        narrative: result.narrative,
         characters: expect.arrayContaining([expect.objectContaining({ name: '幽境角色1' })])
       })
     );
@@ -362,9 +369,17 @@ describe('StygianAdvisorService', () => {
 
   it('falls back once to the checked local plan after two failed repairs', async () => {
     const runner = new InvalidAgentRunner();
-    const result = await service({ apiKey: 'secret', runner }).recommend(stygianInput());
+    const history = vi.fn();
+    const result = await service({ apiKey: 'secret', runner, history }).recommend(stygianInput());
     expect(runner.calls).toBe(3);
     expect(result).toMatchObject({ status: 'planned', source: 'local-rules' });
+    if (result.status !== 'planned') throw new Error('Expected local fallback');
+    expect(result.narrative.sections.map(({ targetKey }) => targetKey)).toEqual([
+      'stygian-phase:1',
+      'stygian-phase:2',
+      'stygian-phase:3'
+    ]);
+    expect(history).toHaveBeenCalledWith(expect.objectContaining({ narrative: result.narrative }));
     expect(result.warnings.join('')).toContain('本地规则');
   });
 

@@ -48,6 +48,18 @@ describe('buildLocalStygianPlan', () => {
     const ids = first.plan.phases.flatMap(({ team }) => team.characterIds);
     expect(ids).toHaveLength(12);
     expect(new Set(ids).size).toBe(12);
+    expect(first.narrative).toMatchObject({
+      origin: 'local-rules',
+      requestedLocale: options.input.locale
+    });
+    expect(first.narrative.sections.map(({ targetKey }) => targetKey)).toEqual([
+      'stygian-phase:1',
+      'stygian-phase:2',
+      'stygian-phase:3'
+    ]);
+    expect(first.narrative.sections.map(({ body }) => body['en-US']).join(' ')).not.toMatch(
+      /[\u3400-\u9fff]/u
+    );
   });
 
   it('uses the scenario-owned allowed and limited reuse rules', () => {

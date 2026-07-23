@@ -26,6 +26,18 @@ describe('buildLocalAbyssPlan', () => {
     expect(secondIds).toHaveLength(4);
     expect(firstIds.filter((id) => secondIds.includes(id))).toEqual([]);
     expect(first.plan.chambers.map(({ chamber }) => chamber)).toEqual([1, 2]);
+    expect(first.narrative).toMatchObject({ origin: 'local-rules', requestedLocale: input.locale });
+    expect(first.narrative.sections.map(({ targetKey }) => targetKey)).toEqual([
+      'abyss-team:first',
+      'abyss-team:second',
+      'abyss-chamber:12:1:first',
+      'abyss-chamber:12:1:second',
+      'abyss-chamber:12:2:first',
+      'abyss-chamber:12:2:second'
+    ]);
+    expect(first.narrative.sections.map(({ body }) => body['en-US']).join(' ')).not.toMatch(
+      /[\u3400-\u9fff]/u
+    );
     expect(
       validateAbyssPlan({ input, scenario, characters: ABYSS_CHARACTERS, plan: first.plan })
     ).toMatchObject({ ok: true, issues: [] });
@@ -72,6 +84,14 @@ describe('buildLocalAbyssPlan', () => {
       prior.chambers.map(({ secondHalf }) => secondHalf)
     );
     expect(result.plan.firstHalfTeam.characterIds).not.toContain(input.excludedCharacterIds[0]);
+    expect(result.narrative.sections.map(({ targetKey }) => targetKey)).toEqual([
+      'abyss-team:first',
+      'abyss-team:second',
+      'abyss-chamber:12:1:first',
+      'abyss-chamber:12:1:second',
+      'abyss-chamber:12:2:first',
+      'abyss-chamber:12:2:second'
+    ]);
   });
 
   it('blocks partial recompute when an intervention conflicts with the preserved half', () => {

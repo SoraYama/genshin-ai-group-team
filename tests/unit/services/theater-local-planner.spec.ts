@@ -63,6 +63,18 @@ describe('buildLocalTheaterPlan', () => {
     expect(first.plan.cast.selectedCharacterIds).toHaveLength(9);
     expect(first.plan.acts[0]?.candidateCharacterIds).toContain('1001');
     expect(first.routeGuidance.preserveCharacterIds).toContain('1001');
+    expect(first.narrative).toMatchObject({
+      origin: 'local-rules',
+      requestedLocale: options.input.locale
+    });
+    expect(first.narrative.sections.map(({ targetKey }) => targetKey)).toEqual([
+      'theater-cast',
+      'theater-act:1',
+      'theater-act:2'
+    ]);
+    expect(first.narrative.sections.map(({ body }) => body['en-US']).join(' ')).not.toMatch(
+      /[\u3400-\u9fff]/u
+    );
   });
 
   it('keeps every act within the cumulative vigor budget and uses conditional wording for random paths', () => {

@@ -23,6 +23,7 @@ import {
   lowerStygianDifficultyWithinTarget,
   minimumOrderForStygianTarget
 } from '../../shared/stygian-reward-policy.js';
+import { renderLocalPlanNarrative } from './local-advisor-narrative.js';
 import { validateStygianPlan } from './stygian-plan-validator.js';
 
 export interface BuildLocalStygianPlanOptions {
@@ -255,6 +256,7 @@ export function buildLocalStygianPlan({
     issues: [],
     warnings,
     assumptions,
+    narrative: renderLocalPlanNarrative(validation.plan, input.locale),
     plan: validation.plan,
     phaseGuidance,
     difficultyAssessment: assessment

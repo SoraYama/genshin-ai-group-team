@@ -11,6 +11,7 @@ import {
 } from '../../shared/abyss-mechanics.js';
 import type { CharacterKnowledgeReader } from '../../shared/character-knowledge.js';
 import { evaluateTheaterEligibility } from './theater-eligibility.js';
+import { renderLocalPlanNarrative } from './local-advisor-narrative.js';
 import { validateTheaterPlan } from './theater-plan-validator.js';
 
 export interface BuildLocalTheaterPlanOptions {
@@ -284,6 +285,7 @@ export function buildLocalTheaterPlan({
     issues: [],
     warnings,
     assumptions,
+    narrative: renderLocalPlanNarrative(validation.plan, input.locale),
     plan: validation.plan,
     vigorBudget: validation.vigorBudget,
     nodeBudget: arcana.nodeBudget,
