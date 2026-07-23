@@ -55,7 +55,7 @@ export interface AgentSdkRunOptions {
 function serializeCustomHeaders(headers: Record<string, string> | undefined): string | undefined {
   if (!headers) return undefined;
   const lines = Object.entries(headers)
-    .filter(([name, value]) => /^[A-Za-z0-9-]+$/.test(name) && !/[\r\n]/.test(value))
+    .filter(([name, value]) => /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name) && !/[\r\n]/.test(value))
     .map(([name, value]) => `${name}: ${value}`);
   return lines.length > 0 ? lines.join('\n') : undefined;
 }

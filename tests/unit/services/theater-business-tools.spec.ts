@@ -69,9 +69,22 @@ describe('theater business tools', () => {
       }),
       getScenario: theaterScenario
     });
-    expect(JSON.stringify(payload(await tools[0]!.handler({ uid: '123456789' }, {})))).not.toMatch(
-      /imageUrl|provenance|artifact/i
-    );
+    const profile = payload(await tools[0]!.handler({ uid: '123456789' }, {}));
+    const profileView = profile as {
+      coverage: { partial: boolean };
+      provenanceSummaries: Array<Record<string, unknown>>;
+      characters: Array<Record<string, unknown>>;
+    };
+    expect(profileView.coverage.partial).toBe(true);
+    expect(profileView.characters[0]).toMatchObject({
+      completeness: expect.any(String),
+      stats: expect.any(Object)
+    });
+    expect(profileView.provenanceSummaries[0]).toMatchObject({
+      ownership: 'miyoushe-list',
+      characterIndexes: expect.any(Array)
+    });
+    expect(JSON.stringify(profile)).not.toMatch(/imageUrl|iconUrl|subStats|fetchedAt/);
     const knowledge = payload(await tools[2]!.handler({ characterIds: ['1001'] }, {}));
     expect(JSON.stringify(knowledge)).toContain('unknown');
     const external = payload(await tools[2]!.handler({ characterIds: ['trial.1'] }, {}));

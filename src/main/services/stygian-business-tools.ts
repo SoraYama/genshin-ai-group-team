@@ -29,7 +29,7 @@ export interface StygianBusinessToolLog {
   scenarioId: string;
   dataVersion: string;
   knowledgeVersion: string;
-  round: 'compose' | 'repair' | 'single';
+  round: 'compose' | 'repair' | 'repair-1' | 'repair-2' | 'single';
   parameterSummary: Readonly<Record<string, string | number | boolean>>;
   issueCodes: string[];
 }

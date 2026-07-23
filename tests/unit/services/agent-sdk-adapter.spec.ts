@@ -103,11 +103,12 @@ describe('buildAgentSdkOptions', () => {
       abortController: new AbortController(),
       customHeaders: {
         'X-Tenant': 'community',
+        'X_Test!': 'rfc-token',
         'Bad Header': 'ignored',
         'X-Injected': 'ok\nAuthorization: leaked'
       }
     });
-    expect(options.env?.ANTHROPIC_CUSTOM_HEADERS).toBe('X-Tenant: community');
+    expect(options.env?.ANTHROPIC_CUSTOM_HEADERS).toBe('X-Tenant: community\nX_Test!: rfc-token');
   });
 
   it('allows only explicitly registered read-only business MCP tools for bounded agent turns', async () => {

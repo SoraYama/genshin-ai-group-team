@@ -10,15 +10,16 @@ import {
   STYGIAN_COMPOSER_PROMPT_V1,
   STYGIAN_REPAIR_PROMPT_V1
 } from '../agents/stygian-composer/prompt.js';
+import type {
+  V2CritiqueOutput,
+  V2ExplainOutput,
+  V2PipelineContext,
+  V2RotationOutput
+} from '../agents/contracts.js';
 import type { AgentSdkRunOptions } from './agent-sdk-adapter.js';
-import {
-  addAgentUsage,
-  runAuditedAgentTurn,
-  type AgentUsage,
-  type AuditedAgentRunner,
-  type ToolAudit
-} from './agent-turn-audit.js';
+import { type AgentUsage, type AuditedAgentRunner, type ToolAudit } from './agent-turn-audit.js';
 import { validateStygianPlan } from './stygian-plan-validator.js';
+import { runV2AgentPipeline, type V2AgentStage } from './v2-agent-pipeline.js';
 
 export type StygianPlanAgentRunner = AuditedAgentRunner;
 
@@ -27,46 +28,56 @@ export interface StygianPlanAgentInput {
   scenario: StygianScenario;
   characters: CharacterProfile[];
   knowledge?: CharacterKnowledgeReader;
+  pipelineContext: V2PipelineContext;
   sdkOptions: AgentSdkRunOptions;
-  sdkOptionsForRound?: (round: 'compose' | 'repair') => AgentSdkRunOptions;
+  sdkOptionsForStage?: (stage: V2AgentStage) => AgentSdkRunOptions;
 }
 
 export type StygianPlanAgentResult =
-  | { ok: true; repaired: boolean; plan: StygianPlanOutput; usage: AgentUsage }
+  | {
+      ok: true;
+      repaired: boolean;
+      repairs: number;
+      plan: StygianPlanOutput;
+      critique: V2CritiqueOutput;
+      rotation: V2RotationOutput;
+      explanation: V2ExplainOutput;
+      usage: AgentUsage;
+    }
   | { ok: false; issues: StygianPlanIssue[]; usage: AgentUsage };
 
 export class StygianPlanAgent {
   constructor(private readonly runner: StygianPlanAgentRunner) {}
 
   async compose(context: StygianPlanAgentInput): Promise<StygianPlanAgentResult> {
-    const composeOptions = context.sdkOptionsForRound?.('compose') ?? context.sdkOptions;
-    const firstTurn = await runAuditedAgentTurn({
+    const result = await runV2AgentPipeline<StygianPlanOutput, StygianPlanIssue>({
       runner: this.runner,
-      prompt: buildComposePayload(context),
-      sdkOptions: composeOptions,
-      systemPrompt: STYGIAN_COMPOSER_PROMPT_V1,
-      auditContext: { correlationId: context.input.correlationId, round: 'compose' }
+      context: context.pipelineContext,
+      sdkOptionsForStage: context.sdkOptionsForStage ?? (() => context.sdkOptions),
+      composer: {
+        initialPrompt: buildComposePayload(context),
+        systemPrompt: STYGIAN_COMPOSER_PROMPT_V1,
+        repairPrompt: STYGIAN_REPAIR_PROMPT_V1,
+        validate: (text, tools) => validateAgentOutput(text, context, tools)
+      },
+      invalidIssue: (stage, message) => ({
+        code: 'AGENT_OUTPUT_INVALID' as const,
+        path: [stage],
+        message
+      })
     });
-    const first = validateAgentOutput(firstTurn.text, context, firstTurn.tools);
-    if (first.ok) return { ok: true, repaired: false, plan: first.plan, usage: firstTurn.usage };
-
-    const repairOptions = context.sdkOptionsForRound?.('repair') ?? context.sdkOptions;
-    const repairTurn = await runAuditedAgentTurn({
-      runner: this.runner,
-      prompt: JSON.stringify({
-        instruction: '只修复以下确定性校验问题，并返回完整方案。',
-        issues: first.issues,
-        previousOutput: parseJsonOrRaw(firstTurn.text),
-        request: publicRequest(context)
-      }),
-      sdkOptions: repairOptions,
-      systemPrompt: `${STYGIAN_COMPOSER_PROMPT_V1}\n\n${STYGIAN_REPAIR_PROMPT_V1}`,
-      auditContext: { correlationId: context.input.correlationId, round: 'repair' }
-    });
-    const repaired = validateAgentOutput(repairTurn.text, context, repairTurn.tools);
-    const usage = addAgentUsage(firstTurn.usage, repairTurn.usage);
-    if (!repaired.ok) return { ...repaired, usage };
-    return { ok: true, repaired: true, plan: repaired.plan, usage };
+    if (!result.ok) return { ok: false, issues: result.issues, usage: result.usage };
+    const plan = applyStygianRotation(result.plan, result.rotation);
+    return {
+      ok: true,
+      repaired: result.repairs > 0,
+      repairs: result.repairs,
+      plan,
+      critique: result.critique,
+      rotation: result.rotation,
+      explanation: result.explanation,
+      usage: result.usage
+    };
   }
 }
 
@@ -172,14 +183,27 @@ function invalidOutput(message: string): { ok: false; issues: StygianPlanIssue[]
   return { ok: false, issues: [{ code: 'AGENT_OUTPUT_INVALID', path: [], message }] };
 }
 
-function parseJsonOrRaw(raw: string): unknown {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return { invalidOutput: true };
-  }
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function applyStygianRotation(
+  plan: StygianPlanOutput,
+  rotation: V2RotationOutput
+): StygianPlanOutput {
+  return {
+    ...plan,
+    phases: plan.phases.map((phase) => ({
+      ...phase,
+      team: {
+        ...phase.team,
+        rotationNotes: [
+          ...phase.team.rotationNotes,
+          ...rotation.rotations
+            .filter(({ target }) => target.kind === 'stygian-phase' && target.phase === phase.phase)
+            .flatMap(({ notes }) => notes)
+        ]
+      }
+    }))
+  };
 }

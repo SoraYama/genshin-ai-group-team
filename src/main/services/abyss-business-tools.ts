@@ -32,6 +32,7 @@ export interface AbyssBusinessToolLog {
   scenarioId: string;
   dataVersion: string;
   knowledgeVersion: string;
+  round: 'compose' | 'repair' | 'repair-1' | 'repair-2' | 'single';
   parameterSummary: Readonly<Record<string, string | number | boolean>>;
   issueCodes: string[];
 }
@@ -40,6 +41,7 @@ export interface AbyssBusinessToolAuditContext {
   correlationId: string;
   scenarioId: string;
   dataVersion: string;
+  round?: AbyssBusinessToolLog['round'];
 }
 
 export interface AbyssBusinessToolsOptions {
@@ -56,10 +58,11 @@ export function createAbyssBusinessTools(options: AbyssBusinessToolsOptions) {
   const maxCharacters = Math.min(Math.max(options.maxCharacters ?? 128, 1), 128);
   const now = options.now ?? Date.now;
   const knowledge = options.knowledge ?? UNKNOWN_CHARACTER_KNOWLEDGE;
-  const auditContext = options.auditContext ?? {
-    correlationId: 'unscoped',
-    scenarioId: options.getScenario().id,
-    dataVersion: options.getScenario().meta.dataVersion
+  const auditContext = {
+    correlationId: options.auditContext?.correlationId ?? 'unscoped',
+    scenarioId: options.auditContext?.scenarioId ?? options.getScenario().id,
+    dataVersion: options.auditContext?.dataVersion ?? options.getScenario().meta.dataVersion,
+    round: options.auditContext?.round ?? ('single' as const)
   };
   const run = async <T>(
     toolName: AbyssBusinessToolLog['tool'],

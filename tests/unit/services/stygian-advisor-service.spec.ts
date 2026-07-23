@@ -45,6 +45,97 @@ class WaitingAgentRunner {
   }
 }
 
+class SuccessfulStageRunner implements StygianPlanAgentRunner {
+  readonly calls: AgentSdkRunOptions[] = [];
+
+  async *run(_prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown> {
+    this.calls.push(options);
+    if (options.systemPrompt.includes('CritiqueAgent v2')) {
+      yield {
+        type: 'result',
+        result: JSON.stringify({
+          decision: 'accept',
+          issues: [
+            {
+              code: 'energy-window-tight',
+              severity: 'soft',
+              target: { kind: 'stygian-phase', phase: 1 },
+              message: '第一阶段能量窗口偏紧。'
+            }
+          ]
+        })
+      };
+      return;
+    }
+    if (options.systemPrompt.includes('RotationCoachAgent v2')) {
+      yield {
+        type: 'result',
+        result: JSON.stringify({
+          rotations: [{ target: { kind: 'stygian-phase', phase: 1 }, notes: ['先处理阶段机制。'] }]
+        })
+      };
+      return;
+    }
+    if (options.systemPrompt.includes('ExplainAgent v2')) {
+      yield {
+        type: 'result',
+        result: JSON.stringify({
+          explanations: [
+            {
+              target: { kind: 'stygian-phase', phase: 1 },
+              text: '第一阶段说明只基于已验证队伍。'
+            }
+          ]
+        })
+      };
+      return;
+    }
+    const toolUses = [
+      {
+        id: 'profile',
+        name: 'mcp__genshin__read_profile_cache',
+        input: { uid: '123456789' }
+      },
+      ...[1, 2, 3].map((phase) => ({
+        id: `phase-${phase}`,
+        name: 'mcp__genshin__query_stygian_phase',
+        input: {
+          scenarioId: 'stygian.2026-07',
+          dataVersion: '2026.07.1',
+          difficultyId: 'difficulty-6',
+          phase
+        }
+      })),
+      {
+        id: 'knowledge',
+        name: 'mcp__genshin__query_genshin_db',
+        input: { characterIds: STYGIAN_CHARACTERS.slice(0, 12).map(({ id }) => String(id)) }
+      }
+    ];
+    yield {
+      type: 'assistant',
+      message: { content: toolUses.map((use) => ({ type: 'tool_use', ...use })) }
+    };
+    yield {
+      type: 'user',
+      message: {
+        content: toolUses.map(({ id }) => ({
+          type: 'tool_result',
+          tool_use_id: id,
+          is_error: false,
+          content: 'ok'
+        }))
+      }
+    };
+    yield {
+      type: 'result',
+      result: JSON.stringify(validStygianPlan()),
+      usage: { input_tokens: 10, output_tokens: 5 },
+      total_cost_usd: 0.01
+    };
+  }
+}
+
 class ComposeToolsOnlyRepairRunner implements StygianPlanAgentRunner {
   calls = 0;
 
@@ -192,6 +283,23 @@ describe('StygianAdvisorService', () => {
     );
   });
 
+  it('maps accepted staged risks, rotation, and explanation onto the validated result', async () => {
+    const runner = new SuccessfulStageRunner();
+    const history = vi.fn();
+    const result = await service({ apiKey: 'secret', runner, history }).recommend(stygianInput());
+
+    expect(result).toMatchObject({ status: 'planned', source: 'smart-service' });
+    if (result.status !== 'planned') throw new Error('Expected planned result');
+    expect(result.plan.phases[0]?.team.rotationNotes).toContain('先处理阶段机制。');
+    expect(result.phaseGuidance[0]?.risks).toContain('第一阶段能量窗口偏紧。');
+    expect(result.phaseGuidance[0]?.mechanismBasis).toContain('第一阶段说明只基于已验证队伍。');
+    expect(runner.calls).toHaveLength(4);
+    expect(
+      runner.calls.slice(1).every(({ allowedBusinessTools }) => allowedBusinessTools?.length === 0)
+    ).toBe(true);
+    expect(history).toHaveBeenCalledTimes(1);
+  });
+
   it('blocks stale or unknown production data before planning', async () => {
     const result = await service({
       view: readyView({ notCurrent: true, usableForRecommendation: false, freshness: 'stale' })
@@ -212,10 +320,10 @@ describe('StygianAdvisorService', () => {
     expect(result.warnings.join('')).toContain('最近一次已确认');
   });
 
-  it('falls back once to the checked local plan when smart output and repair both fail', async () => {
+  it('falls back once to the checked local plan after two failed repairs', async () => {
     const runner = new InvalidAgentRunner();
     const result = await service({ apiKey: 'secret', runner }).recommend(stygianInput());
-    expect(runner.calls).toBe(2);
+    expect(runner.calls).toBe(3);
     expect(result).toMatchObject({ status: 'planned', source: 'local-rules' });
     expect(result.warnings.join('')).toContain('本地规则');
   });
@@ -224,7 +332,7 @@ describe('StygianAdvisorService', () => {
     const runner = new ComposeToolsOnlyRepairRunner();
     const result = await service({ apiKey: 'secret', runner }).recommend(stygianInput());
 
-    expect(runner.calls).toBe(2);
+    expect(runner.calls).toBe(3);
     expect(result).toMatchObject({ status: 'planned', source: 'local-rules' });
     expect(result.warnings.join('')).toContain('本地规则');
   });

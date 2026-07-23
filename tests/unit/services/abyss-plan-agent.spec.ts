@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { AbyssPlanAgent } from '../../../src/main/services/abyss-plan-agent.js';
 import type { AgentSdkRunOptions } from '../../../src/main/services/agent-sdk-adapter.js';
+import { buildV2PipelineContext } from '../../../src/main/services/v2-agent-context.js';
 import {
   ABYSS_CHARACTERS,
   abyssInput,
@@ -16,6 +17,33 @@ class FixtureRunner {
 
   async *run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown> {
     this.calls.push({ prompt, options });
+    if (options.systemPrompt.includes('CritiqueAgent v2')) {
+      yield { type: 'result', result: JSON.stringify({ decision: 'accept', issues: [] }) };
+      return;
+    }
+    if (options.systemPrompt.includes('RotationCoachAgent v2')) {
+      yield {
+        type: 'result',
+        result: JSON.stringify({
+          rotations: [{ target: { kind: 'abyss-team', half: 'first' }, notes: ['先辅助后输出。'] }]
+        })
+      };
+      return;
+    }
+    if (options.systemPrompt.includes('ExplainAgent v2')) {
+      yield {
+        type: 'result',
+        result: JSON.stringify({
+          explanations: [
+            {
+              target: { kind: 'abyss-chamber', floor: 12, chamber: 1, half: 'first' },
+              text: '基于已验证方案处理本房间。'
+            }
+          ]
+        })
+      };
+      return;
+    }
     const toolUses = [
       {
         id: 'profile',
@@ -88,6 +116,36 @@ function sdkOptions(): AgentSdkRunOptions {
   };
 }
 
+function pipelineContext(feasibleBaseline = validAbyssPlan()) {
+  return buildV2PipelineContext({
+    correlationId: 'abyss-test-request',
+    profile: {
+      schemaVersion: 2,
+      uid: '123456789',
+      source: 'merged',
+      fetchedAt: '2026-07-23T00:00:00.000Z',
+      characters: ABYSS_CHARACTERS,
+      coverage: {
+        ownedCount: ABYSS_CHARACTERS.length,
+        detailedCount: 6,
+        buildCount: ABYSS_CHARACTERS.length,
+        statsCount: ABYSS_CHARACTERS.length,
+        enkaShowcaseCount: 8,
+        missingDetailCount: 4,
+        partial: true
+      }
+    },
+    feasibleBaseline,
+    eligibleCharacterIds: ABYSS_CHARACTERS.map(({ id }) => String(id)),
+    mechanics: [{ target: '12 层所选房间', facts: ['上下半固定双队'], unknowns: ['精确输出未知'] }],
+    interventions: { noBuildChange: true },
+    knowledge: {
+      version: 'unavailable',
+      unknownCharacterIds: ABYSS_CHARACTERS.map(({ id }) => String(id))
+    }
+  });
+}
+
 describe('AbyssPlanAgent', () => {
   it('validates compose output, sends structured issues to one repair turn, then accepts valid JSON', async () => {
     const invalid = validAbyssPlan({
@@ -102,25 +160,42 @@ describe('AbyssPlanAgent', () => {
       input: abyssInput(),
       scenario: abyssScenario(),
       characters: ABYSS_CHARACTERS,
+      pipelineContext: pipelineContext(),
       sdkOptions: sdkOptions()
     });
 
-    expect(result).toMatchObject({ ok: true, repaired: true, plan: repaired });
+    expect(result).toMatchObject({
+      ok: true,
+      repaired: true,
+      plan: {
+        mode: repaired.mode,
+        firstHalfTeam: { characterIds: repaired.firstHalfTeam.characterIds }
+      }
+    });
+    if (!result.ok) throw new Error('Expected successful pipeline');
+    expect(result.plan.firstHalfTeam.rotationNotes).toContain('先辅助后输出。');
+    expect(result.plan.chambers[0]?.firstHalf.tactics).toContain('基于已验证方案处理本房间。');
     expect(result.usage).toEqual({ inputTokens: 20, outputTokens: 10, estimatedCostUsd: 0.02 });
-    expect(runner.calls).toHaveLength(2);
+    expect(runner.calls).toHaveLength(5);
     expect(runner.calls[0]?.options.systemPrompt).toContain('AbyssTeamComposer');
     expect(runner.calls[0]?.options.maxTurns).toBe(4);
+    expect(runner.calls[0]?.prompt).toContain('feasibleBaseline');
+    expect(runner.calls[0]?.prompt).toContain('missingFields');
     expect(runner.calls[1]?.prompt).toContain('CROSS_TEAM_DUPLICATE');
     expect(runner.calls[1]?.prompt).toContain('只修复');
+    expect(
+      runner.calls.slice(2).every(({ options }) => options.allowedBusinessTools?.length === 0)
+    ).toBe(true);
   });
 
-  it('returns the second structured issue list after exactly one failed repair', async () => {
+  it('returns the final structured issue list after exhausting two failed repairs', async () => {
     const invalid = { ...validAbyssPlan(), chambers: [] };
-    const runner = new FixtureRunner([invalid, invalid]);
+    const runner = new FixtureRunner([invalid, invalid, invalid]);
     const result = await new AbyssPlanAgent(runner).compose({
       input: abyssInput(),
       scenario: abyssScenario(),
       characters: ABYSS_CHARACTERS,
+      pipelineContext: pipelineContext(),
       sdkOptions: sdkOptions()
     });
 
@@ -129,7 +204,7 @@ describe('AbyssPlanAgent', () => {
     expect(result.issues.map(({ code }) => code)).toEqual(
       expect.arrayContaining(['CHAMBER_COVERAGE_INVALID', 'PLAN_SCHEMA_INVALID'])
     );
-    expect(runner.calls).toHaveLength(2);
+    expect(runner.calls).toHaveLength(3);
   });
 
   it('tells the agent which half to recompute and rejects changes to the preserved half', async () => {
@@ -142,6 +217,7 @@ describe('AbyssPlanAgent', () => {
       input: abyssInput({ priorPlan: prior, recomputeHalf: 'firstHalf' }),
       scenario: abyssScenario(),
       characters: ABYSS_CHARACTERS,
+      pipelineContext: pipelineContext(prior),
       sdkOptions: sdkOptions()
     });
 
@@ -157,6 +233,7 @@ describe('AbyssPlanAgent', () => {
       input: abyssInput(),
       scenario: abyssScenario(),
       characters: ABYSS_CHARACTERS,
+      pipelineContext: pipelineContext(),
       sdkOptions: sdkOptions()
     });
     expect(result).toMatchObject({
@@ -171,12 +248,13 @@ describe('AbyssPlanAgent', () => {
       input: abyssInput(),
       scenario: abyssScenario(),
       characters: ABYSS_CHARACTERS,
+      pipelineContext: pipelineContext(),
       sdkOptions: sdkOptions()
     });
     expect(result).toMatchObject({
       ok: false,
       issues: [{ code: 'AGENT_OUTPUT_INVALID' }]
     });
-    expect(runner.calls).toBe(2);
+    expect(runner.calls).toBe(3);
   });
 });

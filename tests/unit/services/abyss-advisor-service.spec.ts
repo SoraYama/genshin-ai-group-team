@@ -14,8 +14,35 @@ import {
 class FixtureRunner {
   calls = 0;
   constructor(private readonly outputs: unknown[]) {}
-  async *run(_prompt: string, _options: AgentSdkRunOptions): AsyncIterable<unknown> {
+  async *run(_prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown> {
     this.calls += 1;
+    if (options.systemPrompt.includes('CritiqueAgent v2')) {
+      yield { type: 'result', result: JSON.stringify({ decision: 'accept', issues: [] }) };
+      return;
+    }
+    if (options.systemPrompt.includes('RotationCoachAgent v2')) {
+      yield {
+        type: 'result',
+        result: JSON.stringify({
+          rotations: [{ target: { kind: 'abyss-team', half: 'first' }, notes: ['先辅助后输出。'] }]
+        })
+      };
+      return;
+    }
+    if (options.systemPrompt.includes('ExplainAgent v2')) {
+      yield {
+        type: 'result',
+        result: JSON.stringify({
+          explanations: [
+            {
+              target: { kind: 'abyss-chamber', floor: 12, chamber: 1, half: 'first' },
+              text: '基于已验证方案处理本房间。'
+            }
+          ]
+        })
+      };
+      return;
+    }
     const toolUses = [
       {
         id: 'profile',
@@ -68,6 +95,28 @@ class HangingRunner {
       options.abortController.signal.addEventListener('abort', () => resolve(), { once: true });
     });
     yield { type: 'aborted' };
+    throw new Error('aborted');
+  }
+}
+
+class HangingAfterComposeRunner {
+  calls = 0;
+  private releaseStarted!: () => void;
+  readonly stageStarted = new Promise<void>((resolve) => {
+    this.releaseStarted = resolve;
+  });
+
+  async *run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown> {
+    this.calls += 1;
+    if (this.calls === 1) {
+      const compose = new FixtureRunner([validAbyssPlan()]);
+      for await (const message of compose.run(prompt, options)) yield message;
+      return;
+    }
+    this.releaseStarted();
+    await new Promise<void>((resolve) => {
+      options.abortController.signal.addEventListener('abort', () => resolve(), { once: true });
+    });
     throw new Error('aborted');
   }
 }
@@ -177,6 +226,9 @@ describe('AbyssAdvisorService', () => {
     );
 
     expect(result).toMatchObject({ status: 'planned', source: 'smart-service' });
+    if (result.status !== 'planned') throw new Error('Expected planned result');
+    expect(result.plan.firstHalfTeam.rotationNotes).toContain('先辅助后输出。');
+    expect(result.plan.chambers[0]?.firstHalf.tactics).toContain('基于已验证方案处理本房间。');
     expect(progress).toEqual([
       'abyss-test-request:reading-roster',
       'abyss-test-request:analyzing-rules',
@@ -184,7 +236,7 @@ describe('AbyssAdvisorService', () => {
       'abyss-test-request:checking-conflicts',
       'abyss-test-request:writing-tactics'
     ]);
-    expect(runner.calls).toBe(1);
+    expect(runner.calls).toBe(4);
     expect(recordUsage).toHaveBeenCalledWith(12, 6, 0.02);
     expect(appendAbyss).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -200,17 +252,22 @@ describe('AbyssAdvisorService', () => {
           effectiveFrom: '2026-01-01T00:00:00.000Z',
           effectiveTo: '2026-02-01T00:00:00.000Z'
         },
-        plan: validAbyssPlan()
+        plan: expect.objectContaining({
+          mode: 'spiral-abyss',
+          firstHalfTeam: expect.objectContaining({
+            characterIds: validAbyssPlan().firstHalfTeam.characterIds
+          })
+        })
       })
     );
   });
 
-  it('runs one repair then falls back to the local joint optimizer when both agent attempts fail', async () => {
+  it('runs two repairs then falls back to the local joint optimizer when all attempts fail', async () => {
     const invalid = { ...validAbyssPlan(), chambers: [] };
-    const runner = new FixtureRunner([invalid, invalid]);
+    const runner = new FixtureRunner([invalid, invalid, invalid]);
     const result = await service({ runner, apiKey: 'secret' }).recommend(abyssInput());
 
-    expect(runner.calls).toBe(2);
+    expect(runner.calls).toBe(3);
     expect(result).toMatchObject({ status: 'planned', source: 'local-rules' });
     expect(result.warnings.join(' ')).toContain('智能服务');
   });
@@ -337,14 +394,35 @@ describe('AbyssAdvisorService', () => {
   );
 
   it('aborts a hung smart-service request and falls back to local rules', async () => {
+    const appendAbyss = vi.fn();
     const advisor = service({
       runner: new HangingRunner() as never,
       apiKey: 'secret',
-      agentTimeoutMs: 10
+      agentTimeoutMs: 10,
+      appendAbyss
     });
     const result = await advisor.recommend(abyssInput());
     expect(result).toMatchObject({ status: 'planned', source: 'local-rules' });
     expect(result.warnings.join(' ')).toContain('智能服务');
+    expect(appendAbyss).toHaveBeenCalledTimes(1);
+    expect(appendAbyss).toHaveBeenCalledWith(expect.objectContaining({ source: 'local-rules' }));
+  });
+
+  it('cancels a hanging Critique stage without saving a fallback or partial history', async () => {
+    const runner = new HangingAfterComposeRunner();
+    const appendAbyss = vi.fn();
+    const advisor = service({
+      runner: runner as never,
+      apiKey: 'secret',
+      agentTimeoutMs: 1_000,
+      appendAbyss
+    });
+    const pending = advisor.recommend(abyssInput());
+    await runner.stageStarted;
+    expect(advisor.cancel()).toBe(true);
+    await expect(pending).rejects.toThrow('cancelled');
+    expect(runner.calls).toBe(2);
+    expect(appendAbyss).not.toHaveBeenCalled();
   });
 
   it('cancels while scenario data is still loading and never starts generation or history writes', async () => {

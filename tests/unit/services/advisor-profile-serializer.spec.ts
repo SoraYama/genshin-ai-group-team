@@ -95,7 +95,7 @@ describe('advisor profile serializer', () => {
       id: 10000001,
       level: 90,
       talents: { normal: 6, skill: 9, burst: 10 },
-      weapon: { name: 'Weapon-1', level: 90, refinement: 1, rarity: 5 },
+      weapon: { name: 'Weapon-1', level: 90, refinement: 1 },
       artifactSummary: {
         sets: [
           { name: 'Alpha Set', count: 1 },
@@ -103,13 +103,18 @@ describe('advisor profile serializer', () => {
         ],
         mainStats: { goblet: 'pyroDmg', sands: 'atkPct' }
       },
-      completeness: 'detailed'
+      completeness: 'detailed',
+      provenanceSummary: {
+        ownership: 'miyoushe-list',
+        build: 'miyoushe-detail',
+        stats: 'enka'
+      }
     });
     expect(compact.missingFields).toBeUndefined();
     const serialized = JSON.stringify(compact);
     expect(serialized).not.toContain('private.example.test');
     expect(serialized).not.toContain('subStats');
-    expect(serialized).not.toContain('provenance');
+    expect(serialized).not.toContain('fetchedAt');
   });
 
   it('is stable and remains below 48 KiB for 100 characters', () => {

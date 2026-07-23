@@ -19,6 +19,8 @@ import {
 import { evaluateTheaterEligibility } from './theater-eligibility.js';
 import { buildLocalTheaterPlan } from './theater-local-planner.js';
 import { TheaterPlanAgent, type TheaterPlanAgentRunner } from './theater-plan-agent.js';
+import { buildV2PipelineContext } from './v2-agent-context.js';
+import type { V2AgentStage } from './v2-agent-pipeline.js';
 
 export interface TheaterAdvisorServiceOptions {
   runner: TheaterPlanAgentRunner;
@@ -273,30 +275,87 @@ export class TheaterAdvisorService {
             maxTurns: 4,
             allowedBusinessTools: [...THEATER_MCP_TOOL_NAMES]
           };
-          const sdkOptionsForRound = (round: 'compose' | 'repair') => ({
-            ...base,
-            mcpServers: {
-              genshin: createTheaterBusinessMcpServer({
-                getProfile: (uid) => (uid === input.uid ? profile : null),
-                getScenario: () => scenario,
-                knowledge: this.options.knowledge,
-                auditContext: {
-                  correlationId: input.correlationId,
-                  scenarioId: scenario.id,
-                  dataVersion: scenario.meta.dataVersion,
-                  round
-                },
-                log: this.options.toolLog
-              })
+          const eligibleCharacterIds = unique([
+            ...eligibility.eligibleOwnedCharacterIds,
+            ...local.plan.cast.openingCharacterIds,
+            ...local.plan.cast.selectedCharacterIds,
+            ...local.plan.cast.trialCharacterIds,
+            ...local.plan.cast.specialGuestCharacterIds,
+            ...local.plan.cast.supportCharacterIds,
+            ...local.plan.acts.flatMap(({ candidateCharacterIds }) => candidateCharacterIds)
+          ]);
+          const pipelineContext = buildV2PipelineContext({
+            correlationId: input.correlationId,
+            profile,
+            feasibleBaseline: local.plan,
+            eligibleCharacterIds,
+            mechanics: scenario.acts
+              .filter(({ act }) => input.act === undefined || input.act === act)
+              .map(({ act, encounters, pathNotes }) => ({
+                target: `第 ${act} 幕`,
+                facts: [
+                  ...encounters.flatMap(({ waves }) =>
+                    waves.flatMap(({ enemies }) =>
+                      enemies.map(
+                        ({ enemy }) =>
+                          enemy.names['zh-CN'] ?? enemy.names['zh-Hans'] ?? '未命名敌人'
+                      )
+                    )
+                  ),
+                  ...pathNotes.map(({ text }) => text)
+                ],
+                unknowns: pathNotes.some(({ kind }) => kind === 'random')
+                  ? ['随机路线的实际结果未知。']
+                  : ['未在当期资料中标注的数值保持未知。']
+              })),
+            interventions: {
+              target: input.target,
+              ...(input.act ? { act: input.act } : {}),
+              selectedCharacterIds: input.selectedCharacterIds,
+              excludedCharacterIds: input.excludedCharacterIds,
+              selectedOpeningCharacterIds: input.selectedOpeningCharacterIds,
+              selectedTrialCharacterIds: input.selectedTrialCharacterIds,
+              selectedSpecialGuestCharacterIds: input.selectedSpecialGuestCharacterIds,
+              selectedSupportCharacterIds: input.selectedSupportCharacterIds,
+              preferences: input.preferences
+            },
+            knowledge: {
+              version: this.options.knowledge?.version ?? 'unavailable',
+              unknownCharacterIds:
+                this.options.knowledge?.coverageFor(eligibleCharacterIds).unknownCharacterIds ??
+                eligibleCharacterIds
             }
           });
+          const sdkOptionsForStage = (stage: V2AgentStage) => {
+            if (stage === 'critique' || stage === 'rotation' || stage === 'explain') {
+              return { ...base, allowedBusinessTools: [] };
+            }
+            return {
+              ...base,
+              mcpServers: {
+                genshin: createTheaterBusinessMcpServer({
+                  getProfile: (uid) => (uid === input.uid ? profile : null),
+                  getScenario: () => scenario,
+                  knowledge: this.options.knowledge,
+                  auditContext: {
+                    correlationId: input.correlationId,
+                    scenarioId: scenario.id,
+                    dataVersion: scenario.meta.dataVersion,
+                    round: stage
+                  },
+                  log: this.options.toolLog
+                })
+              }
+            };
+          };
           const agent = await this.planAgent.compose({
             input,
             scenario,
             characters: profile.characters,
             knowledge: this.options.knowledge,
+            pipelineContext,
             sdkOptions: base,
-            sdkOptionsForRound
+            sdkOptionsForStage
           });
           this.options.config.recordUsage?.(
             agent.usage.inputTokens,
@@ -310,6 +369,25 @@ export class TheaterAdvisorService {
                 source: 'smart-service',
                 plan: agent.plan,
                 vigorBudget: agent.vigorBudget,
+                routeGuidance: {
+                  ...local.routeGuidance,
+                  notes: unique([
+                    ...local.routeGuidance.notes,
+                    ...agent.critique.issues.map(({ target, message }) =>
+                      target.kind === 'theater-act'
+                        ? `第 ${target.act} 幕风险：${message}`
+                        : message
+                    ),
+                    ...agent.rotation.rotations.flatMap(({ target, notes }) =>
+                      notes.map((note) =>
+                        target.kind === 'theater-act' ? `第 ${target.act} 幕循环：${note}` : note
+                      )
+                    ),
+                    ...agent.explanation.explanations.map(({ target, text }) =>
+                      target.kind === 'theater-act' ? `第 ${target.act} 幕说明：${text}` : text
+                    )
+                  ])
+                },
                 warnings: unique([...local.warnings, ...agent.plan.warnings]),
                 assumptions: unique([...local.assumptions, ...agent.plan.assumptions])
               })

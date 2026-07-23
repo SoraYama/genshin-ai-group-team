@@ -9,9 +9,17 @@ import {
   ABYSS_COMPOSER_PROMPT_V1,
   ABYSS_REPAIR_PROMPT_V1
 } from '../agents/abyss-composer/prompt.js';
+import type {
+  V2CritiqueOutput,
+  V2ExplainOutput,
+  V2PipelineContext,
+  V2RotationOutput
+} from '../agents/contracts.js';
 import type { AgentSdkRunOptions } from './agent-sdk-adapter.js';
+import type { AgentUsage, ToolAudit } from './agent-turn-audit.js';
 import { validateAbyssPlan } from './abyss-plan-validator.js';
 import type { CharacterKnowledgeReader } from '../../shared/character-knowledge.js';
+import { runV2AgentPipeline, type V2AgentStage } from './v2-agent-pipeline.js';
 
 export interface AbyssPlanAgentRunner {
   run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown>;
@@ -22,122 +30,62 @@ export interface AbyssPlanAgentInput {
   scenario: AbyssScenario;
   characters: CharacterProfile[];
   knowledge?: CharacterKnowledgeReader;
+  pipelineContext: V2PipelineContext;
   sdkOptions: AgentSdkRunOptions;
+  sdkOptionsForStage?: (stage: V2AgentStage) => AgentSdkRunOptions;
 }
 
 export type AbyssPlanAgentResult =
-  | { ok: true; repaired: boolean; plan: AbyssPlanOutput; usage: AgentUsage }
+  | {
+      ok: true;
+      repaired: boolean;
+      repairs: number;
+      plan: AbyssPlanOutput;
+      critique: V2CritiqueOutput;
+      rotation: V2RotationOutput;
+      explanation: V2ExplainOutput;
+      usage: AgentUsage;
+    }
   | { ok: false; issues: AbyssPlanIssue[]; usage: AgentUsage };
-
-export interface AgentUsage {
-  inputTokens: number;
-  outputTokens: number;
-  estimatedCostUsd: number;
-}
 
 export class AbyssPlanAgent {
   constructor(private readonly runner: AbyssPlanAgentRunner) {}
 
   async compose(context: AbyssPlanAgentInput): Promise<AbyssPlanAgentResult> {
-    const firstTurn = await this.runTurn(buildComposePayload(context), context.sdkOptions, false);
-    const first = validateAgentOutput(firstTurn.text, context, firstTurn.tools);
-    if (first.ok) return { ok: true, repaired: false, plan: first.plan, usage: firstTurn.usage };
-
-    const repairRaw = await this.runTurn(
-      JSON.stringify({
-        instruction: '只修复以下确定性校验问题，并返回完整方案。',
-        issues: first.issues,
-        previousOutput: parseJsonOrRaw(firstTurn.text),
-        request: publicRequest(context)
-      }),
-      context.sdkOptions,
-      true
+    const result = await runV2AgentPipeline<AbyssPlanOutput, AbyssPlanIssue>({
+      runner: this.runner,
+      context: context.pipelineContext,
+      sdkOptionsForStage: context.sdkOptionsForStage ?? (() => context.sdkOptions),
+      composer: {
+        initialPrompt: buildComposePayload(context),
+        systemPrompt: ABYSS_COMPOSER_PROMPT_V1,
+        repairPrompt: ABYSS_REPAIR_PROMPT_V1,
+        validate: (text, tools) => validateAgentOutput(text, context, tools)
+      },
+      invalidIssue: (stage, message) => ({
+        code: 'AGENT_OUTPUT_INVALID' as const,
+        path: [stage],
+        message
+      })
+    });
+    if (!result.ok) return { ok: false, issues: result.issues, usage: result.usage };
+    const plan = applyAbyssStageOutputs(
+      result.plan,
+      result.critique,
+      result.rotation,
+      result.explanation
     );
-    const repaired = validateAgentOutput(repairRaw.text, context, [
-      ...firstTurn.tools,
-      ...repairRaw.tools
-    ]);
-    const usage = addUsage(firstTurn.usage, repairRaw.usage);
-    if (!repaired.ok) return { ...repaired, usage };
-    return { ok: true, repaired: true, plan: repaired.plan, usage };
+    return {
+      ok: true,
+      repaired: result.repairs > 0,
+      repairs: result.repairs,
+      plan,
+      critique: result.critique,
+      rotation: result.rotation,
+      explanation: result.explanation,
+      usage: result.usage
+    };
   }
-
-  private async runTurn(
-    prompt: string,
-    options: AgentSdkRunOptions,
-    repair: boolean
-  ): Promise<{ text: string; tools: ToolAudit[]; usage: AgentUsage }> {
-    let resultText = '';
-    let assistantText = '';
-    const tools = new Map<string, ToolAudit>();
-    let usage: AgentUsage = { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 };
-    const maxTurns = Math.min(Math.max(options.maxTurns ?? 4, 3), 5);
-    for await (const message of this.runner.run(prompt, {
-      ...options,
-      systemPrompt: repair
-        ? `${ABYSS_COMPOSER_PROMPT_V1}\n\n${ABYSS_REPAIR_PROMPT_V1}`
-        : ABYSS_COMPOSER_PROMPT_V1,
-      maxTurns
-    })) {
-      if (options.abortController.signal.aborted) throw new Error('cancelled');
-      if (!isRecord(message)) continue;
-      if (message['type'] === 'result' && typeof message['result'] === 'string') {
-        resultText = message['result'];
-        const sdkUsage = isRecord(message['usage']) ? message['usage'] : {};
-        usage = addUsage(usage, {
-          inputTokens: numberValue(sdkUsage['input_tokens']),
-          outputTokens: numberValue(sdkUsage['output_tokens']),
-          estimatedCostUsd: numberValue(message['total_cost_usd'])
-        });
-      }
-      if (message['type'] === 'assistant' && isRecord(message['message'])) {
-        const content = message['message']['content'];
-        if (Array.isArray(content)) {
-          for (const block of content) {
-            if (isRecord(block) && block['type'] === 'text' && typeof block['text'] === 'string') {
-              assistantText += block['text'];
-            }
-            if (
-              isRecord(block) &&
-              block['type'] === 'tool_use' &&
-              typeof block['id'] === 'string' &&
-              typeof block['name'] === 'string'
-            ) {
-              tools.set(block['id'], {
-                id: block['id'],
-                name: block['name'],
-                input: isRecord(block['input']) ? block['input'] : {},
-                succeeded: false
-              });
-            }
-          }
-        }
-      }
-      if (message['type'] === 'user' && isRecord(message['message'])) {
-        const content = message['message']['content'];
-        if (Array.isArray(content)) {
-          for (const block of content) {
-            if (
-              isRecord(block) &&
-              block['type'] === 'tool_result' &&
-              typeof block['tool_use_id'] === 'string'
-            ) {
-              const use = tools.get(block['tool_use_id']);
-              if (use) use.succeeded = block['is_error'] !== true;
-            }
-          }
-        }
-      }
-    }
-    return { text: resultText || assistantText, tools: [...tools.values()], usage };
-  }
-}
-
-interface ToolAudit {
-  id: string;
-  name: string;
-  input: Record<string, unknown>;
-  succeeded: boolean;
 }
 
 function validateAgentOutput(
@@ -271,26 +219,64 @@ function publicRequest(context: Pick<AbyssPlanAgentInput, 'input' | 'scenario'>)
   };
 }
 
-function parseJsonOrRaw(raw: string): unknown {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return { invalidOutput: true };
-  }
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function numberValue(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0;
-}
-
-function addUsage(left: AgentUsage, right: AgentUsage): AgentUsage {
+function applyAbyssStageOutputs(
+  plan: AbyssPlanOutput,
+  critique: V2CritiqueOutput,
+  rotation: V2RotationOutput,
+  explanation: V2ExplainOutput
+): AbyssPlanOutput {
+  const firstRotation = rotation.rotations
+    .filter(({ target }) => target.kind === 'abyss-team' && target.half === 'first')
+    .flatMap(({ notes }) => notes);
+  const secondRotation = rotation.rotations
+    .filter(({ target }) => target.kind === 'abyss-team' && target.half === 'second')
+    .flatMap(({ notes }) => notes);
   return {
-    inputTokens: left.inputTokens + right.inputTokens,
-    outputTokens: left.outputTokens + right.outputTokens,
-    estimatedCostUsd: left.estimatedCostUsd + right.estimatedCostUsd
+    ...plan,
+    firstHalfTeam: {
+      ...plan.firstHalfTeam,
+      rotationNotes: [...plan.firstHalfTeam.rotationNotes, ...firstRotation]
+    },
+    secondHalfTeam: {
+      ...plan.secondHalfTeam,
+      rotationNotes: [...plan.secondHalfTeam.rotationNotes, ...secondRotation]
+    },
+    chambers: plan.chambers.map((chamber) => {
+      const enrich = (half: 'first' | 'second') => {
+        const current = half === 'first' ? chamber.firstHalf : chamber.secondHalf;
+        const risks = critique.issues
+          .filter(
+            ({ target }) =>
+              target.kind === 'abyss-chamber' &&
+              target.floor === chamber.floor &&
+              target.chamber === chamber.chamber &&
+              target.half === half
+          )
+          .map(({ message }) => message);
+        const tactics = explanation.explanations
+          .filter(
+            ({ target }) =>
+              target.kind === 'abyss-chamber' &&
+              target.floor === chamber.floor &&
+              target.chamber === chamber.chamber &&
+              target.half === half
+          )
+          .map(({ text }) => text);
+        return {
+          ...current,
+          tactics: [...current.tactics, ...tactics],
+          risks: [...current.risks, ...risks]
+        };
+      };
+      return {
+        ...chamber,
+        firstHalf: enrich('first'),
+        secondHalf: enrich('second')
+      };
+    })
   };
 }

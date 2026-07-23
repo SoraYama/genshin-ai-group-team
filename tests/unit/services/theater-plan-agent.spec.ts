@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { TheaterPlanAgent } from '../../../src/main/services/theater-plan-agent.js';
 import type { AgentSdkRunOptions } from '../../../src/main/services/agent-sdk-adapter.js';
+import { buildV2PipelineContext } from '../../../src/main/services/v2-agent-context.js';
 import type { CharacterKnowledgeReader } from '../../../src/shared/character-knowledge.js';
 import {
   THEATER_CHARACTERS,
@@ -61,6 +62,33 @@ class Runner {
   ) {}
   async *run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown> {
     this.calls.push({ prompt, options });
+    if (options.systemPrompt.includes('CritiqueAgent v2')) {
+      yield { type: 'result', result: JSON.stringify({ decision: 'accept', issues: [] }) };
+      return;
+    }
+    if (options.systemPrompt.includes('RotationCoachAgent v2')) {
+      yield {
+        type: 'result',
+        result: JSON.stringify({
+          rotations: [{ target: { kind: 'theater-act', act: 1 }, notes: ['本幕保留关键演员。'] }]
+        })
+      };
+      return;
+    }
+    if (options.systemPrompt.includes('ExplainAgent v2')) {
+      yield {
+        type: 'result',
+        result: JSON.stringify({
+          explanations: [
+            {
+              target: { kind: 'theater-act', act: 1 },
+              text: '本幕说明只引用已验证路线。'
+            }
+          ]
+        })
+      };
+      return;
+    }
     const round = this.calls.length - 1;
     const uses = [
       { id: 'profile', name: 'mcp__genshin__read_profile_cache', input: { uid: '123456789' } },
@@ -119,6 +147,44 @@ function sdkOptions(): AgentSdkRunOptions {
   };
 }
 
+function pipelineContext(feasibleBaseline = validTheaterPlan()) {
+  const eligibleCharacterIds = [
+    ...THEATER_CHARACTERS.map(({ id }) => String(id)),
+    ...feasibleBaseline.cast.openingCharacterIds,
+    ...feasibleBaseline.cast.trialCharacterIds,
+    ...feasibleBaseline.cast.specialGuestCharacterIds,
+    ...feasibleBaseline.cast.supportCharacterIds,
+    ...feasibleBaseline.acts.flatMap(({ candidateCharacterIds }) => candidateCharacterIds)
+  ];
+  return buildV2PipelineContext({
+    correlationId: 'theater-test-request',
+    profile: {
+      schemaVersion: 2,
+      uid: '123456789',
+      source: 'merged',
+      fetchedAt: '2026-07-23T00:00:00.000Z',
+      characters: THEATER_CHARACTERS,
+      coverage: {
+        ownedCount: THEATER_CHARACTERS.length,
+        detailedCount: 8,
+        buildCount: THEATER_CHARACTERS.length,
+        statsCount: THEATER_CHARACTERS.length,
+        enkaShowcaseCount: 8,
+        missingDetailCount: 4,
+        partial: true
+      }
+    },
+    feasibleBaseline,
+    eligibleCharacterIds: [...new Set(eligibleCharacterIds)],
+    mechanics: [{ target: '所选幕次', facts: ['活力按幕次扣除'], unknowns: ['随机路径结果未知'] }],
+    interventions: { target: 'safe-clear' },
+    knowledge: {
+      version: groupingKnowledge.version,
+      unknownCharacterIds: THEATER_CHARACTERS.slice(1).map(({ id }) => String(id))
+    }
+  });
+}
+
 describe('TheaterPlanAgent', () => {
   it('validates compose, performs one repair, and audits tools independently each round', async () => {
     const invalid = validTheaterPlan();
@@ -129,6 +195,7 @@ describe('TheaterPlanAgent', () => {
       scenario: theaterScenario(),
       characters: THEATER_CHARACTERS,
       knowledge: groupingKnowledge,
+      pipelineContext: pipelineContext(),
       sdkOptions: sdkOptions()
     });
     expect(result).toMatchObject({
@@ -136,38 +203,40 @@ describe('TheaterPlanAgent', () => {
       repaired: true,
       usage: { inputTokens: 20, outputTokens: 10 }
     });
-    expect(runner.calls).toHaveLength(2);
+    expect(runner.calls).toHaveLength(5);
     expect(runner.calls[1]?.prompt).toContain('PATH_CHOICE_INVALID');
   });
 
   it('requires profile, knowledge, and every target act read in the same round', async () => {
-    const runner = new Runner([validTheaterPlan(), validTheaterPlan()], [0]);
+    const runner = new Runner([validTheaterPlan(), validTheaterPlan(), validTheaterPlan()], [0]);
     const result = await new TheaterPlanAgent(runner).compose({
       input: theaterInput(),
       scenario: theaterScenario(),
       characters: THEATER_CHARACTERS,
+      pipelineContext: pipelineContext(),
       sdkOptions: sdkOptions()
     });
     expect(result).toMatchObject({
       ok: false,
       issues: [expect.objectContaining({ code: 'AGENT_OUTPUT_INVALID', path: ['tools'] })]
     });
-    expect(runner.calls).toHaveLength(2);
+    expect(runner.calls).toHaveLength(3);
   });
 
   it('falls through deterministic issues after exactly one invalid repair', async () => {
-    const runner = new Runner(['not-json', {}]);
+    const runner = new Runner(['not-json', {}, 'still-not-json']);
     const result = await new TheaterPlanAgent(runner).compose({
       input: theaterInput(),
       scenario: theaterScenario(),
       characters: THEATER_CHARACTERS,
+      pipelineContext: pipelineContext(),
       sdkOptions: sdkOptions()
     });
     expect(result).toMatchObject({
       ok: false,
       issues: [expect.objectContaining({ code: 'AGENT_OUTPUT_INVALID' })]
     });
-    expect(runner.calls).toHaveLength(2);
+    expect(runner.calls).toHaveLength(3);
   });
 
   it('requires an explicit knowledge read for external cast and candidate actors each round', async () => {
@@ -175,12 +244,13 @@ describe('TheaterPlanAgent', () => {
     external.cast.trialCharacterIds = ['trial.1'];
     external.acts[1]!.candidateCharacterIds[3] = 'trial.1';
     external.acts[1]!.plannedVigorSpend[3] = { characterId: 'trial.1', cost: 1 };
-    const runner = new Runner([external, external]);
+    const runner = new Runner([external, external, external]);
     const result = await new TheaterPlanAgent(runner).compose({
       input: theaterInput({ selectedTrialCharacterIds: ['trial.1'] }),
       scenario: theaterScenario(),
       characters: THEATER_CHARACTERS,
       knowledge: groupingKnowledge,
+      pipelineContext: pipelineContext(external),
       sdkOptions: sdkOptions()
     });
     expect(result).toMatchObject({
@@ -201,6 +271,7 @@ describe('TheaterPlanAgent', () => {
       scenario: theaterScenario(),
       characters: THEATER_CHARACTERS,
       knowledge: groupingKnowledge,
+      pipelineContext: pipelineContext(external),
       sdkOptions: sdkOptions()
     });
     expect(result).toMatchObject({ ok: true, repaired: false });

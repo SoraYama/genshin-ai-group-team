@@ -20,6 +20,8 @@ import {
 } from './abyss-business-tools.js';
 import { buildLocalAbyssPlan } from './abyss-local-optimizer.js';
 import { AbyssPlanAgent, type AbyssPlanAgentRunner } from './abyss-plan-agent.js';
+import { buildV2PipelineContext } from './v2-agent-context.js';
+import type { V2AgentStage } from './v2-agent-pipeline.js';
 
 export interface AbyssAdvisorServiceOptions {
   runner: AbyssPlanAgentRunner;
@@ -218,35 +220,70 @@ export class AbyssAdvisorService {
           Math.max(1, Math.min(this.options.agentTimeoutMs ?? 60_000, 120_000))
         );
         try {
-          const mcpServer = createAbyssBusinessMcpServer({
-            getProfile: (uid) => (uid === input.uid ? profile : null),
-            getScenario: () => scenario,
-            knowledge: this.options.knowledge,
-            auditContext: {
-              correlationId: input.correlationId,
-              scenarioId: scenario.id,
-              dataVersion: scenario.meta.dataVersion
+          const eligibleCharacterIds = profile.characters
+            .map(({ id }) => String(id))
+            .filter((id) => !input.excludedCharacterIds.includes(id));
+          const pipelineContext = buildV2PipelineContext({
+            correlationId: input.correlationId,
+            profile,
+            feasibleBaseline: localPreflight.plan,
+            eligibleCharacterIds,
+            mechanics: abyssMechanicsContext(scenario, input),
+            interventions: {
+              lockedCharacterIds: input.lockedCharacterIds,
+              excludedCharacterIds: input.excludedCharacterIds,
+              preferences: input.preferences,
+              ...(input.recomputeHalf ? { recomputeHalf: input.recomputeHalf } : {})
             },
-            log: this.options.toolLog
+            knowledge: {
+              version: this.options.knowledge?.version ?? 'unavailable',
+              unknownCharacterIds:
+                this.options.knowledge?.coverageFor(eligibleCharacterIds).unknownCharacterIds ??
+                eligibleCharacterIds
+            }
           });
+          const baseSdkOptions = {
+            apiKey,
+            baseUrl: this.options.config.getBaseUrl(),
+            model: this.options.config.getModel(),
+            customHeaders: this.options.config.getCustomHeaders(),
+            systemPrompt: '',
+            cwd: this.options.sdkEnvironment.cwd,
+            clientVersion: this.options.sdkEnvironment.clientVersion,
+            abortController: agentAbort,
+            maxTurns: 4,
+            allowedBusinessTools: [...ABYSS_MCP_TOOL_NAMES]
+          };
+          const sdkOptionsForStage = (stage: V2AgentStage) => {
+            if (stage === 'critique' || stage === 'rotation' || stage === 'explain') {
+              return { ...baseSdkOptions, allowedBusinessTools: [] };
+            }
+            return {
+              ...baseSdkOptions,
+              mcpServers: {
+                genshin: createAbyssBusinessMcpServer({
+                  getProfile: (uid) => (uid === input.uid ? profile : null),
+                  getScenario: () => scenario,
+                  knowledge: this.options.knowledge,
+                  auditContext: {
+                    correlationId: input.correlationId,
+                    scenarioId: scenario.id,
+                    dataVersion: scenario.meta.dataVersion,
+                    round: stage
+                  },
+                  log: this.options.toolLog
+                })
+              }
+            };
+          };
           const agent = await this.planAgent.compose({
             input,
             scenario,
             characters: profile.characters,
             knowledge: this.options.knowledge,
-            sdkOptions: {
-              apiKey,
-              baseUrl: this.options.config.getBaseUrl(),
-              model: this.options.config.getModel(),
-              customHeaders: this.options.config.getCustomHeaders(),
-              systemPrompt: '',
-              cwd: this.options.sdkEnvironment.cwd,
-              clientVersion: this.options.sdkEnvironment.clientVersion,
-              abortController: agentAbort,
-              maxTurns: 4,
-              mcpServers: { genshin: mcpServer },
-              allowedBusinessTools: [...ABYSS_MCP_TOOL_NAMES]
-            }
+            pipelineContext,
+            sdkOptions: baseSdkOptions,
+            sdkOptionsForStage
           });
           this.options.config.recordUsage?.(
             agent.usage.inputTokens,
@@ -414,4 +451,32 @@ function blocked(issues: AbyssPlanIssue[]): AbyssAdvisorResult {
     warnings: [],
     assumptions: []
   });
+}
+
+function abyssMechanicsContext(
+  scenario: Extract<AbyssScenarioView, { status: 'ready' }>['scenario'],
+  input: AbyssAdvisorPlanInput
+) {
+  const floor = scenario.floors.find(({ floor: value }) => value === input.floor);
+  return (floor?.chambers ?? [])
+    .filter(({ chamber }) => input.chamber === undefined || chamber === input.chamber)
+    .flatMap(({ chamber, firstHalf, secondHalf }) =>
+      (
+        [
+          ['上半', firstHalf],
+          ['下半', secondHalf]
+        ] as const
+      ).map(([label, half]) => ({
+        target: `${input.floor} 层第 ${chamber} 间${label}`,
+        facts: [
+          ...half.waves.flatMap(({ enemies }) =>
+            enemies.flatMap(({ enemy, mechanics }) => [
+              enemy.names['zh-CN'] ?? enemy.names['zh-Hans'] ?? '未命名敌人',
+              ...mechanics.tags
+            ])
+          )
+        ],
+        unknowns: ['未在当期资料中标注的数值与机制保持未知。']
+      }))
+    );
 }

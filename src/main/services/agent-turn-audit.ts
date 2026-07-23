@@ -33,7 +33,10 @@ export async function runAuditedAgentTurn(options: {
   let assistantText = '';
   const tools = new Map<string, ToolAudit>();
   let usage: AgentUsage = { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 };
-  const maxTurns = Math.min(Math.max(options.sdkOptions.maxTurns ?? 4, 3), 5);
+  const maxTurns =
+    (options.sdkOptions.allowedBusinessTools?.length ?? 0) > 0
+      ? Math.min(Math.max(options.sdkOptions.maxTurns ?? 4, 3), 5)
+      : 1;
   for await (const message of options.runner.run(options.prompt, {
     ...options.sdkOptions,
     systemPrompt: options.systemPrompt,

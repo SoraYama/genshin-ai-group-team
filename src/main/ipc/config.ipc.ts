@@ -4,19 +4,20 @@ import type { ConfigService } from '../services/config-service.js';
 import type { AdvisorAgent } from '../services/advisor-agent.js';
 import { registerHandler } from './registry.js';
 
-const llmConfigInputSchema = z.object({
+const customHeaderValueSchema = z
+  .string()
+  .min(1)
+  .max(4096)
+  .refine((value) => !/[\r\n]/.test(value), 'custom header 值不能包含换行')
+  .transform((value) => value.trim())
+  .pipe(z.string().min(1).max(4096));
+
+export const llmConfigInputSchema = z.object({
   apiKey: z.string().optional(),
-  baseUrl: z
-    .string()
-    .url('baseUrl 必须是合法的 URL')
-    .optional()
-    .or(z.literal('')),
+  baseUrl: z.string().url('baseUrl 必须是合法的 URL').optional().or(z.literal('')),
   model: z.string().trim().optional(),
   customHeaders: z
-    .record(
-      z.string().trim().min(1).max(128),
-      z.string().trim().min(1).max(4096)
-    )
+    .record(z.string().trim().min(1).max(128), customHeaderValueSchema)
     .refine(
       (headers) => Object.keys(headers).every((name) => /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name)),
       'custom header 名称不合法'

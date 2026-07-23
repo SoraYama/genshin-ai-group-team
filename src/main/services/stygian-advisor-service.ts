@@ -21,6 +21,9 @@ import {
   buildLocalStygianPlan
 } from './stygian-local-optimizer.js';
 import { StygianPlanAgent, type StygianPlanAgentRunner } from './stygian-plan-agent.js';
+import type { V2CritiqueOutput, V2ExplainOutput } from '../agents/contracts.js';
+import { buildV2PipelineContext } from './v2-agent-context.js';
+import type { V2AgentStage } from './v2-agent-pipeline.js';
 
 export interface StygianAdvisorServiceOptions {
   runner: StygianPlanAgentRunner;
@@ -232,30 +235,70 @@ export class StygianAdvisorService {
             maxTurns: 4,
             allowedBusinessTools: [...STYGIAN_MCP_TOOL_NAMES]
           };
-          const sdkOptionsForRound = (round: 'compose' | 'repair') => ({
-            ...baseSdkOptions,
-            mcpServers: {
-              genshin: createStygianBusinessMcpServer({
-                getProfile: (uid) => (uid === input.uid ? profile : null),
-                getScenario: () => scenario,
-                knowledge: this.options.knowledge,
-                auditContext: {
-                  correlationId: input.correlationId,
-                  scenarioId: scenario.id,
-                  dataVersion: scenario.meta.dataVersion,
-                  round
-                },
-                log: this.options.toolLog
-              })
+          const eligibleCharacterIds = profile.characters
+            .map(({ id }) => String(id))
+            .filter((id) => !input.excludedCharacterIds.includes(id));
+          const pipelineContext = buildV2PipelineContext({
+            correlationId: input.correlationId,
+            profile,
+            feasibleBaseline: localPreflight.plan,
+            eligibleCharacterIds,
+            mechanics: scenario.phases.map((phase) => ({
+              target: `第 ${phase.phase} 阶段`,
+              facts: [
+                phase.boss.enemy.names['zh-CN'] ??
+                  phase.boss.enemy.names['zh-Hans'] ??
+                  '未命名首领',
+                ...phase.phaseModifiers.map(({ description }) => description),
+                ...phase.bossModifiers.map(({ description }) => description)
+              ],
+              unknowns: ['未在当期资料中标注的数值与首领行为保持未知。']
+            })),
+            interventions: {
+              target: input.target,
+              difficultyId: input.difficultyId,
+              ...(input.phase ? { phase: input.phase } : {}),
+              lockedCharacterIds: input.lockedCharacterIds,
+              excludedCharacterIds: input.excludedCharacterIds,
+              preferences: input.preferences
+            },
+            knowledge: {
+              version: this.options.knowledge?.version ?? 'unavailable',
+              unknownCharacterIds:
+                this.options.knowledge?.coverageFor(eligibleCharacterIds).unknownCharacterIds ??
+                eligibleCharacterIds
             }
           });
+          const sdkOptionsForStage = (stage: V2AgentStage) => {
+            if (stage === 'critique' || stage === 'rotation' || stage === 'explain') {
+              return { ...baseSdkOptions, allowedBusinessTools: [] };
+            }
+            return {
+              ...baseSdkOptions,
+              mcpServers: {
+                genshin: createStygianBusinessMcpServer({
+                  getProfile: (uid) => (uid === input.uid ? profile : null),
+                  getScenario: () => scenario,
+                  knowledge: this.options.knowledge,
+                  auditContext: {
+                    correlationId: input.correlationId,
+                    scenarioId: scenario.id,
+                    dataVersion: scenario.meta.dataVersion,
+                    round: stage
+                  },
+                  log: this.options.toolLog
+                })
+              }
+            };
+          };
           const agent = await this.planAgent.compose({
             input,
             scenario,
             characters: profile.characters,
             knowledge: this.options.knowledge,
+            pipelineContext,
             sdkOptions: baseSdkOptions,
-            sdkOptionsForRound
+            sdkOptionsForStage
           });
           this.options.config.recordUsage?.(
             agent.usage.inputTokens,
@@ -264,7 +307,15 @@ export class StygianAdvisorService {
           );
           throwIfCancelled();
           if (agent.ok) {
-            result = checkedAgentResult(agent.plan, localPreflight, profile, scenario, input);
+            result = checkedAgentResult(
+              agent.plan,
+              localPreflight,
+              profile,
+              scenario,
+              input,
+              agent.critique,
+              agent.explanation
+            );
           } else {
             result = addFallbackWarning(localPreflight);
           }
@@ -364,7 +415,9 @@ function checkedAgentResult(
   local: Extract<StygianAdvisorResult, { status: 'planned' }>,
   profile: PersistedProfile,
   scenario: Extract<StygianScenarioView, { status: 'ready' }>['scenario'],
-  input: StygianAdvisorPlanInput
+  input: StygianAdvisorPlanInput,
+  critique: V2CritiqueOutput,
+  explanation: V2ExplainOutput
 ): StygianAdvisorResult {
   const selectedIds = Array.from(new Set(plan.phases.flatMap(({ team }) => team.characterIds)));
   const selectedCharacters = selectedIds.flatMap((id) => {
@@ -398,6 +451,25 @@ function checkedAgentResult(
       warnings: Array.from(new Set([...local.warnings, ...plan.warnings])),
       assumptions: Array.from(new Set([...local.assumptions, ...plan.assumptions]))
     },
+    phaseGuidance: local.phaseGuidance.map((guidance) => ({
+      ...guidance,
+      mechanismBasis: [
+        ...guidance.mechanismBasis,
+        ...explanation.explanations
+          .filter(
+            ({ target }) => target.kind === 'stygian-phase' && target.phase === guidance.phase
+          )
+          .map(({ text }) => text)
+      ],
+      risks: [
+        ...guidance.risks,
+        ...critique.issues
+          .filter(
+            ({ target }) => target.kind === 'stygian-phase' && target.phase === guidance.phase
+          )
+          .map(({ message }) => message)
+      ]
+    })),
     difficultyAssessment: assessment
   });
 }

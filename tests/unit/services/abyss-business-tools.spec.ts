@@ -34,14 +34,46 @@ describe('abyss in-process business tools', () => {
     expect(tools.every(({ annotations }) => annotations?.readOnlyHint === true)).toBe(true);
   });
 
-  it('returns a redacted and bounded profile view without image URLs or provenance', async () => {
+  it('returns the complete bounded advisor profile DTO without raw media or build internals', async () => {
+    const detailedCharacter = {
+      ...ABYSS_CHARACTERS[0]!,
+      constellation: 2,
+      build: {
+        ...ABYSS_CHARACTERS[0]!.build,
+        weapon: {
+          id: 123,
+          name: '测试武器',
+          iconUrl: 'https://private.example/weapon.png',
+          level: 90,
+          refinement: 2,
+          rarity: 5
+        },
+        artifacts: [
+          {
+            slot: 'goblet' as const,
+            setId: 1,
+            setName: '测试套装',
+            level: 20,
+            rarity: 5,
+            mainStat: { key: 'pyroDmg', value: 46.6 },
+            subStats: [{ key: 'critRate', value: 10 }],
+            iconUrl: 'https://private.example/artifact.png'
+          }
+        ],
+        talents: { normalAttack: 6, elementalSkill: 9, elementalBurst: 10 }
+      },
+      provenance: {
+        ...ABYSS_CHARACTERS[0]!.provenance,
+        build: { source: 'miyoushe-detail' as const, fetchedAt: '2026-07-23T00:00:00.000Z' }
+      }
+    };
     const tools = createAbyssBusinessTools({
       getProfile: () => ({
         schemaVersion: 2,
         uid: '123456789',
         source: 'merged',
         fetchedAt: '2026-07-23T00:00:00.000Z',
-        characters: [...ABYSS_CHARACTERS, ...ABYSS_CHARACTERS],
+        characters: [detailedCharacter, ...ABYSS_CHARACTERS, ...ABYSS_CHARACTERS],
         coverage: {
           ownedCount: 20,
           detailedCount: 12,
@@ -56,9 +88,32 @@ describe('abyss in-process business tools', () => {
       maxCharacters: 8
     });
     const result = await tools[0]!.handler({ uid: '123456789' }, {});
-    const payload = textPayload(result) as { characters: unknown[] };
+    const payload = textPayload(result) as {
+      coverage: { partial: boolean };
+      provenanceSummaries: Array<Record<string, unknown>>;
+      characters: Array<Record<string, unknown>>;
+    };
     expect(payload.characters).toHaveLength(8);
-    expect(JSON.stringify(payload)).not.toMatch(/imageUrl|provenance|weapon|artifact/i);
+    expect(payload.coverage.partial).toBe(true);
+    expect(payload.characters[0]).toMatchObject({
+      level: expect.any(Number),
+      constellation: expect.any(Number),
+      completeness: expect.any(String),
+      weapon: { name: '测试武器', level: 90 },
+      artifactSummary: {
+        sets: [{ name: '测试套装', count: 1 }],
+        mainStats: { goblet: 'pyroDmg' }
+      },
+      talents: { normal: 6, skill: 9, burst: 10 },
+      stats: expect.any(Object)
+    });
+    expect(payload.provenanceSummaries[0]).toMatchObject({
+      ownership: 'miyoushe-list',
+      characterIndexes: expect.any(Array)
+    });
+    expect(JSON.stringify(payload)).not.toMatch(
+      /imageUrl|iconUrl|subStats|private\.example|fetchedAt/
+    );
   });
 
   it('rejects scenario identity drift and returns only the selected localized enemy fields', async () => {

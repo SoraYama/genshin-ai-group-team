@@ -10,15 +10,16 @@ import {
   THEATER_COMPOSER_PROMPT_V1,
   THEATER_REPAIR_PROMPT_V1
 } from '../agents/theater-composer/prompt.js';
+import type {
+  V2CritiqueOutput,
+  V2ExplainOutput,
+  V2PipelineContext,
+  V2RotationOutput
+} from '../agents/contracts.js';
 import type { AgentSdkRunOptions } from './agent-sdk-adapter.js';
-import {
-  addAgentUsage,
-  runAuditedAgentTurn,
-  type AgentUsage,
-  type AuditedAgentRunner,
-  type ToolAudit
-} from './agent-turn-audit.js';
+import { type AgentUsage, type AuditedAgentRunner, type ToolAudit } from './agent-turn-audit.js';
 import { validateTheaterPlan } from './theater-plan-validator.js';
+import { runV2AgentPipeline, type V2AgentStage } from './v2-agent-pipeline.js';
 
 export type TheaterPlanAgentRunner = AuditedAgentRunner;
 export interface TheaterPlanAgentInput {
@@ -26,15 +27,20 @@ export interface TheaterPlanAgentInput {
   scenario: TheaterScenario;
   characters: CharacterProfile[];
   knowledge?: CharacterKnowledgeReader;
+  pipelineContext: V2PipelineContext;
   sdkOptions: AgentSdkRunOptions;
-  sdkOptionsForRound?: (round: 'compose' | 'repair') => AgentSdkRunOptions;
+  sdkOptionsForStage?: (stage: V2AgentStage) => AgentSdkRunOptions;
 }
 export type TheaterPlanAgentResult =
   | {
       ok: true;
       repaired: boolean;
+      repairs: number;
       plan: TheaterPlanOutput;
       vigorBudget: Array<{ act: number; before: number; spent: number; after: number }>;
+      critique: V2CritiqueOutput;
+      rotation: V2RotationOutput;
+      explanation: V2ExplainOutput;
       usage: AgentUsage;
     }
   | { ok: false; issues: TheaterPlanIssue[]; usage: AgentUsage };
@@ -42,30 +48,42 @@ export type TheaterPlanAgentResult =
 export class TheaterPlanAgent {
   constructor(private readonly runner: TheaterPlanAgentRunner) {}
   async compose(context: TheaterPlanAgentInput): Promise<TheaterPlanAgentResult> {
-    const compose = await runAuditedAgentTurn({
+    const result = await runV2AgentPipeline<TheaterPlanOutput, TheaterPlanIssue>({
       runner: this.runner,
-      prompt: composePayload(context),
-      sdkOptions: context.sdkOptionsForRound?.('compose') ?? context.sdkOptions,
-      systemPrompt: THEATER_COMPOSER_PROMPT_V1,
-      auditContext: { correlationId: context.input.correlationId, round: 'compose' }
+      context: context.pipelineContext,
+      sdkOptionsForStage: context.sdkOptionsForStage ?? (() => context.sdkOptions),
+      composer: {
+        initialPrompt: composePayload(context),
+        systemPrompt: THEATER_COMPOSER_PROMPT_V1,
+        repairPrompt: THEATER_REPAIR_PROMPT_V1,
+        validate: (text, tools) => validateOutput(text, context, tools)
+      },
+      invalidIssue: (stage, message) => ({
+        code: 'AGENT_OUTPUT_INVALID' as const,
+        path: [stage],
+        message
+      })
     });
-    const first = validateOutput(compose.text, context, compose.tools);
-    if (first.ok) return { ...first, repaired: false, usage: compose.usage };
-    const repair = await runAuditedAgentTurn({
-      runner: this.runner,
-      prompt: JSON.stringify({
-        instruction: '只修复以下确定性问题，并返回完整路线方案。',
-        issues: first.issues,
-        previousOutput: parseOrRaw(compose.text),
-        request: publicRequest(context)
-      }),
-      sdkOptions: context.sdkOptionsForRound?.('repair') ?? context.sdkOptions,
-      systemPrompt: `${THEATER_COMPOSER_PROMPT_V1}\n\n${THEATER_REPAIR_PROMPT_V1}`,
-      auditContext: { correlationId: context.input.correlationId, round: 'repair' }
+    if (!result.ok) return { ok: false, issues: result.issues, usage: result.usage };
+    const checked = validateTheaterPlan({
+      input: context.input,
+      scenario: context.scenario,
+      characters: context.characters,
+      knowledge: context.knowledge,
+      plan: result.plan
     });
-    const repaired = validateOutput(repair.text, context, repair.tools);
-    const usage = addAgentUsage(compose.usage, repair.usage);
-    return repaired.ok ? { ...repaired, repaired: true, usage } : { ...repaired, usage };
+    if (!checked.ok) return { ok: false, issues: checked.issues, usage: result.usage };
+    return {
+      ok: true,
+      repaired: result.repairs > 0,
+      repairs: result.repairs,
+      plan: result.plan,
+      vigorBudget: checked.vigorBudget,
+      critique: result.critique,
+      rotation: result.rotation,
+      explanation: result.explanation,
+      usage: result.usage
+    };
   }
 }
 
@@ -187,13 +205,6 @@ function invalid(message: string) {
     ok: false as const,
     issues: [{ code: 'AGENT_OUTPUT_INVALID' as const, path: [], message }]
   };
-}
-function parseOrRaw(raw: string): unknown {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return { invalidOutput: true };
-  }
 }
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
