@@ -114,6 +114,57 @@ describe('V2 deterministic context builder', () => {
     );
   });
 
+  it('keeps high-ID baseline, locked, and selected characters ahead of the eligible remainder', () => {
+    const lowIdFillers = Array.from({ length: 32 }, (_, index) => ({
+      ...structuredClone(ABYSS_CHARACTERS[0]!),
+      id: 1_001 + index,
+      name: `低 ID 填充角色-${index}`
+    }));
+    const priorityIds = Array.from({ length: 10 }, (_, index) => 90_001 + index);
+    const priorityCharacters = priorityIds.map((id, index) => ({
+      ...structuredClone(ABYSS_CHARACTERS[index % ABYSS_CHARACTERS.length]!),
+      id,
+      name: `高 ID 优先角色-${index}`
+    }));
+    const characters = [...lowIdFillers, ...priorityCharacters];
+    const baseline = structuredClone(validAbyssPlan());
+    baseline.firstHalfTeam.characterIds = priorityIds.slice(0, 4).map(String);
+    baseline.secondHalfTeam.characterIds = priorityIds.slice(4, 8).map(String);
+    const context = buildV2PipelineContext({
+      correlationId: 'context-high-priority',
+      profile: {
+        schemaVersion: 2,
+        uid: '123456789',
+        source: 'merged',
+        fetchedAt: '2026-07-23T00:00:00.000Z',
+        characters,
+        coverage: {
+          ownedCount: characters.length,
+          detailedCount: characters.length,
+          buildCount: characters.length,
+          statsCount: characters.length,
+          enkaShowcaseCount: 8,
+          missingDetailCount: 0,
+          partial: false
+        }
+      },
+      feasibleBaseline: baseline,
+      eligibleCharacterIds: characters.map(({ id }) => String(id)),
+      mechanics: [{ target: '12-1 上半', facts: ['水元素护盾'], unknowns: [] }],
+      interventions: {
+        lockedCharacterIds: [String(priorityIds[8])],
+        selectedCharacterIds: [String(priorityIds[9])],
+        noBuildChange: true
+      },
+      knowledge: { version: 'knowledge-v1', unknownCharacterIds: [] }
+    });
+    const detailedIds = context.profile.detailedProfiles.map(({ id }) => id);
+
+    expect(detailedIds).toHaveLength(24);
+    expect(detailedIds.slice(0, 10)).toEqual(priorityIds);
+    expect(detailedIds).toEqual(expect.arrayContaining(priorityIds));
+  });
+
   it('fails closed when the complete serialized context exceeds 48 KiB', () => {
     const profile = {
       schemaVersion: 2 as const,

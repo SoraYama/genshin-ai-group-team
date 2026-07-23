@@ -38,15 +38,15 @@ export function buildV2PipelineContext(options: BuildV2PipelineContextOptions): 
     .sort((left, right) => left.id - right.id);
   const byId = new Map(sortedCharacters.map((character) => [String(character.id), character]));
   const eligibleCharacterIds = uniqueBoundedIds(options.eligibleCharacterIds);
-  const prioritizedIds = uniqueBoundedIds([
-    ...planCharacterIds(baseline),
-    ...recordStringArray(options.interventions, 'lockedCharacterIds'),
-    ...recordStringArray(options.interventions, 'selectedCharacterIds'),
-    ...recordStringArray(options.interventions, 'selectedOpeningCharacterIds'),
-    ...recordStringArray(options.interventions, 'selectedTrialCharacterIds'),
-    ...recordStringArray(options.interventions, 'selectedSpecialGuestCharacterIds'),
-    ...recordStringArray(options.interventions, 'selectedSupportCharacterIds'),
-    ...eligibleCharacterIds
+  const prioritizedIds = priorityOrderedIds([
+    planCharacterIds(baseline),
+    recordStringArray(options.interventions, 'lockedCharacterIds'),
+    recordStringArray(options.interventions, 'selectedCharacterIds'),
+    recordStringArray(options.interventions, 'selectedOpeningCharacterIds'),
+    recordStringArray(options.interventions, 'selectedTrialCharacterIds'),
+    recordStringArray(options.interventions, 'selectedSpecialGuestCharacterIds'),
+    recordStringArray(options.interventions, 'selectedSupportCharacterIds'),
+    eligibleCharacterIds
   ]);
   const detailedCharacters = prioritizedIds
     .flatMap((id) => {
@@ -230,6 +230,17 @@ function uniqueBoundedIds(ids: string[]): string[] {
       if (leftNumeric !== rightNumeric) return leftNumeric ? -1 : 1;
       return left.localeCompare(right);
     });
+}
+
+function priorityOrderedIds(buckets: string[][]): string[] {
+  const seen = new Set<string>();
+  return buckets.flatMap((bucket) =>
+    uniqueBoundedIds(bucket).filter((id) => {
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    })
+  );
 }
 
 function isPreferences(value: unknown): value is PlayerPreferences {
