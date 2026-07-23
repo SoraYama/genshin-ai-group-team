@@ -5,6 +5,7 @@ export function localizeError<K extends string>(
   fallback: K
 ): string {
   const code = getErrorCode(error);
+  if (!code && error instanceof Error && error.message) return error.message;
   const key = {
     IPC_VALIDATION_FAILED: 'common.error.validation',
     IPC_UNAUTHORIZED: 'common.error.unauthorized',

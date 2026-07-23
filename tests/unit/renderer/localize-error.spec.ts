@@ -95,4 +95,15 @@ describe('localizeError', () => {
       )
     ).toBe('Unknown error');
   });
+
+  it('keeps an already-localized renderer validation message when no IPC code exists', () => {
+    expect(
+      localizeError(
+        new Error('附加请求信息格式不正确，请使用“名称: 内容”。'),
+        'zh-CN',
+        translator('zh-CN'),
+        'common.error.unknown'
+      )
+    ).toBe('附加请求信息格式不正确，请使用“名称: 内容”。');
+  });
 });
