@@ -1,8 +1,13 @@
 import type { AbyssAdvisorProgressStep } from '../../../shared/abyss-advisor.js';
-import { abyssElementLabel, localizedMechanicTerm } from '../../../shared/abyss-mechanics.js';
+import {
+  abyssElementLabel,
+  localizedMechanicTerm,
+  parseRequiredCapabilities
+} from '../../../shared/abyss-mechanics.js';
 import type { EnemyInstance, EnemyMechanics } from '../../../shared/scenario-v2.js';
 
 export type CharacterInterventionState = 'neutral' | 'locked' | 'excluded';
+export type PresentationLocale = 'zh' | 'en';
 
 const ELEMENT_LABELS: Record<string, string> = {
   pyro: '火',
@@ -23,11 +28,93 @@ const PROGRESS_LABELS: Record<AbyssAdvisorProgressStep, string> = {
   'writing-tactics': '整理打法'
 };
 
-export function enemyDisplayName(enemy: EnemyInstance): string {
-  return enemy.enemy.names['zh-CN'] ?? enemy.enemy.names['zh-Hans'] ?? '未命名敌人';
+const EN_PROGRESS_LABELS: Record<AbyssAdvisorProgressStep, string> = {
+  'reading-roster': 'Reading roster',
+  'analyzing-rules': 'Analyzing challenge rules',
+  'generating-teams': 'Building both teams',
+  'checking-conflicts': 'Checking conflicts',
+  'writing-tactics': 'Writing tactics'
+};
+
+const EN_ELEMENT_LABELS: Record<string, string> = {
+  pyro: 'Pyro',
+  hydro: 'Hydro',
+  anemo: 'Anemo',
+  geo: 'Geo',
+  electro: 'Electro',
+  dendro: 'Dendro',
+  cryo: 'Cryo',
+  untyped: 'Untyped'
+};
+
+const EN_CAPABILITY_LABELS: Record<string, string> = {
+  healing: 'healing',
+  shield: 'shielding',
+  grouping: 'grouping',
+  'off-field': 'off-field utility',
+  'on-field': 'on-field presence',
+  onslaught: 'frontline pressure',
+  plunging: 'Plunging Attacks',
+  'normal-attack': 'Normal Attacks',
+  'charged-attack': 'Charged Attacks',
+  sword: 'Sword user',
+  claymore: 'Claymore user',
+  polearm: 'Polearm user',
+  bow: 'Bow user',
+  catalyst: 'Catalyst user'
+};
+
+export function localizedEntityName(
+  names: Record<string, string>,
+  locale: PresentationLocale,
+  fallback: { zh: string; en: string }
+): string {
+  return locale === 'en'
+    ? names['en-US'] ?? names.en ?? names['en-GB'] ?? fallback.en
+    : names['zh-CN'] ?? names['zh-Hans'] ?? names.zh ?? fallback.zh;
 }
 
-export function mechanicLabels(mechanics: EnemyMechanics): string[] {
+export function localizedResultText(
+  value: string,
+  locale: PresentationLocale,
+  englishFallback: string
+): string {
+  return locale === 'en' && /[\u3400-\u9fff]/u.test(value) ? englishFallback : value;
+}
+
+export function enemyDisplayName(
+  enemy: EnemyInstance,
+  locale: PresentationLocale = 'zh'
+): string {
+  return localizedEntityName(enemy.enemy.names, locale, {
+    zh: '未命名敌人',
+    en: 'Unnamed enemy'
+  });
+}
+
+export function mechanicLabels(
+  mechanics: EnemyMechanics,
+  locale: PresentationLocale = 'zh'
+): string[] {
+  if (locale === 'en') {
+    return [
+      ...mechanics.shields.map(
+        ({ element, strength }) =>
+          `${EN_ELEMENT_LABELS[element.toLowerCase()] ?? 'Unknown'} shield${
+            strength === undefined ? '' : ` · strength ${strength}`
+          }`
+      ),
+      ...mechanics.resistances.map(
+        ({ damageType, percent }) => `${englishDamageType(damageType)} RES ${percent}%`
+      ),
+      ...mechanics.immunities.map((immunity) => `Immune: ${englishDamageType(immunity)} damage`),
+      ...parseRequiredCapabilities(mechanics.tags).map(({ known, value }) =>
+        known
+          ? `Requires ${EN_CAPABILITY_LABELS[value] ?? 'a verified capability'}`
+          : 'Requires an unrecognized capability'
+      )
+    ];
+  }
   return [
     ...mechanics.shields.map(
       ({ element, strength }) =>
@@ -41,6 +128,12 @@ export function mechanicLabels(mechanics: EnemyMechanics): string[] {
   ];
 }
 
+function englishDamageType(value: string): string {
+  const normalized = value.trim().toLowerCase().replace(/(?:-damage| damage)$/u, '');
+  if (normalized === 'physical') return 'Physical';
+  return EN_ELEMENT_LABELS[normalized] ?? 'Other damage';
+}
+
 function localizedResistanceType(value: string): string {
   const localized = localizedMechanicTerm(value);
   return localized === '未本地化机制' ? '其他伤害' : localized.replace(/(?:元素)?伤害$/u, '');
@@ -52,11 +145,18 @@ export function cycleCharacterIntervention(
   return state === 'neutral' ? 'locked' : state === 'locked' ? 'excluded' : 'neutral';
 }
 
-export function progressStepLabel(step: AbyssAdvisorProgressStep): string {
-  return PROGRESS_LABELS[step];
+export function progressStepLabel(
+  step: AbyssAdvisorProgressStep,
+  locale: PresentationLocale = 'zh'
+): string {
+  return locale === 'en' ? EN_PROGRESS_LABELS[step] : PROGRESS_LABELS[step];
 }
 
-export function characterElementLabel(element: string): string {
+export function characterElementLabel(
+  element: string,
+  locale: PresentationLocale = 'zh'
+): string {
+  if (locale === 'en') return EN_ELEMENT_LABELS[element.toLowerCase()] ?? 'Unknown';
   const label = abyssElementLabel(element);
   return label === '其他' ? '未知' : label;
 }

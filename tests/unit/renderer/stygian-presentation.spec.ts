@@ -37,6 +37,13 @@ describe('Stygian presentation', () => {
     expect(rewardTargetLabel('dire-challenge')).toBe('挑战极限难度');
     expect(reuseRuleSummary({ rule: 'forbidden', notes: [] })).toContain('不可复用');
     expect(progressStepLabel('allocating-parties')).toBe('分配三队');
+    expect(difficultyDisplayName(scenario.difficulties[5]!, 'en')).toBe('Difficulty 6');
+    expect(stygianBossDisplayName(scenario.phases[0]!.boss, 'en')).toBe('Trial Boss 1');
+    expect(rewardTargetLabel('high-reward', 'en')).toBe('Target high-tier rewards');
+    expect(reuseRuleSummary({ rule: 'forbidden', notes: [] }, 'en')).toBe(
+      'Characters cannot be reused across phases; 12 unique characters are required.'
+    );
+    expect(progressStepLabel('allocating-parties', 'en')).toBe('Allocating three teams');
     expect(
       [
         difficultyDisplayName(scenario.difficulties[5]!),
@@ -94,5 +101,23 @@ describe('Stygian presentation', () => {
       '能量回复压力上升。',
       '挑战修正暂无中文说明'
     ]);
+    expect(difficultyModifierLabels(difficulty, 'en')).toEqual([
+      'Increased energy pressure.',
+      'Modifier details unavailable.'
+    ]);
+  });
+
+  it('keeps English mechanics free of Chinese fallback terms', () => {
+    const phase = stygianScenario().phases[0]!;
+    phase.boss.mechanics.shields = [{ element: 'hydro', strength: 4 }];
+    phase.boss.mechanics.tags = ['requires-capability:bow', '需要快速破盾'];
+    const labels = stygianMechanicLabels(phase, 'en');
+    expect(labels).toEqual([
+      'Phase 1 mechanic.',
+      'Boss 1 modifier.',
+      'Hydro shield · strength 4',
+      'Required capability: Bow user'
+    ]);
+    expect(labels.join(' ')).not.toMatch(/[\u3400-\u9fff]/u);
   });
 });

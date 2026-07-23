@@ -23,11 +23,22 @@ describe('Theater presentation', () => {
     expect(progressStepLabel('budgeting-vigor')).toBe('检查活力');
     expect(pathChoiceLabel({ kind: 'random', note: '随机后应变' })).toContain('随机');
     expect(eligibilityReasonLabel(['element', 'level'])).toBe('元素不符合、等级不足');
+    expect(objectiveLabel('safe-clear', 'en')).toBe('Prioritize a reliable clear');
+    expect(elementLabel('anemo', 'en')).toBe('Anemo');
+    expect(poolSourceLabel('special-guest', 'en')).toBe('Special Guest');
+    expect(progressStepLabel('budgeting-vigor', 'en')).toBe('Budgeting Vigor');
+    expect(pathChoiceLabel({ kind: 'random', note: 'Adapt after reveal' }, 'en')).toBe(
+      'Random branch: Adapt after reveal'
+    );
+    expect(eligibilityReasonLabel(['element', 'level'], 'en')).toBe(
+      'Element not eligible, Level too low'
+    );
   });
 
   it('uses localized entity names and player-facing version labels without raw IDs', () => {
     const scenario = theaterScenario();
     expect(theaterEntityName(scenario.pools.trial[0]!)).toBe('试用演员一');
+    expect(theaterEntityName(scenario.pools.trial[0]!, 'en')).toBe('Trial One');
     expect(
       scenarioVersionLabel({
         status: 'ready',
@@ -85,5 +96,22 @@ describe('Theater presentation', () => {
     expect(JSON.stringify(presentation)).not.toMatch(
       /enemy\.internal|Internal Training|internal-only|requires-capability/
     );
+
+    const english = theaterActPresentation(scenario.acts[0]!, 'en');
+    expect(english.waves[0]).toMatchObject({
+      label: 'Wave 1',
+      enemies: [
+        expect.objectContaining({
+          name: 'Internal Training Enemy',
+          mechanics: [
+            'Hydro shield · strength 2',
+            'Physical RES 30%',
+            'Immune: Pyro damage',
+            'Requires grouping'
+          ]
+        })
+      ]
+    });
+    expect(JSON.stringify(english)).not.toMatch(/[\u3400-\u9fff]/u);
   });
 });

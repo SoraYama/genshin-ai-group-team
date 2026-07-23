@@ -37,8 +37,9 @@ export function dataClearCopy(
       case 'scenarios':
         return {
           title: `Clear ${count} downloaded challenge ${count === 1 ? 'file' : 'files'}?`,
-          effect: 'This removes downloaded challenge updates and restores bundled base data.',
-          preserves: 'Character data, recommendation history, and service settings stay.',
+          effect: 'This clears the downloaded challenge-data cache.',
+          preserves:
+            'Character data, recommendation history, and service settings stay. Current-cycle plans may be unavailable until verifiable challenge data is downloaded again.',
           action: `Clear ${count} downloaded ${count === 1 ? 'file' : 'files'}`
         };
       case 'history':
@@ -68,8 +69,9 @@ export function dataClearCopy(
     case 'scenarios':
       return {
         title: `清除 ${count} 份已下载挑战资料？`,
-        effect: '这会移除下载的挑战更新，并恢复应用随附的基础资料。',
-        preserves: '不会删除角色资料、推荐记录或智能服务设置。',
+        effect: '这会清除已下载的挑战资料缓存。',
+        preserves:
+          '不会删除角色资料、推荐记录或智能服务设置。重新取得可验证挑战资料前，可能无法生成本期方案。',
         action: `清除 ${count} 份已下载资料`
       };
     case 'history':

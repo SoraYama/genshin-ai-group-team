@@ -11,7 +11,9 @@ import type {
 import type { PlayerPreferences } from '../../../shared/scenario-v2';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { GtaButton } from '../../components/ui/GtaButton';
+import { useI18n } from '../../i18n';
 import { api } from '../../ipc';
+import { localizedResultText, type PresentationLocale } from './abyss-presentation';
 import {
   eligibilityReasonLabel,
   elementLabel,
@@ -46,9 +48,12 @@ export function TheaterWorkspace({
   onHistoryRerunConsumed?: (historyId: string) => void;
   onBack: () => void;
 }) {
+  const { locale } = useI18n();
+  const language: PresentationLocale = locale === 'en-US' ? 'en' : 'zh';
+  const isEnglish = language === 'en';
   const [view, setView] = useState<TheaterScenarioView | null>(null);
   const [profile, setProfile] = useState<PersistedProfile | null>(null);
-  const [loadError, setLoadError] = useState('');
+  const [loadError, setLoadError] = useState<'load' | 'generate' | ''>('');
   const [target, setTarget] = useState<TheaterObjective>('safe-clear');
   const [act, setAct] = useState<number | 'all'>('all');
   const [selectedOwned, setSelectedOwned] = useState<string[]>([]);
@@ -164,7 +169,7 @@ export function TheaterWorkspace({
           }
         }
       })
-      .catch(() => active && setLoadError('读取角色或剧诗资料失败。'));
+      .catch(() => active && setLoadError('load'));
     return () => {
       active = false;
       sequence.current += 1;
@@ -255,7 +260,7 @@ export function TheaterWorkspace({
       if (sequence.current === request) setResult(next);
     } catch {
       if (sequence.current === request)
-        setLoadError('生成剧诗路线时发生错误；角色与挑战资料没有被修改。');
+        setLoadError('generate');
     } finally {
       if (sequence.current === request) {
         activeCorrelation.current = null;
@@ -275,20 +280,32 @@ export function TheaterWorkspace({
   if (loadError && (!view || !profile))
     return (
       <div className="gta-theater-unavailable" role="alert">
-        <EmptyState kind="offline" />
-        <p>{loadError}</p>
+        <EmptyState kind="offline" locale={language} />
+        <p>
+          {isEnglish
+            ? 'Roster or Imaginarium Theater data could not be loaded.'
+            : '读取角色或剧诗资料失败。'}
+        </p>
       </div>
     );
   if (!view || !profile)
-    return <div className="gta-theater-unavailable">正在读取演员与剧诗资料…</div>;
+    return (
+      <div className="gta-theater-unavailable">
+        {isEnglish ? 'Loading cast and Theater data…' : '正在读取演员与剧诗资料…'}
+      </div>
+    );
   if (view.status === 'unavailable')
     return (
       <section className="gta-theater-unavailable">
         <GtaButton tone="ghost" onClick={onBack}>
-          返回挑战入口
+          {isEnglish ? 'Back to challenge selection' : '返回挑战入口'}
         </GtaButton>
-        <EmptyState kind="offline" />
-        <p>{view.message}</p>
+        <EmptyState kind="offline" locale={language} />
+        <p>
+          {isEnglish
+            ? 'Verified Imaginarium Theater data is unavailable. Saved plans remain available.'
+            : view.message}
+        </p>
       </section>
     );
   if (!scenario || !preview) return null;
@@ -298,72 +315,124 @@ export function TheaterWorkspace({
       <header className="gta-theater-heading">
         <div>
           <GtaButton tone="ghost" onClick={onBack}>
-            返回挑战入口
+            {isEnglish ? 'Back to challenge selection' : '返回挑战入口'}
           </GtaButton>
-          <span className="gta-page-kicker">演员池 · 活力 · 幕次路线</span>
-          <h3 id="theater-workspace-title">幻想真境剧诗手册</h3>
-          <p>先确认谁能入场，再把稀缺能力和活力留给关键幕次。</p>
+          <span className="gta-page-kicker">
+            {isEnglish ? 'Cast · Vigor · Act route' : '演员池 · 活力 · 幕次路线'}
+          </span>
+          <h3 id="theater-workspace-title">
+            {isEnglish ? 'Imaginarium Theater planner' : '幻想真境剧诗手册'}
+          </h3>
+          <p>
+            {isEnglish
+              ? 'Confirm who is eligible, then reserve scarce capabilities and Vigor for key acts.'
+              : '先确认谁能入场，再把稀缺能力和活力留给关键幕次。'}
+          </p>
         </div>
         <div className="gta-theater-stamp">
-          <span>资料状态</span>
-          <strong>{scenarioVersionLabel(view)}</strong>
+          <span>{isEnglish ? 'Data status' : '资料状态'}</span>
+          <strong>{scenarioVersionLabel(view, language)}</strong>
         </div>
       </header>
       {view.trust === 'development-sample' && (
         <div className="gta-theater-banner" role="status">
-          <strong>演练资料，不代表本期</strong>
-          <span>元素、演员、敌人与路线都是原创交互样例。</span>
+          <strong>{isEnglish ? 'Practice data — not the current cycle' : '演练资料，不代表本期'}</strong>
+          <span>
+            {isEnglish
+              ? 'Elements, actors, enemies, and routes are original interaction samples.'
+              : '元素、演员、敌人与路线都是原创交互样例。'}
+          </span>
         </div>
       )}
       {historyNotice && (
         <div className="gta-theater-banner is-history-prefill" role="status">
-          <strong>旧方案已准备</strong>
-          <span>{historyNotice}</span>
+          <strong>{isEnglish ? 'Saved plan ready' : '旧方案已准备'}</strong>
+          <span>
+            {isEnglish
+              ? 'Available saved choices were restored. Review them before generating; the smart service will not start automatically.'
+              : historyNotice}
+          </span>
         </div>
       )}
       {scenarioReadOnly && (
         <div className="gta-theater-banner" role="status">
-          <strong>资料已过期，仅供查看</strong>
-          <span>为避免误导，暂时不能据此生成本期路线。</span>
+          <strong>{isEnglish ? 'Outdated data — view only' : '资料已过期，仅供查看'}</strong>
+          <span>
+            {isEnglish
+              ? 'New current-cycle routes are disabled to avoid misleading results.'
+              : '为避免误导，暂时不能据此生成本期路线。'}
+          </span>
         </div>
       )}
       {view.trust === 'production' && view.refreshWarning && !scenarioReadOnly && (
         <div className="gta-theater-banner" role="status">
-          <strong>正在使用最近确认资料</strong>
-          <span>{view.refreshWarning}</span>
+          <strong>
+            {isEnglish ? 'Using the latest verified snapshot' : '正在使用最近确认资料'}
+          </strong>
+          <span>
+            {isEnglish
+              ? 'Refresh did not complete. Check the data version before generating.'
+              : view.refreshWarning}
+          </span>
         </div>
       )}
 
       <section className="gta-theater-eligibility" aria-labelledby="theater-eligibility-title">
         <div className="gta-theater-section-head">
           <div>
-            <span className="gta-page-kicker">入场资格</span>
-            <h4 id="theater-eligibility-title">元素、等级与人数</h4>
+            <span className="gta-page-kicker">{isEnglish ? 'Eligibility' : '入场资格'}</span>
+            <h4 id="theater-eligibility-title">
+              {isEnglish ? 'Elements, level, and headcount' : '元素、等级与人数'}
+            </h4>
           </div>
           <strong className={preview.shortage ? 'is-short' : 'is-ready'}>
-            {preview.qualified} / {scenario.eligibility.requiredHeadcount} 名可入场
+            {isEnglish
+              ? `${preview.qualified} / ${scenario.eligibility.requiredHeadcount} eligible`
+              : `${preview.qualified} / ${scenario.eligibility.requiredHeadcount} 名可入场`}
           </strong>
         </div>
         <div className="gta-theater-ruleline">
-          <span>当期元素：{scenario.eligibility.elements.map(elementLabel).join('、')}</span>
-          <span>最低等级：{scenario.eligibility.minimumLevel}</span>
-          <span>人数要求：{scenario.eligibility.requiredHeadcount}</span>
+          <span>
+            {isEnglish ? 'Current elements: ' : '当期元素：'}
+            {scenario.eligibility.elements
+              .map((element) => elementLabel(element, language))
+              .join(isEnglish ? ', ' : '、')}
+          </span>
+          <span>
+            {isEnglish ? 'Minimum level: ' : '最低等级：'}
+            {scenario.eligibility.minimumLevel}
+          </span>
+          <span>
+            {isEnglish ? 'Required headcount: ' : '人数要求：'}
+            {scenario.eligibility.requiredHeadcount}
+          </span>
         </div>
         {preview.shortage > 0 && (
           <div className="gta-theater-shortage" role="alert">
-            <strong>还缺 {preview.shortage} 名可入场角色</strong>
-            <p>开幕、试用与支援演员暂不计入硬资格；未知规则不会按已满足处理。</p>
+            <strong>
+              {isEnglish
+                ? `${preview.shortage} more eligible ${preview.shortage === 1 ? 'character is' : 'characters are'} required`
+                : `还缺 ${preview.shortage} 名可入场角色`}
+            </strong>
+            <p>
+              {isEnglish
+                ? 'Opening, Trial, and Support actors do not count toward hard eligibility; unknown rules are not assumed satisfied.'
+                : '开幕、试用与支援演员暂不计入硬资格；未知规则不会按已满足处理。'}
+            </p>
             {preview.lowLevel.map((character) => (
               <p key={character.id}>
-                优先提升 {character.name} 至 {scenario.eligibility.minimumLevel}{' '}
-                级可补位（应用内建议，不是官方攻略）。
+                {isEnglish
+                  ? `Raise ${character.name} to level ${scenario.eligibility.minimumLevel} to fill a slot (in-app suggestion, not official guidance).`
+                  : `优先提升 ${character.name} 至 ${scenario.eligibility.minimumLevel} 级可补位（应用内建议，不是官方攻略）。`}
               </p>
             ))}
           </div>
         )}
         {preview.qualifiedSpecialGuests.length > 0 && (
           <p className="gta-theater-special-guest-rule" role="status">
-            自有特邀演员只绕过元素限制，仍需满足最低等级；本次已计入：
+            {isEnglish
+              ? 'Owned Special Guests bypass only the element restriction and must still meet the minimum level. Counted here: '
+              : '自有特邀演员只绕过元素限制，仍需满足最低等级；本次已计入：'}
             {preview.qualifiedSpecialGuests.map(({ name }) => name).join('、')}
           </p>
         )}
@@ -372,10 +441,16 @@ export function TheaterWorkspace({
       <section className="gta-theater-cast" aria-labelledby="theater-cast-title">
         <div className="gta-theater-section-head">
           <div>
-            <span className="gta-page-kicker">当期演员</span>
-            <h4 id="theater-cast-title">演员来源要分清</h4>
+            <span className="gta-page-kicker">{isEnglish ? 'Current cast' : '当期演员'}</span>
+            <h4 id="theater-cast-title">
+              {isEnglish ? 'Keep actor sources explicit' : '演员来源要分清'}
+            </h4>
           </div>
-          <p>外部演员不会冒充你已拥有的角色。</p>
+          <p>
+            {isEnglish
+              ? 'External actors are never presented as owned characters.'
+              : '外部演员不会冒充你已拥有的角色。'}
+          </p>
         </div>
         <div className="gta-theater-pools">
           {(['opening', 'trial', 'special-guest', 'support'] as const).map((source) => (
@@ -385,24 +460,34 @@ export function TheaterWorkspace({
               scenario={scenario}
               selected={selectedPools[source] ?? []}
               disabled={running}
+              locale={language}
               onToggle={togglePool}
             />
           ))}
         </div>
         <p className="gta-theater-unknown-rule">
-          开幕、试用与支援演员暂不计入硬资格；自有特邀演员仅在等级达标后计入，并保留特邀来源标记。
+          {isEnglish
+            ? 'Opening, Trial, and Support actors do not count toward hard eligibility. Owned Special Guests count only at the required level and keep their source label.'
+            : '开幕、试用与支援演员暂不计入硬资格；自有特邀演员仅在等级达标后计入，并保留特邀来源标记。'}
         </p>
       </section>
 
       <section className="gta-theater-roster" aria-labelledby="theater-roster-title">
         <div className="gta-theater-section-head">
           <div>
-            <span className="gta-page-kicker">你的角色</span>
-            <h4 id="theater-roster-title">选出优先纳入演员池的角色</h4>
+            <span className="gta-page-kicker">{isEnglish ? 'Your roster' : '你的角色'}</span>
+            <h4 id="theater-roster-title">
+              {isEnglish ? 'Choose priority cast members' : '选出优先纳入演员池的角色'}
+            </h4>
           </div>
-          <span>已优先 {selectedOwned.length} 名</span>
+          <span>
+            {isEnglish ? `${selectedOwned.length} prioritized` : `已优先 ${selectedOwned.length} 名`}
+          </span>
         </div>
-        <div className="gta-theater-owned" aria-label="可入场角色">
+        <div
+          className="gta-theater-owned"
+          aria-label={isEnglish ? 'Eligible characters' : '可入场角色'}
+        >
           {preview.eligible.map((character) => (
             <button
               key={character.id}
@@ -420,26 +505,38 @@ export function TheaterWorkspace({
             >
               <strong>{character.name}</strong>
               <small>
-                {elementLabel(character.element)}元素 · 等级 {character.level}
+                {isEnglish
+                  ? `${elementLabel(character.element, language)} · Level ${character.level}`
+                  : `${elementLabel(character.element, language)}元素 · 等级 ${character.level}`}
               </small>
               <em>
                 {selectedOwned.includes(String(character.id))
-                  ? '优先纳入'
+                  ? isEnglish
+                    ? 'Prioritize'
+                    : '优先纳入'
                   : excludedOwned.includes(String(character.id))
-                    ? '本次排除'
-                    : '可入场'}
+                    ? isEnglish
+                      ? 'Exclude this run'
+                      : '本次排除'
+                    : isEnglish
+                      ? 'Eligible'
+                      : '可入场'}
               </em>
             </button>
           ))}
         </div>
         {preview.ineligible.length > 0 && (
           <details className="gta-theater-ineligible">
-            <summary>查看不符合的自有角色（{preview.ineligible.length}）</summary>
+            <summary>
+              {isEnglish
+                ? `Review ineligible owned characters (${preview.ineligible.length})`
+                : `查看不符合的自有角色（${preview.ineligible.length}）`}
+            </summary>
             <ul>
               {preview.ineligible.map(({ character, reasons }) => (
                 <li key={character.id}>
                   <strong>{character.name}</strong>
-                  <span>{eligibilityReasonLabel(reasons)}</span>
+                  <span>{eligibilityReasonLabel(reasons, language)}</span>
                 </li>
               ))}
             </ul>
@@ -450,11 +547,15 @@ export function TheaterWorkspace({
       <section className="gta-theater-controls" aria-labelledby="theater-controls-title">
         <div className="gta-theater-section-head">
           <div>
-            <span className="gta-page-kicker">本次目标</span>
-            <h4 id="theater-controls-title">路线偏好</h4>
+            <span className="gta-page-kicker">{isEnglish ? 'Plan target' : '本次目标'}</span>
+            <h4 id="theater-controls-title">{isEnglish ? 'Route preferences' : '路线偏好'}</h4>
           </div>
         </div>
-        <div className="gta-theater-objectives" role="group" aria-label="选择规划幕次">
+        <div
+          className="gta-theater-objectives"
+          role="group"
+          aria-label={isEnglish ? 'Choose acts to plan' : '选择规划幕次'}
+        >
           <button
             type="button"
             aria-pressed={act === 'all'}
@@ -464,7 +565,7 @@ export function TheaterWorkspace({
               invalidate();
             }}
           >
-            全部幕次
+            {isEnglish ? 'All acts' : '全部幕次'}
           </button>
           {scenario.acts.map(({ act: number }) => (
             <button
@@ -477,11 +578,15 @@ export function TheaterWorkspace({
                 invalidate();
               }}
             >
-              第 {number} 幕
+              {isEnglish ? `Act ${number}` : `第 ${number} 幕`}
             </button>
           ))}
         </div>
-        <div className="gta-theater-objectives" role="group" aria-label="选择剧诗目标">
+        <div
+          className="gta-theater-objectives"
+          role="group"
+          aria-label={isEnglish ? 'Choose Theater goal' : '选择剧诗目标'}
+        >
           {OBJECTIVES.map((value) => (
             <button
               key={value}
@@ -493,16 +598,20 @@ export function TheaterWorkspace({
                 invalidate();
               }}
             >
-              {objectiveLabel(value)}
+              {objectiveLabel(value, language)}
             </button>
           ))}
         </div>
-        <div className="gta-theater-preferences" role="group" aria-label="路线偏好">
+        <div
+          className="gta-theater-preferences"
+          role="group"
+          aria-label={isEnglish ? 'Route preferences' : '路线偏好'}
+        >
           {[
-            ['comfort', '操作简单'],
-            ['survival', '生存优先'],
-            ['lowInvestment', '低练度'],
-            ['noBuildChange', '不换装备']
+            ['comfort', isEnglish ? 'Simple rotations' : '操作简单'],
+            ['survival', isEnglish ? 'Prioritize survival' : '生存优先'],
+            ['lowInvestment', isEnglish ? 'Lower investment' : '低练度'],
+            ['noBuildChange', isEnglish ? 'Keep current builds' : '不换装备']
           ].map(([key, label]) => (
             <button
               key={key}
@@ -525,26 +634,36 @@ export function TheaterWorkspace({
             disabled={running || preview.shortage > 0 || scenarioReadOnly}
           >
             {running
-              ? '正在规划路线…'
+              ? isEnglish
+                ? 'Planning route…'
+                : '正在规划路线…'
               : preview.shortage > 0
-                ? '角色不足，暂不能生成'
-                : '生成剧诗路线'}
+                ? isEnglish
+                  ? 'Not enough eligible characters'
+                  : '角色不足，暂不能生成'
+                : isEnglish
+                  ? 'Generate Theater route'
+                  : '生成剧诗路线'}
           </GtaButton>
           <GtaButton tone="ghost" onClick={cancel} disabled={!running}>
-            取消生成
+            {isEnglish ? 'Cancel generation' : '取消生成'}
           </GtaButton>
         </div>
       </section>
 
       {(running || activeStep) && (
-        <ol className="gta-theater-progress" aria-label="路线生成进度" aria-live="polite">
+        <ol
+          className="gta-theater-progress"
+          aria-label={isEnglish ? 'Route generation progress' : '路线生成进度'}
+          aria-live="polite"
+        >
           {PROGRESS.map((step, index) => {
             const current = activeStep ? PROGRESS.indexOf(activeStep) : -1;
             const done = Boolean(result) || index < current;
             return (
               <li key={step} className={done ? 'is-done' : index === current ? 'is-active' : ''}>
                 <span aria-hidden="true">{done ? '✓' : index + 1}</span>
-                {progressStepLabel(step)}
+                {progressStepLabel(step, language)}
               </li>
             );
           })}
@@ -552,10 +671,19 @@ export function TheaterWorkspace({
       )}
       {loadError && (
         <p className="gta-theater-inline-error" role="alert">
-          {loadError}
+          {isEnglish
+            ? 'The Theater route could not be generated. Character and challenge data were not changed.'
+            : '生成剧诗路线时发生错误；角色与挑战资料没有被修改。'}
         </p>
       )}
-      {result && <TheaterResult result={result} profile={profile} scenario={scenario} />}
+      {result && (
+        <TheaterResult
+          result={result}
+          profile={profile}
+          scenario={scenario}
+          locale={language}
+        />
+      )}
     </section>
   );
 }
@@ -565,18 +693,21 @@ function Pool({
   scenario,
   selected,
   disabled,
+  locale,
   onToggle
 }: {
   source: 'opening' | 'trial' | 'special-guest' | 'support';
   scenario: TheaterScenario;
   selected: string[];
   disabled: boolean;
+  locale: PresentationLocale;
   onToggle: (source: string, id: string) => void;
 }) {
+  const isEnglish = locale === 'en';
   const key = source === 'special-guest' ? 'specialGuest' : source;
   return (
     <section>
-      <span>{poolSourceLabel(source)}</span>
+      <span>{poolSourceLabel(source, locale)}</span>
       {scenario.pools[key].length ? (
         scenario.pools[key].map((item) => (
           <button
@@ -586,12 +717,20 @@ function Pool({
             aria-pressed={selected.includes(item.id)}
             onClick={() => onToggle(source, item.id)}
           >
-            <strong>{theaterEntityName(item)}</strong>
-            <small>{selected.includes(item.id) ? '已纳入路线考量' : '来源独立标记'}</small>
+            <strong>{theaterEntityName(item, locale)}</strong>
+            <small>
+              {selected.includes(item.id)
+                ? isEnglish
+                  ? 'Included in route planning'
+                  : '已纳入路线考量'
+                : isEnglish
+                  ? 'Source kept explicit'
+                  : '来源独立标记'}
+            </small>
           </button>
         ))
       ) : (
-        <p>当期未列出</p>
+        <p>{isEnglish ? 'None listed for this cycle' : '当期未列出'}</p>
       )}
     </section>
   );
@@ -600,23 +739,36 @@ function Pool({
 function TheaterResult({
   result,
   profile,
-  scenario
+  scenario,
+  locale
 }: {
   result: TheaterAdvisorResult;
   profile: PersistedProfile;
   scenario: TheaterScenario;
+  locale: PresentationLocale;
 }) {
+  const isEnglish = locale === 'en';
   if (result.status === 'blocked')
     return (
       <section className="gta-theater-result is-blocked">
-        <h4>暂时不能生成有效路线</h4>
+        <h4>{isEnglish ? 'A valid route cannot be generated yet' : '暂时不能生成有效路线'}</h4>
         <ul>
           {result.issues.map((issue, index) => (
-            <li key={`${issue.code}-${index}`}>{issue.message}</li>
+            <li key={`${issue.code}-${index}`}>
+              {isEnglish
+                ? `Planning constraint ${index + 1} is not satisfied by the current choices.`
+                : issue.message}
+            </li>
           ))}
         </ul>
         {result.eligibility.constructionAdvice.map((advice, index) => (
-          <p key={index}>{advice.note}</p>
+          <p key={index}>
+            {localizedResultText(
+              advice.note,
+              locale,
+              'Adjust the selected cast to satisfy the published eligibility rules.'
+            )}
+          </p>
         ))}
       </section>
     );
@@ -627,7 +779,12 @@ function TheaterResult({
       .map((entity) => [entity.id, entity])
   );
   const actorName = (id: string) =>
-    byId.get(id)?.name ?? (poolById.get(id) ? theaterEntityName(poolById.get(id)!) : '未命名演员');
+    byId.get(id)?.name ??
+    (poolById.get(id)
+      ? theaterEntityName(poolById.get(id)!, locale)
+      : isEnglish
+        ? 'Unnamed actor'
+        : '未命名演员');
   const castEntries = [
     ...result.plan.cast.selectedCharacterIds.map((id) => ({ id, source: 'owned' as const })),
     ...result.plan.cast.openingCharacterIds.map((id) => ({ id, source: 'opening' as const })),
@@ -642,50 +799,76 @@ function TheaterResult({
     <section className="gta-theater-result" aria-labelledby="theater-result-title">
       <header>
         <div>
-          <span className="gta-page-kicker">路线计划</span>
-          <h4 id="theater-result-title">演员池与活力已排成幕次路线</h4>
+          <span className="gta-page-kicker">{isEnglish ? 'Route plan' : '路线计划'}</span>
+          <h4 id="theater-result-title">
+            {isEnglish ? 'Cast and Vigor arranged into an act route' : '演员池与活力已排成幕次路线'}
+          </h4>
         </div>
-        <span>{result.source === 'smart-service' ? '智能服务' : '本地规则'}</span>
+        <span>
+          {result.source === 'smart-service'
+            ? isEnglish
+              ? 'Smart service'
+              : '智能服务'
+            : isEnglish
+              ? 'Local rules'
+              : '本地规则'}
+        </span>
       </header>
       <section className="gta-theater-result-cast">
-        <h5>入场演员池</h5>
+        <h5>{isEnglish ? 'Selected cast' : '入场演员池'}</h5>
         <div>
           {castEntries.map(({ id, source }) => (
             <span key={`${source}:${id}`} data-theater-actor-id={id}>
               <strong>{actorName(id)}</strong>
-              <small>{source === 'owned' ? '自有角色' : poolSourceLabel(source)}</small>
+              <small>
+                {source === 'owned'
+                  ? isEnglish
+                    ? 'Owned character'
+                    : '自有角色'
+                  : poolSourceLabel(source, locale)}
+              </small>
             </span>
           ))}
         </div>
       </section>
       <section className="gta-theater-vigor">
-        <h5>逐幕活力预算</h5>
+        <h5>{isEnglish ? 'Vigor budget by act' : '逐幕活力预算'}</h5>
         <div>
           {result.vigorBudget.map((item) => (
             <span key={`${item.act}:${item.characterId}`}>
               <small>
-                第 {item.act} 幕 · {actorName(item.characterId)}
+                {isEnglish ? `Act ${item.act}` : `第 ${item.act} 幕`} ·{' '}
+                {actorName(item.characterId)}
               </small>
               <strong>
                 {item.before} → {item.after}
               </strong>
-              <em>计划花费 {item.spent}</em>
+              <em>{isEnglish ? `Planned spend ${item.spent}` : `计划花费 ${item.spent}`}</em>
             </span>
           ))}
         </div>
       </section>
-      <div className="gta-theater-route" aria-label="剧诗幕次路线">
+      <div
+        className="gta-theater-route"
+        aria-label={isEnglish ? 'Imaginarium Theater act route' : '剧诗幕次路线'}
+      >
         {result.plan.acts.map((act) => {
           const scenarioAct = scenario.acts.find((item) => item.act === act.act);
-          const presentation = scenarioAct ? theaterActPresentation(scenarioAct) : null;
+          const presentation = scenarioAct
+            ? theaterActPresentation(scenarioAct, locale)
+            : null;
           return (
             <article key={act.act}>
               <div className="gta-theater-route-node">
                 <span>{String(act.act).padStart(2, '0')}</span>
               </div>
               <div>
-                <h5>第 {act.act} 幕候选</h5>
-                <p>{act.candidateCharacterIds.map(actorName).join('、')}</p>
+                <h5>{isEnglish ? `Act ${act.act} candidates` : `第 ${act.act} 幕候选`}</h5>
+                <p>
+                  {act.candidateCharacterIds
+                    .map(actorName)
+                    .join(isEnglish ? ', ' : '、')}
+                </p>
                 {presentation && (
                   <div className="gta-theater-act-encounters">
                     {presentation.waves.map((wave) => (
@@ -695,7 +878,8 @@ function TheaterResult({
                         {wave.enemies.map((enemy, index) => (
                           <div key={`${enemy.name}:${index}`}>
                             <span>
-                              {enemy.name} ×{enemy.count} · {enemy.level} 级
+                              {enemy.name} ×{enemy.count} ·{' '}
+                              {isEnglish ? `Level ${enemy.level}` : `${enemy.level} 级`}
                             </span>
                             {enemy.mechanics.length > 0 && (
                               <ul>
@@ -711,14 +895,15 @@ function TheaterResult({
                   </div>
                 )}
                 <div className="gta-theater-act-rationale">
-                  <strong>为什么这样安排</strong>
-                  <p>{pathChoiceLabel(act.pathChoice)}</p>
+                  <strong>{isEnglish ? 'Why this arrangement' : '为什么这样安排'}</strong>
+                  <p>{pathChoiceLabel(act.pathChoice, locale)}</p>
                 </div>
                 <small>
-                  预计活力：
+                  {isEnglish ? 'Planned Vigor: ' : '预计活力：'}
                   {act.plannedVigorSpend
                     .map((item) => `${actorName(item.characterId)} ${item.cost}`)
-                    .join('、') || '现场保留'}
+                    .join(isEnglish ? ', ' : '、') ||
+                    (isEnglish ? 'Hold for the run' : '现场保留')}
                 </small>
               </div>
             </article>
@@ -726,15 +911,23 @@ function TheaterResult({
         })}
       </div>
       <section className="gta-theater-preserve">
-        <h5>保留与分支优先级</h5>
+        <h5>{isEnglish ? 'Preservation and branch priorities' : '保留与分支优先级'}</h5>
         {result.routeGuidance.preserveCharacterIds.length > 0 && (
           <p>
-            <strong>优先保留：</strong>
-            {result.routeGuidance.preserveCharacterIds.map(actorName).join('、')}
+            <strong>{isEnglish ? 'Preserve first: ' : '优先保留：'}</strong>
+            {result.routeGuidance.preserveCharacterIds
+              .map(actorName)
+              .join(isEnglish ? ', ' : '、')}
           </p>
         )}
         {result.routeGuidance.notes.map((note) => (
-          <p key={note}>{note}</p>
+          <p key={note}>
+            {localizedResultText(
+              note,
+              locale,
+              'Preserve scarce capabilities for later route branches.'
+            )}
+          </p>
         ))}
         {result.routeGuidance.arcanaPriorities.length > 0 && (
           <ol className="gta-theater-arcana">
@@ -742,10 +935,25 @@ function TheaterResult({
               const budget = result.nodeBudget.find(({ nodeId }) => nodeId === priority.nodeId);
               return (
                 <li key={priority.nodeId}>
-                  <strong>{priority.name}</strong>
-                  <span>触发条件：{priority.condition}</span>
-                  <span>选择依据：{priority.reason}</span>
-                  <small>节点资源消耗：{budget?.cost ?? '资料未确认'}</small>
+                  <strong>
+                    {localizedResultText(priority.name, locale, 'Saved Arcana priority')}
+                  </strong>
+                  <span>
+                    {isEnglish ? 'Trigger: ' : '触发条件：'}
+                    {isEnglish && /[\u3400-\u9fff]/u.test(priority.condition)
+                      ? 'Condition saved with the plan'
+                      : priority.condition}
+                  </span>
+                  <span>
+                    {isEnglish ? 'Reason: ' : '选择依据：'}
+                    {isEnglish && /[\u3400-\u9fff]/u.test(priority.reason)
+                      ? 'Reason saved with the plan'
+                      : priority.reason}
+                  </span>
+                  <small>
+                    {isEnglish ? 'Node cost: ' : '节点资源消耗：'}
+                    {budget?.cost ?? (isEnglish ? 'Not verified' : '资料未确认')}
+                  </small>
                 </li>
               );
             })}
@@ -756,14 +964,30 @@ function TheaterResult({
         <footer>
           {result.warnings.length > 0 && (
             <p>
-              <strong>需要留意：</strong>
-              {result.warnings.join('；')}
+              <strong>{isEnglish ? 'Watch for: ' : '需要留意：'}</strong>
+              {result.warnings
+                .map((text) =>
+                  localizedResultText(
+                    text,
+                    locale,
+                    'Verify route assumptions against the current run.'
+                  )
+                )
+                .join(isEnglish ? '; ' : '；')}
             </p>
           )}
           {result.assumptions.length > 0 && (
             <p>
-              <strong>本次建议基于：</strong>
-              {result.assumptions.join('；')}
+              <strong>{isEnglish ? 'This recommendation assumes: ' : '本次建议基于：'}</strong>
+              {result.assumptions
+                .map((text) =>
+                  localizedResultText(
+                    text,
+                    locale,
+                    'Only verified eligibility and route facts are treated as confirmed.'
+                  )
+                )
+                .join(isEnglish ? '; ' : '；')}
             </p>
           )}
         </footer>

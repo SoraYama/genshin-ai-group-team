@@ -43,14 +43,17 @@ export interface ChallengeHistoryGroup {
   entries: ChallengeHistoryEntry[];
 }
 
-const MODE_LABELS: Record<ChallengeHistoryEntry['mode'], string> = {
-  'spiral-abyss': '深境螺旋',
-  'stygian-onslaught': '幽境危战',
-  'imaginarium-theater': '幻想真境剧诗'
+const MODE_LABELS: Record<ChallengeHistoryEntry['mode'], { zh: string; en: string }> = {
+  'spiral-abyss': { zh: '深境螺旋', en: 'Spiral Abyss' },
+  'stygian-onslaught': { zh: '幽境危战', en: 'Stygian Onslaught' },
+  'imaginarium-theater': { zh: '幻想真境剧诗', en: 'Imaginarium Theater' }
 };
 
-export function periodLabelFromScenario(_scenarioId: string): string {
-  return '保存时未记录周期';
+export function periodLabelFromScenario(
+  _scenarioId: string,
+  locale: 'zh' | 'en' = 'zh'
+): string {
+  return locale === 'en' ? 'Period not saved' : '保存时未记录周期';
 }
 
 function historyPeriodLabel(
@@ -89,7 +92,29 @@ export function historyDeleteRecoveryKind(
     : 'reload';
 }
 
-export function historyCardTitle(entry: ChallengeHistoryEntry): string {
+export function historyCardTitle(
+  entry: ChallengeHistoryEntry,
+  locale: 'zh' | 'en' = 'zh'
+): string {
+  if (locale === 'en') {
+    switch (entry.mode) {
+      case 'spiral-abyss':
+        return `Spiral Abyss · Floor ${entry.target.floor}${
+          entry.target.chamber ? ` · Chamber ${entry.target.chamber}` : ''
+        }`;
+      case 'stygian-onslaught': {
+        const difficulty = /[\u3400-\u9fff]/u.test(entry.difficultyName)
+          ? `Difficulty ${
+              /(\d+)(?!.*\d)/u.exec(entry.difficultyName)?.[1] ??
+              difficultyOrder(entry.difficultyId)
+            }`
+          : entry.difficultyName;
+        return `Stygian Onslaught · ${difficulty}`;
+      }
+      case 'imaginarium-theater':
+        return `Imaginarium Theater · ${entry.act ? `Act ${entry.act}` : 'All acts'}`;
+    }
+  }
   switch (entry.mode) {
     case 'spiral-abyss':
       return `深境螺旋 ${entry.target.floor} 层${
@@ -100,6 +125,10 @@ export function historyCardTitle(entry: ChallengeHistoryEntry): string {
     case 'imaginarium-theater':
       return `幻想真境剧诗${entry.act ? ` · 第 ${entry.act} 幕` : ' · 全部幕次'}`;
   }
+}
+
+function difficultyOrder(difficultyId: string): string {
+  return /(\d+)(?!.*\d)/u.exec(difficultyId)?.[1] ?? 'saved';
 }
 
 export function historySavedVersion(
@@ -150,7 +179,10 @@ export function historyDetailSemanticSnapshot(entry: ChallengeHistoryEntry) {
   }
 }
 
-export function groupChallengeHistory(entries: ChallengeHistoryEntry[]): ChallengeHistoryGroup[] {
+export function groupChallengeHistory(
+  entries: ChallengeHistoryEntry[],
+  locale: 'zh' | 'en' = 'zh'
+): ChallengeHistoryGroup[] {
   const byKey = new Map<string, ChallengeHistoryEntry[]>();
   for (const entry of entries) {
     const key = `${entry.uid}:${entry.mode}:${entry.scenarioId}`;
@@ -162,13 +194,13 @@ export function groupChallengeHistory(entries: ChallengeHistoryEntry[]): Challen
         .slice()
         .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
       const first = sortedEntries[0]!;
-      const periodLabel = historyPeriodLabel(first);
+      const periodLabel = historyPeriodLabel(first, locale);
       return {
         key,
         mode: first.mode,
         scenarioId: first.scenarioId,
         periodLabel,
-        title: `${MODE_LABELS[first.mode]} · ${periodLabel}`,
+        title: `${MODE_LABELS[first.mode][locale]} · ${periodLabel}`,
         entries: sortedEntries
       };
     })

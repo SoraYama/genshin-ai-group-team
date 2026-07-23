@@ -34,6 +34,21 @@ async function expectNoForbiddenPlayerTerms(): Promise<void> {
   expect(content).not.toMatch(FORBIDDEN_PLAYER_TERMS);
 }
 
+async function switchToEnglish(): Promise<void> {
+  await page.getByRole('button', { name: '账号与设置' }).click();
+  await page.getByRole('menuitem', { name: '切换语言，当前：中文' }).click();
+}
+
+async function switchToChinese(): Promise<void> {
+  await page.getByRole('button', { name: 'Account and settings' }).click();
+  await page.getByRole('menuitem', { name: 'Switch language, current: English' }).click();
+}
+
+async function expectNoChineseChrome(terms: RegExp): Promise<void> {
+  const content = (await page.locator('main').textContent()) ?? '';
+  expect(content).not.toMatch(terms);
+}
+
 async function expectPageFitsEveryViewport(label: string): Promise<void> {
   for (const viewport of REQUIRED_VIEWPORTS) {
     await page.setViewportSize(viewport);
@@ -1033,6 +1048,20 @@ test('runs the abyss-specific development-sample flow with accessible interventi
   await page.getByRole('button', { name: '挑战配队' }).click();
   await page.getByRole('button', { name: /深境螺旋/ }).click();
 
+  await switchToEnglish();
+  await expect(page.getByRole('heading', { name: 'Choose a challenge' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Spiral Abyss/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Stygian Onslaught/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Imaginarium Theater/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Spiral Abyss planner' })).toBeVisible();
+  await expect(page.getByRole('searchbox', { name: 'Search available characters' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Generate both teams' })).toBeVisible();
+  await expectNoChineseChrome(
+    /选择挑战|深境螺旋战线|搜索可用角色|生成上下半方案|配队进度/u
+  );
+  await switchToChinese();
+  await expect(page.getByRole('heading', { name: '深境螺旋战线' })).toBeVisible();
+
   await expect(page.getByText('演练资料，不代表本期')).toBeVisible();
   await expect(page.getByText('演练增益', { exact: true })).toBeVisible();
   await expect(page.getByText('本期祝福', { exact: true })).toHaveCount(0);
@@ -1086,6 +1115,20 @@ test('runs the abyss-specific development-sample flow with accessible interventi
   await expect(page.locator('.gta-abyss-progress li').last()).toHaveClass(/is-done/);
   await expectNoForbiddenPlayerTerms();
 
+  await switchToEnglish();
+  await expect(page.getByRole('heading', { name: 'Spiral Abyss planner' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'No character overlap between halves' })
+  ).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'First-half team' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Second-half team' })).toBeVisible();
+  await expect(page.getByLabel('Team planning progress')).toBeVisible();
+  await expectNoChineseChrome(
+    /深境螺旋战线|生成上下半方案|上半队伍|下半队伍|配队进度/u
+  );
+  await switchToChinese();
+  await expect(page.getByRole('heading', { name: '上下半零重复' })).toBeVisible();
+
   await expectPageFitsEveryViewport('Abyss input and result');
   await page.setViewportSize({ width: 1024, height: 768 });
   await page.getByRole('heading', { name: '上下半零重复' }).scrollIntoViewIfNeeded();
@@ -1125,6 +1168,18 @@ test('runs the abyss-specific development-sample flow with accessible interventi
   await expect(page.getByText('风险').first()).toBeVisible();
   await expect(page.getByText('替换建议').first()).toBeVisible();
   await expect(page.getByRole('button', { name: '删除这份方案' })).toBeVisible();
+  await switchToEnglish();
+  await expect(page.getByRole('heading', { name: 'Recommendation history' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Spiral Abyss · Floor 12/ }).first()).toHaveAttribute(
+    'aria-expanded',
+    'true'
+  );
+  await expect(page.getByText('Rotation').first()).toBeVisible();
+  await expect(page.getByText('First-half tactics').first()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Delete this plan' })).toBeVisible();
+  await expectNoChineseChrome(/推荐记录|深境螺旋 12 层|循环手法|上半打法|替换建议|删除这份方案/u);
+  await switchToChinese();
+  await expect(page.getByText('循环手法').first()).toBeVisible();
   await page.setViewportSize({ width: 1024, height: 768 });
   await page.screenshot({ path: path.join(tmpdir(), 'gta-m7-history-1024x768.png') });
   await page.setViewportSize({ width: 1600, height: 1000 });
@@ -1312,6 +1367,21 @@ test('plans three Stygian phases from the development scenario without leaking r
   await expect(page.locator('.gta-stygian-progress li').last()).toHaveClass(/is-done/);
   await expect(page.locator('main')).not.toContainText(/必过|保证通关/);
   await expectNoForbiddenPlayerTerms();
+  await switchToEnglish();
+  await expect(page.getByRole('heading', { name: 'Stygian Onslaught planner' })).toBeVisible();
+  await expect(
+    page.getByRole('group', { name: 'Choose from six difficulty tiers' }).getByRole('button')
+  ).toHaveCount(6);
+  await expect(page.getByRole('button', { name: 'Attempt the highest difficulty' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Three teams allocated under current rules' })
+  ).toBeVisible();
+  await expect(page.getByLabel('Team planning progress')).toBeVisible();
+  await expectNoChineseChrome(
+    /幽境危战作战台|选择六档难度|选择奖励目标|生成三阶段方案|三队已按当期规则分配|配队进度/u
+  );
+  await switchToChinese();
+  await expect(page.getByRole('heading', { name: '三队已按当期规则分配' })).toBeVisible();
   await expectPageFitsEveryViewport('Stygian input and result');
 
   await page.setViewportSize({ width: 1024, height: 768 });
@@ -1332,6 +1402,20 @@ test('plans three Stygian phases from the development scenario without leaking r
   await expect(page.locator('main')).not.toContainText(
     /development\.|development-sample|dire-challenge/
   );
+  await switchToEnglish();
+  await expect(page.getByRole('heading', { name: 'Recommendation history' })).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: /Stygian Onslaught · Difficulty 6/ }).first()
+  ).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByText('Phase 1', { exact: true })).toBeVisible();
+  await expect(page.getByText('Rotation').first()).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Saved phase guidance' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Delete this plan' })).toBeVisible();
+  await expectNoChineseChrome(
+    /推荐记录|幽境危战|循环手法|当时的阶段依据|删除这份方案/u
+  );
+  await switchToChinese();
+  await expect(page.getByText('第 1 阶段', { exact: true })).toBeVisible();
 });
 
 test('keeps Theater generation blocked when external actors do not satisfy hard eligibility', async () => {
@@ -1554,6 +1638,21 @@ test('checks Theater eligibility and renders a cast-vigor route instead of team 
     /上半队伍|下半队伍|三队已按当期规则分配|team card/i
   );
   await expectNoForbiddenPlayerTerms();
+  await switchToEnglish();
+  await expect(page.getByRole('heading', { name: 'Imaginarium Theater planner' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Elements, level, and headcount' })).toBeVisible();
+  await expect(page.getByRole('group', { name: 'Choose acts to plan' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Cast and Vigor arranged into an act route' })
+  ).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Selected cast' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Vigor budget by act' })).toBeVisible();
+  await expect(page.getByLabel('Route generation progress')).toBeVisible();
+  await expectNoChineseChrome(
+    /幻想真境剧诗手册|元素、等级与人数|选择规划幕次|生成剧诗路线|演员池与活力已排成幕次路线|路线生成进度/u
+  );
+  await switchToChinese();
+  await expect(page.getByRole('heading', { name: '演员池与活力已排成幕次路线' })).toBeVisible();
   await expectPageFitsEveryViewport('Theater route');
 
   await page.setViewportSize({ width: 1024, height: 768 });
@@ -1589,4 +1688,19 @@ test('checks Theater eligibility and renders a cast-vigor route instead of team 
   await expect(page.getByRole('heading', { name: '秘法节点预算' })).toBeVisible();
   await expect(page.getByText(/演示聚敌秘法：1/)).toBeVisible();
   await expect(page.getByRole('button', { name: '删除这份方案' })).toBeVisible();
+  await switchToEnglish();
+  await expect(page.getByRole('heading', { name: 'Recommendation history' })).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: /Imaginarium Theater · All acts/ }).first()
+  ).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator('.gta-history-theater-route')).toContainText('Act 1');
+  await expect(page.getByText(/Planned Vigor:/).first()).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Saved route guidance' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Arcana node budget' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Delete this plan' })).toBeVisible();
+  await expectNoChineseChrome(
+    /推荐记录|幻想真境剧诗|第 1 幕|计划活力|当时的路线指引|秘法节点预算|删除这份方案/u
+  );
+  await switchToChinese();
+  await expect(page.getByRole('heading', { name: '当时的路线指引' })).toBeVisible();
 });

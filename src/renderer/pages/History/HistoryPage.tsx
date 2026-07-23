@@ -16,6 +16,7 @@ import {
 import { api } from '../../ipc';
 import { rewardTargetLabel, reuseRuleSummary } from '../Advisor/stygian-presentation';
 import { objectiveLabel, pathChoiceLabel, poolSourceLabel } from '../Advisor/theater-presentation';
+import { localizedResultText } from '../Advisor/abyss-presentation';
 import {
   createHistoryRerunIntent,
   groupChallengeHistory,
@@ -89,7 +90,11 @@ export function HistoryPage({ state, onRerun }: HistoryPageProps) {
     void load();
   }, [load]);
 
-  const groups = useMemo(() => groupChallengeHistory(allEntries), [allEntries]);
+  const language = isEnglish ? 'en' : 'zh';
+  const groups = useMemo(
+    () => groupChallengeHistory(allEntries, language),
+    [allEntries, language]
+  );
   const totalCount = allEntries.length + legacyCount;
   const errorRecovery = destructiveErrorRecovery(errorCode, locale);
 
@@ -365,7 +370,9 @@ function HistoryEntry({
         aria-expanded={expanded}
         onClick={onToggle}
       >
-        <span className="gta-history-entry-title">{historyCardTitle(entry)}</span>
+        <span className="gta-history-entry-title">
+          {historyCardTitle(entry, isEnglish ? 'en' : 'zh')}
+        </span>
         <span className={`gta-history-source is-${entry.source}`}>
           {entry.source === 'smart-service'
             ? isEnglish
@@ -378,7 +385,9 @@ function HistoryEntry({
         <span className="gta-history-confidence">
           {historyConfidenceLabel(entry, isEnglish ? 'en' : 'zh')}
         </span>
-        <time dateTime={entry.createdAt}>{formatTime(entry.createdAt)}</time>
+        <time dateTime={entry.createdAt}>
+          {formatTime(entry.createdAt, isEnglish ? 'en-US' : 'zh-CN')}
+        </time>
         {entry.scenarioTrust === 'development-sample' && (
           <span className="gta-history-sample">{isEnglish ? 'Practice data' : '演练资料'}</span>
         )}
@@ -442,7 +451,13 @@ function AbyssDetails({ entry, isEnglish }: { entry: AbyssPlanHistoryEntry; isEn
       <article>
         <span>{isEnglish ? 'First half' : '上半队伍'}</span>
         <strong>{teamNames(entry.plan.firstHalfTeam.characterIds)}</strong>
-        <p>{entry.plan.firstHalfTeam.purpose}</p>
+        <p>
+          {localizedResultText(
+            entry.plan.firstHalfTeam.purpose,
+            isEnglish ? 'en' : 'zh',
+            'Saved first-half team purpose'
+          )}
+        </p>
         <DetailList
           label={isEnglish ? 'Rotation' : '循环手法'}
           items={entry.plan.firstHalfTeam.rotationNotes}
@@ -451,7 +466,13 @@ function AbyssDetails({ entry, isEnglish }: { entry: AbyssPlanHistoryEntry; isEn
       <article>
         <span>{isEnglish ? 'Second half' : '下半队伍'}</span>
         <strong>{teamNames(entry.plan.secondHalfTeam.characterIds)}</strong>
-        <p>{entry.plan.secondHalfTeam.purpose}</p>
+        <p>
+          {localizedResultText(
+            entry.plan.secondHalfTeam.purpose,
+            isEnglish ? 'en' : 'zh',
+            'Saved second-half team purpose'
+          )}
+        </p>
         <DetailList
           label={isEnglish ? 'Rotation' : '循环手法'}
           items={entry.plan.secondHalfTeam.rotationNotes}
@@ -519,7 +540,8 @@ function StygianDetails({
   return (
     <>
       <p className="gta-history-rule">
-        {rewardTargetLabel(entry.target)} · {reuseRuleSummary(entry.reusePolicy)}
+        {rewardTargetLabel(entry.target, isEnglish ? 'en' : 'zh')} ·{' '}
+        {reuseRuleSummary(entry.reusePolicy, isEnglish ? 'en' : 'zh')}
       </p>
       <div className="gta-history-plan-grid is-three">
         {entry.plan.phases
@@ -533,7 +555,13 @@ function StygianDetails({
                   .map((id) => characters.get(id) ?? (isEnglish ? 'Saved character' : '已保存角色'))
                   .join(' · ')}
               </strong>
-              <p>{phase.team.purpose}</p>
+              <p>
+                {localizedResultText(
+                  phase.team.purpose,
+                  isEnglish ? 'en' : 'zh',
+                  `Saved purpose for phase ${phase.phase}`
+                )}
+              </p>
               <DetailList
                 label={isEnglish ? 'Rotation' : '循环手法'}
                 items={phase.team.rotationNotes}
@@ -622,10 +650,20 @@ function TheaterDetails({
   isEnglish: boolean;
 }) {
   const names = new Map(entry.cast.map((actor) => [actor.id, actor.name]));
+  const arcanaNames = new Map(
+    entry.routeGuidance.arcanaPriorities.map((priority) => [priority.nodeId, priority.name])
+  );
+  const nodeLabel = (nodeId: string) => {
+    const savedName = arcanaNames.get(nodeId);
+    if (!savedName) return isEnglish ? 'Saved node' : '已保存节点';
+    return localizedResultText(savedName, isEnglish ? 'en' : 'zh', 'Saved node');
+  };
+
   return (
     <>
       <p className="gta-history-rule">
-        {objectiveLabel(entry.target)} · {entry.eligibility.hardQualifiedCount}/
+        {objectiveLabel(entry.target, isEnglish ? 'en' : 'zh')} ·{' '}
+        {entry.eligibility.hardQualifiedCount}/
         {entry.eligibility.requiredHeadcount} {isEnglish ? 'eligible actors' : '名可入场'}
       </p>
       <div className="gta-history-theater-cast">
@@ -637,7 +675,7 @@ function TheaterDetails({
                 ? isEnglish
                   ? 'Owned'
                   : '自有角色'
-                : poolSourceLabel(actor.source)}
+                : poolSourceLabel(actor.source, isEnglish ? 'en' : 'zh')}
             </small>
           </span>
         ))}
@@ -651,9 +689,9 @@ function TheaterDetails({
                 .map((id) => names.get(id) ?? (isEnglish ? 'Saved actor' : '已保存演员'))
                 .join(isEnglish ? ', ' : '、')}
             </span>
-            <small>{pathChoiceLabel(act.pathChoice)}</small>
+            <small>{pathChoiceLabel(act.pathChoice, isEnglish ? 'en' : 'zh')}</small>
             <small>
-              {isEnglish ? 'Planned vigor' : '计划活力'}：
+              {isEnglish ? 'Planned Vigor: ' : '计划活力：'}
               {act.plannedVigorSpend.length > 0
                 ? act.plannedVigorSpend
                     .map(
@@ -673,7 +711,8 @@ function TheaterDetails({
           {entry.vigorBudget.map((item) => (
             <span key={`${item.act}:${item.characterId}`}>
               {isEnglish ? `Act ${item.act}` : `第 ${item.act} 幕`} ·{' '}
-              {names.get(item.characterId) ?? (isEnglish ? 'Saved actor' : '已保存演员')}：
+              {names.get(item.characterId) ?? (isEnglish ? 'Saved actor' : '已保存演员')}
+              {isEnglish ? ': ' : '：'}
               {item.before} − {item.spent} → {item.after}
             </span>
           ))}
@@ -693,9 +732,27 @@ function TheaterDetails({
         />
         {entry.routeGuidance.arcanaPriorities.map((priority) => (
           <article key={priority.nodeId}>
-            <strong>{priority.name}</strong>
-            <p>{priority.condition}</p>
-            <small>{priority.reason}</small>
+            <strong>
+              {localizedResultText(
+                priority.name,
+                isEnglish ? 'en' : 'zh',
+                'Saved Arcana priority'
+              )}
+            </strong>
+            <p>
+              {localizedResultText(
+                priority.condition,
+                isEnglish ? 'en' : 'zh',
+                'Condition saved with this plan'
+              )}
+            </p>
+            <small>
+              {localizedResultText(
+                priority.reason,
+                isEnglish ? 'en' : 'zh',
+                'Reason saved with this plan'
+              )}
+            </small>
           </article>
         ))}
       </section>
@@ -704,10 +761,9 @@ function TheaterDetails({
         {entry.nodeBudget.length > 0 ? (
           entry.nodeBudget.map((node) => (
             <span key={node.nodeId}>
-              {entry.routeGuidance.arcanaPriorities.find(
-                (priority) => priority.nodeId === node.nodeId
-              )?.name ?? (isEnglish ? 'Saved node' : '已保存节点')}
-              ：{node.cost}
+              {nodeLabel(node.nodeId)}
+              {isEnglish ? ': ' : '：'}
+              {node.cost}
             </span>
           ))
         ) : (
@@ -725,12 +781,19 @@ function TheaterDetails({
 
 function DetailList({ items, label }: { items: string[]; label: string }) {
   if (items.length === 0) return null;
+  const isEnglish = !/[\u3400-\u9fff]/u.test(label);
   return (
     <div className="gta-history-detail-list">
       <span>{label}</span>
       <ul>
         {items.map((item, index) => (
-          <li key={`${index}:${item}`}>{item}</li>
+          <li key={`${index}:${item}`}>
+            {localizedResultText(
+              item,
+              isEnglish ? 'en' : 'zh',
+              'Details saved with this plan'
+            )}
+          </li>
         ))}
       </ul>
     </div>
@@ -800,7 +863,7 @@ function deleteDialogAction(pending: PendingDelete, isEnglish: boolean): string 
     : `删除 ${count} 条记录`;
 }
 
-function formatTime(value: string): string {
+function formatTime(value: string, locale: 'zh-CN' | 'en-US'): string {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString(locale);
 }

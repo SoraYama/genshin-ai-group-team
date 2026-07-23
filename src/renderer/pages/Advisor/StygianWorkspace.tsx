@@ -15,8 +15,13 @@ import {
 } from '../../../shared/stygian-reward-policy';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { GtaButton } from '../../components/ui/GtaButton';
+import { useI18n } from '../../i18n';
 import { api } from '../../ipc';
-import { characterElementLabel } from './abyss-presentation';
+import {
+  characterElementLabel,
+  localizedResultText,
+  type PresentationLocale
+} from './abyss-presentation';
 import {
   cycleStygianIntervention,
   difficultyDisplayName,
@@ -63,9 +68,12 @@ export function StygianWorkspace({
   onHistoryRerunConsumed,
   onBack
 }: StygianWorkspaceProps) {
+  const { locale } = useI18n();
+  const language: PresentationLocale = locale === 'en-US' ? 'en' : 'zh';
+  const isEnglish = language === 'en';
   const [scenarioView, setScenarioView] = useState<StygianScenarioView | null>(null);
   const [profile, setProfile] = useState<PersistedProfile | null>(null);
-  const [loadError, setLoadError] = useState('');
+  const [loadError, setLoadError] = useState<'load' | 'generate' | ''>('');
   const [difficultyId, setDifficultyId] = useState('');
   const [target, setTarget] = useState<StygianRewardTarget>('primogems');
   const [preferences, setPreferences] = useState<PlayerPreferences>(DEFAULT_PREFERENCES);
@@ -147,7 +155,7 @@ export function StygianWorkspace({
         }
       })
       .catch(() => {
-        if (active) setLoadError('读取幽境危战资料失败，请稍后重试。');
+        if (active) setLoadError('load');
       });
     return () => {
       active = false;
@@ -244,7 +252,7 @@ export function StygianWorkspace({
       if (sequence.current === requestId) setResult(next);
     } catch {
       if (sequence.current === requestId) {
-        setLoadError('生成三阶段方案时发生错误；本地角色与挑战资料没有被修改。');
+        setLoadError('generate');
       }
     } finally {
       if (sequence.current === requestId) {
@@ -266,25 +274,39 @@ export function StygianWorkspace({
   if (loadError && (!scenarioView || !profile)) {
     return (
       <div className="gta-stygian-unavailable" role="alert">
-        <EmptyState kind="offline" />
-        <p>{loadError}</p>
+        <EmptyState kind="offline" locale={language} />
+        <p>
+          {isEnglish
+            ? 'Stygian Onslaught data could not be loaded. Try again later.'
+            : '读取幽境危战资料失败，请稍后重试。'}
+        </p>
       </div>
     );
   }
   if (!scenarioView || !profile) {
-    return <div className="gta-stygian-unavailable">正在读取角色与挑战资料…</div>;
+    return (
+      <div className="gta-stygian-unavailable">
+        {isEnglish ? 'Loading roster and challenge data…' : '正在读取角色与挑战资料…'}
+      </div>
+    );
   }
   if (scenarioView.status === 'unavailable') {
     return (
       <section className="gta-stygian-unavailable" aria-labelledby="stygian-unavailable-title">
         <GtaButton tone="ghost" onClick={onBack}>
-          返回挑战入口
+          {isEnglish ? 'Back to challenge selection' : '返回挑战入口'}
         </GtaButton>
-        <span className="gta-page-kicker">幽境危战</span>
+        <span className="gta-page-kicker">
+          {isEnglish ? 'Stygian Onslaught' : '幽境危战'}
+        </span>
         <div id="stygian-unavailable-title">
-          <EmptyState kind="offline" />
+          <EmptyState kind="offline" locale={language} />
         </div>
-        <p>{scenarioView.message} 你仍可查看角色与历史方案。</p>
+        <p>
+          {isEnglish
+            ? 'Verified challenge data is unavailable. You can still review the roster and saved plans.'
+            : `${scenarioView.message} 你仍可查看角色与历史方案。`}
+        </p>
       </section>
     );
   }
@@ -295,49 +317,81 @@ export function StygianWorkspace({
       <header className="gta-stygian-heading">
         <div>
           <GtaButton tone="ghost" onClick={onBack}>
-            返回挑战入口
+            {isEnglish ? 'Back to challenge selection' : '返回挑战入口'}
           </GtaButton>
-          <span className="gta-page-kicker">三阶段联合规划</span>
-          <h3 id="stygian-workspace-title">幽境危战作战台</h3>
-          <p>先选择目标难度和奖励，再按当期复用规则一次分配三队。</p>
+          <span className="gta-page-kicker">
+            {isEnglish ? 'Joint three-phase planning' : '三阶段联合规划'}
+          </span>
+          <h3 id="stygian-workspace-title">
+            {isEnglish ? 'Stygian Onslaught planner' : '幽境危战作战台'}
+          </h3>
+          <p>
+            {isEnglish
+              ? 'Choose a difficulty and reward goal, then allocate all three teams under the current reuse rules.'
+              : '先选择目标难度和奖励，再按当期复用规则一次分配三队。'}
+          </p>
         </div>
         <div className="gta-stygian-data-stamp">
-          <span>资料版本</span>
-          <strong>{scenarioVersionLabel(scenarioView)}</strong>
+          <span>{isEnglish ? 'Data version' : '资料版本'}</span>
+          <strong>{scenarioVersionLabel(scenarioView, language)}</strong>
         </div>
       </header>
 
       {scenarioView.trust === 'development-sample' && (
         <div className="gta-stygian-banner" role="status">
-          <strong>演练资料，不代表本期</strong>
-          <span>三名首领、六档难度与规则均为交互演示，不是正式服当前内容。</span>
+          <strong>{isEnglish ? 'Practice data — not the current cycle' : '演练资料，不代表本期'}</strong>
+          <span>
+            {isEnglish
+              ? 'The bosses, difficulty tiers, and rules are original interaction samples, not live-server content.'
+              : '三名首领、六档难度与规则均为交互演示，不是正式服当前内容。'}
+          </span>
         </div>
       )}
       {historyNotice && (
         <div className="gta-stygian-banner is-history-prefill" role="status">
-          <strong>旧方案已准备</strong>
-          <span>{historyNotice}</span>
+          <strong>{isEnglish ? 'Saved plan ready' : '旧方案已准备'}</strong>
+          <span>
+            {isEnglish
+              ? 'Available saved choices were restored. Review them before generating; the smart service will not start automatically.'
+              : historyNotice}
+          </span>
         </div>
       )}
       {scenarioReadOnly && (
         <div className="gta-stygian-banner" role="status">
-          <strong>资料已过期，仅供查看</strong>
-          <span>为避免误导，暂时不能据此生成本期方案。</span>
+          <strong>{isEnglish ? 'Outdated data — view only' : '资料已过期，仅供查看'}</strong>
+          <span>
+            {isEnglish
+              ? 'New current-cycle plans are disabled to avoid misleading results.'
+              : '为避免误导，暂时不能据此生成本期方案。'}
+          </span>
         </div>
       )}
       {scenarioView.trust === 'production' && scenarioView.refreshWarning && !scenarioReadOnly && (
         <div className="gta-stygian-banner is-refresh-warning" role="status">
-          <strong>正在使用最近一次已确认资料</strong>
-          <span>{scenarioView.refreshWarning} 请留意资料版本。</span>
+          <strong>
+            {isEnglish ? 'Using the latest verified snapshot' : '正在使用最近一次已确认资料'}
+          </strong>
+          <span>
+            {isEnglish
+              ? 'Refresh did not complete. Check the data version before generating.'
+              : `${scenarioView.refreshWarning} 请留意资料版本。`}
+          </span>
         </div>
       )}
 
       <section className="gta-stygian-objective" aria-labelledby="stygian-objective-title">
         <div>
-          <span className="gta-page-kicker">挑战目标</span>
-          <h4 id="stygian-objective-title">选择难度与奖励期待</h4>
+          <span className="gta-page-kicker">{isEnglish ? 'Challenge goal' : '挑战目标'}</span>
+          <h4 id="stygian-objective-title">
+            {isEnglish ? 'Choose difficulty and reward goal' : '选择难度与奖励期待'}
+          </h4>
         </div>
-        <div className="gta-stygian-difficulties" role="group" aria-label="选择六档难度">
+        <div
+          className="gta-stygian-difficulties"
+          role="group"
+          aria-label={isEnglish ? 'Choose from six difficulty tiers' : '选择六档难度'}
+        >
           {readyScenario.difficulties
             .slice()
             .sort((left, right) => left.order - right.order)
@@ -352,12 +406,16 @@ export function StygianWorkspace({
                   invalidateResult();
                 }}
               >
-                <small>第 {item.order} 档</small>
-                <strong>{difficultyDisplayName(item)}</strong>
+                <small>{isEnglish ? `Tier ${item.order}` : `第 ${item.order} 档`}</small>
+                <strong>{difficultyDisplayName(item, language)}</strong>
               </button>
             ))}
         </div>
-        <div className="gta-stygian-targets" role="group" aria-label="选择奖励目标">
+        <div
+          className="gta-stygian-targets"
+          role="group"
+          aria-label={isEnglish ? 'Choose reward goal' : '选择奖励目标'}
+        >
           {REWARD_TARGETS.map((value) => (
             <button
               key={value}
@@ -372,46 +430,57 @@ export function StygianWorkspace({
                 invalidateResult();
               }}
             >
-              {rewardTargetLabel(value)}
+              {rewardTargetLabel(value, language)}
             </button>
           ))}
         </div>
         <p className="gta-stygian-policy-note">
-          应用内目标档位，不代表官方奖励解锁条件；正式场景阈值发布后将优先使用其版本化规则。
+          {isEnglish
+            ? 'In-app target tiers are planning preferences, not official reward unlock requirements. Published versioned rules take priority.'
+            : '应用内目标档位，不代表官方奖励解锁条件；正式场景阈值发布后将优先使用其版本化规则。'}
         </p>
         <div className="gta-stygian-modifiers">
-          <strong>所选难度修正</strong>
+          <strong>{isEnglish ? 'Selected difficulty modifiers' : '所选难度修正'}</strong>
           {difficulty && difficulty.modifiers.length > 0 ? (
             <ul>
-              {difficultyModifierLabels(difficulty).map((label, index) => (
+              {difficultyModifierLabels(difficulty, language).map((label, index) => (
                 <li key={difficulty.modifiers[index]?.id ?? label}>{label}</li>
               ))}
             </ul>
           ) : (
-            <span>资料未标注时间、能量或额外增益。</span>
+            <span>
+              {isEnglish
+                ? 'No timer, energy, or bonus modifiers are listed.'
+                : '资料未标注时间、能量或额外增益。'}
+            </span>
           )}
         </div>
       </section>
 
       <div className="gta-stygian-reuse" role="status">
-        <strong>三队角色规则</strong>
-        <span>{reuseRuleSummary(readyScenario.crossPartyReusePolicy)}</span>
+        <strong>{isEnglish ? 'Character reuse rule' : '三队角色规则'}</strong>
+        <span>{reuseRuleSummary(readyScenario.crossPartyReusePolicy, language)}</span>
       </div>
 
-      <div className="gta-stygian-phases" aria-label="三个阶段首领">
+      <div
+        className="gta-stygian-phases"
+        aria-label={isEnglish ? 'Bosses in all three phases' : '三个阶段首领'}
+      >
         {readyScenario.phases
           .slice()
           .sort((left, right) => left.phase - right.phase)
           .map((phase) => {
-            const mechanics = stygianMechanicLabels(phase);
+            const mechanics = stygianMechanicLabels(phase, language);
             return (
               <article key={phase.phase}>
-                <span>第 {phase.phase} 阶段</span>
-                <h4>{stygianBossDisplayName(phase.boss)}</h4>
+                <span>{isEnglish ? `Phase ${phase.phase}` : `第 ${phase.phase} 阶段`}</span>
+                <h4>{stygianBossDisplayName(phase.boss, language)}</h4>
                 <p>
-                  等级 {phase.boss.level} · {phase.boss.count} 名首领
+                  {isEnglish
+                    ? `Level ${phase.boss.level} · ${phase.boss.count} ${phase.boss.count === 1 ? 'boss' : 'bosses'}`
+                    : `等级 ${phase.boss.level} · ${phase.boss.count} 名首领`}
                 </p>
-                <strong>机制与修正</strong>
+                <strong>{isEnglish ? 'Mechanics and modifiers' : '机制与修正'}</strong>
                 {mechanics.length > 0 ? (
                   <ul>
                     {mechanics.map((text) => (
@@ -419,7 +488,9 @@ export function StygianWorkspace({
                     ))}
                   </ul>
                 ) : (
-                  <p className="is-unknown">资料未标注额外机制。</p>
+                  <p className="is-unknown">
+                    {isEnglish ? 'No additional mechanics are listed.' : '资料未标注额外机制。'}
+                  </p>
                 )}
               </article>
             );
@@ -429,32 +500,42 @@ export function StygianWorkspace({
       <section className="gta-stygian-controls" aria-labelledby="stygian-control-title">
         <div className="gta-stygian-control-heading">
           <div>
-            <span className="gta-page-kicker">你的取舍</span>
-            <h4 id="stygian-control-title">偏好与角色干预</h4>
+            <span className="gta-page-kicker">{isEnglish ? 'Your choices' : '你的取舍'}</span>
+            <h4 id="stygian-control-title">
+              {isEnglish ? 'Preferences and character choices' : '偏好与角色干预'}
+            </h4>
           </div>
-          <p>角色按钮依次切换：未设置 → 锁定 → 排除。</p>
+          <p>
+            {isEnglish
+              ? 'Character buttons cycle through: neutral → locked → excluded.'
+              : '角色按钮依次切换：未设置 → 锁定 → 排除。'}
+          </p>
         </div>
-        <div className="gta-stygian-preferences" role="group" aria-label="配队偏好">
+        <div
+          className="gta-stygian-preferences"
+          role="group"
+          aria-label={isEnglish ? 'Team preferences' : '配队偏好'}
+        >
           <Preference
-            label="操作简单"
+            label={isEnglish ? 'Simple rotations' : '操作简单'}
             active={preferences.comfort === 'high'}
             disabled={running}
             onClick={() => togglePreference('comfort')}
           />
           <Preference
-            label="生存优先"
+            label={isEnglish ? 'Prioritize survival' : '生存优先'}
             active={preferences.survival === 'high'}
             disabled={running}
             onClick={() => togglePreference('survival')}
           />
           <Preference
-            label="低练度"
+            label={isEnglish ? 'Lower investment' : '低练度'}
             active={preferences.lowInvestment === 'high'}
             disabled={running}
             onClick={() => togglePreference('lowInvestment')}
           />
           <Preference
-            label="不换装备"
+            label={isEnglish ? 'Keep current builds' : '不换装备'}
             active={preferences.noBuildChange}
             disabled={running}
             onClick={() => togglePreference('noBuildChange')}
@@ -462,31 +543,41 @@ export function StygianWorkspace({
         </div>
         <div className="gta-stygian-roster-toolbar">
           <label>
-            <span className="gta-visually-hidden">搜索可用角色</span>
+            <span className="gta-visually-hidden">
+              {isEnglish ? 'Search available characters' : '搜索可用角色'}
+            </span>
             <input
               type="search"
-              aria-label="搜索可用角色"
-              placeholder="搜索可用角色"
+              aria-label={isEnglish ? 'Search available characters' : '搜索可用角色'}
+              placeholder={isEnglish ? 'Search available characters' : '搜索可用角色'}
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
           </label>
           <span>
-            已锁定 {lockedCharacterIds.length} · 已排除 {excludedCharacterIds.length}
+            {isEnglish
+              ? `${lockedCharacterIds.length} locked · ${excludedCharacterIds.length} excluded`
+              : `已锁定 ${lockedCharacterIds.length} · 已排除 ${excludedCharacterIds.length}`}
           </span>
         </div>
         {lockLimitExceeded && (
           <p className="gta-stygian-inline-error" role="alert">
-            三队总共只有 12 个位置，请先减少锁定角色再生成方案。
+            {isEnglish
+              ? 'Three teams have 12 slots in total. Unlock characters before generating.'
+              : '三队总共只有 12 个位置，请先减少锁定角色再生成方案。'}
           </p>
         )}
-        <div className="gta-stygian-roster" aria-label="角色干预">
+        <div
+          className="gta-stygian-roster"
+          aria-label={isEnglish ? 'Character choices' : '角色干预'}
+        >
           {characters.map((character) => (
             <CharacterChoice
               key={character.id}
               character={character}
               state={interventions[String(character.id)] ?? 'neutral'}
               disabled={running}
+              locale={language}
               onClick={() => cycleCharacter(String(character.id))}
             />
           ))}
@@ -496,23 +587,33 @@ export function StygianWorkspace({
             onClick={() => void generatePlan()}
             disabled={running || !difficulty || scenarioReadOnly || lockLimitExceeded}
           >
-            {running ? '正在规划三队…' : '生成三阶段方案'}
+            {running
+              ? isEnglish
+                ? 'Planning three teams…'
+                : '正在规划三队…'
+              : isEnglish
+                ? 'Generate three-phase plan'
+                : '生成三阶段方案'}
           </GtaButton>
           <GtaButton tone="ghost" onClick={cancelPlan} disabled={!running}>
-            取消生成
+            {isEnglish ? 'Cancel generation' : '取消生成'}
           </GtaButton>
         </div>
       </section>
 
       {(running || activeStep) && (
-        <ol className="gta-stygian-progress" aria-label="配队进度" aria-live="polite">
+        <ol
+          className="gta-stygian-progress"
+          aria-label={isEnglish ? 'Team planning progress' : '配队进度'}
+          aria-live="polite"
+        >
           {PROGRESS_STEPS.map((step, index) => {
             const current = activeStep ? PROGRESS_STEPS.indexOf(activeStep) : -1;
             const done = Boolean(result) || index < current;
             return (
               <li key={step} className={done ? 'is-done' : index === current ? 'is-active' : ''}>
                 <span aria-hidden="true">{done ? '✓' : index + 1}</span>
-                {progressStepLabel(step)}
+                {progressStepLabel(step, language)}
               </li>
             );
           })}
@@ -521,7 +622,9 @@ export function StygianWorkspace({
 
       {loadError && (
         <p className="gta-stygian-inline-error" role="alert">
-          {loadError}
+          {isEnglish
+            ? 'The three-phase plan could not be generated. Local character and challenge data were not changed.'
+            : '生成三阶段方案时发生错误；本地角色与挑战资料没有被修改。'}
         </p>
       )}
       {result && (
@@ -529,6 +632,7 @@ export function StygianWorkspace({
           result={result}
           profile={profile}
           difficulties={readyScenario.difficulties}
+          locale={language}
           onLowerDifficulty={(id) => {
             setDifficultyId(id);
             invalidateResult();
@@ -561,19 +665,37 @@ function CharacterChoice({
   character,
   state,
   disabled,
+  locale,
   onClick
 }: {
   character: CharacterProfile;
   state: StygianInterventionState;
   disabled: boolean;
+  locale: PresentationLocale;
   onClick: () => void;
 }) {
-  const stateLabel = state === 'locked' ? '锁定' : state === 'excluded' ? '排除' : '未设置';
+  const isEnglish = locale === 'en';
+  const stateLabel =
+    state === 'locked'
+      ? isEnglish
+        ? 'Locked'
+        : '锁定'
+      : state === 'excluded'
+        ? isEnglish
+          ? 'Excluded'
+          : '排除'
+        : isEnglish
+          ? 'Neutral'
+          : '未设置';
   return (
     <button
       type="button"
       className={`gta-stygian-character is-${state}`}
-      aria-label={`${character.name}，当前：${stateLabel}；按下切换`}
+      aria-label={
+        isEnglish
+          ? `${character.name}, current state: ${stateLabel}; press to change`
+          : `${character.name}，当前：${stateLabel}；按下切换`
+      }
       aria-pressed={state === 'locked'}
       disabled={disabled}
       onClick={onClick}
@@ -582,7 +704,9 @@ function CharacterChoice({
       <span>
         <strong>{character.name}</strong>
         <small>
-          等级 {character.level ?? '未知'} · {characterElementLabel(character.element)}元素
+          {isEnglish
+            ? `Level ${character.level ?? 'unknown'} · ${characterElementLabel(character.element, locale)}`
+            : `等级 ${character.level ?? '未知'} · ${characterElementLabel(character.element, locale)}元素`}
         </small>
       </span>
       <em>{stateLabel}</em>
@@ -594,27 +718,42 @@ function StygianResult({
   result,
   profile,
   difficulties,
+  locale,
   onLowerDifficulty
 }: {
   result: StygianAdvisorResult;
   profile: PersistedProfile;
   difficulties: StygianScenario['difficulties'];
+  locale: PresentationLocale;
   onLowerDifficulty: (id: string) => void;
 }) {
+  const isEnglish = locale === 'en';
   if (result.status === 'blocked') {
     const budget = result.issues.some(({ code }) => code === 'SEARCH_BUDGET_EXCEEDED');
     return (
       <section className="gta-stygian-result is-blocked" aria-labelledby="stygian-blocked-title">
-        <h4 id="stygian-blocked-title">暂时无法组成符合规则的三队</h4>
+        <h4 id="stygian-blocked-title">
+          {isEnglish
+            ? 'Three rule-compliant teams cannot be built yet'
+            : '暂时无法组成符合规则的三队'}
+        </h4>
         <ul>
           {result.issues.map((item, index) => (
-            <li key={`${item.code}-${index}`}>{item.message}</li>
+            <li key={`${item.code}-${index}`}>
+              {isEnglish
+                ? `Planning constraint ${index + 1} is not satisfied by the current choices.`
+                : item.message}
+            </li>
           ))}
         </ul>
         <p>
-          {budget
-            ? '搜索到达本次上限，不代表当前角色一定无解。'
-            : '请减少锁定或排除角色，或改选更适合的目标。'}
+          {isEnglish
+            ? budget
+              ? 'The search limit was reached; this does not prove the roster has no solution.'
+              : 'Reduce locked or excluded characters, or choose a more suitable goal.'
+            : budget
+              ? '搜索到达本次上限，不代表当前角色一定无解。'
+              : '请减少锁定或排除角色，或改选更适合的目标。'}
         </p>
       </section>
     );
@@ -624,22 +763,46 @@ function StygianResult({
     <section className="gta-stygian-result" aria-labelledby="stygian-result-title">
       <header>
         <div>
-          <span className="gta-page-kicker">三阶段方案</span>
-          <h4 id="stygian-result-title">三队已按当期规则分配</h4>
+          <span className="gta-page-kicker">
+            {isEnglish ? 'Three-phase plan' : '三阶段方案'}
+          </span>
+          <h4 id="stygian-result-title">
+            {isEnglish ? 'Three teams allocated under current rules' : '三队已按当期规则分配'}
+          </h4>
         </div>
-        <span>{result.source === 'smart-service' ? '智能服务' : '本地规则'}</span>
+        <span>
+          {result.source === 'smart-service'
+            ? isEnglish
+              ? 'Smart service'
+              : '智能服务'
+            : isEnglish
+              ? 'Local rules'
+              : '本地规则'}
+        </span>
       </header>
       {result.difficultyAssessment.recommendation !== 'proceed' && (
         <div className="gta-stygian-honesty" role="status">
           <strong>
             {result.difficultyAssessment.recommendation === 'lower-difficulty'
               ? result.difficultyAssessment.suggestedDifficultyId
-                ? '资料或练度证据不足，建议先降档'
-                : '资料或练度证据不足，建议降低奖励目标'
-              : '可谨慎尝试，但不能判定能否通过'}
+                ? isEnglish
+                  ? 'Evidence is limited; try a lower difficulty first'
+                  : '资料或练度证据不足，建议先降档'
+                : isEnglish
+                  ? 'Evidence is limited; lower the reward goal'
+                  : '资料或练度证据不足，建议降低奖励目标'
+              : isEnglish
+                ? 'A cautious attempt is reasonable, but success cannot be predicted'
+                : '可谨慎尝试，但不能判定能否通过'}
           </strong>
           {result.difficultyAssessment.evidence.map((text) => (
-            <p key={text}>{text}</p>
+            <p key={text}>
+              {localizedResultText(
+                text,
+                locale,
+                'The saved roster evidence does not establish a guaranteed clear.'
+              )}
+            </p>
           ))}
           {result.difficultyAssessment.suggestedDifficultyId && (
             <GtaButton
@@ -648,7 +811,8 @@ function StygianResult({
             >
               {difficultySuggestionLabel(
                 difficulties,
-                result.difficultyAssessment.suggestedDifficultyId
+                result.difficultyAssessment.suggestedDifficultyId,
+                locale
               )}
             </GtaButton>
           )}
@@ -662,39 +826,69 @@ function StygianResult({
             const guidance = result.phaseGuidance.find((item) => item.phase === phase.phase);
             return (
               <article key={phase.phase}>
-                <span>第 {phase.phase} 阶段</span>
-                <h5>{phase.team.purpose}</h5>
+                <span>{isEnglish ? `Phase ${phase.phase}` : `第 ${phase.phase} 阶段`}</span>
+                <h5>
+                  {localizedResultText(
+                    phase.team.purpose,
+                    locale,
+                    `Team for phase ${phase.phase}`
+                  )}
+                </h5>
                 <div className="gta-stygian-result-roster">
                   {phase.team.characterIds.map((id) => {
                     const character = byId.get(id);
                     return (
                       <span key={id} data-stygian-result-character-id={id}>
-                        <strong>{character?.name ?? '未知角色'}</strong>
+                        <strong>
+                          {character?.name ?? (isEnglish ? 'Unknown character' : '未知角色')}
+                        </strong>
                         <small>
                           {character
-                            ? `${characterElementLabel(character.element)}元素 · 等级 ${character.level ?? '未知'}`
-                            : '角色资料缺失'}
+                            ? isEnglish
+                              ? `${characterElementLabel(character.element, locale)} · Level ${character.level ?? 'unknown'}`
+                              : `${characterElementLabel(character.element, locale)}元素 · 等级 ${character.level ?? '未知'}`
+                            : isEnglish
+                              ? 'Character data unavailable'
+                              : '角色资料缺失'}
                         </small>
                       </span>
                     );
                   })}
                 </div>
                 <section>
-                  <strong>开局循环</strong>
+                  <strong>{isEnglish ? 'Opening rotation' : '开局循环'}</strong>
                   {phase.team.rotationNotes.map((text) => (
-                    <p key={text}>{text}</p>
+                    <p key={text}>
+                      {localizedResultText(
+                        text,
+                        locale,
+                        'Set up support effects before the main damage window.'
+                      )}
+                    </p>
                   ))}
                 </section>
                 <section>
-                  <strong>机制依据</strong>
+                  <strong>{isEnglish ? 'Mechanic basis' : '机制依据'}</strong>
                   {guidance?.mechanismBasis.map((text) => (
-                    <p key={text}>{text}</p>
+                    <p key={text}>
+                      {localizedResultText(
+                        text,
+                        locale,
+                        'No additional verified boss mechanics are listed.'
+                      )}
+                    </p>
                   ))}
                 </section>
                 <section>
-                  <strong>需要留意</strong>
+                  <strong>{isEnglish ? 'Watch for' : '需要留意'}</strong>
                   {guidance?.risks.map((text) => (
-                    <p key={text}>{text}</p>
+                    <p key={text}>
+                      {localizedResultText(
+                        text,
+                        locale,
+                        'Timing and energy requirements need in-game verification.'
+                      )}
+                    </p>
                   ))}
                 </section>
               </article>
@@ -705,14 +899,30 @@ function StygianResult({
         <footer>
           {result.warnings.length > 0 && (
             <p>
-              <strong>需要留意：</strong>
-              {result.warnings.join('；')}
+              <strong>{isEnglish ? 'Watch for: ' : '需要留意：'}</strong>
+              {result.warnings
+                .map((text) =>
+                  localizedResultText(
+                    text,
+                    locale,
+                    'Roster evidence is limited; treat the target as a cautious attempt.'
+                  )
+                )
+                .join(isEnglish ? '; ' : '；')}
             </p>
           )}
           {result.assumptions.length > 0 && (
             <p>
-              <strong>本次建议基于：</strong>
-              {result.assumptions.join('；')}
+              <strong>{isEnglish ? 'This recommendation assumes: ' : '本次建议基于：'}</strong>
+              {result.assumptions
+                .map((text) =>
+                  localizedResultText(
+                    text,
+                    locale,
+                    'Only verified roster and boss facts are treated as confirmed.'
+                  )
+                )
+                .join(isEnglish ? '; ' : '；')}
             </p>
           )}
         </footer>

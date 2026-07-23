@@ -141,6 +141,10 @@ describe('history presentation', () => {
     expect(historyCardTitle(theaterEntry())).toBe('幻想真境剧诗 · 第 8 幕');
     expect(periodLabelFromScenario('theater.2026-07-season')).toBe('保存时未记录周期');
     expect(periodLabelFromScenario('opaque-cycle')).toBe('保存时未记录周期');
+    expect(historyCardTitle(abyssEntry(), 'en')).toBe('Spiral Abyss · Floor 12 · Chamber 2');
+    expect(historyCardTitle(stygianEntry(), 'en')).toBe('Stygian Onslaught · Difficulty 5');
+    expect(historyCardTitle(theaterEntry(), 'en')).toBe('Imaginarium Theater · Act 8');
+    expect(periodLabelFromScenario('opaque-cycle', 'en')).toBe('Period not saved');
   });
 
   it('uses the immutable player period for opaque scenario identities and never exposes the slug', () => {
@@ -161,6 +165,9 @@ describe('history presentation', () => {
     });
     expect(groupChallengeHistory([entry])[0]?.title).toBe(
       '深境螺旋 · 2026-07-01 — 2026-07-15'
+    );
+    expect(groupChallengeHistory([entry], 'en')[0]?.title).toBe(
+      'Spiral Abyss · 2026-07-01 — 2026-07-15'
     );
     expect(JSON.stringify(historySavedVersion(entry, 'zh'))).not.toContain(entry.scenarioId);
   });
@@ -199,6 +206,19 @@ describe('history presentation', () => {
       scenarioId: abyssEntry().scenarioId,
       title: expect.stringContaining('深境螺旋')
     });
+  });
+
+  it('keeps English group and card chrome localized without exposing mode slugs', () => {
+    const entries = [theaterEntry(), abyssEntry(), stygianEntry()];
+    const visible = [
+      ...entries.map((entry) => historyCardTitle(entry, 'en')),
+      ...groupChallengeHistory(entries, 'en').map((group) => group.title)
+    ].join(' ');
+    expect(visible).toContain('Spiral Abyss');
+    expect(visible).toContain('Stygian Onslaught');
+    expect(visible).toContain('Imaginarium Theater');
+    expect(visible).not.toMatch(/spiral-abyss|stygian-onslaught|imaginarium-theater/);
+    expect(visible).not.toMatch(/[\u3400-\u9fff]/u);
   });
 
   it('never merges identical challenge cycles across UIDs', () => {

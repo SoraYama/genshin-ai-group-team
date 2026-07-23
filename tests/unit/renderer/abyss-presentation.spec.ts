@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  characterElementLabel,
   cycleCharacterIntervention,
   enemyDisplayName,
   mechanicLabels,
@@ -12,9 +13,16 @@ describe('abyss presentation', () => {
   it('uses a localized Chinese enemy name and never falls back to the English slug', () => {
     const enemy = abyssScenario().floors[0]!.chambers[0]!.firstHalf.waves[0]!.enemies[0]!;
     expect(enemyDisplayName(enemy)).toBe('训练水兽');
+    expect(enemyDisplayName(enemy, 'en')).toBe('Training Hydra');
     expect(
       enemyDisplayName({ ...enemy, enemy: { id: 'abyss-mage', names: { en: 'Abyss Mage' } } })
     ).toBe('未命名敌人');
+    expect(
+      enemyDisplayName(
+        { ...enemy, enemy: { id: 'abyss-mage', names: { 'zh-CN': '深渊法师' } } },
+        'en'
+      )
+    ).toBe('Unnamed enemy');
   });
 
   it('formats only known shield, resistance, immunity, and mechanism facts in player language', () => {
@@ -41,6 +49,22 @@ describe('abyss presentation', () => {
         tags: []
       }).join(' ')
     ).toBe('物理抗性 30% 其他伤害抗性 10% 免疫：水元素伤害 免疫：未本地化机制');
+    expect(
+      mechanicLabels(
+        {
+          shields: [{ element: 'hydro', strength: 12 }],
+          resistances: [{ damageType: 'physical', percent: 30 }],
+          immunities: ['pyro'],
+          tags: ['requires-capability:grouping', '多目标']
+        },
+        'en'
+      )
+    ).toEqual([
+      'Hydro shield · strength 12',
+      'Physical RES 30%',
+      'Immune: Pyro damage',
+      'Requires grouping'
+    ]);
   });
 
   it('cycles keyboard-friendly intervention state without conflicting lock and exclusion', () => {
@@ -55,5 +79,7 @@ describe('abyss presentation', () => {
     expect(progressStepLabel('generating-teams')).toBe('生成双队');
     expect(progressStepLabel('checking-conflicts')).toBe('检查冲突');
     expect(progressStepLabel('writing-tactics')).toBe('整理打法');
+    expect(progressStepLabel('reading-roster', 'en')).toBe('Reading roster');
+    expect(characterElementLabel('hydro', 'en')).toBe('Hydro');
   });
 });
