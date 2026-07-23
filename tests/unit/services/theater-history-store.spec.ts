@@ -15,8 +15,14 @@ vi.mock('electron-store', () => ({
     get(key: string) {
       return storeState.get(key);
     }
-    set(key: string, value: unknown) {
-      storeState.set(key, value);
+    set(key: string | Record<string, unknown>, value?: unknown) {
+      if (typeof key === 'string') {
+        storeState.set(key, value);
+      } else {
+        Object.entries(key).forEach(([entryKey, entryValue]) =>
+          storeState.set(entryKey, entryValue)
+        );
+      }
     }
   }
 }));
@@ -89,6 +95,29 @@ function input(): Omit<TheaterPlanHistoryEntry, 'id' | 'createdAt'> {
 }
 
 describe('Theater history deep validation', () => {
+  it('preserves opaque Theater raw values and their order across append and single delete', () => {
+    const opaqueBefore = {
+      id: 'theater-old-before',
+      uid: '987654321',
+      scenarioId: 'opaque-cycle-a',
+      oldPayload: { order: 1, keep: true }
+    };
+    const opaqueAfter = {
+      id: 'theater-old-after',
+      uid: '987654321',
+      scenarioId: 'opaque-cycle-b',
+      oldPayload: { order: 2, keep: true }
+    };
+    storeState.set('theaterPlans', [opaqueBefore, opaqueAfter]);
+    const store = new HistoryStore();
+
+    const appended = store.appendTheater(input());
+    expect(storeState.get('theaterPlans')).toEqual([appended, opaqueBefore, opaqueAfter]);
+
+    expect(store.removeTheaterById(appended.id)).toBe(true);
+    expect(storeState.get('theaterPlans')).toEqual([opaqueBefore, opaqueAfter]);
+  });
+
   it('stores immutable scenario, eligibility, cast source, vigor and route snapshots', () => {
     const store = new HistoryStore();
     const stored = store.appendTheater(input());

@@ -23,8 +23,14 @@ vi.mock('electron-store', () => ({
     get(key: string) {
       return storeState.get(key);
     }
-    set(key: string, value: unknown) {
-      storeState.set(key, value);
+    set(key: string | Record<string, unknown>, value?: unknown) {
+      if (typeof key === 'string') {
+        storeState.set(key, value);
+      } else {
+        Object.entries(key).forEach(([entryKey, entryValue]) =>
+          storeState.set(entryKey, entryValue)
+        );
+      }
     }
     delete(key: string) {
       storeState.delete(key);
@@ -90,6 +96,156 @@ function stygianHistoryInput(): Omit<StygianPlanHistoryEntry, 'id' | 'createdAt'
 }
 
 describe('HistoryStore', () => {
+  it('preserves opaque legacy, abyss, and Stygian raw records when appending new entries', async () => {
+    const opaqueLegacy = {
+      id: 'legacy-old-record',
+      uid: '222222222',
+      createdAt: '2025-01-01T00:00:00.000Z',
+      oldPayload: { keep: 'legacy' }
+    };
+    const opaqueAbyss = {
+      id: 'abyss-old-record',
+      uid: '222222222',
+      scenarioId: 'opaque-abyss-cycle',
+      oldPayload: { keep: 'abyss' }
+    };
+    const opaqueStygian = {
+      id: 'stygian-old-record',
+      uid: '222222222',
+      scenarioId: 'opaque-stygian-cycle',
+      oldPayload: { keep: 'stygian' }
+    };
+    storeState.set('entries', [opaqueLegacy]);
+    storeState.set('abyssPlans', [opaqueAbyss]);
+    storeState.set('stygianPlans', [opaqueStygian]);
+    const { HistoryStore } = await import('../../../src/main/services/history-store.js');
+    const store = new HistoryStore();
+
+    store.append({
+      uid: '111111111',
+      enemyNames: [],
+      result: makeResult(),
+      side: 'single'
+    });
+    store.appendAbyss(abyssEntryForScope('abyss.2026-07'));
+    store.appendStygian(stygianHistoryInput());
+
+    expect(storeState.get('entries')).toEqual(expect.arrayContaining([opaqueLegacy]));
+    expect(storeState.get('abyssPlans')).toEqual(expect.arrayContaining([opaqueAbyss]));
+    expect(storeState.get('stygianPlans')).toEqual(expect.arrayContaining([opaqueStygian]));
+  });
+
+  it('preserves opaque non-target raw records during mode-specific single deletion', async () => {
+    const { HistoryStore } = await import('../../../src/main/services/history-store.js');
+    const store = new HistoryStore();
+    const abyss = store.appendAbyss(abyssEntryForScope('abyss.2026-07'));
+    const stygian = store.appendStygian(stygianHistoryInput());
+    const opaqueAbyss = {
+      id: 'abyss-old-other',
+      uid: '222222222',
+      scenarioId: 'opaque-cycle',
+      oldPayload: { keep: true }
+    };
+    const opaqueStygian = {
+      id: 'stygian-old-other',
+      uid: '222222222',
+      scenarioId: 'opaque-cycle',
+      oldPayload: { keep: true }
+    };
+    storeState.set('abyssPlans', [...(storeState.get('abyssPlans') as unknown[]), opaqueAbyss]);
+    storeState.set('stygianPlans', [
+      ...(storeState.get('stygianPlans') as unknown[]),
+      opaqueStygian
+    ]);
+
+    expect(store.removeAbyssById(abyss.id)).toBe(true);
+    expect(store.removeStygianById(stygian.id)).toBe(true);
+    expect(storeState.get('abyssPlans')).toEqual([opaqueAbyss]);
+    expect(storeState.get('stygianPlans')).toEqual([opaqueStygian]);
+  });
+
+  it('counts and deletes recognizable old raw records in the exact UID scope', async () => {
+    const { HistoryStore } = await import('../../../src/main/services/history-store.js');
+    const store = new HistoryStore();
+    store.appendStygian(stygianHistoryInput());
+    const recognizableOld = {
+      id: 'stygian-old-target',
+      uid: stygianHistoryInput().uid,
+      scenarioId: 'opaque-old-cycle',
+      oldPayload: { keepUntilExplicitlySelected: true }
+    };
+    const unrelatedOld = {
+      id: 'stygian-old-unrelated',
+      uid: '987654321',
+      oldPayload: { keep: true }
+    };
+    storeState.set('stygianPlans', [
+      ...(storeState.get('stygianPlans') as unknown[]),
+      recognizableOld,
+      unrelatedOld
+    ]);
+
+    const confirmation = store.getChallengeScopeConfirmation({
+      scope: 'uid',
+      uid: stygianHistoryInput().uid
+    });
+
+    expect(confirmation.count).toBe(2);
+    expect(
+      store.removeChallengeScope({
+        scope: 'uid',
+        uid: stygianHistoryInput().uid,
+        expectedCount: confirmation.count,
+        confirmationToken: confirmation.confirmationToken
+      })
+    ).toBe(2);
+    expect(storeState.get('stygianPlans')).toEqual([unrelatedOld]);
+  });
+
+  it('fails closed before confirmation when an affected raw record has unknown identity', async () => {
+    const ambiguous = {
+      id: 'stygian-ambiguous-record',
+      scenarioId: 'opaque-cycle',
+      oldPayload: { uidWasNotRecorded: true }
+    };
+    storeState.set('stygianPlans', [ambiguous]);
+    const { HistoryStore } = await import('../../../src/main/services/history-store.js');
+    const store = new HistoryStore();
+
+    expect(() => store.getChallengeScopeConfirmation({ scope: 'uid', uid: '123456789' })).toThrow(
+      /identity|识别/iu
+    );
+    expect(storeState.get('stygianPlans')).toEqual([ambiguous]);
+  });
+
+  it('rejects same-ID raw content replacement between confirmation and deletion', async () => {
+    const { HistoryStore } = await import('../../../src/main/services/history-store.js');
+    const store = new HistoryStore();
+    const entry = store.appendAbyss(abyssEntryForScope('abyss.2026-07'));
+    const confirmation = store.getChallengeScopeConfirmation({
+      scope: 'group',
+      uid: entry.uid,
+      mode: entry.mode,
+      scenarioId: entry.scenarioId
+    });
+    const before = (storeState.get('abyssPlans') as AbyssPlanHistoryEntry[])[0]!;
+    const replacement = structuredClone(before);
+    replacement.plan.firstHalfTeam.purpose = '同 ID 但内容已被替换';
+    storeState.set('abyssPlans', [replacement]);
+
+    expect(() =>
+      store.removeChallengeScope({
+        scope: 'group',
+        uid: entry.uid,
+        mode: entry.mode,
+        scenarioId: entry.scenarioId,
+        expectedCount: confirmation.count,
+        confirmationToken: confirmation.confirmationToken
+      })
+    ).toThrow(/changed|变化/iu);
+    expect(storeState.get('abyssPlans')).toEqual([replacement]);
+  });
+
   it('appends entries and returns latest first', async () => {
     const { HistoryStore } = await import('../../../src/main/services/history-store.js');
     const store = new HistoryStore();

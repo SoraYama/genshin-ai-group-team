@@ -34,6 +34,35 @@ interface HistoryStoreSchema {
   theaterPlans: TheaterPlanHistoryEntry[];
 }
 
+type HistoryCollectionKey = keyof HistoryStoreSchema;
+
+interface RawHistoryCollection {
+  key: HistoryCollectionKey;
+  mode?: ScenarioMode;
+}
+
+interface RawChallengeSelection {
+  rawByCollection: Map<HistoryCollectionKey, unknown[]>;
+  selectedIndexes: Map<HistoryCollectionKey, Set<number>>;
+  descriptors: string[];
+}
+
+export type HistoryStoreErrorCode =
+  | 'HISTORY_CONFIRMATION_EXPIRED'
+  | 'HISTORY_SELECTION_CHANGED'
+  | 'HISTORY_IDENTITY_UNKNOWN';
+
+export class HistoryStoreError extends Error {
+  override readonly name = 'HistoryStoreError';
+
+  constructor(
+    readonly code: HistoryStoreErrorCode,
+    message: string
+  ) {
+    super(message);
+  }
+}
+
 type ChallengeScope =
   | {
       scope: 'group';
@@ -59,6 +88,13 @@ const DEFAULTS: HistoryStoreSchema = {
   stygianPlans: [],
   theaterPlans: []
 };
+
+const RAW_HISTORY_COLLECTIONS: RawHistoryCollection[] = [
+  { key: 'entries' },
+  { key: 'abyssPlans', mode: 'spiral-abyss' },
+  { key: 'stygianPlans', mode: 'stygian-onslaught' },
+  { key: 'theaterPlans', mode: 'imaginarium-theater' }
+];
 
 const theaterHistoryEntrySchema = z
   .object({
@@ -461,7 +497,6 @@ export class HistoryStore {
       name: 'history',
       defaults: DEFAULTS
     });
-    this.migrateAbyssPlans();
   }
 
   append(input: Omit<RecommendationHistoryEntry, 'id' | 'createdAt'>): RecommendationHistoryEntry {
@@ -471,8 +506,7 @@ export class HistoryStore {
       ...input
     };
 
-    const next = [entry, ...this.store.get('entries')].slice(0, MAX_ENTRIES);
-    this.store.set('entries', next);
+    this.appendRaw('entries', entry, isRecommendationHistoryEntry);
     return entry;
   }
 
@@ -482,8 +516,11 @@ export class HistoryStore {
       createdAt: new Date().toISOString(),
       ...input
     });
-    const next = [entry, ...this.readAbyssPlans()].slice(0, MAX_ENTRIES);
-    this.store.set('abyssPlans', next);
+    this.appendRaw(
+      'abyssPlans',
+      entry,
+      (value) => normalizeAbyssPlanHistoryEntry(value) !== undefined
+    );
     return structuredClone(entry);
   }
 
@@ -496,11 +533,7 @@ export class HistoryStore {
   }
 
   removeAbyssById(id: string): boolean {
-    const entries = this.readAbyssPlans();
-    const next = entries.filter((entry) => entry.id !== id);
-    if (next.length === entries.length) return false;
-    this.store.set('abyssPlans', next);
-    return true;
+    return this.removeRawById('abyssPlans', id);
   }
 
   appendStygian(input: Omit<StygianPlanHistoryEntry, 'id' | 'createdAt'>): StygianPlanHistoryEntry {
@@ -511,8 +544,11 @@ export class HistoryStore {
         ...input
       })
     ) as StygianPlanHistoryEntry;
-    const next = [entry, ...this.readStygianPlans()].slice(0, MAX_ENTRIES);
-    this.store.set('stygianPlans', next);
+    this.appendRaw(
+      'stygianPlans',
+      entry,
+      (value) => stygianHistoryEntrySchema.safeParse(value).success
+    );
     return structuredClone(entry);
   }
 
@@ -525,18 +561,18 @@ export class HistoryStore {
   }
 
   removeStygianById(id: string): boolean {
-    const entries = this.readStygianPlans();
-    const next = entries.filter((entry) => entry.id !== id);
-    if (next.length === entries.length) return false;
-    this.store.set('stygianPlans', next);
-    return true;
+    return this.removeRawById('stygianPlans', id);
   }
 
   appendTheater(input: Omit<TheaterPlanHistoryEntry, 'id' | 'createdAt'>): TheaterPlanHistoryEntry {
     const entry = theaterHistoryEntrySchema.parse(
       structuredClone({ id: randomUUID(), createdAt: new Date().toISOString(), ...input })
     ) as TheaterPlanHistoryEntry;
-    this.store.set('theaterPlans', [entry, ...this.readTheaterPlans()].slice(0, MAX_ENTRIES));
+    this.appendRaw(
+      'theaterPlans',
+      entry,
+      (value) => theaterHistoryEntrySchema.safeParse(value).success
+    );
     return structuredClone(entry);
   }
 
@@ -549,11 +585,7 @@ export class HistoryStore {
   }
 
   removeTheaterById(id: string): boolean {
-    const entries = this.readTheaterPlans();
-    const next = entries.filter((entry) => entry.id !== id);
-    if (next.length === entries.length) return false;
-    this.store.set('theaterPlans', next);
-    return true;
+    return this.removeRawById('theaterPlans', id);
   }
 
   private readTheaterPlans(): TheaterPlanHistoryEntry[] {
@@ -583,23 +615,6 @@ export class HistoryStore {
     });
   }
 
-  private migrateAbyssPlans(): void {
-    const stored = this.store.get('abyssPlans') as unknown;
-    if (!Array.isArray(stored)) {
-      this.store.set('abyssPlans', []);
-      return;
-    }
-    const needsMigration = stored.some(
-      (entry) =>
-        !isRecord(entry) ||
-        !Array.isArray(entry.characters) ||
-        !isScenarioTrust(entry.scenarioTrust) ||
-        !isScenarioFreshness(entry.scenarioFreshness) ||
-        typeof entry.scenarioNotCurrent !== 'boolean'
-    );
-    if (needsMigration) this.store.set('abyssPlans', this.readAbyssPlans());
-  }
-
   query(options: HistoryQueryOptions = {}): HistoryQueryResult {
     const offset = options.offset && options.offset > 0 ? options.offset : 0;
     const limit =
@@ -608,28 +623,31 @@ export class HistoryStore {
     const fromTs = options.fromDate ? Date.parse(options.fromDate) : Number.NEGATIVE_INFINITY;
     const toTs = options.toDate ? Date.parse(options.toDate) : Number.POSITIVE_INFINITY;
 
-    const filtered = this.store.get('entries').filter((entry) => {
-      if (options.uid && entry.uid !== options.uid) {
-        return false;
-      }
-      if (options.source && entry.result.source !== options.source) {
-        return false;
-      }
-      if (enemyKeyword) {
-        const hay = entry.enemyNames.join(' ').toLowerCase();
-        if (!hay.includes(enemyKeyword)) {
+    const rawEntries = this.rawCollectionForRead('entries');
+    const filtered = rawEntries
+      .flatMap((value) => (isRecommendationHistoryEntry(value) ? [value] : []))
+      .filter((entry) => {
+        if (options.uid && entry.uid !== options.uid) {
           return false;
         }
-      }
-      const ts = Date.parse(entry.createdAt);
-      if (Number.isFinite(fromTs) && ts < fromTs) {
-        return false;
-      }
-      if (Number.isFinite(toTs) && ts > toTs) {
-        return false;
-      }
-      return true;
-    });
+        if (options.source && entry.result.source !== options.source) {
+          return false;
+        }
+        if (enemyKeyword) {
+          const hay = entry.enemyNames.join(' ').toLowerCase();
+          if (!hay.includes(enemyKeyword)) {
+            return false;
+          }
+        }
+        const ts = Date.parse(entry.createdAt);
+        if (Number.isFinite(fromTs) && ts < fromTs) {
+          return false;
+        }
+        if (Number.isFinite(toTs) && ts > toTs) {
+          return false;
+        }
+        return true;
+      });
 
     return {
       items: filtered.slice(offset, offset + limit),
@@ -641,13 +659,7 @@ export class HistoryStore {
   }
 
   removeById(id: string): boolean {
-    const before = this.store.get('entries');
-    const next = before.filter((entry) => entry.id !== id);
-    if (next.length === before.length) {
-      return false;
-    }
-    this.store.set('entries', next);
-    return true;
+    return this.removeRawById('entries', id);
   }
 
   removeMany(filter: { uid?: string; source?: 'llm' | 'fallback'; enemyKeyword?: string }): number {
@@ -657,34 +669,52 @@ export class HistoryStore {
       );
     }
     const keyword = filter.enemyKeyword?.trim().toLowerCase();
-    const before = this.store.get('entries');
-    const next = before.filter((entry) => {
-      if (filter.uid && entry.uid !== filter.uid) {
-        return true;
+    const before = this.requireRawCollection('entries');
+    const selected = new Set<number>();
+    before.forEach((value, index) => {
+      if (!isRecord(value)) {
+        throw unknownHistoryIdentity('entries');
       }
-      if (filter.source && entry.result.source !== filter.source) {
-        return true;
+      if (filter.uid) {
+        if (typeof value.uid !== 'string') throw unknownHistoryIdentity('entries');
+        if (value.uid !== filter.uid) return;
+      }
+      if (filter.source) {
+        if (!isRecord(value.result) || typeof value.result.source !== 'string') {
+          throw unknownHistoryIdentity('entries');
+        }
+        if (value.result.source !== filter.source) return;
       }
       if (keyword) {
-        const hay = entry.enemyNames.join(' ').toLowerCase();
-        if (!hay.includes(keyword)) {
-          return true;
+        if (
+          !Array.isArray(value.enemyNames) ||
+          value.enemyNames.some((name) => typeof name !== 'string')
+        ) {
+          throw unknownHistoryIdentity('entries');
         }
+        if (!value.enemyNames.join(' ').toLowerCase().includes(keyword)) return;
       }
-      return false;
+      if (typeof value.id !== 'string' || value.id.length === 0) {
+        throw unknownHistoryIdentity('entries');
+      }
+      selected.add(index);
     });
-    this.store.set('entries', next);
-    return before.length - next.length;
+    if (selected.size > 0) {
+      this.store.set(
+        'entries',
+        before.filter((_entry, index) => !selected.has(index)) as RecommendationHistoryEntry[]
+      );
+    }
+    return selected.size;
   }
 
   getSummary(): { count: number; sizeBytes?: number; updatedAt?: string } {
-    const entries = this.store.get('entries');
-    const abyssPlans = this.readAbyssPlans();
-    const stygianPlans = this.readStygianPlans();
-    const theaterPlans = this.readTheaterPlans();
-    const allCreatedAt = [...entries, ...abyssPlans, ...stygianPlans, ...theaterPlans].map(
-      ({ createdAt }) => createdAt
-    );
+    const rawCollections = RAW_HISTORY_COLLECTIONS.map(({ key }) => this.rawCollectionForRead(key));
+    const allCreatedAt = rawCollections
+      .flat()
+      .flatMap((value) =>
+        isRecord(value) && typeof value.createdAt === 'string' ? [value.createdAt] : []
+      );
     let sizeBytes: number | undefined;
     try {
       if (this.store.path) sizeBytes = statSync(this.store.path).size;
@@ -692,7 +722,7 @@ export class HistoryStore {
       sizeBytes = undefined;
     }
     return {
-      count: entries.length + abyssPlans.length + stygianPlans.length + theaterPlans.length,
+      count: rawCollections.reduce((total, entries) => total + entries.length, 0),
       ...(sizeBytes === undefined ? {} : { sizeBytes }),
       ...(allCreatedAt.length === 0
         ? {}
@@ -721,8 +751,8 @@ export class HistoryStore {
   getChallengeScopeSnapshot(scope: ChallengeScope): { count: number; fingerprint: string } {
     const snapshot = this.challengeScopeSnapshot(scope);
     return {
-      count: snapshot.ids.length,
-      fingerprint: createHistorySelectionFingerprint(snapshot.ids)
+      count: snapshot.descriptors.length,
+      fingerprint: createHistorySelectionFingerprint(snapshot.descriptors)
     };
   }
 
@@ -730,62 +760,164 @@ export class HistoryStore {
     const confirmation = this.challengeConfirmations.get(scope.confirmationToken);
     this.challengeConfirmations.delete(scope.confirmationToken);
     if (!confirmation || confirmation.expiresAt < this.now()) {
-      throw new Error('History confirmation expired; confirm again');
+      throw new HistoryStoreError(
+        'HISTORY_CONFIRMATION_EXPIRED',
+        'History confirmation expired; confirm again'
+      );
     }
     const snapshot = this.challengeScopeSnapshot(scope);
-    const fingerprint = createHistorySelectionFingerprint(snapshot.ids);
+    const fingerprint = createHistorySelectionFingerprint(snapshot.descriptors);
     if (
       confirmation.scopeKey !== challengeScopeKey(scope) ||
       confirmation.count !== scope.expectedCount ||
-      snapshot.ids.length !== confirmation.count ||
+      snapshot.descriptors.length !== confirmation.count ||
       fingerprint !== confirmation.fingerprint
     ) {
-      throw new Error(
-        `History selection changed: expected ${scope.expectedCount}, found ${snapshot.ids.length}`
+      throw new HistoryStoreError(
+        'HISTORY_SELECTION_CHANGED',
+        `History selection changed: expected ${scope.expectedCount}, found ${snapshot.descriptors.length}`
       );
     }
-    this.store.set(
-      'entries',
-      snapshot.legacy.filter((entry) => !snapshot.matches(entry))
-    );
-    this.store.set(
-      'abyssPlans',
-      snapshot.abyss.filter((entry) => !snapshot.matches(entry))
-    );
-    this.store.set(
-      'stygianPlans',
-      snapshot.stygian.filter((entry) => !snapshot.matches(entry))
-    );
-    this.store.set(
-      'theaterPlans',
-      snapshot.theater.filter((entry) => !snapshot.matches(entry))
-    );
-    return snapshot.ids.length;
+    const updates: Partial<HistoryStoreSchema> = {};
+    for (const { key } of RAW_HISTORY_COLLECTIONS) {
+      const selected = snapshot.selectedIndexes.get(key);
+      if (!selected || selected.size === 0) continue;
+      const raw = snapshot.rawByCollection.get(key) ?? [];
+      updates[key] = raw.filter((_entry, index) => !selected.has(index)) as never;
+    }
+    if (Object.keys(updates).length > 0) this.store.set(updates);
+    return snapshot.descriptors.length;
   }
 
-  private challengeScopeSnapshot(scope: ChallengeScope) {
-    const legacy = this.store.get('entries');
-    const abyss = this.readAbyssPlans();
-    const stygian = this.readStygianPlans();
-    const theater = this.readTheaterPlans();
-    const matches = (entry: { uid: string; mode?: ScenarioMode; scenarioId?: string }) => {
-      if (scope.scope === 'all') return true;
-      if (entry.uid !== scope.uid) return false;
-      if (scope.scope === 'uid') return true;
-      return entry.mode === scope.mode && entry.scenarioId === scope.scenarioId;
-    };
-    const ids = [
-      ...legacy.filter(matches).map(({ id }) => `legacy:${id}`),
-      ...abyss.filter(matches).map(({ id }) => `abyss:${id}`),
-      ...stygian.filter(matches).map(({ id }) => `stygian:${id}`),
-      ...theater.filter(matches).map(({ id }) => `theater:${id}`)
-    ].sort();
-    return { legacy, abyss, stygian, theater, matches, ids };
+  private challengeScopeSnapshot(scope: ChallengeScope): RawChallengeSelection {
+    const rawByCollection = new Map<HistoryCollectionKey, unknown[]>();
+    const selectedIndexes = new Map<HistoryCollectionKey, Set<number>>();
+    const descriptors: string[] = [];
+    for (const collection of RAW_HISTORY_COLLECTIONS) {
+      const raw = this.requireRawCollection(collection.key);
+      rawByCollection.set(collection.key, raw);
+      const selected = new Set<number>();
+      raw.forEach((value, index) => {
+        const decision = rawScopeDecision(value, collection, scope);
+        if (decision === 'ambiguous') throw unknownHistoryIdentity(collection.key);
+        if (decision === 'outside') return;
+        selected.add(index);
+        const id = rawIdentityPart(value, 'id')!;
+        descriptors.push(
+          `${collection.key}:${id}:${createHash('sha256').update(rawFingerprintValue(value)).digest('hex')}`
+        );
+      });
+      selectedIndexes.set(collection.key, selected);
+    }
+    descriptors.sort();
+    return { rawByCollection, selectedIndexes, descriptors };
+  }
+
+  private appendRaw(
+    key: HistoryCollectionKey,
+    entry: HistoryStoreSchema[HistoryCollectionKey][number],
+    isParseable: (value: unknown) => boolean
+  ): void {
+    const raw = this.requireRawCollection(key);
+    const next: unknown[] = [entry];
+    let parseableCount = 1;
+    for (const value of raw) {
+      if (isParseable(value)) {
+        if (parseableCount >= MAX_ENTRIES) continue;
+        parseableCount += 1;
+      }
+      next.push(value);
+    }
+    this.store.set(key, next as never);
+  }
+
+  private removeRawById(key: HistoryCollectionKey, id: string): boolean {
+    const raw = this.requireRawCollection(key);
+    const next = raw.filter((value) => rawIdentityPart(value, 'id') !== id);
+    if (next.length === raw.length) return false;
+    this.store.set(key, next as never);
+    return true;
+  }
+
+  private requireRawCollection(key: HistoryCollectionKey): unknown[] {
+    const stored = this.store.get(key) as unknown;
+    if (!Array.isArray(stored)) throw unknownHistoryIdentity(key);
+    return stored;
+  }
+
+  private rawCollectionForRead(key: HistoryCollectionKey): unknown[] {
+    const stored = this.store.get(key) as unknown;
+    return Array.isArray(stored) ? stored : [];
   }
 }
 
-function createHistorySelectionFingerprint(ids: string[]): string {
-  return createHash('sha256').update(JSON.stringify(ids)).digest('hex');
+function createHistorySelectionFingerprint(descriptors: string[]): string {
+  return createHash('sha256').update(JSON.stringify(descriptors)).digest('hex');
+}
+
+function rawScopeDecision(
+  value: unknown,
+  collection: RawHistoryCollection,
+  scope: ChallengeScope
+): 'selected' | 'outside' | 'ambiguous' {
+  if (scope.scope === 'all') {
+    return rawIdentityPart(value, 'id') ? 'selected' : 'ambiguous';
+  }
+  if (scope.scope === 'group' && collection.mode !== scope.mode) return 'outside';
+  const uid = rawIdentityPart(value, 'uid');
+  if (!uid) return 'ambiguous';
+  if (uid !== scope.uid) return 'outside';
+  if (scope.scope === 'uid') {
+    return rawIdentityPart(value, 'id') ? 'selected' : 'ambiguous';
+  }
+  const recordedMode = rawIdentityPart(value, 'mode');
+  if (recordedMode && recordedMode !== collection.mode) return 'ambiguous';
+  const scenarioId = rawIdentityPart(value, 'scenarioId');
+  if (!scenarioId) return 'ambiguous';
+  if (scenarioId !== scope.scenarioId) return 'outside';
+  return rawIdentityPart(value, 'id') ? 'selected' : 'ambiguous';
+}
+
+function rawIdentityPart(
+  value: unknown,
+  key: 'id' | 'uid' | 'mode' | 'scenarioId'
+): string | undefined {
+  if (!isRecord(value)) return undefined;
+  const part = value[key];
+  return typeof part === 'string' && part.length > 0 ? part : undefined;
+}
+
+function rawFingerprintValue(value: unknown): string {
+  const serialized = JSON.stringify(value);
+  if (serialized === undefined) {
+    throw new HistoryStoreError(
+      'HISTORY_IDENTITY_UNKNOWN',
+      'History record cannot be fingerprinted safely'
+    );
+  }
+  return serialized;
+}
+
+function unknownHistoryIdentity(collection: HistoryCollectionKey): HistoryStoreError {
+  return new HistoryStoreError(
+    'HISTORY_IDENTITY_UNKNOWN',
+    `History record identity is unknown in ${collection}; nothing was changed`
+  );
+}
+
+function isRecommendationHistoryEntry(value: unknown): value is RecommendationHistoryEntry {
+  if (!isRecord(value) || !isRecord(value.result)) return false;
+  return (
+    typeof value.id === 'string' &&
+    typeof value.uid === 'string' &&
+    typeof value.createdAt === 'string' &&
+    Array.isArray(value.enemyNames) &&
+    value.enemyNames.every((name) => typeof name === 'string') &&
+    (value.side === 'single' || value.side === 'left' || value.side === 'right') &&
+    (value.result.source === 'llm' || value.result.source === 'fallback') &&
+    typeof value.result.summary === 'string' &&
+    Array.isArray(value.result.teams)
+  );
 }
 
 function challengeScopeKey(scope: ChallengeScope): string {
