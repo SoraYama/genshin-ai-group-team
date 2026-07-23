@@ -42,6 +42,16 @@ describe('renderer text contrast tokens', () => {
     const tokens = await readTokens();
     expect(requireToken(tokens, '--gta-accent-soft')).toMatch(/^(?:#[\da-f]{6}|rgba?\()/iu);
   });
+
+  test('keeps destructive actions readable on dark page backgrounds', async () => {
+    const tokens = await readTokens();
+    expect(
+      contrast(
+        parseColor(requireToken(tokens, '--gta-danger-on-dark')),
+        parseColor(requireToken(tokens, '--gta-danger-on-dark-bg'))
+      )
+    ).toBeGreaterThanOrEqual(4.5);
+  });
 });
 
 async function readTokens(): Promise<Record<string, string>> {

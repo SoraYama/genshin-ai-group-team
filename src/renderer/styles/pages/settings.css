@@ -86,9 +86,10 @@
   margin: 18px 0;
   padding: 20px 28px;
   grid-template-columns: 180px 1fr;
+  background: linear-gradient(105deg, rgba(20, 38, 51, 0.94), rgba(30, 47, 55, 0.86));
 }
 .gta-settings-service .gta-empty-state small {
-  color: rgba(239, 244, 240, 0.72);
+  color: var(--gta-text-on-dark-soft);
 }
 .gta-settings-key-row {
   display: grid;
