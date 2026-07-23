@@ -1,4 +1,5 @@
 import type { BrowserWindow } from 'electron';
+import { z } from 'zod';
 
 import { abyssAdvisorPlanInputSchema } from '../../shared/abyss-advisor.js';
 import { IpcError, IpcErrorCodes } from '../../shared/errors.js';
@@ -35,5 +36,14 @@ export function registerAbyssAdvisorIpc({
     });
   });
 
-  registerHandler('advisor-v2:abyss-cancel', async () => ({ ok: advisor.cancel() }));
+  registerHandler('advisor-v2:abyss-cancel', async (payload) => {
+    const parsed = z.object({ correlationId: z.string().min(1).max(128) }).safeParse(payload);
+    if (!parsed.success) {
+      throw new IpcError(
+        IpcErrorCodes.ValidationFailed,
+        parsed.error.issues.map(({ message }) => message).join('; ')
+      );
+    }
+    return { ok: advisor.cancel(parsed.data.correlationId) };
+  });
 }

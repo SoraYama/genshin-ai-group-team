@@ -327,11 +327,14 @@ export interface AbyssPlanHistoryEntry {
   scenarioFreshness: 'fresh' | 'expiring' | 'stale' | 'unknown';
   scenarioNotCurrent: boolean;
   interventions: {
+    locale?: import('./advisor-narrative.js').AdvisorLocale;
     lockedCharacterIds: string[];
     excludedCharacterIds: string[];
     preferences: import('./scenario-v2.js').PlayerPreferences;
     recomputeHalf?: 'firstHalf' | 'secondHalf';
   };
+  narrative?: import('./advisor-narrative.js').AdvisorNarrative;
+  teamRisks?: import('./advisor-narrative.js').AbyssTeamRisk[];
   characters: Array<{
     id: string;
     name: string;
@@ -351,7 +354,9 @@ export interface StygianPlanHistoryEntry {
   dataVersion: string;
   mode: 'stygian-onslaught';
   difficultyId: string;
-  difficultyName: string;
+  difficultyNames?: Record<string, string>;
+  /** Legacy v2 records are migrated to difficultyNames when read. */
+  difficultyName?: string;
   phase?: number;
   target: import('./stygian-advisor.js').StygianRewardTarget;
   reusePolicy: import('./scenario-v2.js').CrossPartyReusePolicy;
@@ -360,12 +365,14 @@ export interface StygianPlanHistoryEntry {
   scenarioFreshness: 'fresh' | 'expiring' | 'stale' | 'unknown';
   scenarioNotCurrent: boolean;
   interventions: {
+    locale?: import('./advisor-narrative.js').AdvisorLocale;
     lockedCharacterIds: string[];
     excludedCharacterIds: string[];
     target: import('./stygian-advisor.js').StygianRewardTarget;
     difficultyId: string;
     preferences: import('./scenario-v2.js').PlayerPreferences;
   };
+  narrative?: import('./advisor-narrative.js').AdvisorNarrative;
   characters: Array<{
     id: string;
     name: string;
@@ -397,6 +404,11 @@ export interface TheaterPlanHistoryEntry {
   cast: Array<{
     id: string;
     name: string;
+    names?: Record<string, string>;
+    nameRef?: {
+      kind: 'profile-character' | 'scenario-entity' | 'legacy-name';
+      id: string;
+    };
     element?: string;
     level?: number;
     source: 'owned' | 'opening' | 'trial' | 'special-guest' | 'support';
@@ -410,7 +422,21 @@ export interface TheaterPlanHistoryEntry {
     after: number;
   }>;
   nodeBudget: import('./theater-advisor.js').TheaterNodeBudgetItem[];
+  arcanaSnapshots?: Array<{
+    id: string;
+    nameRef: string;
+    names: Record<string, string>;
+  }>;
+  encounterSnapshots?: Array<{
+    act: number;
+    encounterId: string;
+    enemyRefs: Array<{
+      id: string;
+      names: Record<string, string>;
+    }>;
+  }>;
   routeGuidance: import('./theater-advisor.js').TheaterRouteGuidance;
+  narrative?: import('./advisor-narrative.js').AdvisorNarrative;
   plan: import('./scenario-v2.js').TheaterPlan;
 }
 

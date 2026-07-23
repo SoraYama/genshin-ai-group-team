@@ -93,7 +93,7 @@ describe('buildAgentSdkOptions', () => {
     }
   });
 
-  it('passes compatible custom headers without allowing newline injection', () => {
+  it('passes custom headers accepted by the shared validator', () => {
     const options = buildAgentSdkOptions({
       apiKey: 'test-key',
       baseUrl: 'https://llm.example.test',
@@ -103,12 +103,30 @@ describe('buildAgentSdkOptions', () => {
       abortController: new AbortController(),
       customHeaders: {
         'X-Tenant': 'community',
-        'X_Test!': 'rfc-token',
-        'Bad Header': 'ignored',
-        'X-Injected': 'ok\nAuthorization: leaked'
+        'X_Test!': 'rfc-token'
       }
     });
     expect(options.env?.ANTHROPIC_CUSTOM_HEADERS).toBe('X-Tenant: community\nX_Test!: rfc-token');
+  });
+
+  it.each([
+    [{ 'Bad Header': 'value' }, 'invalid name'],
+    [{ 'X-Nul': 'ok\u0000tail' }, 'NUL'],
+    [{ 'X-Del': 'ok\u007ftail' }, 'DEL'],
+    [{ 'X-Line': 'ok\u2028tail' }, 'Unicode line separator'],
+    [{ 'X-Bidi': 'ok\u202etail' }, 'Unicode format control']
+  ])('rejects %s at the generation boundary (%s)', (customHeaders, _label) => {
+    expect(() =>
+      buildAgentSdkOptions({
+        apiKey: 'test-key',
+        baseUrl: 'https://llm.example.test',
+        model: 'test-model',
+        systemPrompt: 'system',
+        cwd: '/tmp/genshin-advisor',
+        abortController: new AbortController(),
+        customHeaders
+      })
+    ).toThrow();
   });
 
   it('allows only explicitly registered read-only business MCP tools for bounded agent turns', async () => {

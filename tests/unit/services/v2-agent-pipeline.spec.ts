@@ -60,11 +60,54 @@ function planIds(plan: RecommendationPlan): string[] {
 
 function context(plan: RecommendationPlan): V2PipelineContext {
   const eligibleCharacterIds = [...new Set(planIds(plan))];
+  const compactBaseline =
+    plan.mode === 'spiral-abyss'
+      ? {
+          mode: plan.mode,
+          scenarioId: plan.scenarioId,
+          dataVersion: plan.dataVersion,
+          firstHalfTeam: {
+            id: plan.firstHalfTeam.id,
+            characterIds: plan.firstHalfTeam.characterIds
+          },
+          secondHalfTeam: {
+            id: plan.secondHalfTeam.id,
+            characterIds: plan.secondHalfTeam.characterIds
+          },
+          chambers: plan.chambers.map(({ floor, chamber }) => ({ floor, chamber }))
+        }
+      : plan.mode === 'stygian-onslaught'
+        ? {
+            mode: plan.mode,
+            scenarioId: plan.scenarioId,
+            dataVersion: plan.dataVersion,
+            reusePolicyAcknowledgement: plan.reusePolicyAcknowledgement,
+            phases: plan.phases.map(({ phase, team }) => ({
+              phase,
+              team: { id: team.id, characterIds: team.characterIds }
+            }))
+          }
+        : {
+            mode: plan.mode,
+            scenarioId: plan.scenarioId,
+            dataVersion: plan.dataVersion,
+            cast: plan.cast,
+            acts: plan.acts.map(
+              ({ act, candidateCharacterIds, plannedVigorSpend, pathChoice }) => ({
+                act,
+                candidateCharacterIds,
+                plannedVigorSpend,
+                pathKind: pathChoice.kind
+              })
+            )
+          };
   return {
     mode: plan.mode,
     correlationId: 'pipeline-correlation',
     scenarioId: plan.scenarioId,
     dataVersion: plan.dataVersion,
+    locale: 'zh-CN',
+    profileRef: { uid: '123456789' },
     profile: {
       coverage: {
         ownedCount: 100,
@@ -75,9 +118,19 @@ function context(plan: RecommendationPlan): V2PipelineContext {
         missingDetailCount: 92,
         partial: true
       },
-      omittedCharacterCount: 0,
       provenanceSummaries: [{ ownership: 'miyoushe-list', characterIndexes: [0] }],
-      characters: [
+      minimalIndex: [
+        {
+          id: Number(eligibleCharacterIds[0] ?? '1001'),
+          name: '测试角色',
+          element: 'Pyro',
+          rarity: 5,
+          level: 90,
+          completeness: 'detailed',
+          missingFields: ['talents']
+        }
+      ],
+      detailedProfiles: [
         {
           id: Number(eligibleCharacterIds[0] ?? '1001'),
           name: '测试角色',
@@ -97,11 +150,19 @@ function context(plan: RecommendationPlan): V2PipelineContext {
     },
     candidate: {
       kind: 'feasibleBaseline',
-      feasibleBaseline: plan,
+      feasibleBaseline: compactBaseline,
       eligibleCharacterIds
     },
     mechanics: [{ target: 'selected-scenario', facts: ['已确认机制'], unknowns: ['未知数值'] }],
-    interventions: { noBuildChange: true },
+    interventions: {
+      locale: 'zh-CN',
+      preferences: {
+        comfort: 'off',
+        survival: 'off',
+        lowInvestment: 'off',
+        noBuildChange: true
+      }
+    },
     knowledge: {
       version: 'test-knowledge',
       unknownCharacterIds: ['9999']
@@ -109,27 +170,67 @@ function context(plan: RecommendationPlan): V2PipelineContext {
   };
 }
 
-function targets(mode: RecommendationPlan['mode']) {
-  switch (mode) {
+function targets(plan: RecommendationPlan) {
+  switch (plan.mode) {
     case 'spiral-abyss':
       return {
         critique: { kind: 'abyss-chamber' as const, floor: 12, chamber: 1, half: 'first' as const },
-        rotation: { kind: 'abyss-team' as const, half: 'first' as const },
-        explain: { kind: 'abyss-chamber' as const, floor: 12, chamber: 1, half: 'first' as const }
+        rotations: [
+          { kind: 'abyss-team' as const, half: 'first' as const },
+          { kind: 'abyss-team' as const, half: 'second' as const }
+        ],
+        explanations: plan.chambers.flatMap(({ floor, chamber }) =>
+          (['first', 'second'] as const).map((half) => ({
+            kind: 'abyss-chamber' as const,
+            floor,
+            chamber,
+            half
+          }))
+        )
       };
     case 'stygian-onslaught':
       return {
         critique: { kind: 'stygian-phase' as const, phase: 1 },
-        rotation: { kind: 'stygian-phase' as const, phase: 1 },
-        explain: { kind: 'stygian-phase' as const, phase: 1 }
+        rotations: plan.phases.map(({ phase }) => ({
+          kind: 'stygian-phase' as const,
+          phase
+        })),
+        explanations: plan.phases.map(({ phase }) => ({
+          kind: 'stygian-phase' as const,
+          phase
+        }))
       };
     case 'imaginarium-theater':
       return {
         critique: { kind: 'theater-act' as const, act: 1 },
-        rotation: { kind: 'theater-act' as const, act: 1 },
-        explain: { kind: 'theater-act' as const, act: 1 }
+        rotations: plan.acts.map(({ act }) => ({ kind: 'theater-act' as const, act })),
+        explanations: [
+          { kind: 'theater-cast' as const },
+          ...plan.acts.map(({ act }) => ({ kind: 'theater-act' as const, act }))
+        ]
       };
   }
+}
+
+function rotationOutput(plan: RecommendationPlan) {
+  return {
+    rotations: targets(plan).rotations.map((target) => directive(target))
+  };
+}
+
+function explainOutput(plan: RecommendationPlan) {
+  return {
+    explanations: targets(plan).explanations.map((target) => directive(target))
+  };
+}
+
+function directive<T>(target: T) {
+  return {
+    target,
+    tone: 'steady',
+    reasonCodes: ['setup-order'],
+    factRefs: [{ kind: 'plan', field: 'validated-target' }]
+  };
 }
 
 function run(
@@ -166,12 +267,11 @@ describe.each([
   ['imaginarium-theater', validTheaterPlan()]
 ] as const)('V2 agent pipeline: %s', (_mode, baseline) => {
   it('runs Composer → Critique → Rotation → Explain with a grounded feasible baseline', async () => {
-    const target = targets(baseline.mode);
     const runner = new StageRunner([
       baseline,
       { decision: 'accept', issues: [] },
-      { rotations: [{ target: target.rotation, notes: ['循环建议'] }] },
-      { explanations: [{ target: target.explain, text: '已验证说明' }] }
+      rotationOutput(baseline),
+      explainOutput(baseline)
     ]);
     const result = await run(runner, baseline, (text) => ({
       ok: true,
@@ -192,6 +292,7 @@ describe.each([
     const composePayload = JSON.parse(runner.calls[0]!.prompt) as Record<string, unknown>;
     expect(JSON.stringify(composePayload)).toContain('"kind":"feasibleBaseline"');
     expect(JSON.stringify(composePayload)).toContain('"missingFields":["talents"]');
+    expect(JSON.stringify(composePayload)).toContain('"profileRef":{"uid":"123456789"}');
     expect(JSON.stringify(composePayload)).toContain('"unknownCharacterIds":["9999"]');
     expect(runner.calls[0]!.options.allowedBusinessTools).toEqual([
       'mcp__genshin__read_profile_cache'
@@ -204,10 +305,63 @@ describe.each([
   });
 });
 
+describe.each([
+  ['spiral-abyss', validAbyssPlan()],
+  ['stygian-onslaught', validStygianPlan()],
+  ['imaginarium-theater', validTheaterPlan()]
+] as const)('V2 exact stage target coverage: %s', (_mode, baseline) => {
+  it('rejects a missing Rotation target', async () => {
+    const rotation = rotationOutput(baseline);
+    const currentExplain = {
+      explanations: explainOutput(baseline).explanations.filter(
+        ({ target }) => target.kind !== 'theater-cast'
+      )
+    };
+    const runner = new StageRunner([
+      baseline,
+      { decision: 'accept', issues: [] },
+      { rotations: rotation.rotations.slice(0, -1) },
+      currentExplain
+    ]);
+
+    const result = await run(runner, baseline, (text) => ({
+      ok: true,
+      plan: JSON.parse(text) as RecommendationPlan
+    }));
+
+    expect(result).toMatchObject({
+      ok: false,
+      issues: [expect.objectContaining({ path: ['rotation'] })]
+    });
+  });
+
+  it('rejects a duplicate Explain target', async () => {
+    const explanations = explainOutput(baseline).explanations.filter(
+      ({ target }) => target.kind !== 'theater-cast'
+    );
+    const runner = new StageRunner([
+      baseline,
+      { decision: 'accept', issues: [] },
+      rotationOutput(baseline),
+      { explanations: [...explanations, explanations[0]] }
+    ]);
+
+    const result = await run(runner, baseline, (text) => ({
+      ok: true,
+      plan: JSON.parse(text) as RecommendationPlan
+    }));
+
+    expect(result).toMatchObject({
+      ok: false,
+      issues: [expect.objectContaining({ path: ['explain'] })]
+    });
+  });
+});
+
 describe('V2 agent pipeline repair and grounding', () => {
   it('uses at most two concrete repair rounds and critiques each valid attempt exactly once', async () => {
     const baseline = validAbyssPlan();
-    const target = targets(baseline.mode);
+    const target = targets(baseline);
     const invalid = { invalid: true };
     const runner = new StageRunner([
       invalid,
@@ -225,8 +379,8 @@ describe('V2 agent pipeline repair and grounding', () => {
       },
       baseline,
       { decision: 'accept', issues: [] },
-      { rotations: [{ target: target.rotation, notes: ['循环建议'] }] },
-      { explanations: [{ target: target.explain, text: '已验证说明' }] }
+      rotationOutput(baseline),
+      explainOutput(baseline)
     ]);
     const result = await run(runner, baseline, (text) => {
       const parsed = JSON.parse(text) as unknown;
@@ -254,7 +408,7 @@ describe('V2 agent pipeline repair and grounding', () => {
 
   it('stops before Rotation/Explain when a third repair would be required', async () => {
     const baseline = validStygianPlan();
-    const target = targets(baseline.mode);
+    const target = targets(baseline);
     const runner = new StageRunner([
       baseline,
       {
@@ -307,13 +461,12 @@ describe('V2 agent pipeline repair and grounding', () => {
 
   it('rejects an Explain target that was not present in the validated plan', async () => {
     const baseline = validTheaterPlan();
-    const target = targets(baseline.mode);
     const runner = new StageRunner([
       baseline,
       { decision: 'accept', issues: [] },
-      { rotations: [{ target: target.rotation, notes: ['循环建议'] }] },
+      rotationOutput(baseline),
       {
-        explanations: [{ target: { kind: 'theater-act', act: 10 }, text: '试图新增不存在的幕次' }]
+        explanations: [directive({ kind: 'theater-act', act: 10 })]
       }
     ]);
     const result = await run(runner, baseline, (text) => ({
@@ -324,6 +477,40 @@ describe('V2 agent pipeline repair and grounding', () => {
     expect(result).toMatchObject({
       ok: false,
       issues: [expect.objectContaining({ path: ['explain'] })]
+    });
+  });
+
+  it('rejects a structured fact reference outside the bounded context', async () => {
+    const baseline = validAbyssPlan();
+    const explanation = explainOutput(baseline) as ReturnType<typeof explainOutput> & {
+      explanations: Array<{
+        factRefs: Array<
+          { kind: 'plan'; field: string } | { kind: 'profile'; characterId: string; field: string }
+        >;
+      }>;
+    };
+    explanation.explanations[0]!.factRefs = [
+      { kind: 'profile', characterId: '999999', field: 'stats' }
+    ];
+    const runner = new StageRunner([
+      baseline,
+      { decision: 'accept', issues: [] },
+      rotationOutput(baseline),
+      explanation
+    ]);
+    const result = await run(runner, baseline, (text) => ({
+      ok: true,
+      plan: JSON.parse(text) as RecommendationPlan
+    }));
+
+    expect(result).toMatchObject({
+      ok: false,
+      issues: [
+        expect.objectContaining({
+          path: ['explain'],
+          message: expect.stringContaining('outside the bounded roster')
+        })
+      ]
     });
   });
 });

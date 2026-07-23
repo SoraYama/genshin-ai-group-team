@@ -9,6 +9,11 @@ import {
   type StygianOnslaughtScenario,
   type StygianPlan
 } from './scenario-v2.js';
+import {
+  advisorLocaleSchema,
+  advisorNarrativeSchema,
+  defaultAdvisorNarrative
+} from './advisor-narrative.js';
 
 export const canonicalCharacterIdSchema = z
   .string()
@@ -57,6 +62,7 @@ export const stygianAdvisorPlanInputSchema = z
     uid: z.string().regex(/^\d{9}$/, 'UID must contain exactly 9 digits'),
     scenarioId: z.string().trim().min(1),
     dataVersion: z.string().trim().min(1),
+    locale: advisorLocaleSchema.default('zh-CN'),
     difficultyId: z.string().trim().min(1),
     phase: z.number().int().min(1).max(3).optional(),
     target: stygianRewardTargetSchema,
@@ -196,7 +202,8 @@ const resultCommonShape = {
   source: z.enum(['smart-service', 'local-rules']),
   issues: z.array(stygianPlanIssueSchema),
   warnings: z.array(playerFacingTextSchema),
-  assumptions: z.array(playerFacingTextSchema)
+  assumptions: z.array(playerFacingTextSchema),
+  narrative: advisorNarrativeSchema.default(defaultAdvisorNarrative('stygian-onslaught'))
 };
 
 export const stygianPhaseGuidanceSchema = z

@@ -143,6 +143,16 @@ describe('history presentation', () => {
     expect(periodLabelFromScenario('opaque-cycle')).toBe('保存时未记录周期');
     expect(historyCardTitle(abyssEntry(), 'en')).toBe('Spiral Abyss · Floor 12 · Chamber 2');
     expect(historyCardTitle(stygianEntry(), 'en')).toBe('Stygian Onslaught · Difficulty 5');
+    expect(
+      historyCardTitle(
+        {
+          ...stygianEntry(),
+          difficultyName: undefined,
+          difficultyNames: { 'zh-CN': '险境', en: 'Perilous' }
+        },
+        'en'
+      )
+    ).toBe('Stygian Onslaught · Perilous');
     expect(historyCardTitle(theaterEntry(), 'en')).toBe('Imaginarium Theater · Act 8');
     expect(periodLabelFromScenario('opaque-cycle', 'en')).toBe('Period not saved');
   });
@@ -163,9 +173,7 @@ describe('history presentation', () => {
       scenario: '2026-07-01 — 2026-07-15',
       data: '2026.07.1'
     });
-    expect(groupChallengeHistory([entry])[0]?.title).toBe(
-      '深境螺旋 · 2026-07-01 — 2026-07-15'
-    );
+    expect(groupChallengeHistory([entry])[0]?.title).toBe('深境螺旋 · 2026-07-01 — 2026-07-15');
     expect(groupChallengeHistory([entry], 'en')[0]?.title).toBe(
       'Spiral Abyss · 2026-07-01 — 2026-07-15'
     );
@@ -264,6 +272,17 @@ describe('history presentation', () => {
     abyss.plan.firstHalfTeam.rotationNotes = ['深渊循环'];
     abyss.plan.warnings = ['深渊提醒'];
     abyss.plan.assumptions = ['深渊前提'];
+    abyss.teamRisks = [
+      {
+        half: 'first',
+        code: 'energy-window-tight',
+        severity: 'soft',
+        narrative: {
+          'zh-CN': '上半充能窗口较紧。',
+          'en-US': 'The first-half energy window is tight.'
+        }
+      }
+    ];
     abyss.plan.chambers[0]!.firstHalf.tactics = ['深渊打法'];
     abyss.plan.chambers[0]!.firstHalf.risks = ['深渊风险'];
     abyss.plan.chambers[0]!.firstHalf.substitutionNotes = ['深渊替换'];
@@ -287,6 +306,25 @@ describe('history presentation', () => {
     theater.plan.acts[0]!.plannedVigorSpend = [{ characterId: '1001', cost: 2 }];
     theater.vigorBudget = [{ act: 1, characterId: '1001', before: 2, spent: 1, after: 1 }];
     theater.nodeBudget = [{ nodeId: 'arcana:1', cost: 1 }];
+    theater.arcanaSnapshots = [
+      {
+        id: 'arcana:1',
+        nameRef: 'arcana.name.1',
+        names: { 'zh-CN': '剧诗秘法', 'en-US': 'Theater Arcana' }
+      }
+    ];
+    theater.encounterSnapshots = [
+      {
+        act: 1,
+        encounterId: 'encounter:1',
+        enemyRefs: [
+          {
+            id: 'enemy:1',
+            names: { 'zh-CN': '剧诗敌人', 'en-US': 'Theater Enemy' }
+          }
+        ]
+      }
+    ];
     theater.routeGuidance = {
       preserveCharacterIds: ['1001'],
       arcanaPriorityIds: ['arcana:1'],
@@ -318,7 +356,16 @@ describe('history presentation', () => {
         })
       ]),
       warnings: ['深渊提醒'],
-      assumptions: ['深渊前提']
+      assumptions: ['深渊前提'],
+      teamRisks: [
+        expect.objectContaining({
+          half: 'first',
+          narrative: {
+            'zh-CN': '上半充能窗口较紧。',
+            'en-US': 'The first-half energy window is tight.'
+          }
+        })
+      ]
     });
     expect(historyDetailSemanticSnapshot(stygian)).toMatchObject({
       mode: 'stygian-onslaught',
@@ -339,6 +386,23 @@ describe('history presentation', () => {
       ]),
       vigorBudget: [{ before: 2, spent: 1, after: 1 }],
       nodeBudget: [{ nodeId: 'arcana:1', cost: 1 }],
+      arcanaSnapshots: [
+        expect.objectContaining({
+          id: 'arcana:1',
+          names: { 'zh-CN': '剧诗秘法', 'en-US': 'Theater Arcana' }
+        })
+      ],
+      encounterSnapshots: [
+        expect.objectContaining({
+          act: 1,
+          enemyRefs: [
+            expect.objectContaining({
+              id: 'enemy:1',
+              names: { 'zh-CN': '剧诗敌人', 'en-US': 'Theater Enemy' }
+            })
+          ]
+        })
+      ],
       routeGuidance: {
         arcanaPriorities: [
           {

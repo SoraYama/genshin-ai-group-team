@@ -10,6 +10,15 @@ import {
   validStygianPlan
 } from './stygian-test-fixtures.js';
 
+function directive<T>(target: T) {
+  return {
+    target,
+    tone: 'steady',
+    reasonCodes: ['setup-order'],
+    factRefs: [{ kind: 'plan', field: 'validated-target' }]
+  };
+}
+
 const profile = {
   schemaVersion: 2 as const,
   uid: '123456789',
@@ -45,10 +54,32 @@ class WaitingAgentRunner {
   }
 }
 
+class HangingAfterComposeRunner implements StygianPlanAgentRunner {
+  calls = 0;
+  private releaseStarted!: () => void;
+  readonly stageStarted = new Promise<void>((resolve) => {
+    this.releaseStarted = resolve;
+  });
+
+  async *run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown> {
+    this.calls += 1;
+    if (this.calls === 1) {
+      const compose = new SuccessfulStageRunner();
+      for await (const message of compose.run(prompt, options)) yield message;
+      return;
+    }
+    this.releaseStarted();
+    await new Promise<void>((resolve) => {
+      options.abortController.signal.addEventListener('abort', () => resolve(), { once: true });
+    });
+    throw new Error('aborted');
+  }
+}
+
 class SuccessfulStageRunner implements StygianPlanAgentRunner {
   readonly calls: AgentSdkRunOptions[] = [];
 
-  async *run(_prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown> {
+  async *run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown> {
     this.calls.push(options);
     if (options.systemPrompt.includes('CritiqueAgent v2')) {
       yield {
@@ -71,7 +102,7 @@ class SuccessfulStageRunner implements StygianPlanAgentRunner {
       yield {
         type: 'result',
         result: JSON.stringify({
-          rotations: [{ target: { kind: 'stygian-phase', phase: 1 }, notes: ['先处理阶段机制。'] }]
+          rotations: [1, 2, 3].map((phase) => directive({ kind: 'stygian-phase', phase }))
         })
       };
       return;
@@ -80,21 +111,18 @@ class SuccessfulStageRunner implements StygianPlanAgentRunner {
       yield {
         type: 'result',
         result: JSON.stringify({
-          explanations: [
-            {
-              target: { kind: 'stygian-phase', phase: 1 },
-              text: '第一阶段说明只基于已验证队伍。'
-            }
-          ]
+          explanations: [1, 2, 3].map((phase) => directive({ kind: 'stygian-phase', phase }))
         })
       };
       return;
     }
+    const request = JSON.parse(prompt) as { context: { profileRef: { uid: string } } };
+    const selectedCharacterIds = validStygianPlan().phases.flatMap(({ team }) => team.characterIds);
     const toolUses = [
       {
         id: 'profile',
         name: 'mcp__genshin__read_profile_cache',
-        input: { uid: '123456789' }
+        input: { uid: request.context.profileRef.uid, characterIds: selectedCharacterIds }
       },
       ...[1, 2, 3].map((phase) => ({
         id: `phase-${phase}`,
@@ -213,6 +241,7 @@ function service(
     history?: ReturnType<typeof vi.fn>;
     audit?: ReturnType<typeof vi.fn>;
     timeout?: number;
+    recordUsage?: ReturnType<typeof vi.fn>;
   } = {}
 ) {
   return new StygianAdvisorService({
@@ -224,7 +253,8 @@ function service(
       getApiKey: () => options.apiKey,
       getBaseUrl: () => 'https://example.test',
       getModel: () => 'test-model',
-      getCustomHeaders: () => ({})
+      getCustomHeaders: () => ({}),
+      recordUsage: options.recordUsage
     },
     sdkEnvironment: { cwd: '/tmp', clientVersion: 'test' },
     agentTimeoutMs: options.timeout,
@@ -254,7 +284,10 @@ describe('StygianAdvisorService', () => {
       expect.objectContaining({
         mode: 'stygian-onslaught',
         difficultyId: 'difficulty-6',
-        difficultyName: '难度 6',
+        difficultyNames: expect.objectContaining({
+          'zh-CN': '难度 6',
+          en: 'Difficulty 6'
+        }),
         target: 'dire-challenge',
         reusePolicy: { rule: 'forbidden', notes: [] },
         scenarioTrust: 'production',
@@ -286,18 +319,25 @@ describe('StygianAdvisorService', () => {
   it('maps accepted staged risks, rotation, and explanation onto the validated result', async () => {
     const runner = new SuccessfulStageRunner();
     const history = vi.fn();
-    const result = await service({ apiKey: 'secret', runner, history }).recommend(stygianInput());
+    const recordUsage = vi.fn();
+    const result = await service({ apiKey: 'secret', runner, history, recordUsage }).recommend(
+      stygianInput()
+    );
 
     expect(result).toMatchObject({ status: 'planned', source: 'smart-service' });
     if (result.status !== 'planned') throw new Error('Expected planned result');
-    expect(result.plan.phases[0]?.team.rotationNotes).toContain('先处理阶段机制。');
     expect(result.phaseGuidance[0]?.risks).toContain('第一阶段能量窗口偏紧。');
-    expect(result.phaseGuidance[0]?.mechanismBasis).toContain('第一阶段说明只基于已验证队伍。');
+    expect(result.narrative).toMatchObject({
+      origin: 'agent-structured',
+      summary: { 'zh-CN': expect.any(String), 'en-US': expect.any(String) }
+    });
     expect(runner.calls).toHaveLength(4);
     expect(
       runner.calls.slice(1).every(({ allowedBusinessTools }) => allowedBusinessTools?.length === 0)
     ).toBe(true);
     expect(history).toHaveBeenCalledTimes(1);
+    expect(recordUsage).toHaveBeenCalledTimes(1);
+    expect(recordUsage).toHaveBeenCalledWith(10, 5, 0.01);
   });
 
   it('blocks stale or unknown production data before planning', async () => {
@@ -347,6 +387,23 @@ describe('StygianAdvisorService', () => {
     expect(result.issues).not.toContainEqual(
       expect.objectContaining({ code: 'MECHANIC_COVERAGE_INVALID' })
     );
+  });
+
+  it('records compose usage once when a later Critique stage is cancelled', async () => {
+    const runner = new HangingAfterComposeRunner();
+    const recordUsage = vi.fn();
+    const advisor = service({
+      apiKey: 'secret',
+      runner,
+      recordUsage,
+      timeout: 1_000
+    });
+    const pending = advisor.recommend(stygianInput());
+    await runner.stageStarted;
+    expect(advisor.cancel('stygian-test-request')).toBe(true);
+    await expect(pending).rejects.toThrow(/cancelled/);
+    expect(recordUsage).toHaveBeenCalledTimes(1);
+    expect(recordUsage).toHaveBeenCalledWith(10, 5, 0.01);
   });
 
   it('cancels the active request and prevents history writes', async () => {

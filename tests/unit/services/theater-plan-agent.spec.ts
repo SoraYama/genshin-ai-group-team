@@ -11,6 +11,15 @@ import {
   validTheaterPlan
 } from './theater-test-fixtures.js';
 
+function directive<T>(target: T) {
+  return {
+    target,
+    tone: 'steady',
+    reasonCodes: ['setup-order'],
+    factRefs: [{ kind: 'plan', field: 'validated-target' }]
+  };
+}
+
 const groupingKnowledge: CharacterKnowledgeReader = {
   version: 'test',
   coverage: { characterCount: 1, notes: 'test' },
@@ -55,6 +64,7 @@ const groupingKnowledge: CharacterKnowledgeReader = {
 
 class Runner {
   calls: Array<{ prompt: string; options: AgentSdkRunOptions }> = [];
+  profileInputs: Array<{ uid: string; characterIds: string[] }> = [];
   constructor(
     private outputs: unknown[],
     private toolRounds: number[] = [0, 1],
@@ -70,7 +80,7 @@ class Runner {
       yield {
         type: 'result',
         result: JSON.stringify({
-          rotations: [{ target: { kind: 'theater-act', act: 1 }, notes: ['本幕保留关键演员。'] }]
+          rotations: [1, 2].map((act) => directive({ kind: 'theater-act', act }))
         })
       };
       return;
@@ -80,18 +90,41 @@ class Runner {
         type: 'result',
         result: JSON.stringify({
           explanations: [
-            {
-              target: { kind: 'theater-act', act: 1 },
-              text: '本幕说明只引用已验证路线。'
-            }
+            directive({ kind: 'theater-cast' }),
+            directive({ kind: 'theater-act', act: 1 }),
+            directive({ kind: 'theater-act', act: 2 })
           ]
         })
       };
       return;
     }
     const round = this.calls.length - 1;
+    const payload = JSON.parse(prompt) as {
+      context: { profileRef: { uid: string } };
+    };
+    const nextPlan = this.outputs[0] as {
+      cast?: Record<string, unknown>;
+      acts?: Array<{ candidateCharacterIds?: unknown }>;
+    };
+    const selectedIds = [
+      ...Object.values(nextPlan?.cast ?? {}).flatMap((ids) =>
+        Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : []
+      ),
+      ...(Array.isArray(nextPlan?.acts)
+        ? nextPlan.acts.flatMap(({ candidateCharacterIds }) =>
+            Array.isArray(candidateCharacterIds)
+              ? candidateCharacterIds.filter((id): id is string => typeof id === 'string')
+              : []
+          )
+        : [])
+    ];
+    const profileInput = {
+      uid: payload.context.profileRef.uid,
+      characterIds: [...new Set(selectedIds.filter((id) => /^[1-9]\d*$/.test(id)))]
+    };
+    this.profileInputs.push(profileInput);
     const uses = [
-      { id: 'profile', name: 'mcp__genshin__read_profile_cache', input: { uid: '123456789' } },
+      { id: 'profile', name: 'mcp__genshin__read_profile_cache', input: profileInput },
       ...[1, 2].map((act) => ({
         id: `act-${act}`,
         name: 'mcp__genshin__query_theater_act',
@@ -204,7 +237,12 @@ describe('TheaterPlanAgent', () => {
       usage: { inputTokens: 20, outputTokens: 10 }
     });
     expect(runner.calls).toHaveLength(5);
+    expect(runner.calls[0]?.prompt).toContain('"locale":"zh-CN"');
     expect(runner.calls[1]?.prompt).toContain('PATH_CHOICE_INVALID');
+    expect(runner.profileInputs.every(({ uid }) => uid === '123456789')).toBe(true);
+    expect(runner.profileInputs[1]?.characterIds).toEqual(
+      expect.arrayContaining(validTheaterPlan().cast.selectedCharacterIds)
+    );
   });
 
   it('requires profile, knowledge, and every target act read in the same round', async () => {

@@ -53,9 +53,12 @@ describe('abyss advisor IPC', () => {
       correlationId: 'abyss-test-request',
       step: 'reading-roster'
     });
-    await expect(handlers.get('advisor-v2:abyss-cancel')?.(undefined)).resolves.toEqual({
+    await expect(
+      handlers.get('advisor-v2:abyss-cancel')?.({ correlationId: 'abyss-test-request' })
+    ).resolves.toEqual({
       ok: true
     });
+    expect(advisor.cancel).toHaveBeenCalledWith('abyss-test-request');
   });
 
   it('rejects invalid UID and non-canonical character IDs before calling the service', async () => {
@@ -74,5 +77,19 @@ describe('abyss advisor IPC', () => {
       })
     ).rejects.toMatchObject({ code: 'IPC_VALIDATION_FAILED' });
     expect(advisor.recommend).not.toHaveBeenCalled();
+  });
+
+  it('rejects a malformed cancel payload before calling the service', async () => {
+    const advisor = { recommend: vi.fn(), cancel: vi.fn() };
+    registerAbyssAdvisorIpc({
+      scenario: { getView: vi.fn() },
+      advisor,
+      getMainWindow: () => undefined
+    });
+
+    await expect(
+      handlers.get('advisor-v2:abyss-cancel')?.({ correlationId: '' })
+    ).rejects.toMatchObject({ code: 'IPC_VALIDATION_FAILED' });
+    expect(advisor.cancel).not.toHaveBeenCalled();
   });
 });

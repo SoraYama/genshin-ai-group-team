@@ -21,6 +21,7 @@ import { buildLocalTheaterPlan } from './theater-local-planner.js';
 import { TheaterPlanAgent, type TheaterPlanAgentRunner } from './theater-plan-agent.js';
 import { buildV2PipelineContext } from './v2-agent-context.js';
 import type { V2AgentStage } from './v2-agent-pipeline.js';
+import { renderV2Narrative } from './v2-narrative.js';
 
 export interface TheaterAdvisorServiceOptions {
   runner: TheaterPlanAgentRunner;
@@ -289,6 +290,7 @@ export class TheaterAdvisorService {
             profile,
             feasibleBaseline: local.plan,
             eligibleCharacterIds,
+            locale: input.locale,
             mechanics: scenario.acts
               .filter(({ act }) => input.act === undefined || input.act === act)
               .map(({ act, encounters, pathNotes }) => ({
@@ -355,13 +357,14 @@ export class TheaterAdvisorService {
             knowledge: this.options.knowledge,
             pipelineContext,
             sdkOptions: base,
-            sdkOptionsForStage
+            sdkOptionsForStage,
+            onUsageDelta: (usage) =>
+              this.options.config.recordUsage?.(
+                usage.inputTokens,
+                usage.outputTokens,
+                usage.estimatedCostUsd
+              )
           });
-          this.options.config.recordUsage?.(
-            agent.usage.inputTokens,
-            agent.usage.outputTokens,
-            agent.usage.estimatedCostUsd
-          );
           ensureActive();
           result = agent.ok
             ? theaterAdvisorResultSchema.parse({
@@ -369,6 +372,13 @@ export class TheaterAdvisorService {
                 source: 'smart-service',
                 plan: agent.plan,
                 vigorBudget: agent.vigorBudget,
+                narrative: renderV2Narrative({
+                  mode: 'imaginarium-theater',
+                  locale: input.locale,
+                  critique: agent.critique,
+                  rotation: agent.rotation,
+                  explanation: agent.explanation
+                }),
                 routeGuidance: {
                   ...local.routeGuidance,
                   notes: unique([
@@ -377,14 +387,6 @@ export class TheaterAdvisorService {
                       target.kind === 'theater-act'
                         ? `第 ${target.act} 幕风险：${message}`
                         : message
-                    ),
-                    ...agent.rotation.rotations.flatMap(({ target, notes }) =>
-                      notes.map((note) =>
-                        target.kind === 'theater-act' ? `第 ${target.act} 幕循环：${note}` : note
-                      )
-                    ),
-                    ...agent.explanation.explanations.map(({ target, text }) =>
-                      target.kind === 'theater-act' ? `第 ${target.act} 幕说明：${text}` : text
                     )
                   ])
                 },
@@ -458,6 +460,8 @@ export class TheaterAdvisorService {
         sourceById.set(id, 'special-guest')
       );
       result.plan.cast.supportCharacterIds.forEach((id) => sourceById.set(id, 'support'));
+      const plannedActs = new Set(result.plan.acts.map(({ act }) => act));
+      const priorityIds = new Set(result.routeGuidance.arcanaPriorityIds);
       this.options.history.appendTheater({
         uid: input.uid,
         scenarioId: result.plan.scenarioId,
@@ -483,6 +487,7 @@ export class TheaterAdvisorService {
             return {
               id,
               name: owned.name,
+              nameRef: { kind: 'profile-character' as const, id },
               element: owned.element,
               ...(owned.level === undefined ? {} : { level: owned.level }),
               source: 'owned' as const,
@@ -493,6 +498,8 @@ export class TheaterAdvisorService {
           return {
             id,
             name: entity?.names['zh-CN'] ?? entity?.names['zh-Hans'] ?? owned?.name ?? '未命名演员',
+            ...(entity ? { names: entity.names } : {}),
+            nameRef: { kind: 'scenario-entity' as const, id },
             ...(owned?.element ? { element: owned.element } : {}),
             ...(owned?.level === undefined ? {} : { level: owned.level }),
             source,
@@ -501,7 +508,31 @@ export class TheaterAdvisorService {
         }),
         vigorBudget: result.vigorBudget,
         nodeBudget: result.nodeBudget,
+        arcanaSnapshots: (scenario.arcanaNodes ?? [])
+          .filter(({ id }) => priorityIds.has(id))
+          .map(({ id, name }) => ({
+            id,
+            nameRef: name.id,
+            names: name.names
+          })),
+        encounterSnapshots: scenario.acts
+          .filter(({ act }) => plannedActs.has(act))
+          .flatMap(({ act, encounters }) =>
+            encounters.map(({ id: encounterId, waves }) => {
+              const enemyById = new Map(
+                waves
+                  .flatMap(({ enemies }) => enemies)
+                  .map(({ enemy }) => [enemy.id, enemy] as const)
+              );
+              return {
+                act,
+                encounterId,
+                enemyRefs: [...enemyById.values()].map(({ id, names }) => ({ id, names }))
+              };
+            })
+          ),
         routeGuidance: result.routeGuidance,
+        narrative: result.narrative,
         plan: result.plan
       });
     } catch {

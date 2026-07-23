@@ -30,6 +30,7 @@ export interface TheaterPlanAgentInput {
   pipelineContext: V2PipelineContext;
   sdkOptions: AgentSdkRunOptions;
   sdkOptionsForStage?: (stage: V2AgentStage) => AgentSdkRunOptions;
+  onUsageDelta?: (usage: AgentUsage) => void;
 }
 export type TheaterPlanAgentResult =
   | {
@@ -51,6 +52,7 @@ export class TheaterPlanAgent {
     const result = await runV2AgentPipeline<TheaterPlanOutput, TheaterPlanIssue>({
       runner: this.runner,
       context: context.pipelineContext,
+      onUsageDelta: context.onUsageDelta,
       sdkOptionsForStage: context.sdkOptionsForStage ?? (() => context.sdkOptions),
       composer: {
         initialPrompt: composePayload(context),
@@ -108,8 +110,6 @@ function requiredTools(
   const has = (name: string, predicate: (input: Record<string, unknown>) => boolean = () => true) =>
     successful.some((use) => use.name === name && predicate(use.input));
   const missing: string[] = [];
-  if (!has('mcp__genshin__read_profile_cache', (value) => value['uid'] === context.input.uid))
-    missing.push('read_profile_cache');
   const targetActs = context.scenario.acts
     .filter(({ act }) => context.input.act === undefined || context.input.act === act)
     .map(({ act }) => act);
@@ -149,6 +149,22 @@ function requiredTools(
         )
       : [];
   const requiredKnowledgeIds = [...new Set([...selected, ...candidates])];
+  const ownedIds = new Set(context.characters.map(({ id }) => String(id)));
+  const selectedOwnedIds = requiredKnowledgeIds.filter((id) => ownedIds.has(id));
+  const detailedProfileIds = new Set(
+    successful
+      .filter(
+        ({ name, input }) =>
+          name === 'mcp__genshin__read_profile_cache' && input['uid'] === context.input.uid
+      )
+      .flatMap(({ input }) =>
+        Array.isArray(input['characterIds'])
+          ? input['characterIds'].filter((id): id is string => typeof id === 'string')
+          : []
+      )
+  );
+  if (selectedOwnedIds.length === 0 || selectedOwnedIds.some((id) => !detailedProfileIds.has(id)))
+    missing.push('read_profile_cache:selected-character-details');
   const queried = new Set(
     successful
       .filter(({ name }) => name === 'mcp__genshin__query_genshin_db')
@@ -187,6 +203,7 @@ function publicRequest(context: TheaterPlanAgentInput) {
     uid: input.uid,
     scenarioId: scenario.id,
     dataVersion: scenario.meta.dataVersion,
+    locale: input.locale,
     ...(input.act === undefined ? {} : { act: input.act }),
     target: input.target,
     preferences: input.preferences,

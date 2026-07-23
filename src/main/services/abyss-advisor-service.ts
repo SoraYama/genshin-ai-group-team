@@ -22,6 +22,7 @@ import { buildLocalAbyssPlan } from './abyss-local-optimizer.js';
 import { AbyssPlanAgent, type AbyssPlanAgentRunner } from './abyss-plan-agent.js';
 import { buildV2PipelineContext } from './v2-agent-context.js';
 import type { V2AgentStage } from './v2-agent-pipeline.js';
+import { renderAbyssTeamRisks, renderV2Narrative } from './v2-narrative.js';
 
 export interface AbyssAdvisorServiceOptions {
   runner: AbyssPlanAgentRunner;
@@ -64,16 +65,16 @@ export interface AbyssAdvisorAuditLog {
 }
 
 export class AbyssAdvisorService {
-  private currentAbort: AbortController | undefined;
+  private currentRequest: { correlationId: string; abortController: AbortController } | undefined;
   private readonly planAgent: AbyssPlanAgent;
 
   constructor(private readonly options: AbyssAdvisorServiceOptions) {
     this.planAgent = new AbyssPlanAgent(options.runner);
   }
 
-  cancel(): boolean {
-    if (!this.currentAbort) return false;
-    this.currentAbort.abort();
+  cancel(correlationId: string): boolean {
+    if (!this.currentRequest || this.currentRequest.correlationId !== correlationId) return false;
+    this.currentRequest.abortController.abort();
     return true;
   }
 
@@ -118,9 +119,9 @@ export class AbyssAdvisorService {
       }
       return result;
     };
-    this.currentAbort?.abort();
+    this.currentRequest?.abortController.abort();
     const requestAbort = new AbortController();
-    this.currentAbort = requestAbort;
+    this.currentRequest = { correlationId: input.correlationId, abortController: requestAbort };
     const emit = (step: AbyssAdvisorProgressStep) =>
       progress({ correlationId: input.correlationId, step });
     const throwIfCancelled = () => {
@@ -228,6 +229,7 @@ export class AbyssAdvisorService {
             profile,
             feasibleBaseline: localPreflight.plan,
             eligibleCharacterIds,
+            locale: input.locale,
             mechanics: abyssMechanicsContext(scenario, input),
             interventions: {
               lockedCharacterIds: input.lockedCharacterIds,
@@ -283,13 +285,14 @@ export class AbyssAdvisorService {
             knowledge: this.options.knowledge,
             pipelineContext,
             sdkOptions: baseSdkOptions,
-            sdkOptionsForStage
+            sdkOptionsForStage,
+            onUsageDelta: (usage) =>
+              this.options.config.recordUsage?.(
+                usage.inputTokens,
+                usage.outputTokens,
+                usage.estimatedCostUsd
+              )
           });
-          this.options.config.recordUsage?.(
-            agent.usage.inputTokens,
-            agent.usage.outputTokens,
-            agent.usage.estimatedCostUsd
-          );
           throwIfCancelled();
           if (agent.ok) {
             const checkedPlan = applyKnowledgeCoverage(agent.plan, this.options.knowledge);
@@ -299,7 +302,15 @@ export class AbyssAdvisorService {
               issues: [],
               warnings: agent.plan.warnings,
               assumptions: checkedPlan.assumptions,
-              plan: checkedPlan
+              plan: checkedPlan,
+              narrative: renderV2Narrative({
+                mode: 'spiral-abyss',
+                locale: input.locale,
+                critique: agent.critique,
+                rotation: agent.rotation,
+                explanation: agent.explanation
+              }),
+              teamRisks: renderAbyssTeamRisks(agent.critique)
             });
           } else {
             result = addAgentFallbackWarning(localPreflight);
@@ -328,7 +339,7 @@ export class AbyssAdvisorService {
       if (result.status === 'planned') this.persist(input, result, profile, scenarioView);
       return finish(result);
     } finally {
-      if (this.currentAbort === requestAbort) this.currentAbort = undefined;
+      if (this.currentRequest?.abortController === requestAbort) this.currentRequest = undefined;
     }
   }
 
@@ -352,11 +363,14 @@ export class AbyssAdvisorService {
         scenarioFreshness: scenarioView.freshness,
         scenarioNotCurrent: scenarioView.notCurrent,
         interventions: {
+          locale: input.locale,
           lockedCharacterIds: input.lockedCharacterIds,
           excludedCharacterIds: input.excludedCharacterIds,
           preferences: input.preferences,
           ...(input.recomputeHalf ? { recomputeHalf: input.recomputeHalf } : {})
         },
+        narrative: result.narrative,
+        teamRisks: result.teamRisks,
         characters: [
           ...result.plan.firstHalfTeam.characterIds,
           ...result.plan.secondHalfTeam.characterIds

@@ -153,15 +153,17 @@ export function TheaterWorkspace({
               });
               const changed = prepared.status === 'adjusted' || removedExternal > 0;
               setHistoryNotice(
-                `${historySourceChangedNotice(prepared, 'zh')}${changed
-                  ? `已带入旧方案的可用选择；${
-                      prepared.targetUnavailable ? '原幕次已不在当前资料中；' : ''
-                    }${
-                      prepared.removedCharacterCount + removedExternal > 0
-                        ? `${prepared.removedCharacterCount + removedExternal} 名当前不可用的演员未带入；`
-                        : ''
-                    }请检查后再点击生成，不会自动调用智能服务。`
-                  : '已带入旧方案的幕次、目标、偏好、演员与外援选择。请检查后再点击生成，不会自动调用智能服务。'}`
+                `${historySourceChangedNotice(prepared, 'zh')}${
+                  changed
+                    ? `已带入旧方案的可用选择；${
+                        prepared.targetUnavailable ? '原幕次已不在当前资料中；' : ''
+                      }${
+                        prepared.removedCharacterCount + removedExternal > 0
+                          ? `${prepared.removedCharacterCount + removedExternal} 名当前不可用的演员未带入；`
+                          : ''
+                      }请检查后再点击生成，不会自动调用智能服务。`
+                    : '已带入旧方案的幕次、目标、偏好、演员与外援选择。请检查后再点击生成，不会自动调用智能服务。'
+                }`
               );
             }
             pendingHistoryRerun.current = undefined;
@@ -247,6 +249,7 @@ export function TheaterWorkspace({
         uid,
         scenarioId: scenario.id,
         dataVersion: scenario.meta.dataVersion,
+        locale,
         ...(act === 'all' ? {} : { act }),
         target,
         preferences,
@@ -259,8 +262,7 @@ export function TheaterWorkspace({
       });
       if (sequence.current === request) setResult(next);
     } catch {
-      if (sequence.current === request)
-        setLoadError('generate');
+      if (sequence.current === request) setLoadError('generate');
     } finally {
       if (sequence.current === request) {
         activeCorrelation.current = null;
@@ -336,7 +338,9 @@ export function TheaterWorkspace({
       </header>
       {view.trust === 'development-sample' && (
         <div className="gta-theater-banner" role="status">
-          <strong>{isEnglish ? 'Practice data — not the current cycle' : '演练资料，不代表本期'}</strong>
+          <strong>
+            {isEnglish ? 'Practice data — not the current cycle' : '演练资料，不代表本期'}
+          </strong>
           <span>
             {isEnglish
               ? 'Elements, actors, enemies, and routes are original interaction samples.'
@@ -481,7 +485,9 @@ export function TheaterWorkspace({
             </h4>
           </div>
           <span>
-            {isEnglish ? `${selectedOwned.length} prioritized` : `已优先 ${selectedOwned.length} 名`}
+            {isEnglish
+              ? `${selectedOwned.length} prioritized`
+              : `已优先 ${selectedOwned.length} 名`}
           </span>
         </div>
         <div
@@ -677,12 +683,7 @@ export function TheaterWorkspace({
         </p>
       )}
       {result && (
-        <TheaterResult
-          result={result}
-          profile={profile}
-          scenario={scenario}
-          locale={language}
-        />
+        <TheaterResult result={result} profile={profile} scenario={scenario} locale={language} />
       )}
     </section>
   );
@@ -814,6 +815,7 @@ function TheaterResult({
               : '本地规则'}
         </span>
       </header>
+      <p>{isEnglish ? result.narrative.summary['en-US'] : result.narrative.summary['zh-CN']}</p>
       <section className="gta-theater-result-cast">
         <h5>{isEnglish ? 'Selected cast' : '入场演员池'}</h5>
         <div>
@@ -854,9 +856,7 @@ function TheaterResult({
       >
         {result.plan.acts.map((act) => {
           const scenarioAct = scenario.acts.find((item) => item.act === act.act);
-          const presentation = scenarioAct
-            ? theaterActPresentation(scenarioAct, locale)
-            : null;
+          const presentation = scenarioAct ? theaterActPresentation(scenarioAct, locale) : null;
           return (
             <article key={act.act}>
               <div className="gta-theater-route-node">
@@ -864,11 +864,7 @@ function TheaterResult({
               </div>
               <div>
                 <h5>{isEnglish ? `Act ${act.act} candidates` : `第 ${act.act} 幕候选`}</h5>
-                <p>
-                  {act.candidateCharacterIds
-                    .map(actorName)
-                    .join(isEnglish ? ', ' : '、')}
-                </p>
+                <p>{act.candidateCharacterIds.map(actorName).join(isEnglish ? ', ' : '、')}</p>
                 {presentation && (
                   <div className="gta-theater-act-encounters">
                     {presentation.waves.map((wave) => (
@@ -902,8 +898,7 @@ function TheaterResult({
                   {isEnglish ? 'Planned Vigor: ' : '预计活力：'}
                   {act.plannedVigorSpend
                     .map((item) => `${actorName(item.characterId)} ${item.cost}`)
-                    .join(isEnglish ? ', ' : '、') ||
-                    (isEnglish ? 'Hold for the run' : '现场保留')}
+                    .join(isEnglish ? ', ' : '、') || (isEnglish ? 'Hold for the run' : '现场保留')}
                 </small>
               </div>
             </article>
@@ -915,9 +910,7 @@ function TheaterResult({
         {result.routeGuidance.preserveCharacterIds.length > 0 && (
           <p>
             <strong>{isEnglish ? 'Preserve first: ' : '优先保留：'}</strong>
-            {result.routeGuidance.preserveCharacterIds
-              .map(actorName)
-              .join(isEnglish ? ', ' : '、')}
+            {result.routeGuidance.preserveCharacterIds.map(actorName).join(isEnglish ? ', ' : '、')}
           </p>
         )}
         {result.routeGuidance.notes.map((note) => (

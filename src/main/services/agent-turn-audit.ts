@@ -28,6 +28,7 @@ export async function runAuditedAgentTurn(options: {
     correlationId: string;
     round: ToolAudit['round'];
   };
+  onUsageDelta?: (usage: AgentUsage) => void;
 }): Promise<{ text: string; tools: ToolAudit[]; usage: AgentUsage }> {
   let resultText = '';
   let assistantText = '';
@@ -47,11 +48,19 @@ export async function runAuditedAgentTurn(options: {
     if (message['type'] === 'result' && typeof message['result'] === 'string') {
       resultText = message['result'];
       const sdkUsage = isRecord(message['usage']) ? message['usage'] : {};
-      usage = addAgentUsage(usage, {
+      const delta = {
         inputTokens: numberValue(sdkUsage['input_tokens']),
         outputTokens: numberValue(sdkUsage['output_tokens']),
         estimatedCostUsd: numberValue(message['total_cost_usd'])
-      });
+      };
+      usage = addAgentUsage(usage, delta);
+      if (
+        typeof sdkUsage['input_tokens'] === 'number' ||
+        typeof sdkUsage['output_tokens'] === 'number' ||
+        typeof message['total_cost_usd'] === 'number'
+      ) {
+        options.onUsageDelta?.(delta);
+      }
     }
     if (message['type'] === 'assistant' && isRecord(message['message'])) {
       const content = message['message']['content'];

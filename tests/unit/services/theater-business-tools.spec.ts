@@ -69,7 +69,17 @@ describe('theater business tools', () => {
       }),
       getScenario: theaterScenario
     });
-    const profile = payload(await tools[0]!.handler({ uid: '123456789' }, {}));
+    const profile = payload(
+      await tools[0]!.handler(
+        {
+          uid: '123456789',
+          characterIds: THEATER_CHARACTERS.slice(0, 8).map(({ id }) => String(id)),
+          cursor: undefined,
+          pageSize: undefined
+        },
+        {}
+      )
+    );
     const profileView = profile as {
       coverage: { partial: boolean };
       provenanceSummaries: Array<Record<string, unknown>>;

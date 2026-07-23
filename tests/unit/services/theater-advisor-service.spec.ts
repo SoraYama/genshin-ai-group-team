@@ -11,6 +11,15 @@ import {
   validTheaterPlan
 } from './theater-test-fixtures.js';
 
+function directive<T>(target: T) {
+  return {
+    target,
+    tone: 'steady',
+    reasonCodes: ['setup-order'],
+    factRefs: [{ kind: 'plan', field: 'validated-target' }]
+  };
+}
+
 class InvalidRunner {
   calls = 0;
   async *run(): AsyncIterable<unknown> {
@@ -37,10 +46,32 @@ class WaitingRunner {
   }
 }
 
+class HangingAfterComposeRunner implements TheaterPlanAgentRunner {
+  calls = 0;
+  private releaseStarted!: () => void;
+  readonly stageStarted = new Promise<void>((resolve) => {
+    this.releaseStarted = resolve;
+  });
+
+  async *run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown> {
+    this.calls += 1;
+    if (this.calls === 1) {
+      const compose = new SuccessfulStageRunner();
+      for await (const message of compose.run(prompt, options)) yield message;
+      return;
+    }
+    this.releaseStarted();
+    await new Promise<void>((resolve) => {
+      options.abortController.signal.addEventListener('abort', () => resolve(), { once: true });
+    });
+    throw new Error('aborted');
+  }
+}
+
 class SuccessfulStageRunner implements TheaterPlanAgentRunner {
   readonly calls: AgentSdkRunOptions[] = [];
 
-  async *run(_prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown> {
+  async *run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown> {
     this.calls.push(options);
     if (options.systemPrompt.includes('CritiqueAgent v2')) {
       yield {
@@ -63,9 +94,7 @@ class SuccessfulStageRunner implements TheaterPlanAgentRunner {
       yield {
         type: 'result',
         result: JSON.stringify({
-          rotations: [
-            { target: { kind: 'theater-act', act: 1 }, notes: ['第一幕优先轮换高活力演员。'] }
-          ]
+          rotations: [1, 2].map((act) => directive({ kind: 'theater-act', act }))
         })
       };
       return;
@@ -75,20 +104,20 @@ class SuccessfulStageRunner implements TheaterPlanAgentRunner {
         type: 'result',
         result: JSON.stringify({
           explanations: [
-            {
-              target: { kind: 'theater-act', act: 1 },
-              text: '第一幕说明只引用已验证路线。'
-            }
+            directive({ kind: 'theater-cast' }),
+            ...[1, 2].map((act) => directive({ kind: 'theater-act', act }))
           ]
         })
       };
       return;
     }
+    const request = JSON.parse(prompt) as { context: { profileRef: { uid: string } } };
+    const selectedCharacterIds = validTheaterPlan().cast.selectedCharacterIds;
     const tools = [
       {
         id: 'profile',
         name: 'mcp__genshin__read_profile_cache',
-        input: { uid: '123456789' }
+        input: { uid: request.context.profileRef.uid, characterIds: selectedCharacterIds }
       },
       ...[1, 2].map((act) => ({
         id: `act-${act}`,
@@ -163,6 +192,7 @@ function service(
     history?: ReturnType<typeof vi.fn>;
     audit?: ReturnType<typeof vi.fn>;
     timeout?: number;
+    recordUsage?: ReturnType<typeof vi.fn>;
   } = {}
 ) {
   return new TheaterAdvisorService({
@@ -174,7 +204,8 @@ function service(
       getApiKey: () => options.apiKey,
       getBaseUrl: () => 'https://example.test',
       getModel: () => 'test',
-      getCustomHeaders: () => ({})
+      getCustomHeaders: () => ({}),
+      recordUsage: options.recordUsage
     },
     sdkEnvironment: { cwd: '/tmp', clientVersion: 'test' },
     agentTimeoutMs: options.timeout,
@@ -224,7 +255,23 @@ describe('TheaterAdvisorService', () => {
             after: 1
           })
         ]),
-        cast: expect.arrayContaining([expect.objectContaining({ id: '1001', source: 'owned' })])
+        cast: expect.arrayContaining([expect.objectContaining({ id: '1001', source: 'owned' })]),
+        arcanaSnapshots: [
+          {
+            id: 'node.1',
+            nameRef: 'arcana.node.1',
+            names: { 'zh-CN': '聚敌增益', en: 'Grouping Boon' }
+          }
+        ],
+        encounterSnapshots: expect.arrayContaining([
+          expect.objectContaining({
+            act: 1,
+            encounterId: 'act-1-encounter',
+            enemyRefs: expect.arrayContaining([
+              expect.objectContaining({ id: expect.any(String), names: expect.any(Object) })
+            ])
+          })
+        ])
       })
     );
   });
@@ -232,18 +279,25 @@ describe('TheaterAdvisorService', () => {
   it('maps staged soft risks, rotation, and explanation into existing route guidance', async () => {
     const runner = new SuccessfulStageRunner();
     const history = vi.fn();
-    const result = await service({ runner, apiKey: 'secret', history }).recommend(theaterInput());
+    const recordUsage = vi.fn();
+    const result = await service({ runner, apiKey: 'secret', history, recordUsage }).recommend(
+      theaterInput()
+    );
 
     expect(result).toMatchObject({ status: 'planned', source: 'smart-service' });
     if (result.status !== 'planned') throw new Error('Expected planned result');
     expect(result.routeGuidance.notes.join(' ')).toContain('演员调整余量较小');
-    expect(result.routeGuidance.notes.join(' ')).toContain('优先轮换高活力演员');
-    expect(result.routeGuidance.notes.join(' ')).toContain('只引用已验证路线');
+    expect(result.narrative).toMatchObject({
+      origin: 'agent-structured',
+      summary: { 'zh-CN': expect.any(String), 'en-US': expect.any(String) }
+    });
     expect(runner.calls).toHaveLength(4);
     expect(
       runner.calls.slice(1).every(({ allowedBusinessTools }) => allowedBusinessTools?.length === 0)
     ).toBe(true);
     expect(history).toHaveBeenCalledTimes(1);
+    expect(recordUsage).toHaveBeenCalledTimes(1);
+    expect(recordUsage).toHaveBeenCalledWith(10, 5, 0.01);
   });
 
   it('persists the source actually selected in the plan even for external actors', async () => {
@@ -254,7 +308,14 @@ describe('TheaterAdvisorService', () => {
     expect(result.status).toBe('planned');
     expect(history).toHaveBeenCalledWith(
       expect.objectContaining({
-        cast: expect.arrayContaining([expect.objectContaining({ id: '1001', source: 'opening' })])
+        cast: expect.arrayContaining([
+          expect.objectContaining({
+            id: '1001',
+            source: 'opening',
+            names: { 'zh-CN': '开幕角色一', en: 'Opening One' },
+            nameRef: { kind: 'scenario-entity', id: '1001' }
+          })
+        ])
       })
     );
   });
@@ -309,6 +370,23 @@ describe('TheaterAdvisorService', () => {
     expect(runner.calls).toBe(3);
     expect(result).toMatchObject({ status: 'planned', source: 'local-rules' });
     expect(result.warnings.join('')).toContain('本地规则');
+  });
+
+  it('records compose usage once when a later Critique stage is cancelled', async () => {
+    const runner = new HangingAfterComposeRunner();
+    const recordUsage = vi.fn();
+    const advisor = service({
+      runner,
+      apiKey: 'secret',
+      recordUsage,
+      timeout: 1_000
+    });
+    const pending = advisor.recommend(theaterInput());
+    await runner.stageStarted;
+    expect(advisor.cancel('theater-test-request')).toBe(true);
+    await expect(pending).rejects.toThrow(/cancelled/);
+    expect(recordUsage).toHaveBeenCalledTimes(1);
+    expect(recordUsage).toHaveBeenCalledWith(10, 5, 0.01);
   });
 
   it('times out or cancels without writing an invalid history entry', async () => {

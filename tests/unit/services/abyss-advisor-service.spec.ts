@@ -11,43 +11,73 @@ import {
   validAbyssPlan
 } from './abyss-test-fixtures.js';
 
+function directive<T>(target: T) {
+  return {
+    target,
+    tone: 'steady',
+    reasonCodes: ['setup-order'],
+    factRefs: [{ kind: 'plan', field: 'validated-target' }]
+  };
+}
+
 class FixtureRunner {
   calls = 0;
   constructor(private readonly outputs: unknown[]) {}
-  async *run(_prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown> {
+  async *run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown> {
     this.calls += 1;
     if (options.systemPrompt.includes('CritiqueAgent v2')) {
-      yield { type: 'result', result: JSON.stringify({ decision: 'accept', issues: [] }) };
-      return;
-    }
-    if (options.systemPrompt.includes('RotationCoachAgent v2')) {
       yield {
         type: 'result',
         result: JSON.stringify({
-          rotations: [{ target: { kind: 'abyss-team', half: 'first' }, notes: ['先辅助后输出。'] }]
-        })
-      };
-      return;
-    }
-    if (options.systemPrompt.includes('ExplainAgent v2')) {
-      yield {
-        type: 'result',
-        result: JSON.stringify({
-          explanations: [
+          decision: 'accept',
+          issues: [
             {
-              target: { kind: 'abyss-chamber', floor: 12, chamber: 1, half: 'first' },
-              text: '基于已验证方案处理本房间。'
+              code: 'energy-window-tight',
+              severity: 'soft',
+              target: { kind: 'abyss-team', half: 'first' },
+              message: '能量窗口偏紧。'
             }
           ]
         })
       };
       return;
     }
+    if (options.systemPrompt.includes('RotationCoachAgent v2')) {
+      yield {
+        type: 'result',
+        result: JSON.stringify({
+          rotations: (['first', 'second'] as const).map((half) => ({
+            ...directive({ kind: 'abyss-team', half })
+          }))
+        })
+      };
+      return;
+    }
+    if (options.systemPrompt.includes('ExplainAgent v2')) {
+      const plan = validAbyssPlan();
+      yield {
+        type: 'result',
+        result: JSON.stringify({
+          explanations: plan.chambers.flatMap(({ floor, chamber }) =>
+            (['first', 'second'] as const).map((half) =>
+              directive({ kind: 'abyss-chamber', floor, chamber, half })
+            )
+          )
+        })
+      };
+      return;
+    }
+    const request = JSON.parse(prompt) as { context: { profileRef: { uid: string } } };
+    const candidate = this.outputs[0] as ReturnType<typeof validAbyssPlan>;
+    const selectedCharacterIds = [
+      ...(candidate.firstHalfTeam?.characterIds ?? []),
+      ...(candidate.secondHalfTeam?.characterIds ?? [])
+    ];
     const toolUses = [
       {
         id: 'profile',
         name: 'mcp__genshin__read_profile_cache',
-        input: { uid: '123456789' }
+        input: { uid: request.context.profileRef.uid, characterIds: selectedCharacterIds }
       },
       ...[1, 2].map((chamber) => ({
         id: `enemy-${chamber}`,
@@ -227,8 +257,17 @@ describe('AbyssAdvisorService', () => {
 
     expect(result).toMatchObject({ status: 'planned', source: 'smart-service' });
     if (result.status !== 'planned') throw new Error('Expected planned result');
-    expect(result.plan.firstHalfTeam.rotationNotes).toContain('先辅助后输出。');
-    expect(result.plan.chambers[0]?.firstHalf.tactics).toContain('基于已验证方案处理本房间。');
+    expect(result.narrative).toMatchObject({
+      origin: 'agent-structured',
+      requestedLocale: 'zh-CN',
+      summary: {
+        'zh-CN': expect.any(String),
+        'en-US': expect.any(String)
+      }
+    });
+    expect(result.teamRisks).toEqual([
+      expect.objectContaining({ half: 'first', code: 'energy-window-tight' })
+    ]);
     expect(progress).toEqual([
       'abyss-test-request:reading-roster',
       'abyss-test-request:analyzing-rules',
@@ -411,17 +450,21 @@ describe('AbyssAdvisorService', () => {
   it('cancels a hanging Critique stage without saving a fallback or partial history', async () => {
     const runner = new HangingAfterComposeRunner();
     const appendAbyss = vi.fn();
+    const recordUsage = vi.fn();
     const advisor = service({
       runner: runner as never,
       apiKey: 'secret',
       agentTimeoutMs: 1_000,
-      appendAbyss
+      appendAbyss,
+      recordUsage
     });
     const pending = advisor.recommend(abyssInput());
     await runner.stageStarted;
-    expect(advisor.cancel()).toBe(true);
+    expect(advisor.cancel('abyss-test-request')).toBe(true);
     await expect(pending).rejects.toThrow('cancelled');
     expect(runner.calls).toBe(2);
+    expect(recordUsage).toHaveBeenCalledTimes(1);
+    expect(recordUsage).toHaveBeenCalledWith(12, 6, 0.02);
     expect(appendAbyss).not.toHaveBeenCalled();
   });
 
@@ -440,11 +483,32 @@ describe('AbyssAdvisorService', () => {
     });
 
     const pending = advisor.recommend(abyssInput());
-    expect(advisor.cancel()).toBe(true);
+    expect(advisor.cancel('abyss-test-request')).toBe(true);
     await expect(pending).rejects.toThrow('cancelled');
     resolveScenario(readyScenario());
     expect(runner.calls).toBe(0);
     expect(appendAbyss).not.toHaveBeenCalled();
+  });
+
+  it('ignores a stale correlation cancel after a newer request has started', async () => {
+    const releases: Array<(view: AbyssScenarioView) => void> = [];
+    const advisor = service({
+      runner: new FixtureRunner([]),
+      scenarioService: {
+        getView: () =>
+          new Promise<AbyssScenarioView>((resolve) => {
+            releases.push(resolve);
+          })
+      }
+    });
+    const oldRequest = advisor.recommend(abyssInput({ correlationId: 'stale-request' }));
+    const oldRejection = expect(oldRequest).rejects.toThrow(/cancelled/);
+    const newRequest = advisor.recommend(abyssInput({ correlationId: 'current-request' }));
+
+    expect(advisor.cancel('stale-request')).toBe(false);
+    releases[1]?.(readyScenario());
+    await expect(newRequest).resolves.toMatchObject({ status: 'planned' });
+    await oldRejection;
   });
 
   it('persists development-sample trust so history cannot present rehearsal data as current', async () => {

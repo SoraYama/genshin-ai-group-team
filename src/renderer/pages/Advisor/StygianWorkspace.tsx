@@ -138,15 +138,17 @@ export function StygianWorkspace({
                 ...Object.fromEntries(prepared.excludedCharacterIds.map((id) => [id, 'excluded']))
               });
               setHistoryNotice(
-                `${historySourceChangedNotice(prepared, 'zh')}${prepared.status === 'adjusted'
-                  ? `已带入旧方案的可用选择；${
-                      prepared.targetUnavailable ? '原难度已不在当前资料中；' : ''
-                    }${
-                      prepared.removedCharacterCount > 0
-                        ? `${prepared.removedCharacterCount} 名已不在当前角色资料中的角色未带入；`
-                        : ''
-                    }请检查后再点击生成，不会自动调用智能服务。`
-                  : '已带入旧方案的难度、目标、偏好与角色选择。请检查后再点击生成，不会自动调用智能服务。'}`
+                `${historySourceChangedNotice(prepared, 'zh')}${
+                  prepared.status === 'adjusted'
+                    ? `已带入旧方案的可用选择；${
+                        prepared.targetUnavailable ? '原难度已不在当前资料中；' : ''
+                      }${
+                        prepared.removedCharacterCount > 0
+                          ? `${prepared.removedCharacterCount} 名已不在当前角色资料中的角色未带入；`
+                          : ''
+                      }请检查后再点击生成，不会自动调用智能服务。`
+                    : '已带入旧方案的难度、目标、偏好与角色选择。请检查后再点击生成，不会自动调用智能服务。'
+                }`
               );
             }
             pendingHistoryRerun.current = undefined;
@@ -243,6 +245,7 @@ export function StygianWorkspace({
         uid,
         scenarioId: scenario.id,
         dataVersion: scenario.meta.dataVersion,
+        locale,
         difficultyId: difficulty.id,
         target,
         preferences,
@@ -296,9 +299,7 @@ export function StygianWorkspace({
         <GtaButton tone="ghost" onClick={onBack}>
           {isEnglish ? 'Back to challenge selection' : '返回挑战入口'}
         </GtaButton>
-        <span className="gta-page-kicker">
-          {isEnglish ? 'Stygian Onslaught' : '幽境危战'}
-        </span>
+        <span className="gta-page-kicker">{isEnglish ? 'Stygian Onslaught' : '幽境危战'}</span>
         <div id="stygian-unavailable-title">
           <EmptyState kind="offline" locale={language} />
         </div>
@@ -339,7 +340,9 @@ export function StygianWorkspace({
 
       {scenarioView.trust === 'development-sample' && (
         <div className="gta-stygian-banner" role="status">
-          <strong>{isEnglish ? 'Practice data — not the current cycle' : '演练资料，不代表本期'}</strong>
+          <strong>
+            {isEnglish ? 'Practice data — not the current cycle' : '演练资料，不代表本期'}
+          </strong>
           <span>
             {isEnglish
               ? 'The bosses, difficulty tiers, and rules are original interaction samples, not live-server content.'
@@ -763,9 +766,7 @@ function StygianResult({
     <section className="gta-stygian-result" aria-labelledby="stygian-result-title">
       <header>
         <div>
-          <span className="gta-page-kicker">
-            {isEnglish ? 'Three-phase plan' : '三阶段方案'}
-          </span>
+          <span className="gta-page-kicker">{isEnglish ? 'Three-phase plan' : '三阶段方案'}</span>
           <h4 id="stygian-result-title">
             {isEnglish ? 'Three teams allocated under current rules' : '三队已按当期规则分配'}
           </h4>
@@ -780,6 +781,7 @@ function StygianResult({
               : '本地规则'}
         </span>
       </header>
+      <p>{isEnglish ? result.narrative.summary['en-US'] : result.narrative.summary['zh-CN']}</p>
       {result.difficultyAssessment.recommendation !== 'proceed' && (
         <div className="gta-stygian-honesty" role="status">
           <strong>
@@ -828,11 +830,7 @@ function StygianResult({
               <article key={phase.phase}>
                 <span>{isEnglish ? `Phase ${phase.phase}` : `第 ${phase.phase} 阶段`}</span>
                 <h5>
-                  {localizedResultText(
-                    phase.team.purpose,
-                    locale,
-                    `Team for phase ${phase.phase}`
-                  )}
+                  {localizedResultText(phase.team.purpose, locale, `Team for phase ${phase.phase}`)}
                 </h5>
                 <div className="gta-stygian-result-roster">
                   {phase.team.characterIds.map((id) => {

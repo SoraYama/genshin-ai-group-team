@@ -33,6 +33,7 @@ export interface AbyssPlanAgentInput {
   pipelineContext: V2PipelineContext;
   sdkOptions: AgentSdkRunOptions;
   sdkOptionsForStage?: (stage: V2AgentStage) => AgentSdkRunOptions;
+  onUsageDelta?: (usage: AgentUsage) => void;
 }
 
 export type AbyssPlanAgentResult =
@@ -55,6 +56,7 @@ export class AbyssPlanAgent {
     const result = await runV2AgentPipeline<AbyssPlanOutput, AbyssPlanIssue>({
       runner: this.runner,
       context: context.pipelineContext,
+      onUsageDelta: context.onUsageDelta,
       sdkOptionsForStage: context.sdkOptionsForStage ?? (() => context.sdkOptions),
       composer: {
         initialPrompt: buildComposePayload(context),
@@ -69,12 +71,7 @@ export class AbyssPlanAgent {
       })
     });
     if (!result.ok) return { ok: false, issues: result.issues, usage: result.usage };
-    const plan = applyAbyssStageOutputs(
-      result.plan,
-      result.critique,
-      result.rotation,
-      result.explanation
-    );
+    const plan = applyAbyssStageOutputs(result.plan, result.critique);
     return {
       ok: true,
       repaired: result.repairs > 0,
@@ -126,7 +123,7 @@ function validateAgentOutput(
 }
 
 function validateRequiredTools(
-  context: Pick<AbyssPlanAgentInput, 'input' | 'scenario'>,
+  context: Pick<AbyssPlanAgentInput, 'input' | 'scenario' | 'characters'>,
   tools: ToolAudit[],
   plan: Record<string, unknown>
 ): AbyssPlanIssue | undefined {
@@ -134,15 +131,29 @@ function validateRequiredTools(
   const has = (name: string, predicate: (input: Record<string, unknown>) => boolean = () => true) =>
     successful.some((use) => use.name === name && predicate(use.input));
   const missing: string[] = [];
-  if (!has('mcp__genshin__read_profile_cache', (input) => input['uid'] === context.input.uid)) {
-    missing.push('read_profile_cache');
-  }
   const plannedIds = ['firstHalfTeam', 'secondHalfTeam'].flatMap((key) => {
     const team = isRecord(plan[key]) ? plan[key] : {};
     return Array.isArray(team['characterIds'])
       ? team['characterIds'].filter((id): id is string => typeof id === 'string')
       : [];
   });
+  const ownedIds = new Set(context.characters.map(({ id }) => String(id)));
+  const plannedOwnedIds = plannedIds.filter((id) => ownedIds.has(id));
+  const detailedProfileIds = new Set(
+    successful
+      .filter(
+        ({ name, input }) =>
+          name === 'mcp__genshin__read_profile_cache' && input['uid'] === context.input.uid
+      )
+      .flatMap(({ input }) =>
+        Array.isArray(input['characterIds'])
+          ? input['characterIds'].filter((id): id is string => typeof id === 'string')
+          : []
+      )
+  );
+  if (plannedOwnedIds.length === 0 || plannedOwnedIds.some((id) => !detailedProfileIds.has(id))) {
+    missing.push('read_profile_cache:selected-character-details');
+  }
   const queriedCharacterIds = new Set(
     successful
       .filter(({ name }) => name === 'mcp__genshin__query_genshin_db')
@@ -201,6 +212,7 @@ function publicRequest(context: Pick<AbyssPlanAgentInput, 'input' | 'scenario'>)
     uid: context.input.uid,
     scenarioId: context.scenario.id,
     dataVersion: context.scenario.meta.dataVersion,
+    locale: context.input.locale,
     floor: context.input.floor,
     chamber: context.input.chamber,
     preferences: context.input.preferences,
@@ -225,26 +237,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function applyAbyssStageOutputs(
   plan: AbyssPlanOutput,
-  critique: V2CritiqueOutput,
-  rotation: V2RotationOutput,
-  explanation: V2ExplainOutput
+  critique: V2CritiqueOutput
 ): AbyssPlanOutput {
-  const firstRotation = rotation.rotations
-    .filter(({ target }) => target.kind === 'abyss-team' && target.half === 'first')
-    .flatMap(({ notes }) => notes);
-  const secondRotation = rotation.rotations
-    .filter(({ target }) => target.kind === 'abyss-team' && target.half === 'second')
-    .flatMap(({ notes }) => notes);
   return {
     ...plan,
-    firstHalfTeam: {
-      ...plan.firstHalfTeam,
-      rotationNotes: [...plan.firstHalfTeam.rotationNotes, ...firstRotation]
-    },
-    secondHalfTeam: {
-      ...plan.secondHalfTeam,
-      rotationNotes: [...plan.secondHalfTeam.rotationNotes, ...secondRotation]
-    },
     chambers: plan.chambers.map((chamber) => {
       const enrich = (half: 'first' | 'second') => {
         const current = half === 'first' ? chamber.firstHalf : chamber.secondHalf;
@@ -257,18 +253,8 @@ function applyAbyssStageOutputs(
               target.half === half
           )
           .map(({ message }) => message);
-        const tactics = explanation.explanations
-          .filter(
-            ({ target }) =>
-              target.kind === 'abyss-chamber' &&
-              target.floor === chamber.floor &&
-              target.chamber === chamber.chamber &&
-              target.half === half
-          )
-          .map(({ text }) => text);
         return {
           ...current,
-          tactics: [...current.tactics, ...tactics],
           risks: [...current.risks, ...risks]
         };
       };

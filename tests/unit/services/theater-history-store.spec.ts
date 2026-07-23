@@ -78,6 +78,25 @@ function input(): Omit<TheaterPlanHistoryEntry, 'id' | 'createdAt'> {
       }))
     ],
     nodeBudget: [{ nodeId: 'node.1', cost: 1 }],
+    arcanaSnapshots: [
+      {
+        id: 'node.1',
+        nameRef: 'arcana.node.1',
+        names: { 'zh-CN': '聚敌增益', en: 'Grouping Boon' }
+      }
+    ],
+    encounterSnapshots: [
+      {
+        act: 1,
+        encounterId: 'act-1-encounter',
+        enemyRefs: [
+          {
+            id: 'enemy.1',
+            names: { 'zh-CN': '测试敌人', en: 'Test Enemy' }
+          }
+        ]
+      }
+    ],
     routeGuidance: {
       preserveCharacterIds: ['1001'],
       arcanaPriorityIds: ['node.1'],
@@ -123,10 +142,31 @@ describe('Theater history deep validation', () => {
     const store = new HistoryStore();
     const stored = store.appendTheater(input());
     expect(store.queryTheater({ uid: '123456789' })[0]).toEqual(stored);
+    expect(stored.cast[0]?.nameRef).toEqual({ kind: 'legacy-name', id: '1001' });
+    expect(stored.narrative).toMatchObject({ origin: 'legacy-unavailable' });
     stored.plan.cast.selectedCharacterIds[0] = '9999';
     expect(
       store.queryTheater({ uid: '123456789' })[0]?.plan.cast.selectedCharacterIds
     ).not.toContain('9999');
+    expect(stored.arcanaSnapshots).toEqual([
+      expect.objectContaining({
+        id: 'node.1',
+        nameRef: 'arcana.node.1',
+        names: { 'zh-CN': '聚敌增益', en: 'Grouping Boon' }
+      })
+    ]);
+    expect(stored.encounterSnapshots).toEqual([
+      expect.objectContaining({
+        act: 1,
+        encounterId: 'act-1-encounter',
+        enemyRefs: [
+          expect.objectContaining({
+            id: 'enemy.1',
+            names: { 'zh-CN': '测试敌人', en: 'Test Enemy' }
+          })
+        ]
+      })
+    ]);
     expect(store.removeTheaterById(stored.id)).toBe(true);
   });
 

@@ -51,6 +51,7 @@ type ValidationResult<P extends RecommendationPlan, I extends PipelineIssue> =
 export interface RunV2AgentPipelineOptions<P extends RecommendationPlan, I extends PipelineIssue> {
   runner: AuditedAgentRunner;
   context: V2PipelineContext;
+  onUsageDelta?: (usage: AgentUsage) => void;
   sdkOptionsForStage: (stage: V2AgentStage) => AgentSdkRunOptions;
   composer: {
     initialPrompt: string;
@@ -107,7 +108,8 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
       auditContext: {
         correlationId: context.correlationId,
         round: stage === 'compose' ? 'compose' : 'repair'
-      }
+      },
+      onUsageDelta: options.onUsageDelta
     });
     usage = addAgentUsage(usage, composerTurn.usage);
     const validated = options.composer.validate(composerTurn.text, composerTurn.tools);
@@ -138,7 +140,8 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
       }),
       systemPrompt: CRITIQUE_PROMPT_V2,
       schema: v2CritiqueOutputSchema,
-      correlationId: context.correlationId
+      correlationId: context.correlationId,
+      onUsageDelta: options.onUsageDelta
     });
     usage = addAgentUsage(usage, critiqueResult.usage);
     if (!critiqueResult.ok) {
@@ -196,7 +199,8 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
       }),
       systemPrompt: ROTATION_COACH_PROMPT_V2,
       schema: v2RotationOutputSchema,
-      correlationId: context.correlationId
+      correlationId: context.correlationId,
+      onUsageDelta: options.onUsageDelta
     });
     usage = addAgentUsage(usage, rotationResult.usage);
     if (!rotationResult.ok) {
@@ -207,8 +211,8 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
         usage
       };
     }
-    const rotationTargetError = firstUnknownTarget(
-      validated.plan,
+    const rotationTargetError = exactCoverageError(
+      expectedStageTargets(validated.plan, 'rotation'),
       rotationResult.value.rotations.map(({ target }) => target)
     );
     if (rotationTargetError) {
@@ -216,6 +220,18 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
         ok: false,
         repairs,
         issues: [options.invalidIssue('rotation', rotationTargetError)],
+        usage
+      };
+    }
+    const rotationFactError = firstInvalidFactRef(
+      rotationResult.value.rotations.flatMap(({ factRefs }) => factRefs),
+      context
+    );
+    if (rotationFactError) {
+      return {
+        ok: false,
+        repairs,
+        issues: [options.invalidIssue('rotation', rotationFactError)],
         usage
       };
     }
@@ -232,7 +248,8 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
       }),
       systemPrompt: EXPLAIN_PROMPT_V2,
       schema: v2ExplainOutputSchema,
-      correlationId: context.correlationId
+      correlationId: context.correlationId,
+      onUsageDelta: options.onUsageDelta
     });
     usage = addAgentUsage(usage, explainResult.usage);
     if (!explainResult.ok) {
@@ -243,8 +260,8 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
         usage
       };
     }
-    const explainTargetError = firstUnknownTarget(
-      validated.plan,
+    const explainTargetError = exactCoverageError(
+      expectedStageTargets(validated.plan, 'explain'),
       explainResult.value.explanations.map(({ target }) => target)
     );
     if (explainTargetError) {
@@ -252,6 +269,18 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
         ok: false,
         repairs,
         issues: [options.invalidIssue('explain', explainTargetError)],
+        usage
+      };
+    }
+    const explainFactError = firstInvalidFactRef(
+      explainResult.value.explanations.flatMap(({ factRefs }) => factRefs),
+      context
+    );
+    if (explainFactError) {
+      return {
+        ok: false,
+        repairs,
+        issues: [options.invalidIssue('explain', explainFactError)],
         usage
       };
     }
@@ -267,6 +296,35 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
   }
 }
 
+function firstInvalidFactRef(
+  refs: Array<
+    | { kind: 'plan'; field: string }
+    | { kind: 'mechanic'; target: string; factIndex: number }
+    | { kind: 'profile'; characterId: string; field: string }
+    | { kind: 'knowledge'; characterId: string }
+  >,
+  context: V2PipelineContext
+): string | undefined {
+  const profileIds = new Set(context.profile.minimalIndex.map(({ id }) => String(id)));
+  const eligibleIds = new Set(context.candidate.eligibleCharacterIds);
+  for (const ref of refs) {
+    if (ref.kind === 'plan') continue;
+    if (ref.kind === 'profile' && !profileIds.has(ref.characterId)) {
+      return `Stage referenced a profile fact outside the bounded roster: ${ref.characterId}`;
+    }
+    if (ref.kind === 'knowledge' && !eligibleIds.has(ref.characterId)) {
+      return `Stage referenced knowledge outside the eligible pool: ${ref.characterId}`;
+    }
+    if (ref.kind === 'mechanic') {
+      const mechanic = context.mechanics.find(({ target }) => target === ref.target);
+      if (!mechanic || ref.factIndex >= mechanic.facts.length) {
+        return `Stage referenced an unknown mechanic fact: ${ref.target}#${ref.factIndex}`;
+      }
+    }
+  }
+  return undefined;
+}
+
 async function runStrictStage<T>(options: {
   runner: AuditedAgentRunner;
   sdkOptions: AgentSdkRunOptions;
@@ -274,6 +332,7 @@ async function runStrictStage<T>(options: {
   systemPrompt: string;
   schema: z.ZodType<T>;
   correlationId: string;
+  onUsageDelta?: (usage: AgentUsage) => void;
 }): Promise<
   { ok: true; value: T; usage: AgentUsage } | { ok: false; message: string; usage: AgentUsage }
 > {
@@ -282,7 +341,8 @@ async function runStrictStage<T>(options: {
     prompt: JSON.stringify(options.prompt),
     sdkOptions: options.sdkOptions,
     systemPrompt: options.systemPrompt,
-    auditContext: { correlationId: options.correlationId, round: 'single' }
+    auditContext: { correlationId: options.correlationId, round: 'single' },
+    onUsageDelta: options.onUsageDelta
   });
   let parsed: unknown;
   try {
@@ -348,6 +408,65 @@ function firstUnknownTarget(
     : undefined;
 }
 
+function expectedStageTargets(
+  plan: RecommendationPlan,
+  stage: 'rotation' | 'explain'
+): V2AgentTarget[] {
+  switch (plan.mode) {
+    case 'spiral-abyss':
+      return stage === 'rotation'
+        ? [
+            { kind: 'abyss-team', half: 'first' },
+            { kind: 'abyss-team', half: 'second' }
+          ]
+        : plan.chambers.flatMap(({ floor, chamber }) =>
+            (['first', 'second'] as const).map((half) => ({
+              kind: 'abyss-chamber' as const,
+              floor,
+              chamber,
+              half
+            }))
+          );
+    case 'stygian-onslaught':
+      return plan.phases.map(({ phase }) => ({ kind: 'stygian-phase', phase }));
+    case 'imaginarium-theater':
+      return stage === 'rotation'
+        ? plan.acts.map(({ act }) => ({ kind: 'theater-act', act }))
+        : [
+            { kind: 'theater-cast' },
+            ...plan.acts.map(({ act }) => ({ kind: 'theater-act' as const, act }))
+          ];
+  }
+}
+
+function exactCoverageError(
+  expected: V2AgentTarget[],
+  actual: V2AgentTarget[]
+): string | undefined {
+  const expectedCounts = targetCounts(expected);
+  const actualCounts = targetCounts(actual);
+  const missing = [...expectedCounts].filter(
+    ([key, count]) => (actualCounts.get(key) ?? 0) !== count
+  );
+  const extra = [...actualCounts].filter(
+    ([key, count]) => (expectedCounts.get(key) ?? 0) !== count
+  );
+  return missing.length === 0 && extra.length === 0
+    ? undefined
+    : `Stage target coverage must be exact-once; missing=${
+        missing.map(([key]) => key).join(',') || 'none'
+      }; extra-or-duplicate=${extra.map(([key]) => key).join(',') || 'none'}.`;
+}
+
+function targetCounts(targets: V2AgentTarget[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  targets.forEach((target) => {
+    const key = JSON.stringify(target);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  });
+  return counts;
+}
+
 function targetExists(plan: RecommendationPlan, target: V2AgentTarget): boolean {
   if (plan.mode === 'spiral-abyss') {
     if (target.kind === 'abyss-team') return true;
@@ -363,7 +482,10 @@ function targetExists(plan: RecommendationPlan, target: V2AgentTarget): boolean 
       target.kind === 'stygian-phase' && plan.phases.some(({ phase }) => phase === target.phase)
     );
   }
-  return target.kind === 'theater-act' && plan.acts.some(({ act }) => act === target.act);
+  return (
+    target.kind === 'theater-cast' ||
+    (target.kind === 'theater-act' && plan.acts.some(({ act }) => act === target.act))
+  );
 }
 
 function targetPath(target: V2AgentTarget): Array<string | number> {
@@ -376,6 +498,8 @@ function targetPath(target: V2AgentTarget): Array<string | number> {
       return ['phases', target.phase];
     case 'theater-act':
       return ['acts', target.act];
+    case 'theater-cast':
+      return ['cast'];
   }
 }
 

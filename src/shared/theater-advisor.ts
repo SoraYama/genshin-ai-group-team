@@ -8,6 +8,11 @@ import {
   type ImaginariumTheaterScenario,
   type TheaterPlan
 } from './scenario-v2.js';
+import {
+  advisorLocaleSchema,
+  advisorNarrativeSchema,
+  defaultAdvisorNarrative
+} from './advisor-narrative.js';
 
 export const canonicalTheaterCharacterIdSchema = z
   .string()
@@ -52,6 +57,7 @@ export const theaterAdvisorPlanInputSchema = z
     uid: z.string().regex(/^\d{9}$/),
     scenarioId: z.string().trim().min(1),
     dataVersion: z.string().trim().min(1),
+    locale: advisorLocaleSchema.default('zh-CN'),
     act: z.number().int().min(1).max(10).optional(),
     target: theaterObjectiveSchema,
     preferences: playerPreferencesSchema,
@@ -312,7 +318,8 @@ const resultCommonShape = {
   issues: z.array(theaterPlanIssueSchema),
   warnings: z.array(playerTextSchema),
   assumptions: z.array(playerTextSchema),
-  eligibility: theaterEligibilityReportSchema
+  eligibility: theaterEligibilityReportSchema,
+  narrative: advisorNarrativeSchema.default(defaultAdvisorNarrative('imaginarium-theater'))
 };
 
 export const theaterAdvisorResultSchema = z

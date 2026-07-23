@@ -132,6 +132,7 @@ export function stygianInput(
     uid: '123456789',
     scenarioId: 'stygian.2026-07',
     dataVersion: '2026.07.1',
+    locale: 'zh-CN',
     difficultyId: 'difficulty-6',
     target: 'dire-challenge',
     preferences: {

@@ -6,6 +6,7 @@ import {
   type Options as SdkOptions,
   type Query
 } from '@anthropic-ai/claude-agent-sdk';
+import { validateCustomHeaders } from '../../shared/custom-headers.js';
 
 const DENIED_NATIVE_TOOLS = [
   'Agent',
@@ -53,10 +54,9 @@ export interface AgentSdkRunOptions {
 }
 
 function serializeCustomHeaders(headers: Record<string, string> | undefined): string | undefined {
-  if (!headers) return undefined;
-  const lines = Object.entries(headers)
-    .filter(([name, value]) => /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name) && !/[\r\n]/.test(value))
-    .map(([name, value]) => `${name}: ${value}`);
+  const validated = validateCustomHeaders(headers);
+  if (!validated) return undefined;
+  const lines = Object.entries(validated).map(([name, value]) => `${name}: ${value}`);
   return lines.length > 0 ? lines.join('\n') : undefined;
 }
 

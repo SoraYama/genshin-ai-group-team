@@ -9,6 +9,12 @@ import {
   type PlayerIntervention,
   type SpiralAbyssScenario
 } from './scenario-v2.js';
+import {
+  abyssTeamRiskSchema,
+  advisorLocaleSchema,
+  advisorNarrativeSchema,
+  defaultAdvisorNarrative
+} from './advisor-narrative.js';
 
 const canonicalCharacterIdSchema = z
   .string()
@@ -37,6 +43,7 @@ export const abyssAdvisorPlanInputSchema = z
     uid: z.string().regex(/^\d{9}$/, 'UID must contain exactly 9 digits'),
     scenarioId: z.string().trim().min(1),
     dataVersion: z.string().trim().min(1),
+    locale: advisorLocaleSchema.default('zh-CN'),
     floor: z.number().int().positive(),
     chamber: z.number().int().positive().optional(),
     preferences: playerPreferencesSchema,
@@ -193,7 +200,9 @@ const resultCommonShape = {
   source: z.enum(['smart-service', 'local-rules']),
   issues: z.array(abyssPlanIssueSchema),
   warnings: z.array(z.string().trim().min(1)),
-  assumptions: z.array(z.string().trim().min(1))
+  assumptions: z.array(z.string().trim().min(1)),
+  narrative: advisorNarrativeSchema.default(defaultAdvisorNarrative('spiral-abyss')),
+  teamRisks: z.array(abyssTeamRiskSchema).max(16).default([])
 };
 
 export const abyssAdvisorResultSchema = z.discriminatedUnion('status', [

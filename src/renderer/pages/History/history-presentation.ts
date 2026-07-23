@@ -21,7 +21,7 @@ export type HistoryRerunIntent =
     } & RerunIdentity)
   | (Omit<
       TheaterPlanHistoryEntry['interventions'],
-      'correlationId' | 'uid' | 'scenarioId' | 'dataVersion'
+      'correlationId' | 'uid' | 'scenarioId' | 'dataVersion' | 'locale'
     > & {
       mode: 'imaginarium-theater';
     } & RerunIdentity);
@@ -49,25 +49,16 @@ const MODE_LABELS: Record<ChallengeHistoryEntry['mode'], { zh: string; en: strin
   'imaginarium-theater': { zh: '幻想真境剧诗', en: 'Imaginarium Theater' }
 };
 
-export function periodLabelFromScenario(
-  _scenarioId: string,
-  locale: 'zh' | 'en' = 'zh'
-): string {
+export function periodLabelFromScenario(_scenarioId: string, locale: 'zh' | 'en' = 'zh'): string {
   return locale === 'en' ? 'Period not saved' : '保存时未记录周期';
 }
 
-function historyPeriodLabel(
-  entry: ChallengeHistoryEntry,
-  locale: 'zh' | 'en' = 'zh'
-): string {
+function historyPeriodLabel(entry: ChallengeHistoryEntry, locale: 'zh' | 'en' = 'zh'): string {
   if (entry.playerCycle.status === 'known') return entry.playerCycle.label;
   return locale === 'en' ? 'Period not saved' : '保存时未记录周期';
 }
 
-export function historyConfidenceLabel(
-  entry: ChallengeHistoryEntry,
-  locale: 'zh' | 'en'
-): string {
+export function historyConfidenceLabel(entry: ChallengeHistoryEntry, locale: 'zh' | 'en'): string {
   const confidence =
     'confidence' in entry.plan &&
     (entry.plan.confidence === 'low' ||
@@ -92,10 +83,7 @@ export function historyDeleteRecoveryKind(
     : 'reload';
 }
 
-export function historyCardTitle(
-  entry: ChallengeHistoryEntry,
-  locale: 'zh' | 'en' = 'zh'
-): string {
+export function historyCardTitle(entry: ChallengeHistoryEntry, locale: 'zh' | 'en' = 'zh'): string {
   if (locale === 'en') {
     switch (entry.mode) {
       case 'spiral-abyss':
@@ -103,12 +91,15 @@ export function historyCardTitle(
           entry.target.chamber ? ` · Chamber ${entry.target.chamber}` : ''
         }`;
       case 'stygian-onslaught': {
-        const difficulty = /[\u3400-\u9fff]/u.test(entry.difficultyName)
-          ? `Difficulty ${
-              /(\d+)(?!.*\d)/u.exec(entry.difficultyName)?.[1] ??
-              difficultyOrder(entry.difficultyId)
-            }`
-          : entry.difficultyName;
+        const legacyName = entry.difficultyName;
+        const difficulty =
+          entry.difficultyNames?.['en-US'] ??
+          entry.difficultyNames?.['en'] ??
+          (legacyName && !/[\u3400-\u9fff]/u.test(legacyName) ? legacyName : undefined) ??
+          `Difficulty ${
+            (legacyName ? /(\d+)(?!.*\d)/u.exec(legacyName)?.[1] : undefined) ??
+            difficultyOrder(entry.difficultyId)
+          }`;
         return `Stygian Onslaught · ${difficulty}`;
       }
       case 'imaginarium-theater':
@@ -121,7 +112,9 @@ export function historyCardTitle(
         entry.target.chamber ? ` · 第 ${entry.target.chamber} 间` : ''
       }`;
     case 'stygian-onslaught':
-      return `幽境危战 · ${entry.difficultyName}`;
+      return `幽境危战 · ${
+        entry.difficultyNames?.['zh-CN'] ?? entry.difficultyName ?? entry.difficultyId
+      }`;
     case 'imaginarium-theater':
       return `幻想真境剧诗${entry.act ? ` · 第 ${entry.act} 幕` : ' · 全部幕次'}`;
   }
@@ -153,6 +146,8 @@ export function historyDetailSemanticSnapshot(entry: ChallengeHistoryEntry) {
           second: entry.plan.secondHalfTeam
         },
         chambers: entry.plan.chambers,
+        narrative: entry.narrative,
+        teamRisks: entry.teamRisks,
         warnings: entry.plan.warnings,
         assumptions: entry.plan.assumptions
       });
@@ -164,7 +159,8 @@ export function historyDetailSemanticSnapshot(entry: ChallengeHistoryEntry) {
         warnings: entry.plan.warnings,
         assumptions: entry.plan.assumptions,
         phaseGuidance: entry.phaseGuidance,
-        difficultyAssessment: entry.difficultyAssessment
+        difficultyAssessment: entry.difficultyAssessment,
+        narrative: entry.narrative
       });
     case 'imaginarium-theater':
       return structuredClone({
@@ -172,6 +168,9 @@ export function historyDetailSemanticSnapshot(entry: ChallengeHistoryEntry) {
         acts: entry.plan.acts,
         vigorBudget: entry.vigorBudget,
         nodeBudget: entry.nodeBudget,
+        arcanaSnapshots: entry.arcanaSnapshots,
+        encounterSnapshots: entry.encounterSnapshots,
+        narrative: entry.narrative,
         routeGuidance: entry.routeGuidance,
         warnings: entry.plan.warnings,
         assumptions: entry.plan.assumptions

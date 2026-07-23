@@ -21,9 +21,10 @@ import {
   buildLocalStygianPlan
 } from './stygian-local-optimizer.js';
 import { StygianPlanAgent, type StygianPlanAgentRunner } from './stygian-plan-agent.js';
-import type { V2CritiqueOutput, V2ExplainOutput } from '../agents/contracts.js';
+import type { V2CritiqueOutput, V2ExplainOutput, V2RotationOutput } from '../agents/contracts.js';
 import { buildV2PipelineContext } from './v2-agent-context.js';
 import type { V2AgentStage } from './v2-agent-pipeline.js';
+import { renderV2Narrative } from './v2-narrative.js';
 
 export interface StygianAdvisorServiceOptions {
   runner: StygianPlanAgentRunner;
@@ -243,6 +244,7 @@ export class StygianAdvisorService {
             profile,
             feasibleBaseline: localPreflight.plan,
             eligibleCharacterIds,
+            locale: input.locale,
             mechanics: scenario.phases.map((phase) => ({
               target: `第 ${phase.phase} 阶段`,
               facts: [
@@ -298,13 +300,14 @@ export class StygianAdvisorService {
             knowledge: this.options.knowledge,
             pipelineContext,
             sdkOptions: baseSdkOptions,
-            sdkOptionsForStage
+            sdkOptionsForStage,
+            onUsageDelta: (usage) =>
+              this.options.config.recordUsage?.(
+                usage.inputTokens,
+                usage.outputTokens,
+                usage.estimatedCostUsd
+              )
           });
-          this.options.config.recordUsage?.(
-            agent.usage.inputTokens,
-            agent.usage.outputTokens,
-            agent.usage.estimatedCostUsd
-          );
           throwIfCancelled();
           if (agent.ok) {
             result = checkedAgentResult(
@@ -314,6 +317,7 @@ export class StygianAdvisorService {
               scenario,
               input,
               agent.critique,
+              agent.rotation,
               agent.explanation
             );
           } else {
@@ -369,8 +373,7 @@ export class StygianAdvisorService {
         dataVersion: result.plan.dataVersion,
         mode: 'stygian-onslaught',
         difficultyId: input.difficultyId,
-        difficultyName:
-          difficulty.name.names['zh-CN'] ?? difficulty.name.names['zh-Hans'] ?? '未命名难度',
+        difficultyNames: difficulty.name.names,
         ...(input.phase === undefined ? {} : { phase: input.phase }),
         target: input.target,
         reusePolicy: scenarioView.scenario.crossPartyReusePolicy,
@@ -379,12 +382,14 @@ export class StygianAdvisorService {
         scenarioFreshness: scenarioView.freshness,
         scenarioNotCurrent: scenarioView.notCurrent,
         interventions: {
+          locale: input.locale,
           lockedCharacterIds: input.lockedCharacterIds,
           excludedCharacterIds: input.excludedCharacterIds,
           target: input.target,
           difficultyId: input.difficultyId,
           preferences: input.preferences
         },
+        narrative: result.narrative,
         characters: usedIds.flatMap((id) => {
           const character = profile.characters.find(
             ({ id: numericId }) => String(numericId) === id
@@ -417,6 +422,7 @@ function checkedAgentResult(
   scenario: Extract<StygianScenarioView, { status: 'ready' }>['scenario'],
   input: StygianAdvisorPlanInput,
   critique: V2CritiqueOutput,
+  rotation: V2RotationOutput,
   explanation: V2ExplainOutput
 ): StygianAdvisorResult {
   const selectedIds = Array.from(new Set(plan.phases.flatMap(({ team }) => team.characterIds)));
@@ -445,6 +451,13 @@ function checkedAgentResult(
     source: 'smart-service',
     warnings: Array.from(new Set([...local.warnings, ...plan.warnings])),
     assumptions: Array.from(new Set([...local.assumptions, ...plan.assumptions])),
+    narrative: renderV2Narrative({
+      mode: 'stygian-onslaught',
+      locale: input.locale,
+      critique,
+      rotation,
+      explanation
+    }),
     plan: {
       ...plan,
       confidence,
@@ -453,14 +466,7 @@ function checkedAgentResult(
     },
     phaseGuidance: local.phaseGuidance.map((guidance) => ({
       ...guidance,
-      mechanismBasis: [
-        ...guidance.mechanismBasis,
-        ...explanation.explanations
-          .filter(
-            ({ target }) => target.kind === 'stygian-phase' && target.phase === guidance.phase
-          )
-          .map(({ text }) => text)
-      ],
+      mechanismBasis: [...guidance.mechanismBasis],
       risks: [
         ...guidance.risks,
         ...critique.issues

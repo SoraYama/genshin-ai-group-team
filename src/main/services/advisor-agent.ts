@@ -12,6 +12,7 @@ import type {
   RecommendationResult,
   TeamRecommendation
 } from '../../shared/domain.js';
+import { validateCustomHeaders } from '../../shared/custom-headers.js';
 import type { ConfigService } from './config-service.js';
 import type { HistoryStore } from './history-store.js';
 import type { ProfileStore } from './profile-store.js';
@@ -57,7 +58,7 @@ export class AdvisorAgent {
     const apiKey = this.config.getApiKey();
     const baseUrl = this.config.getBaseUrl();
     const model = this.config.getModel();
-    const customHeaders = this.config.getCustomHeaders();
+    let customHeaders: Record<string, string> | undefined;
 
     if (!apiKey) {
       return {
@@ -71,6 +72,7 @@ export class AdvisorAgent {
 
     const start = Date.now();
     try {
+      customHeaders = validateCustomHeaders(this.config.getCustomHeaders());
       const { statusCode, body } = await request(joinUrl(baseUrl, '/v1/messages'), {
         method: 'POST',
         headers: {
@@ -381,16 +383,9 @@ export function buildFallback(
   };
 }
 
-export function buildDiffSummary(
-  left: RecommendationResult,
-  right: RecommendationResult
-): string {
-  const leftNames = new Set(
-    left.teams.flatMap((team) => team.characters.map((c) => c.name))
-  );
-  const rightNames = new Set(
-    right.teams.flatMap((team) => team.characters.map((c) => c.name))
-  );
+export function buildDiffSummary(left: RecommendationResult, right: RecommendationResult): string {
+  const leftNames = new Set(left.teams.flatMap((team) => team.characters.map((c) => c.name)));
+  const rightNames = new Set(right.teams.flatMap((team) => team.characters.map((c) => c.name)));
 
   const onlyLeft = Array.from(leftNames).filter((name) => !rightNames.has(name));
   const onlyRight = Array.from(rightNames).filter((name) => !leftNames.has(name));

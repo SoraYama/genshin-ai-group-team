@@ -634,9 +634,30 @@ describe('HistoryStore', () => {
       expect.objectContaining({
         id: 'legacy-abyss',
         characters: [],
-        scenarioTrust: 'development-sample'
+        scenarioTrust: 'development-sample',
+        narrative: expect.objectContaining({ origin: 'legacy-unavailable' })
       })
     ]);
+  });
+
+  it('drops persisted Abyss records with malformed supplied narrative or team-risk contracts', async () => {
+    const base = {
+      id: 'invalid-abyss-narrative',
+      createdAt: '2026-07-22T00:00:00.000Z',
+      ...abyssEntryForScope('abyss.2026-07')
+    };
+    storeState.set('abyssPlans', [
+      { ...base, narrative: { origin: 'agent-structured', summary: 'free text' } },
+      {
+        ...base,
+        id: 'invalid-abyss-team-risk',
+        teamRisks: [{ half: 'first', severity: 'soft', code: 'bad', narrative: 'free text' }]
+      }
+    ]);
+    const { HistoryStore } = await import('../../../src/main/services/history-store.js');
+    const store = new HistoryStore();
+
+    expect(store.queryAbyss()).toEqual([]);
   });
 
   it('keeps old Stygian history readable with honest unknown period and missing guidance', async () => {
@@ -655,7 +676,8 @@ describe('HistoryStore', () => {
         id: 'legacy-stygian-history',
         playerCycle: { status: 'unknown' },
         phaseGuidance: null,
-        difficultyAssessment: null
+        difficultyAssessment: null,
+        narrative: expect.objectContaining({ origin: 'legacy-unavailable' })
       })
     ]);
   });
@@ -716,7 +738,7 @@ describe('HistoryStore', () => {
       dataVersion: input.dataVersion,
       mode: 'stygian-onslaught',
       difficultyId: input.difficultyId,
-      difficultyName: '难度 6',
+      difficultyNames: { 'zh-CN': '难度 6' },
       phase: input.phase,
       target: input.target,
       reusePolicy: { rule: 'forbidden', notes: [] },
@@ -748,7 +770,7 @@ describe('HistoryStore', () => {
     expect(stored).toMatchObject({
       mode: 'stygian-onslaught',
       difficultyId: 'difficulty-6',
-      difficultyName: '难度 6',
+      difficultyNames: { 'zh-CN': '难度 6' },
       target: 'dire-challenge',
       phase: 2,
       reusePolicy: { rule: 'forbidden' },

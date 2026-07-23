@@ -7,12 +7,7 @@ import type {
 } from '../../../shared/domain';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { GtaDialog } from '../../components/ui/GtaDialog';
-import {
-  destructiveErrorRecovery,
-  getErrorCode,
-  localizeError,
-  useI18n
-} from '../../i18n';
+import { destructiveErrorRecovery, getErrorCode, localizeError, useI18n } from '../../i18n';
 import { api } from '../../ipc';
 import { rewardTargetLabel, reuseRuleSummary } from '../Advisor/stygian-presentation';
 import { objectiveLabel, pathChoiceLabel, poolSourceLabel } from '../Advisor/theater-presentation';
@@ -91,10 +86,7 @@ export function HistoryPage({ state, onRerun }: HistoryPageProps) {
   }, [load]);
 
   const language = isEnglish ? 'en' : 'zh';
-  const groups = useMemo(
-    () => groupChallengeHistory(allEntries, language),
-    [allEntries, language]
-  );
+  const groups = useMemo(() => groupChallengeHistory(allEntries, language), [allEntries, language]);
   const totalCount = allEntries.length + legacyCount;
   const errorRecovery = destructiveErrorRecovery(errorCode, locale);
 
@@ -131,9 +123,7 @@ export function HistoryPage({ state, onRerun }: HistoryPageProps) {
     } catch (deleteError) {
       const code = getErrorCode(deleteError);
       setRetryDelete(
-        historyDeleteRecoveryKind(code, pendingDelete.kind) === 'reconfirm'
-          ? pendingDelete
-          : null
+        historyDeleteRecoveryKind(code, pendingDelete.kind) === 'reconfirm' ? pendingDelete : null
       );
       setPendingDelete(null);
       setError(localizeError(deleteError, locale, t, 'history.error.clear'));
@@ -173,8 +163,7 @@ export function HistoryPage({ state, onRerun }: HistoryPageProps) {
     setRetryDelete(null);
     try {
       const confirmation = await api.history.prepareDeleteScope({ scope: 'uid', uid });
-      if (confirmation.count > 0)
-        setPendingDelete({ kind: 'uid', uid, ...confirmation });
+      if (confirmation.count > 0) setPendingDelete({ kind: 'uid', uid, ...confirmation });
       else await load();
     } catch (prepareError) {
       setError(localizeError(prepareError, locale, t, 'history.error.clear'));
@@ -448,6 +437,32 @@ function AbyssDetails({ entry, isEnglish }: { entry: AbyssPlanHistoryEntry; isEn
     ids.map((id) => names.get(id) ?? (isEnglish ? 'Saved character' : '已保存角色')).join(' · ');
   return (
     <div className="gta-history-plan-grid">
+      <p>
+        {isEnglish
+          ? (entry.narrative?.summary['en-US'] ?? 'No bilingual explanation was saved.')
+          : (entry.narrative?.summary['zh-CN'] ?? '这条记录没有保存双语说明。')}
+      </p>
+      {(entry.teamRisks?.length ?? 0) > 0 && (
+        <section>
+          <h4>{isEnglish ? 'Saved team risks' : '已保存的队伍风险'}</h4>
+          <ul>
+            {entry.teamRisks?.map((risk) => (
+              <li key={`${risk.half}:${risk.code}`}>
+                <strong>
+                  {risk.half === 'first'
+                    ? isEnglish
+                      ? 'First half: '
+                      : '上半：'
+                    : isEnglish
+                      ? 'Second half: '
+                      : '下半：'}
+                </strong>
+                {risk.narrative[isEnglish ? 'en-US' : 'zh-CN']}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       <article>
         <span>{isEnglish ? 'First half' : '上半队伍'}</span>
         <strong>{teamNames(entry.plan.firstHalfTeam.characterIds)}</strong>
@@ -540,8 +555,19 @@ function StygianDetails({
   return (
     <>
       <p className="gta-history-rule">
-        {rewardTargetLabel(entry.target, isEnglish ? 'en' : 'zh')} ·{' '}
+        {isEnglish
+          ? (entry.difficultyNames?.['en-US'] ??
+            entry.difficultyNames?.['en'] ??
+            entry.difficultyName ??
+            entry.difficultyId)
+          : (entry.difficultyNames?.['zh-CN'] ?? entry.difficultyName ?? entry.difficultyId)}{' '}
+        · {rewardTargetLabel(entry.target, isEnglish ? 'en' : 'zh')} ·{' '}
         {reuseRuleSummary(entry.reusePolicy, isEnglish ? 'en' : 'zh')}
+      </p>
+      <p>
+        {isEnglish
+          ? (entry.narrative?.summary['en-US'] ?? 'No bilingual explanation was saved.')
+          : (entry.narrative?.summary['zh-CN'] ?? '这条记录没有保存双语说明。')}
       </p>
       <div className="gta-history-plan-grid is-three">
         {entry.plan.phases
@@ -575,9 +601,7 @@ function StygianDetails({
           entry.phaseGuidance.map((guidance) => (
             <article key={guidance.phase}>
               <strong>
-                {isEnglish
-                  ? `Phase ${guidance.phase} guidance`
-                  : `第 ${guidance.phase} 阶段依据`}
+                {isEnglish ? `Phase ${guidance.phase} guidance` : `第 ${guidance.phase} 阶段依据`}
               </strong>
               <DetailList
                 label={isEnglish ? 'Mechanism basis' : '机制依据'}
@@ -599,10 +623,7 @@ function StygianDetails({
         {entry.difficultyAssessment ? (
           <>
             <strong>
-              {difficultyRecommendationLabel(
-                entry.difficultyAssessment.recommendation,
-                isEnglish
-              )}
+              {difficultyRecommendationLabel(entry.difficultyAssessment.recommendation, isEnglish)}
             </strong>
             <DetailList
               label={isEnglish ? 'Evidence' : '判断依据'}
@@ -649,10 +670,18 @@ function TheaterDetails({
   entry: TheaterPlanHistoryEntry;
   isEnglish: boolean;
 }) {
-  const names = new Map(entry.cast.map((actor) => [actor.id, actor.name]));
-  const arcanaNames = new Map(
-    entry.routeGuidance.arcanaPriorities.map((priority) => [priority.nodeId, priority.name])
+  const names = new Map(
+    entry.cast.map((actor) => [actor.id, localizedSnapshotName(actor.names, isEnglish, actor.name)])
   );
+  const arcanaNames = new Map<string, string>(
+    (entry.arcanaSnapshots ?? []).map((snapshot) => [
+      snapshot.id,
+      localizedSnapshotName(snapshot.names, isEnglish, snapshot.nameRef)
+    ])
+  );
+  entry.routeGuidance.arcanaPriorities.forEach((priority) => {
+    if (!arcanaNames.has(priority.nodeId)) arcanaNames.set(priority.nodeId, priority.name);
+  });
   const nodeLabel = (nodeId: string) => {
     const savedName = arcanaNames.get(nodeId);
     if (!savedName) return isEnglish ? 'Saved node' : '已保存节点';
@@ -663,13 +692,18 @@ function TheaterDetails({
     <>
       <p className="gta-history-rule">
         {objectiveLabel(entry.target, isEnglish ? 'en' : 'zh')} ·{' '}
-        {entry.eligibility.hardQualifiedCount}/
-        {entry.eligibility.requiredHeadcount} {isEnglish ? 'eligible actors' : '名可入场'}
+        {entry.eligibility.hardQualifiedCount}/{entry.eligibility.requiredHeadcount}{' '}
+        {isEnglish ? 'eligible actors' : '名可入场'}
+      </p>
+      <p>
+        {isEnglish
+          ? (entry.narrative?.summary['en-US'] ?? 'No bilingual explanation was saved.')
+          : (entry.narrative?.summary['zh-CN'] ?? '这条记录没有保存双语说明。')}
       </p>
       <div className="gta-history-theater-cast">
         {entry.cast.map((actor) => (
           <span key={`${actor.source}:${actor.id}`}>
-            <strong>{actor.name}</strong>
+            <strong>{localizedSnapshotName(actor.names, isEnglish, actor.name)}</strong>
             <small>
               {actor.source === 'owned'
                 ? isEnglish
@@ -706,6 +740,21 @@ function TheaterDetails({
           </li>
         ))}
       </ol>
+      {(entry.encounterSnapshots?.length ?? 0) > 0 && (
+        <section className="gta-history-theater-guidance">
+          <h4>{isEnglish ? 'Saved encounter references' : '已保存的敌情引用'}</h4>
+          {entry.encounterSnapshots?.map((snapshot) => (
+            <article key={`${snapshot.act}:${snapshot.encounterId}`}>
+              <strong>{isEnglish ? `Act ${snapshot.act}` : `第 ${snapshot.act} 幕`}</strong>
+              <p>
+                {snapshot.enemyRefs
+                  .map((enemy) => localizedSnapshotName(enemy.names, isEnglish, enemy.id))
+                  .join(isEnglish ? ', ' : '、')}
+              </p>
+            </article>
+          ))}
+        </section>
+      )}
       {entry.vigorBudget.length > 0 && (
         <div className="gta-history-theater-vigor">
           {entry.vigorBudget.map((item) => (
@@ -732,13 +781,7 @@ function TheaterDetails({
         />
         {entry.routeGuidance.arcanaPriorities.map((priority) => (
           <article key={priority.nodeId}>
-            <strong>
-              {localizedResultText(
-                priority.name,
-                isEnglish ? 'en' : 'zh',
-                'Saved Arcana priority'
-              )}
-            </strong>
+            <strong>{nodeLabel(priority.nodeId)}</strong>
             <p>
               {localizedResultText(
                 priority.condition,
@@ -779,6 +822,16 @@ function TheaterDetails({
   );
 }
 
+function localizedSnapshotName(
+  names: Record<string, string> | undefined,
+  isEnglish: boolean,
+  fallback: string
+): string {
+  return isEnglish
+    ? (names?.['en-US'] ?? names?.['en'] ?? fallback)
+    : (names?.['zh-CN'] ?? names?.['zh-Hans'] ?? fallback);
+}
+
 function DetailList({ items, label }: { items: string[]; label: string }) {
   if (items.length === 0) return null;
   const isEnglish = !/[\u3400-\u9fff]/u.test(label);
@@ -788,11 +841,7 @@ function DetailList({ items, label }: { items: string[]; label: string }) {
       <ul>
         {items.map((item, index) => (
           <li key={`${index}:${item}`}>
-            {localizedResultText(
-              item,
-              isEnglish ? 'en' : 'zh',
-              'Details saved with this plan'
-            )}
+            {localizedResultText(item, isEnglish ? 'en' : 'zh', 'Details saved with this plan')}
           </li>
         ))}
       </ul>

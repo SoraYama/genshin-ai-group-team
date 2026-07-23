@@ -10,8 +10,18 @@ import {
   validAbyssPlan
 } from './abyss-test-fixtures.js';
 
+function directive<T>(target: T) {
+  return {
+    target,
+    tone: 'steady',
+    reasonCodes: ['setup-order'],
+    factRefs: [{ kind: 'plan', field: 'validated-target' }]
+  };
+}
+
 class FixtureRunner {
   readonly calls: Array<{ prompt: string; options: AgentSdkRunOptions }> = [];
+  readonly profileInputs: Array<{ uid: string; characterIds: string[] }> = [];
 
   constructor(private readonly outputs: unknown[]) {}
 
@@ -25,7 +35,10 @@ class FixtureRunner {
       yield {
         type: 'result',
         result: JSON.stringify({
-          rotations: [{ target: { kind: 'abyss-team', half: 'first' }, notes: ['先辅助后输出。'] }]
+          rotations: [
+            directive({ kind: 'abyss-team', half: 'first' }),
+            directive({ kind: 'abyss-team', half: 'second' })
+          ]
         })
       };
       return;
@@ -35,20 +48,38 @@ class FixtureRunner {
         type: 'result',
         result: JSON.stringify({
           explanations: [
-            {
-              target: { kind: 'abyss-chamber', floor: 12, chamber: 1, half: 'first' },
-              text: '基于已验证方案处理本房间。'
-            }
+            ...[1, 2].flatMap((chamber) =>
+              (['first', 'second'] as const).map((half) =>
+                directive({ kind: 'abyss-chamber', floor: 12, chamber, half })
+              )
+            )
           ]
         })
       };
       return;
     }
+    const payload = JSON.parse(prompt) as {
+      context: { profileRef: { uid: string } };
+    };
+    const nextPlan = this.outputs[0] as {
+      firstHalfTeam?: { characterIds?: unknown };
+      secondHalfTeam?: { characterIds?: unknown };
+    };
+    const selectedIds = [nextPlan?.firstHalfTeam, nextPlan?.secondHalfTeam].flatMap((team) =>
+      Array.isArray(team?.characterIds)
+        ? team.characterIds.filter((id): id is string => typeof id === 'string')
+        : []
+    );
+    const profileInput = {
+      uid: payload.context.profileRef.uid,
+      characterIds: [...new Set(selectedIds)]
+    };
+    this.profileInputs.push(profileInput);
     const toolUses = [
       {
         id: 'profile',
         name: 'mcp__genshin__read_profile_cache',
-        input: { uid: '123456789' }
+        input: profileInput
       },
       ...[1, 2].map((chamber) => ({
         id: `enemy-${chamber}`,
@@ -63,7 +94,7 @@ class FixtureRunner {
       {
         id: 'characters',
         name: 'mcp__genshin__query_genshin_db',
-        input: { characterIds: ABYSS_CHARACTERS.slice(0, 8).map(({ id }) => String(id)) }
+        input: { characterIds: [...new Set(selectedIds)] }
       }
     ];
     yield {
@@ -173,16 +204,26 @@ describe('AbyssPlanAgent', () => {
       }
     });
     if (!result.ok) throw new Error('Expected successful pipeline');
-    expect(result.plan.firstHalfTeam.rotationNotes).toContain('先辅助后输出。');
-    expect(result.plan.chambers[0]?.firstHalf.tactics).toContain('基于已验证方案处理本房间。');
+    expect(result.rotation.rotations).toHaveLength(2);
+    expect(result.explanation.explanations).toHaveLength(4);
     expect(result.usage).toEqual({ inputTokens: 20, outputTokens: 10, estimatedCostUsd: 0.02 });
     expect(runner.calls).toHaveLength(5);
     expect(runner.calls[0]?.options.systemPrompt).toContain('AbyssTeamComposer');
     expect(runner.calls[0]?.options.maxTurns).toBe(4);
     expect(runner.calls[0]?.prompt).toContain('feasibleBaseline');
+    expect(runner.calls[0]?.prompt).toContain('"locale":"zh-CN"');
     expect(runner.calls[0]?.prompt).toContain('missingFields');
     expect(runner.calls[1]?.prompt).toContain('CROSS_TEAM_DUPLICATE');
     expect(runner.calls[1]?.prompt).toContain('只修复');
+    expect(runner.profileInputs).toEqual([
+      { uid: '123456789', characterIds: expect.any(Array) },
+      {
+        uid: '123456789',
+        characterIds: repaired.firstHalfTeam.characterIds.concat(
+          repaired.secondHalfTeam.characterIds
+        )
+      }
+    ]);
     expect(
       runner.calls.slice(2).every(({ options }) => options.allowedBusinessTools?.length === 0)
     ).toBe(true);

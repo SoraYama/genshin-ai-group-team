@@ -13,7 +13,8 @@ import {
   UNKNOWN_CHARACTER_KNOWLEDGE,
   characterKnowledgeView,
   errorToolResult,
-  redactedProfileView,
+  profileCacheToolInput,
+  profileCacheView,
   textToolResult
 } from './advisor-business-tool-common.js';
 
@@ -55,7 +56,7 @@ export interface AbyssBusinessToolsOptions {
 }
 
 export function createAbyssBusinessTools(options: AbyssBusinessToolsOptions) {
-  const maxCharacters = Math.min(Math.max(options.maxCharacters ?? 128, 1), 128);
+  const maxCharacters = Math.min(Math.max(options.maxCharacters ?? 100, 1), 100);
   const now = options.now ?? Date.now;
   const knowledge = options.knowledge ?? UNKNOWN_CHARACTER_KNOWLEDGE;
   const auditContext = {
@@ -103,18 +104,26 @@ export function createAbyssBusinessTools(options: AbyssBusinessToolsOptions) {
   return [
     tool(
       'read_profile_cache',
-      '读取当前 UID 的本地角色摘要；只读，不返回图片、来源明细或凭据。',
-      { uid: z.string().regex(/^\d{9}$/) },
-      async ({ uid }) => {
+      '按页读取当前 UID 的全量角色索引，或按 characterIds 读取完整安全详情；只读，不返回图片、来源明细或凭据。',
+      profileCacheToolInput,
+      async ({ uid, characterIds, cursor, pageSize }) => {
         const profile = options.getProfile(uid);
         return run(
           'read_profile_cache',
-          profile?.characters.length ?? 0,
-          { requested: 'profile', maxCharacters },
+          characterIds?.length ??
+            Math.min(pageSize ?? maxCharacters, profile?.characters.length ?? 0),
+          {
+            requested: characterIds ? 'details' : 'index-page',
+            requestedCount: characterIds?.length ?? pageSize ?? maxCharacters
+          },
           'PROFILE_NOT_FOUND',
           () => {
             if (!profile) throw new Error('Profile not found');
-            return redactedProfileView(profile, maxCharacters);
+            return profileCacheView(profile, {
+              characterIds,
+              cursor,
+              pageSize: pageSize ?? maxCharacters
+            });
           }
         );
       },

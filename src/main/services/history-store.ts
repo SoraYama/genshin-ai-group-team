@@ -28,6 +28,12 @@ import {
   playerPreferencesSchema,
   theaterPlanSchema
 } from '../../shared/scenario-v2.js';
+import {
+  abyssTeamRiskSchema,
+  advisorLocaleSchema,
+  advisorNarrativeSchema,
+  defaultAdvisorNarrative
+} from '../../shared/advisor-narrative.js';
 
 interface HistoryStoreSchema {
   entries: RecommendationHistoryEntry[];
@@ -130,18 +136,37 @@ const theaterHistoryEntrySchema = z
     eligibility: theaterEligibilityReportSchema,
     cast: z
       .array(
-        z
-          .object({
-            id: z.string().trim().min(1),
-            name: z.string().trim().min(1),
-            element: z.string().trim().min(1).optional(),
-            level: z.number().int().nonnegative().optional(),
-            source: z.enum(['owned', 'opening', 'trial', 'special-guest', 'support']),
-            poolSources: z
-              .array(z.enum(['opening', 'trial', 'special-guest', 'support']))
-              .optional()
-          })
-          .strict()
+        z.preprocess(
+          (value) =>
+            isRecord(value) && value['nameRef'] === undefined
+              ? {
+                  ...value,
+                  nameRef: {
+                    kind: 'legacy-name',
+                    id: typeof value['id'] === 'string' ? value['id'] : 'unknown'
+                  }
+                }
+              : value,
+          z
+            .object({
+              id: z.string().trim().min(1),
+              name: z.string().trim().min(1),
+              names: z.record(z.string().trim().min(1), z.string().trim().min(1)).optional(),
+              nameRef: z
+                .object({
+                  kind: z.enum(['profile-character', 'scenario-entity', 'legacy-name']),
+                  id: z.string().trim().min(1)
+                })
+                .strict(),
+              element: z.string().trim().min(1).optional(),
+              level: z.number().int().nonnegative().optional(),
+              source: z.enum(['owned', 'opening', 'trial', 'special-guest', 'support']),
+              poolSources: z
+                .array(z.enum(['opening', 'trial', 'special-guest', 'support']))
+                .optional()
+            })
+            .strict()
+        )
       )
       .min(1),
     vigorBudget: z.array(
@@ -165,6 +190,41 @@ const theaterHistoryEntrySchema = z
           .strict()
       )
       .default([]),
+    arcanaSnapshots: z
+      .array(
+        z
+          .object({
+            id: z.string().trim().min(1),
+            nameRef: z.string().trim().min(1),
+            names: z
+              .record(z.string().trim().min(1), z.string().trim().min(1))
+              .refine((names) => Object.keys(names).length > 0)
+          })
+          .strict()
+      )
+      .default([]),
+    encounterSnapshots: z
+      .array(
+        z
+          .object({
+            act: z.number().int().min(1).max(10),
+            encounterId: z.string().trim().min(1),
+            enemyRefs: z
+              .array(
+                z
+                  .object({
+                    id: z.string().trim().min(1),
+                    names: z
+                      .record(z.string().trim().min(1), z.string().trim().min(1))
+                      .refine((names) => Object.keys(names).length > 0)
+                  })
+                  .strict()
+              )
+              .min(1)
+          })
+          .strict()
+      )
+      .default([]),
     routeGuidance: z
       .object({
         preserveCharacterIds: z.array(canonicalCharacterIdSchema),
@@ -184,6 +244,9 @@ const theaterHistoryEntrySchema = z
         notes: z.array(z.string().trim().min(1)).min(1)
       })
       .strict(),
+    narrative: advisorNarrativeSchema.default(
+      defaultAdvisorNarrative('imaginarium-theater', 'legacy-unavailable')
+    ),
     plan: theaterPlanSchema
   })
   .strict()
@@ -200,6 +263,26 @@ const theaterHistoryEntrySchema = z
         message: 'Theater history identity must remain immutable'
       });
     }
+    const plannedActs = new Set(entry.plan.acts.map(({ act }) => act));
+    entry.encounterSnapshots.forEach(({ act }, index) => {
+      if (!plannedActs.has(act)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['encounterSnapshots', index, 'act'],
+          message: 'Encounter snapshot must belong to a planned act'
+        });
+      }
+    });
+    const priorityIdSet = new Set(entry.routeGuidance.arcanaPriorityIds);
+    entry.arcanaSnapshots.forEach(({ id }, index) => {
+      if (!priorityIdSet.has(id)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['arcanaSnapshots', index, 'id'],
+          message: 'Arcana snapshot must belong to the saved priority set'
+        });
+      }
+    });
     if (
       entry.interventions.uid !== entry.uid ||
       entry.interventions.target !== entry.target ||
@@ -353,155 +436,175 @@ const theaterHistoryEntrySchema = z
       });
   });
 
-const stygianHistoryEntrySchema = z
-  .object({
-    id: z.string().trim().min(8),
-    createdAt: z.iso.datetime({ offset: true }),
-    uid: z.string().regex(/^\d{9}$/),
-    scenarioId: z.string().trim().min(1),
-    playerCycle: playerCycleSnapshotSchema.default({ status: 'unknown' }),
-    schemaVersion: z.literal(2),
-    dataVersion: z.string().trim().min(1),
-    mode: z.literal('stygian-onslaught'),
-    difficultyId: z.string().trim().min(1),
-    difficultyName: z.string().trim().min(1),
-    phase: z.number().int().min(1).max(3).optional(),
-    target: stygianRewardTargetSchema,
-    reusePolicy: crossPartyReusePolicySchema,
-    source: z.enum(['smart-service', 'local-rules']),
-    scenarioTrust: z.enum(['production', 'development-sample']),
-    scenarioFreshness: z.enum(['fresh', 'expiring', 'stale', 'unknown']),
-    scenarioNotCurrent: z.boolean(),
-    interventions: z
-      .object({
-        lockedCharacterIds: z.array(canonicalCharacterIdSchema),
-        excludedCharacterIds: z.array(canonicalCharacterIdSchema),
-        target: stygianRewardTargetSchema,
-        difficultyId: z.string().trim().min(1),
-        preferences: playerPreferencesSchema
-      })
-      .strict(),
-    characters: z
-      .array(
-        z
-          .object({
-            id: canonicalCharacterIdSchema,
-            name: z.string().trim().min(1),
-            element: z.string().trim().min(1),
-            level: z.number().int().nonnegative().optional()
-          })
-          .strict()
-      )
-      .min(1),
-    phaseGuidance: stygianPhaseGuidanceSchema.nullable().default(null),
-    difficultyAssessment: stygianDifficultyAssessmentSchema.nullable().default(null),
-    plan: stygianAdvisorPlanSchema
-  })
-  .strict()
-  .superRefine((entry, context) => {
-    const characterIds = entry.characters.map(({ id }) => id);
-    const plannedTeams = entry.plan.phases.map(({ team }) => team.characterIds);
-    const plannedIds = plannedTeams.flat();
-    const plannedUniqueIds = new Set(plannedIds);
-    if (new Set(characterIds).size !== characterIds.length) {
-      context.addIssue({
-        code: 'custom',
-        message: 'History character IDs must be unique',
-        path: ['characters']
-      });
-    }
-    const names = new Set(characterIds);
-    const missingNames = plannedIds.filter((id) => !names.has(id));
-    if (missingNames.length > 0) {
-      context.addIssue({
-        code: 'custom',
-        message: 'Every planned character requires a stored display name',
-        path: ['characters']
-      });
-    }
-    if (characterIds.some((id) => !plannedUniqueIds.has(id))) {
-      context.addIssue({
-        code: 'custom',
-        message: 'History character snapshots must match the planned roster exactly',
-        path: ['characters']
-      });
-    }
-    plannedTeams.forEach((ids, index) => {
-      if (ids.length !== 4 || new Set(ids).size !== 4) {
+const stygianHistoryEntrySchema = z.preprocess(
+  (value) => {
+    if (!isRecord(value)) return value;
+    const { difficultyName, ...rest } = value;
+    return {
+      ...rest,
+      difficultyNames: isRecord(value['difficultyNames'])
+        ? value['difficultyNames']
+        : typeof difficultyName === 'string'
+          ? { 'zh-CN': difficultyName }
+          : undefined
+    };
+  },
+  z
+    .object({
+      id: z.string().trim().min(8),
+      createdAt: z.iso.datetime({ offset: true }),
+      uid: z.string().regex(/^\d{9}$/),
+      scenarioId: z.string().trim().min(1),
+      playerCycle: playerCycleSnapshotSchema.default({ status: 'unknown' }),
+      schemaVersion: z.literal(2),
+      dataVersion: z.string().trim().min(1),
+      mode: z.literal('stygian-onslaught'),
+      difficultyId: z.string().trim().min(1),
+      difficultyNames: z
+        .record(z.string().trim().min(1), z.string().trim().min(1))
+        .refine((names) => Object.keys(names).length > 0),
+      phase: z.number().int().min(1).max(3).optional(),
+      target: stygianRewardTargetSchema,
+      reusePolicy: crossPartyReusePolicySchema,
+      source: z.enum(['smart-service', 'local-rules']),
+      scenarioTrust: z.enum(['production', 'development-sample']),
+      scenarioFreshness: z.enum(['fresh', 'expiring', 'stale', 'unknown']),
+      scenarioNotCurrent: z.boolean(),
+      interventions: z
+        .object({
+          locale: advisorLocaleSchema.default('zh-CN'),
+          lockedCharacterIds: z.array(canonicalCharacterIdSchema),
+          excludedCharacterIds: z.array(canonicalCharacterIdSchema),
+          target: stygianRewardTargetSchema,
+          difficultyId: z.string().trim().min(1),
+          preferences: playerPreferencesSchema
+        })
+        .strict(),
+      characters: z
+        .array(
+          z
+            .object({
+              id: canonicalCharacterIdSchema,
+              name: z.string().trim().min(1),
+              element: z.string().trim().min(1),
+              level: z.number().int().nonnegative().optional()
+            })
+            .strict()
+        )
+        .min(1),
+      phaseGuidance: stygianPhaseGuidanceSchema.nullable().default(null),
+      difficultyAssessment: stygianDifficultyAssessmentSchema.nullable().default(null),
+      narrative: advisorNarrativeSchema.default(
+        defaultAdvisorNarrative('stygian-onslaught', 'legacy-unavailable')
+      ),
+      plan: stygianAdvisorPlanSchema
+    })
+    .strict()
+    .superRefine((entry, context) => {
+      const characterIds = entry.characters.map(({ id }) => id);
+      const plannedTeams = entry.plan.phases.map(({ team }) => team.characterIds);
+      const plannedIds = plannedTeams.flat();
+      const plannedUniqueIds = new Set(plannedIds);
+      if (new Set(characterIds).size !== characterIds.length) {
         context.addIssue({
           code: 'custom',
-          message: 'Every stored Stygian team must contain four unique characters',
-          path: ['plan', 'phases', index, 'team', 'characterIds']
+          message: 'History character IDs must be unique',
+          path: ['characters']
         });
       }
-    });
-    if (
-      entry.plan.scenarioId !== entry.scenarioId ||
-      entry.plan.dataVersion !== entry.dataVersion
-    ) {
-      context.addIssue({
-        code: 'custom',
-        message: 'History plan identity must match its envelope',
-        path: ['plan']
+      const names = new Set(characterIds);
+      const missingNames = plannedIds.filter((id) => !names.has(id));
+      if (missingNames.length > 0) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Every planned character requires a stored display name',
+          path: ['characters']
+        });
+      }
+      if (characterIds.some((id) => !plannedUniqueIds.has(id))) {
+        context.addIssue({
+          code: 'custom',
+          message: 'History character snapshots must match the planned roster exactly',
+          path: ['characters']
+        });
+      }
+      plannedTeams.forEach((ids, index) => {
+        if (ids.length !== 4 || new Set(ids).size !== 4) {
+          context.addIssue({
+            code: 'custom',
+            message: 'Every stored Stygian team must contain four unique characters',
+            path: ['plan', 'phases', index, 'team', 'characterIds']
+          });
+        }
       });
-    }
-    if (entry.plan.reusePolicyAcknowledgement !== entry.reusePolicy.rule) {
-      context.addIssue({
-        code: 'custom',
-        message: 'History reuse acknowledgement must match its envelope',
-        path: ['reusePolicy']
+      if (
+        entry.plan.scenarioId !== entry.scenarioId ||
+        entry.plan.dataVersion !== entry.dataVersion
+      ) {
+        context.addIssue({
+          code: 'custom',
+          message: 'History plan identity must match its envelope',
+          path: ['plan']
+        });
+      }
+      if (entry.plan.reusePolicyAcknowledgement !== entry.reusePolicy.rule) {
+        context.addIssue({
+          code: 'custom',
+          message: 'History reuse acknowledgement must match its envelope',
+          path: ['reusePolicy']
+        });
+      }
+      const appearances = new Map<string, number>();
+      plannedTeams.forEach((ids) => {
+        new Set(ids).forEach((id) => appearances.set(id, (appearances.get(id) ?? 0) + 1));
       });
-    }
-    const appearances = new Map<string, number>();
-    plannedTeams.forEach((ids) => {
-      new Set(ids).forEach((id) => appearances.set(id, (appearances.get(id) ?? 0) + 1));
-    });
-    const maximumAppearances =
-      entry.reusePolicy.rule === 'forbidden'
-        ? 1
-        : entry.reusePolicy.rule === 'limited'
-          ? entry.reusePolicy.maxPartyAppearancesPerCharacter
-          : 3;
-    if ([...appearances.values()].some((count) => count > maximumAppearances)) {
-      context.addIssue({
-        code: 'custom',
-        message: 'Stored team appearances violate the recorded reuse policy',
-        path: ['plan', 'phases']
-      });
-    }
-    const excluded = new Set(entry.interventions.excludedCharacterIds);
-    if (entry.interventions.lockedCharacterIds.some((id) => excluded.has(id))) {
-      context.addIssue({
-        code: 'custom',
-        message: 'History interventions cannot lock and exclude the same character',
-        path: ['interventions']
-      });
-    }
-    if (entry.interventions.lockedCharacterIds.some((id) => !plannedUniqueIds.has(id))) {
-      context.addIssue({
-        code: 'custom',
-        message: 'Every stored locked character must appear in the plan',
-        path: ['interventions', 'lockedCharacterIds']
-      });
-    }
-    if (entry.interventions.excludedCharacterIds.some((id) => plannedUniqueIds.has(id))) {
-      context.addIssue({
-        code: 'custom',
-        message: 'Stored excluded characters cannot appear in the plan',
-        path: ['interventions', 'excludedCharacterIds']
-      });
-    }
-    if (
-      entry.interventions.target !== entry.target ||
-      entry.interventions.difficultyId !== entry.difficultyId
-    ) {
-      context.addIssue({
-        code: 'custom',
-        message: 'Stored intervention target must match the history envelope',
-        path: ['interventions']
-      });
-    }
-  });
+      const maximumAppearances =
+        entry.reusePolicy.rule === 'forbidden'
+          ? 1
+          : entry.reusePolicy.rule === 'limited'
+            ? entry.reusePolicy.maxPartyAppearancesPerCharacter
+            : 3;
+      if ([...appearances.values()].some((count) => count > maximumAppearances)) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Stored team appearances violate the recorded reuse policy',
+          path: ['plan', 'phases']
+        });
+      }
+      const excluded = new Set(entry.interventions.excludedCharacterIds);
+      if (entry.interventions.lockedCharacterIds.some((id) => excluded.has(id))) {
+        context.addIssue({
+          code: 'custom',
+          message: 'History interventions cannot lock and exclude the same character',
+          path: ['interventions']
+        });
+      }
+      if (entry.interventions.lockedCharacterIds.some((id) => !plannedUniqueIds.has(id))) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Every stored locked character must appear in the plan',
+          path: ['interventions', 'lockedCharacterIds']
+        });
+      }
+      if (entry.interventions.excludedCharacterIds.some((id) => plannedUniqueIds.has(id))) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Stored excluded characters cannot appear in the plan',
+          path: ['interventions', 'excludedCharacterIds']
+        });
+      }
+      if (
+        entry.interventions.target !== entry.target ||
+        entry.interventions.difficultyId !== entry.difficultyId
+      ) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Stored intervention target must match the history envelope',
+          path: ['interventions']
+        });
+      }
+    })
+);
 
 export class HistoryStore {
   private readonly store: Store<HistoryStoreSchema>;
@@ -962,6 +1065,13 @@ function normalizeAbyssPlanHistoryEntry(value: unknown): AbyssPlanHistoryEntry |
   }
   const inferredDevelopment =
     value.scenarioId.startsWith('development.') || value.dataVersion.startsWith('development.');
+  const narrativeResult =
+    value.narrative === undefined ? undefined : advisorNarrativeSchema.safeParse(value.narrative);
+  const teamRisksResult =
+    value.teamRisks === undefined
+      ? undefined
+      : z.array(abyssTeamRiskSchema).safeParse(value.teamRisks);
+  if (narrativeResult?.success === false || teamRisksResult?.success === false) return undefined;
   const characters = Array.isArray(value.characters)
     ? value.characters.flatMap((character) => {
         if (
@@ -985,10 +1095,18 @@ function normalizeAbyssPlanHistoryEntry(value: unknown): AbyssPlanHistoryEntry |
   return structuredClone({
     ...value,
     characters,
-    playerCycle:
-      playerCycleSnapshotSchema.safeParse(value.playerCycle).success
-        ? value.playerCycle
-        : { status: 'unknown' },
+    interventions: isRecord(value.interventions)
+      ? {
+          ...value.interventions,
+          locale: value.interventions['locale'] === 'en-US' ? 'en-US' : 'zh-CN'
+        }
+      : value.interventions,
+    narrative:
+      narrativeResult?.data ?? defaultAdvisorNarrative('spiral-abyss', 'legacy-unavailable'),
+    teamRisks: teamRisksResult?.data ?? [],
+    playerCycle: playerCycleSnapshotSchema.safeParse(value.playerCycle).success
+      ? value.playerCycle
+      : { status: 'unknown' },
     scenarioTrust: isScenarioTrust(value.scenarioTrust)
       ? value.scenarioTrust
       : inferredDevelopment

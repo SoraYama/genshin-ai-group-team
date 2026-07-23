@@ -114,7 +114,7 @@ export interface IpcContract {
   'advisor:cancel': { req: void; res: { ok: boolean } };
   'advisor-v2:abyss-scenario': { req: void; res: AbyssScenarioView };
   'advisor-v2:abyss-plan': { req: AbyssAdvisorPlanInput; res: AbyssAdvisorResult };
-  'advisor-v2:abyss-cancel': { req: void; res: { ok: boolean } };
+  'advisor-v2:abyss-cancel': { req: { correlationId: string }; res: { ok: boolean } };
   'advisor-v2:stygian-scenario': { req: void; res: StygianScenarioView };
   'advisor-v2:stygian-plan': { req: StygianAdvisorPlanInput; res: StygianAdvisorResult };
   'advisor-v2:stygian-cancel': { req: { correlationId: string }; res: { ok: boolean } };
@@ -266,7 +266,9 @@ export interface RendererApi {
     recommend: (
       input: IpcRequest<'advisor-v2:abyss-plan'>
     ) => Promise<IpcResponse<'advisor-v2:abyss-plan'>>;
-    cancel: () => Promise<IpcResponse<'advisor-v2:abyss-cancel'>>;
+    cancel: (
+      input: IpcRequest<'advisor-v2:abyss-cancel'>
+    ) => Promise<IpcResponse<'advisor-v2:abyss-cancel'>>;
     onEvent: (cb: (event: AbyssAdvisorEvent) => void) => () => void;
   };
   stygianAdvisor: {

@@ -45,11 +45,7 @@ const DEFAULT_PREFERENCES: PlayerPreferences = {
   noBuildChange: false
 };
 
-export function AbyssWorkspace({
-  uid,
-  historyRerun,
-  onHistoryRerunConsumed
-}: AbyssWorkspaceProps) {
+export function AbyssWorkspace({ uid, historyRerun, onHistoryRerunConsumed }: AbyssWorkspaceProps) {
   const { locale } = useI18n();
   const language: PresentationLocale = locale === 'en-US' ? 'en' : 'zh';
   const isEnglish = language === 'en';
@@ -74,11 +70,16 @@ export function AbyssWorkspace({
   historyConsumedCallback.current = onHistoryRerunConsumed;
   const [historyNotice, setHistoryNotice] = useState('');
 
+  function cancelActiveRequest() {
+    const correlationId = activeCorrelation.current;
+    activeCorrelation.current = null;
+    if (correlationId) void api.abyssAdvisor.cancel({ correlationId });
+  }
+
   useEffect(() => {
     let active = true;
     requestSequence.current += 1;
-    activeCorrelation.current = null;
-    void api.abyssAdvisor.cancel();
+    cancelActiveRequest();
     setScenarioView(null);
     setProfile(null);
     setLoadError('');
@@ -132,15 +133,17 @@ export function AbyssWorkspace({
                 ...Object.fromEntries(prepared.excludedCharacterIds.map((id) => [id, 'excluded']))
               });
               setHistoryNotice(
-                `${historySourceChangedNotice(prepared, 'zh')}${prepared.status === 'adjusted'
-                  ? `已带入旧方案的可用选择；${
-                      prepared.targetUnavailable ? '原楼层已不在当前资料中；' : ''
-                    }${
-                      prepared.removedCharacterCount > 0
-                        ? `${prepared.removedCharacterCount} 名已不在当前角色资料中的角色未带入；`
-                        : ''
-                    }请检查后再点击生成，不会自动调用智能服务。`
-                  : '已带入旧方案的楼层、偏好与角色选择。请检查后再点击生成，不会自动调用智能服务。'}`
+                `${historySourceChangedNotice(prepared, 'zh')}${
+                  prepared.status === 'adjusted'
+                    ? `已带入旧方案的可用选择；${
+                        prepared.targetUnavailable ? '原楼层已不在当前资料中；' : ''
+                      }${
+                        prepared.removedCharacterCount > 0
+                          ? `${prepared.removedCharacterCount} 名已不在当前角色资料中的角色未带入；`
+                          : ''
+                      }请检查后再点击生成，不会自动调用智能服务。`
+                    : '已带入旧方案的楼层、偏好与角色选择。请检查后再点击生成，不会自动调用智能服务。'
+                }`
               );
             }
             pendingHistoryRerun.current = undefined;
@@ -154,8 +157,7 @@ export function AbyssWorkspace({
     return () => {
       active = false;
       requestSequence.current += 1;
-      activeCorrelation.current = null;
-      void api.abyssAdvisor.cancel();
+      cancelActiveRequest();
     };
   }, [uid]);
 
@@ -196,25 +198,23 @@ export function AbyssWorkspace({
 
   function resetPlan() {
     requestSequence.current += 1;
-    activeCorrelation.current = null;
     setResult(null);
     setResultNeedsUpdate(false);
     setActiveStep(null);
     if (running) {
       setRunning(false);
-      void api.abyssAdvisor.cancel();
+      cancelActiveRequest();
     }
   }
 
   function markPlanNeedsUpdate() {
     requestSequence.current += 1;
-    activeCorrelation.current = null;
     setActiveStep(null);
     setResultNeedsUpdate(result?.status === 'planned');
     if (result?.status !== 'planned') setResult(null);
     if (running) {
       setRunning(false);
-      void api.abyssAdvisor.cancel();
+      cancelActiveRequest();
     }
   }
 
@@ -252,6 +252,7 @@ export function AbyssWorkspace({
         uid,
         scenarioId: scenario.id,
         dataVersion: scenario.meta.dataVersion,
+        locale,
         floor: floor.floor,
         ...(chamberNumber === 'all' ? {} : { chamber: chamberNumber }),
         preferences,
@@ -277,10 +278,9 @@ export function AbyssWorkspace({
 
   function cancelPlan() {
     requestSequence.current += 1;
-    activeCorrelation.current = null;
     setRunning(false);
     setActiveStep(null);
-    void api.abyssAdvisor.cancel();
+    cancelActiveRequest();
   }
 
   if (loadError) {
@@ -330,9 +330,7 @@ export function AbyssWorkspace({
           <span className="gta-page-kicker">
             {isEnglish ? 'Joint two-team planning' : '双队联合规划'}
           </span>
-          <h3 id="abyss-workspace-title">
-            {isEnglish ? 'Spiral Abyss planner' : '深境螺旋战线'}
-          </h3>
+          <h3 id="abyss-workspace-title">{isEnglish ? 'Spiral Abyss planner' : '深境螺旋战线'}</h3>
           <p>
             {isEnglish
               ? 'Review both halves, then lock or exclude characters. Both teams are built together and checked for overlap.'
@@ -354,7 +352,9 @@ export function AbyssWorkspace({
 
       {scenarioView.trust === 'development-sample' && (
         <div className="gta-abyss-sample-banner" role="status">
-          <strong>{isEnglish ? 'Practice data — not the current cycle' : '演练资料，不代表本期'}</strong>
+          <strong>
+            {isEnglish ? 'Practice data — not the current cycle' : '演练资料，不代表本期'}
+          </strong>
           <span>
             {isEnglish
               ? 'These enemies and rules are original interaction samples, not live-server cycle data.'
@@ -459,10 +459,7 @@ export function AbyssWorkspace({
         </p>
       </div>
 
-      <div
-        className="gta-abyss-halves"
-        aria-label={isEnglish ? 'Enemies by half' : '上下半敌情'}
-      >
+      <div className="gta-abyss-halves" aria-label={isEnglish ? 'Enemies by half' : '上下半敌情'}>
         <AbyssHalf
           title={isEnglish ? 'First-half enemies' : '上半敌情'}
           half="first"
@@ -547,10 +544,7 @@ export function AbyssWorkspace({
               : `最多锁定 8 名角色；请先取消至少 ${lockedCharacterIds.length - 8} 名。`}
           </p>
         )}
-        <div
-          className="gta-abyss-roster"
-          aria-label={isEnglish ? 'Character choices' : '角色干预'}
-        >
+        <div className="gta-abyss-roster" aria-label={isEnglish ? 'Character choices' : '角色干预'}>
           {characters.map((character) => (
             <CharacterInterventionButton
               key={character.id}
@@ -680,9 +674,7 @@ function AbyssHalf({
       {chambers.map((chamber) => (
         <div key={chamber.chamber} className="gta-abyss-chamber">
           <div className="gta-abyss-chamber-title">
-            <strong>
-              {isEnglish ? `Chamber ${chamber.chamber}` : `第 ${chamber.chamber} 间`}
-            </strong>
+            <strong>{isEnglish ? `Chamber ${chamber.chamber}` : `第 ${chamber.chamber} 间`}</strong>
             {chamber.targetSeconds && (
               <span>
                 {isEnglish
@@ -880,6 +872,7 @@ function AbyssResult({
               : '本地规则'}
         </div>
       </header>
+      <p>{isEnglish ? result.narrative.summary['en-US'] : result.narrative.summary['zh-CN']}</p>
       <div className="gta-abyss-result-teams">
         <ResultTeam
           title={isEnglish ? 'First-half team' : '上半队伍'}
@@ -910,6 +903,24 @@ function AbyssResult({
           locale={locale}
         />
       </div>
+      {result.teamRisks.length > 0 && (
+        <div className="gta-abyss-result-notes" aria-label={isEnglish ? 'Team risks' : '队伍风险'}>
+          {result.teamRisks.map((risk) => (
+            <div key={`${risk.half}:${risk.code}`}>
+              <strong>
+                {risk.half === 'first'
+                  ? isEnglish
+                    ? 'First-half risk'
+                    : '上半队伍风险'
+                  : isEnglish
+                    ? 'Second-half risk'
+                    : '下半队伍风险'}
+              </strong>
+              <span>{risk.narrative[isEnglish ? 'en-US' : 'zh-CN']}</span>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="gta-abyss-tactics">
         {result.plan.chambers.map((chamber) => (
           <article key={`${chamber.floor}-${chamber.chamber}`}>
@@ -933,7 +944,11 @@ function AbyssResult({
                 {isEnglish ? 'Time risk: ' : '超时风险：'}
                 {chamber.firstHalf.risks
                   .map((text) =>
-                    localizedResultText(text, locale, 'Combat timing requires in-game verification.')
+                    localizedResultText(
+                      text,
+                      locale,
+                      'Combat timing requires in-game verification.'
+                    )
                   )
                   .join(isEnglish ? '; ' : '；') ||
                   (isEnglish ? 'No additional notes' : '暂无额外提示')}
@@ -969,7 +984,11 @@ function AbyssResult({
                 {isEnglish ? 'Time risk: ' : '超时风险：'}
                 {chamber.secondHalf.risks
                   .map((text) =>
-                    localizedResultText(text, locale, 'Combat timing requires in-game verification.')
+                    localizedResultText(
+                      text,
+                      locale,
+                      'Combat timing requires in-game verification.'
+                    )
                   )
                   .join(isEnglish ? '; ' : '；') ||
                   (isEnglish ? 'No additional notes' : '暂无额外提示')}

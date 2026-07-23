@@ -87,13 +87,23 @@ describe('abyss in-process business tools', () => {
       getScenario: () => abyssScenario(),
       maxCharacters: 8
     });
-    const result = await tools[0]!.handler({ uid: '123456789' }, {});
+    const result = await tools[0]!.handler(
+      {
+        uid: '123456789',
+        characterIds: ['1001', '1002', '1003', '1004'],
+        cursor: undefined,
+        pageSize: undefined
+      },
+      {}
+    );
     const payload = textPayload(result) as {
+      kind: string;
       coverage: { partial: boolean };
       provenanceSummaries: Array<Record<string, unknown>>;
       characters: Array<Record<string, unknown>>;
     };
-    expect(payload.characters).toHaveLength(8);
+    expect(payload.kind).toBe('details');
+    expect(payload.characters).toHaveLength(4);
     expect(payload.coverage.partial).toBe(true);
     expect(payload.characters[0]).toMatchObject({
       level: expect.any(Number),
@@ -114,6 +124,119 @@ describe('abyss in-process business tools', () => {
     expect(JSON.stringify(payload)).not.toMatch(
       /imageUrl|iconUrl|subStats|private\.example|fetchedAt/
     );
+  });
+
+  it('pages all 112 safe index rows and can explicitly retrieve a character stored last', async () => {
+    const characters = Array.from({ length: 112 }, (_, index) => ({
+      ...structuredClone(ABYSS_CHARACTERS[0]!),
+      id: 30_000 + index,
+      name: `角色-${index}`
+    }));
+    const tools = createAbyssBusinessTools({
+      getProfile: () => ({
+        schemaVersion: 2,
+        uid: '123456789',
+        source: 'merged',
+        fetchedAt: '2026-07-23T00:00:00.000Z',
+        characters: characters.slice().reverse(),
+        coverage: {
+          ownedCount: 112,
+          detailedCount: 112,
+          buildCount: 112,
+          statsCount: 112,
+          enkaShowcaseCount: 8,
+          missingDetailCount: 0,
+          partial: false
+        }
+      }),
+      getScenario: () => abyssScenario()
+    });
+
+    const firstPage = textPayload(
+      await tools[0]!.handler(
+        { uid: '123456789', characterIds: undefined, cursor: 0, pageSize: 100 },
+        {}
+      )
+    ) as {
+      kind: string;
+      total: number;
+      nextCursor?: number;
+      characters: Array<{ id: number }>;
+    };
+    const secondPage = textPayload(
+      await tools[0]!.handler(
+        {
+          uid: '123456789',
+          characterIds: undefined,
+          cursor: firstPage.nextCursor,
+          pageSize: 100
+        },
+        {}
+      )
+    ) as typeof firstPage;
+    const details = textPayload(
+      await tools[0]!.handler(
+        {
+          uid: '123456789',
+          characterIds: ['30111'],
+          cursor: undefined,
+          pageSize: undefined
+        },
+        {}
+      )
+    ) as {
+      kind: string;
+      characters: Array<{ id: number; name: string }>;
+      missingCharacterIds: string[];
+    };
+
+    expect(firstPage).toMatchObject({ kind: 'index-page', total: 112, nextCursor: 100 });
+    expect([...firstPage.characters, ...secondPage.characters]).toHaveLength(112);
+    expect(details).toMatchObject({
+      kind: 'details',
+      characters: [{ id: 30111, name: '角色-111' }],
+      missingCharacterIds: []
+    });
+  });
+
+  it('fails closed instead of returning a profile tool payload above 48 KiB', async () => {
+    const tools = createAbyssBusinessTools({
+      getProfile: () => ({
+        schemaVersion: 2,
+        uid: '123456789',
+        source: 'merged',
+        fetchedAt: '2026-07-23T00:00:00.000Z',
+        characters: [
+          {
+            ...structuredClone(ABYSS_CHARACTERS[0]!),
+            name: 'X'.repeat(60_000)
+          }
+        ],
+        coverage: {
+          ownedCount: 1,
+          detailedCount: 1,
+          buildCount: 1,
+          statsCount: 1,
+          enkaShowcaseCount: 1,
+          missingDetailCount: 0,
+          partial: false
+        }
+      }),
+      getScenario: () => abyssScenario()
+    });
+
+    const result = await tools[0]!.handler(
+      {
+        uid: '123456789',
+        characterIds: ['1001'],
+        cursor: undefined,
+        pageSize: undefined
+      },
+      {}
+    );
+
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result)).toContain('PROFILE_RESPONSE_TOO_LARGE');
   });
 
   it('rejects scenario identity drift and returns only the selected localized enemy fields', async () => {

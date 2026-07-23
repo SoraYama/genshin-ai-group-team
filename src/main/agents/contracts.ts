@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { recommendationPlanSchema } from '../../shared/scenario-v2.js';
+import { playerPreferencesSchema, recommendationPlanSchema } from '../../shared/scenario-v2.js';
+import { advisorLocaleSchema } from '../../shared/advisor-narrative.js';
 
 export const dataCuratorOutputSchema = z.object({
   usableCharacterIds: z.array(z.number().int()).min(4),
@@ -56,6 +57,9 @@ export type ExplainOutput = z.infer<typeof explainOutputSchema>;
 
 const v2ModeSchema = z.enum(['spiral-abyss', 'stygian-onslaught', 'imaginarium-theater']);
 const v2PlayerTextSchema = z.string().trim().min(1).max(800);
+const boundedIdSchema = z.string().trim().min(1).max(128);
+const canonicalProfileCharacterIdSchema = z.number().int().positive();
+const boundedCharacterIdsSchema = z.array(boundedIdSchema).max(128);
 
 const v2AbyssTeamTargetSchema = z
   .object({
@@ -83,12 +87,18 @@ const v2TheaterActTargetSchema = z
     act: z.number().int().min(1).max(10)
   })
   .strict();
+const v2TheaterCastTargetSchema = z
+  .object({
+    kind: z.literal('theater-cast')
+  })
+  .strict();
 
 export const v2AgentTargetSchema = z.discriminatedUnion('kind', [
   v2AbyssTeamTargetSchema,
   v2AbyssChamberTargetSchema,
   v2StygianPhaseTargetSchema,
-  v2TheaterActTargetSchema
+  v2TheaterActTargetSchema,
+  v2TheaterCastTargetSchema
 ]);
 
 const profileCoverageSchema = z
@@ -117,9 +127,9 @@ const advisorStatsSchema = z
   .strict();
 const advisorCharacterContextSchema = z
   .object({
-    id: z.number().int().positive(),
-    name: z.string().trim().min(1),
-    element: z.string().trim().min(1),
+    id: canonicalProfileCharacterIdSchema,
+    name: z.string().trim().min(1).max(80),
+    element: z.string().trim().min(1).max(24),
     rarity: z.number().int().positive(),
     level: z.number().int().nonnegative().optional(),
     constellation: z.number().int().nonnegative().optional(),
@@ -163,7 +173,130 @@ const advisorCharacterContextSchema = z
       .optional(),
     stats: advisorStatsSchema.optional(),
     completeness: z.enum(['basic', 'build', 'detailed']),
-    missingFields: z.array(z.enum(['stats', 'weapon', 'artifacts', 'talents'])).optional()
+    missingFields: z
+      .array(z.enum(['stats', 'weapon', 'artifacts', 'talents']))
+      .max(4)
+      .optional()
+  })
+  .strict();
+
+const advisorCharacterIndexSchema = z
+  .object({
+    id: canonicalProfileCharacterIdSchema,
+    name: z.string().trim().min(1).max(80),
+    element: z.string().trim().min(1).max(24),
+    rarity: z.number().int().positive(),
+    level: z.number().int().nonnegative().optional(),
+    completeness: z.enum(['basic', 'build', 'detailed']),
+    missingFields: z
+      .array(z.enum(['stats', 'weapon', 'artifacts', 'talents']))
+      .max(4)
+      .optional()
+  })
+  .strict();
+
+const compactTeamSchema = z
+  .object({
+    id: boundedIdSchema,
+    characterIds: z.array(boundedIdSchema).length(4)
+  })
+  .strict();
+
+export const v2CompactBaselineSchema = z.discriminatedUnion('mode', [
+  z
+    .object({
+      mode: z.literal('spiral-abyss'),
+      scenarioId: boundedIdSchema,
+      dataVersion: boundedIdSchema,
+      firstHalfTeam: compactTeamSchema,
+      secondHalfTeam: compactTeamSchema,
+      chambers: z
+        .array(
+          z
+            .object({
+              floor: z.number().int().positive(),
+              chamber: z.number().int().positive()
+            })
+            .strict()
+        )
+        .min(1)
+        .max(12)
+    })
+    .strict(),
+  z
+    .object({
+      mode: z.literal('stygian-onslaught'),
+      scenarioId: boundedIdSchema,
+      dataVersion: boundedIdSchema,
+      reusePolicyAcknowledgement: z.enum(['forbidden', 'allowed', 'limited']),
+      phases: z
+        .array(
+          z
+            .object({
+              phase: z.number().int().min(1).max(3),
+              team: compactTeamSchema
+            })
+            .strict()
+        )
+        .length(3)
+    })
+    .strict(),
+  z
+    .object({
+      mode: z.literal('imaginarium-theater'),
+      scenarioId: boundedIdSchema,
+      dataVersion: boundedIdSchema,
+      cast: z
+        .object({
+          openingCharacterIds: boundedCharacterIdsSchema,
+          selectedCharacterIds: boundedCharacterIdsSchema,
+          trialCharacterIds: boundedCharacterIdsSchema,
+          specialGuestCharacterIds: boundedCharacterIdsSchema,
+          supportCharacterIds: boundedCharacterIdsSchema
+        })
+        .strict(),
+      acts: z
+        .array(
+          z
+            .object({
+              act: z.number().int().min(1).max(10),
+              candidateCharacterIds: boundedCharacterIdsSchema,
+              plannedVigorSpend: z
+                .array(
+                  z
+                    .object({
+                      characterId: boundedIdSchema,
+                      cost: z.number().int().nonnegative()
+                    })
+                    .strict()
+                )
+                .max(32),
+              pathKind: z.enum(['fixed', 'conditional', 'random'])
+            })
+            .strict()
+        )
+        .min(1)
+        .max(10)
+    })
+    .strict()
+]);
+
+const v2InterventionsSchema = z
+  .object({
+    locale: advisorLocaleSchema,
+    preferences: playerPreferencesSchema,
+    lockedCharacterIds: boundedCharacterIdsSchema.optional(),
+    excludedCharacterIds: boundedCharacterIdsSchema.optional(),
+    selectedCharacterIds: boundedCharacterIdsSchema.optional(),
+    selectedOpeningCharacterIds: boundedCharacterIdsSchema.optional(),
+    selectedTrialCharacterIds: boundedCharacterIdsSchema.optional(),
+    selectedSpecialGuestCharacterIds: boundedCharacterIdsSchema.optional(),
+    selectedSupportCharacterIds: boundedCharacterIdsSchema.optional(),
+    target: boundedIdSchema.optional(),
+    difficultyId: boundedIdSchema.optional(),
+    phase: z.number().int().min(1).max(3).optional(),
+    act: z.number().int().min(1).max(10).optional(),
+    recomputeHalf: z.enum(['firstHalf', 'secondHalf']).optional()
   })
   .strict();
 
@@ -171,47 +304,57 @@ export const v2PipelineContextSchema = z
   .object({
     mode: v2ModeSchema,
     correlationId: z.string().trim().min(1).max(128),
-    scenarioId: z.string().trim().min(1),
-    dataVersion: z.string().trim().min(1),
+    scenarioId: boundedIdSchema,
+    dataVersion: boundedIdSchema,
+    locale: advisorLocaleSchema,
+    profileRef: z
+      .object({
+        uid: z.string().regex(/^\d{9}$/)
+      })
+      .strict(),
     profile: z
       .object({
         coverage: profileCoverageSchema,
-        omittedCharacterCount: z.number().int().nonnegative(),
-        provenanceSummaries: z.array(
-          z
-            .object({
-              ownership: fieldSourceSchema,
-              build: fieldSourceSchema.optional(),
-              stats: fieldSourceSchema.optional(),
-              staleFields: z.array(z.enum(['ownership', 'build', 'stats'])).optional(),
-              characterIndexes: z.array(z.number().int().nonnegative())
-            })
-            .strict()
-        ),
-        characters: z.array(advisorCharacterContextSchema).max(100)
+        provenanceSummaries: z
+          .array(
+            z
+              .object({
+                ownership: fieldSourceSchema,
+                build: fieldSourceSchema.optional(),
+                stats: fieldSourceSchema.optional(),
+                staleFields: z.array(z.enum(['ownership', 'build', 'stats'])).optional(),
+                characterIndexes: z.array(z.number().int().nonnegative())
+              })
+              .strict()
+          )
+          .max(16),
+        minimalIndex: z.array(advisorCharacterIndexSchema).min(1).max(128),
+        detailedProfiles: z.array(advisorCharacterContextSchema).max(24)
       })
       .strict(),
     candidate: z
       .object({
         kind: z.literal('feasibleBaseline'),
-        feasibleBaseline: recommendationPlanSchema,
-        eligibleCharacterIds: z.array(z.string().trim().min(1)).min(1)
+        feasibleBaseline: v2CompactBaselineSchema,
+        eligibleCharacterIds: boundedCharacterIdsSchema.min(1)
       })
       .strict(),
-    mechanics: z.array(
-      z
-        .object({
-          target: z.string().trim().min(1),
-          facts: z.array(z.string().trim().min(1)),
-          unknowns: z.array(z.string().trim().min(1))
-        })
-        .strict()
-    ),
-    interventions: z.record(z.string(), z.unknown()),
+    mechanics: z
+      .array(
+        z
+          .object({
+            target: z.string().trim().min(1).max(128),
+            facts: z.array(z.string().trim().min(1).max(240)).max(16),
+            unknowns: z.array(z.string().trim().min(1).max(240)).max(8)
+          })
+          .strict()
+      )
+      .max(32),
+    interventions: v2InterventionsSchema,
     knowledge: z
       .object({
-        version: z.string().trim().min(1),
-        unknownCharacterIds: z.array(z.string().trim().min(1))
+        version: z.string().trim().min(1).max(128),
+        unknownCharacterIds: boundedCharacterIdsSchema
       })
       .strict()
   })
@@ -278,6 +421,53 @@ export const v2RotationInputSchema = z
   })
   .strict();
 
+export const v2NarrativeReasonCodeSchema = z.enum([
+  'setup-order',
+  'energy-cycle',
+  'survival-window',
+  'reaction-chain',
+  'mechanic-response',
+  'target-priority',
+  'vigor-budget',
+  'cast-flexibility',
+  'uncertainty'
+]);
+
+export const v2FactRefSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('plan'),
+      field: z.enum(['validated-target', 'selected-team', 'cast-allocation', 'vigor-ledger'])
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('mechanic'),
+      target: z.string().trim().min(1).max(128),
+      factIndex: z.number().int().nonnegative().max(15)
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('profile'),
+      characterId: boundedIdSchema,
+      field: z.enum(['level', 'build', 'stats', 'completeness'])
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('knowledge'),
+      characterId: boundedIdSchema
+    })
+    .strict()
+]);
+
+const v2NarrativeDirectiveShape = {
+  tone: z.enum(['steady', 'cautious', 'technical']),
+  reasonCodes: z.array(v2NarrativeReasonCodeSchema).min(1).max(8),
+  factRefs: z.array(v2FactRefSchema).min(1).max(16)
+};
+
 export const v2RotationOutputSchema = z
   .object({
     rotations: z
@@ -289,7 +479,7 @@ export const v2RotationOutputSchema = z
               v2StygianPhaseTargetSchema,
               v2TheaterActTargetSchema
             ]),
-            notes: z.array(v2PlayerTextSchema).min(1).max(8)
+            ...v2NarrativeDirectiveShape
           })
           .strict()
       )
@@ -317,9 +507,10 @@ export const v2ExplainOutputSchema = z
             target: z.discriminatedUnion('kind', [
               v2AbyssChamberTargetSchema,
               v2StygianPhaseTargetSchema,
-              v2TheaterActTargetSchema
+              v2TheaterActTargetSchema,
+              v2TheaterCastTargetSchema
             ]),
-            text: v2PlayerTextSchema
+            ...v2NarrativeDirectiveShape
           })
           .strict()
       )

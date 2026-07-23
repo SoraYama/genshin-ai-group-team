@@ -11,8 +11,18 @@ import {
   validStygianPlan
 } from './stygian-test-fixtures.js';
 
+function directive<T>(target: T) {
+  return {
+    target,
+    tone: 'steady',
+    reasonCodes: ['setup-order'],
+    factRefs: [{ kind: 'plan', field: 'validated-target' }]
+  };
+}
+
 class FixtureRunner {
   readonly calls: Array<{ prompt: string; options: AgentSdkRunOptions }> = [];
+  readonly profileInputs: Array<{ uid: string; characterIds: string[] }> = [];
 
   constructor(
     private readonly outputs: unknown[],
@@ -29,7 +39,7 @@ class FixtureRunner {
       yield {
         type: 'result',
         result: JSON.stringify({
-          rotations: [{ target: { kind: 'stygian-phase', phase: 1 }, notes: ['先处理阶段机制。'] }]
+          rotations: [1, 2, 3].map((phase) => directive({ kind: 'stygian-phase', phase }))
         })
       };
       return;
@@ -38,22 +48,35 @@ class FixtureRunner {
       yield {
         type: 'result',
         result: JSON.stringify({
-          explanations: [
-            {
-              target: { kind: 'stygian-phase', phase: 1 },
-              text: '本阶段说明基于已验证队伍。'
-            }
-          ]
+          explanations: [...[1, 2, 3].map((phase) => directive({ kind: 'stygian-phase', phase }))]
         })
       };
       return;
     }
     const round = this.calls.length - 1;
+    const payload = JSON.parse(prompt) as {
+      context: { profileRef: { uid: string } };
+    };
+    const nextPlan = this.outputs[0] as {
+      phases?: Array<{ team?: { characterIds?: unknown } }>;
+    };
+    const selectedIds = Array.isArray(nextPlan?.phases)
+      ? nextPlan.phases.flatMap(({ team }) =>
+          Array.isArray(team?.characterIds)
+            ? team.characterIds.filter((id): id is string => typeof id === 'string')
+            : []
+        )
+      : [];
+    const profileInput = {
+      uid: payload.context.profileRef.uid,
+      characterIds: [...new Set(selectedIds)]
+    };
+    this.profileInputs.push(profileInput);
     const toolUses = [
       {
         id: 'profile',
         name: 'mcp__genshin__read_profile_cache',
-        input: { uid: '123456789' }
+        input: profileInput
       },
       ...[1, 2, 3].map((phase) => ({
         id: `phase-${phase}`,
@@ -68,7 +91,7 @@ class FixtureRunner {
       {
         id: 'characters',
         name: 'mcp__genshin__query_genshin_db',
-        input: { characterIds: STYGIAN_CHARACTERS.slice(0, 12).map(({ id }) => String(id)) }
+        input: { characterIds: [...new Set(selectedIds)] }
       }
     ];
     if (this.toolRounds.includes(round)) {
@@ -179,9 +202,17 @@ describe('StygianPlanAgent', () => {
     expect(result.usage).toEqual({ inputTokens: 24, outputTokens: 16, estimatedCostUsd: 0.04 });
     expect(runner.calls).toHaveLength(5);
     expect(runner.calls[0]?.options.systemPrompt).toContain('StygianTeamComposer');
+    expect(runner.calls[0]?.prompt).toContain('"locale":"zh-CN"');
     expect(runner.calls[0]?.prompt).toContain('"phase":2');
     expect(runner.calls[1]?.prompt).toContain('REUSE_POLICY_VIOLATION');
     expect(runner.calls[1]?.prompt).toContain('只修复');
+    expect(runner.profileInputs).toEqual([
+      { uid: '123456789', characterIds: ['1001', '1002', '1003', '1004'] },
+      {
+        uid: '123456789',
+        characterIds: repaired.phases.flatMap(({ team }) => team.characterIds)
+      }
+    ]);
   });
 
   it('rejects a plan unless profile, every phase, and all selected character knowledge were read', async () => {

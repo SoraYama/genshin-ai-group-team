@@ -156,6 +156,7 @@ export function theaterInput(
     uid: '123456789',
     scenarioId: 'theater.2026-07',
     dataVersion: '2026.07.1',
+    locale: 'zh-CN',
     target: 'safe-clear',
     preferences: {
       comfort: 'medium',

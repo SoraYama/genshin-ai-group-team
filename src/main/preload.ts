@@ -100,7 +100,7 @@ const api: RendererApi = {
   abyssAdvisor: {
     getScenario: () => invoke('advisor-v2:abyss-scenario', undefined),
     recommend: (input) => invoke('advisor-v2:abyss-plan', input),
-    cancel: () => invoke('advisor-v2:abyss-cancel', undefined),
+    cancel: (input) => invoke('advisor-v2:abyss-cancel', input),
     onEvent: (cb: (event: AbyssAdvisorEvent) => void): (() => void) => {
       const handler = (_event: Electron.IpcRendererEvent, value: AbyssAdvisorEvent) => cb(value);
       ipcRenderer.on(ABYSS_ADVISOR_EVENT_CHANNEL, handler);

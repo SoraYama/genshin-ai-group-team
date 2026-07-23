@@ -158,6 +158,7 @@ export function abyssInput(overrides: Partial<AbyssAdvisorPlanInput> = {}): Abys
     uid: '123456789',
     scenarioId: 'abyss.2026-07',
     dataVersion: '2026.07.1',
+    locale: 'zh-CN',
     floor: 12,
     preferences: {
       comfort: 'medium',

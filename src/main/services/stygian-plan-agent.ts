@@ -31,6 +31,7 @@ export interface StygianPlanAgentInput {
   pipelineContext: V2PipelineContext;
   sdkOptions: AgentSdkRunOptions;
   sdkOptionsForStage?: (stage: V2AgentStage) => AgentSdkRunOptions;
+  onUsageDelta?: (usage: AgentUsage) => void;
 }
 
 export type StygianPlanAgentResult =
@@ -53,6 +54,7 @@ export class StygianPlanAgent {
     const result = await runV2AgentPipeline<StygianPlanOutput, StygianPlanIssue>({
       runner: this.runner,
       context: context.pipelineContext,
+      onUsageDelta: context.onUsageDelta,
       sdkOptionsForStage: context.sdkOptionsForStage ?? (() => context.sdkOptions),
       composer: {
         initialPrompt: buildComposePayload(context),
@@ -67,12 +69,11 @@ export class StygianPlanAgent {
       })
     });
     if (!result.ok) return { ok: false, issues: result.issues, usage: result.usage };
-    const plan = applyStygianRotation(result.plan, result.rotation);
     return {
       ok: true,
       repaired: result.repairs > 0,
       repairs: result.repairs,
-      plan,
+      plan: result.plan,
       critique: result.critique,
       rotation: result.rotation,
       explanation: result.explanation,
@@ -99,7 +100,7 @@ function validateAgentOutput(
 }
 
 function validateRequiredTools(
-  context: Pick<StygianPlanAgentInput, 'input' | 'scenario'>,
+  context: Pick<StygianPlanAgentInput, 'input' | 'scenario' | 'characters'>,
   tools: ToolAudit[],
   plan: Record<string, unknown>
 ): StygianPlanIssue | undefined {
@@ -107,9 +108,6 @@ function validateRequiredTools(
   const has = (name: string, predicate: (input: Record<string, unknown>) => boolean = () => true) =>
     successful.some((use) => use.name === name && predicate(use.input));
   const missing: string[] = [];
-  if (!has('mcp__genshin__read_profile_cache', (value) => value['uid'] === context.input.uid)) {
-    missing.push('read_profile_cache');
-  }
   for (const phase of [1, 2, 3]) {
     if (
       !has(
@@ -131,6 +129,23 @@ function validateRequiredTools(
         return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : [];
       })
     : [];
+  const ownedIds = new Set(context.characters.map(({ id }) => String(id)));
+  const plannedOwnedIds = plannedIds.filter((id) => ownedIds.has(id));
+  const detailedProfileIds = new Set(
+    successful
+      .filter(
+        ({ name, input }) =>
+          name === 'mcp__genshin__read_profile_cache' && input['uid'] === context.input.uid
+      )
+      .flatMap(({ input }) =>
+        Array.isArray(input['characterIds'])
+          ? input['characterIds'].filter((id): id is string => typeof id === 'string')
+          : []
+      )
+  );
+  if (plannedOwnedIds.length === 0 || plannedOwnedIds.some((id) => !detailedProfileIds.has(id))) {
+    missing.push('read_profile_cache:selected-character-details');
+  }
   const queriedIds = new Set(
     successful
       .filter(({ name }) => name === 'mcp__genshin__query_genshin_db')
@@ -169,6 +184,7 @@ function publicRequest(context: Pick<StygianPlanAgentInput, 'input' | 'scenario'
     uid: context.input.uid,
     scenarioId: context.scenario.id,
     dataVersion: context.scenario.meta.dataVersion,
+    locale: context.input.locale,
     difficultyId: context.input.difficultyId,
     ...(context.input.phase === undefined ? {} : { phase: context.input.phase }),
     target: context.input.target,
@@ -185,25 +201,4 @@ function invalidOutput(message: string): { ok: false; issues: StygianPlanIssue[]
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function applyStygianRotation(
-  plan: StygianPlanOutput,
-  rotation: V2RotationOutput
-): StygianPlanOutput {
-  return {
-    ...plan,
-    phases: plan.phases.map((phase) => ({
-      ...phase,
-      team: {
-        ...phase.team,
-        rotationNotes: [
-          ...phase.team.rotationNotes,
-          ...rotation.rotations
-            .filter(({ target }) => target.kind === 'stygian-phase' && target.phase === phase.phase)
-            .flatMap(({ notes }) => notes)
-        ]
-      }
-    }))
-  };
 }
