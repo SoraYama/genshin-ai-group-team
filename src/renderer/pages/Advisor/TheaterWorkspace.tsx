@@ -251,7 +251,7 @@ export function TheaterWorkspace({ uid, onBack }: { uid: string; onBack: () => v
         {preview.shortage > 0 && (
           <div className="gta-theater-shortage" role="alert">
             <strong>还缺 {preview.shortage} 名可入场角色</strong>
-            <p>试用、特邀或支援演员的计数规则未在场景中说明时，暂不计入硬资格。</p>
+            <p>开幕、试用与支援演员暂不计入硬资格；未知规则不会按已满足处理。</p>
             {preview.lowLevel.map((character) => (
               <p key={character.id}>
                 优先提升 {character.name} 至 {scenario.eligibility.minimumLevel}{' '}
@@ -259,6 +259,12 @@ export function TheaterWorkspace({ uid, onBack }: { uid: string; onBack: () => v
               </p>
             ))}
           </div>
+        )}
+        {preview.qualifiedSpecialGuests.length > 0 && (
+          <p className="gta-theater-special-guest-rule" role="status">
+            自有特邀演员只绕过元素限制，仍需满足最低等级；本次已计入：
+            {preview.qualifiedSpecialGuests.map(({ name }) => name).join('、')}
+          </p>
         )}
       </section>
 
@@ -283,7 +289,7 @@ export function TheaterWorkspace({ uid, onBack }: { uid: string; onBack: () => v
           ))}
         </div>
         <p className="gta-theater-unknown-rule">
-          场景未说明外部演员是否计入硬资格，暂不计入；实际可用性以游戏内为准。
+          开幕、试用与支援演员暂不计入硬资格；自有特邀演员仅在等级达标后计入，并保留特邀来源标记。
         </p>
       </section>
 
@@ -639,6 +645,7 @@ function qualificationPreview(
   const selectedSpecialGuests = new Set(selectedPools['special-guest'] ?? []);
   const configuredSpecialGuests = new Set(scenario.pools.specialGuest.map(({ id }) => id));
   const eligible: CharacterProfile[] = [];
+  const qualifiedSpecialGuests: CharacterProfile[] = [];
   const ineligible: Array<{ character: CharacterProfile; reasons: Array<'element' | 'level'> }> =
     [];
   for (const character of characters) {
@@ -650,10 +657,14 @@ function qualificationPreview(
       reasons.push('element');
     if ((character.level ?? 0) < scenario.eligibility.minimumLevel) reasons.push('level');
     if (reasons.length) ineligible.push({ character, reasons });
-    else eligible.push(character);
+    else {
+      eligible.push(character);
+      if (specialGuest) qualifiedSpecialGuests.push(character);
+    }
   }
   return {
     eligible,
+    qualifiedSpecialGuests,
     ineligible,
     qualified: eligible.length,
     shortage: Math.max(0, scenario.eligibility.requiredHeadcount - eligible.length),

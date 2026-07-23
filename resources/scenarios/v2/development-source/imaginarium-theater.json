@@ -43,7 +43,7 @@
       ],
       "specialGuest": [
         {
-          "id": "development.guest",
+          "id": "3009",
           "names": { "zh-CN": "演示特邀角色", "en": "Demo Special Guest" }
         }
       ],

@@ -1190,7 +1190,14 @@ test('checks Theater eligibility and renders a cast-vigor route instead of team 
   await expect(page.getByText('演示试用角色')).toBeVisible();
   await expect(page.getByText('演示特邀角色')).toBeVisible();
   await expect(page.getByText('演示助演角色')).toBeVisible();
-  await expect(page.getByText(/场景未说明外部演员是否计入硬资格/)).toBeVisible();
+  await expect(page.getByText(/开幕、试用与支援演员暂不计入硬资格/)).toBeVisible();
+  await page.getByRole('button', { name: /演示特邀角色/ }).click();
+  await expect(page.getByText('9 / 8 名可入场')).toBeVisible();
+  await expect(
+    page.getByText(/自有特邀演员只绕过元素限制，仍需满足最低等级；本次已计入/)
+  ).toBeVisible();
+  await page.getByRole('button', { name: /演示特邀角色/ }).click();
+  await expect(page.getByText('8 / 8 名可入场')).toBeVisible();
   await page.getByText(/查看不符合的自有角色/).click();
   await expect(page.getByText('元素不符合', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('等级不足', { exact: true })).toBeVisible();

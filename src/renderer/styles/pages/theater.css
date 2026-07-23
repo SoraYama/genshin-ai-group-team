@@ -165,6 +165,14 @@
 .gta-theater-unknown-rule {
   margin: 18px 0 0;
 }
+.gta-theater-special-guest-rule {
+  margin: 16px 0 0;
+  padding: 10px 14px;
+  border-left: 2px solid var(--gta-gold-strong);
+  color: #e9dfc2;
+  background: rgba(87, 71, 39, 0.28);
+  font-size: var(--gta-text-xs);
+}
 .gta-theater-roster,
 .gta-theater-controls,
 .gta-theater-result {
