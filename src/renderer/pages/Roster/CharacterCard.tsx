@@ -57,6 +57,11 @@ export function CharacterCard({ character }: CharacterCardProps) {
     <article
       className={`gta-character ${rarity ? `r${rarity}` : 'r-unknown'}`}
       data-element={element ?? 'unknown'}
+      style={
+        {
+          '--character-element': element ? elementPalette[element].flat : '#71808a'
+        } as CSSProperties
+      }
     >
       <div className="gta-character-main">
         <CharacterPortrait

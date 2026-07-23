@@ -28,4 +28,28 @@ describe('roster character portrait', () => {
     expect(source).toContain('object-fit: cover');
     expect(source).toContain('object-position: center top');
   });
+
+  it('uses the character element as a restrained background wash', async () => {
+    const component = await readFile(
+      path.resolve('src/renderer/pages/Roster/CharacterCard.tsx'),
+      'utf8'
+    );
+    const styles = await readFile(
+      path.resolve('src/renderer/styles/pages/roster.css'),
+      'utf8'
+    );
+
+    expect(component).toContain(
+      "'--character-element': element ? elementPalette[element].flat : '#71808a'"
+    );
+    expect(styles).toMatch(
+      /color-mix\(\s*in srgb,\s*var\(--character-element\)\s*12%/u
+    );
+    expect(styles).toMatch(
+      /color-mix\(\s*in srgb,\s*var\(--character-element\)\s*6%/u
+    );
+    expect(styles).toMatch(
+      /color-mix\(\s*in srgb,\s*var\(--character-element\)\s*5%/u
+    );
+  });
 });

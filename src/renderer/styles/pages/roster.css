@@ -318,11 +318,17 @@
 }
 
 .gta-character {
+  --character-element: #71808a;
   position: relative;
   overflow: hidden;
-  border: 1px solid rgba(208, 221, 218, 0.84);
+  border: 1px solid
+    color-mix(in srgb, var(--character-element) 22%, rgba(208, 221, 218, 0.84));
   color: var(--gta-text-on-light);
-  background: rgba(239, 244, 242, 0.97);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--character-element) 12%, rgba(239, 244, 242, 0.97)),
+    color-mix(in srgb, var(--character-element) 5%, rgba(239, 244, 242, 0.97))
+  );
   box-shadow: 0 8px 22px rgba(1, 8, 16, 0.12);
   clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
   transition:
@@ -471,7 +477,11 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0;
   border-top: 1px solid var(--gta-stroke-soft);
-  background: rgba(231, 238, 236, 0.7);
+  background: color-mix(
+    in srgb,
+    var(--character-element) 6%,
+    rgba(231, 238, 236, 0.7)
+  );
 }
 
 .gta-character-team-fact {
@@ -528,7 +538,11 @@
   gap: 16px;
   padding: 15px;
   border-top: 1px solid var(--gta-stroke-soft);
-  background: rgba(222, 232, 230, 0.58);
+  background: color-mix(
+    in srgb,
+    var(--character-element) 5%,
+    rgba(222, 232, 230, 0.58)
+  );
   animation: gta-detail-reveal 180ms var(--gta-ease) both;
 }
 
