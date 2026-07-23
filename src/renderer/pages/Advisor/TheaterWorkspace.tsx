@@ -33,6 +33,7 @@ import {
 } from './theater-presentation';
 import type { HistoryRerunIntent } from '../History/history-presentation';
 import { historySourceChangedNotice, prepareTheaterRerun } from './history-rerun-prefill';
+import { scenarioUnavailableCopy } from './scenario-unavailable-presentation';
 
 const PROGRESS: TheaterAdvisorProgressStep[] = [
   'reading-roster',
@@ -308,7 +309,11 @@ export function TheaterWorkspace({
         <GtaButton tone="ghost" onClick={onBack}>
           {isEnglish ? 'Back to challenge selection' : '返回挑战入口'}
         </GtaButton>
-        <EmptyState kind="offline" locale={language} />
+        <EmptyState
+          kind="offline"
+          locale={language}
+          copy={scenarioUnavailableCopy(view.reason, language)}
+        />
         <p>
           {isEnglish
             ? 'Verified Imaginarium Theater data is unavailable. Saved plans remain available.'

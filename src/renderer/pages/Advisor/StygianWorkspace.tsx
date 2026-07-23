@@ -39,6 +39,7 @@ import {
 } from './stygian-presentation';
 import type { HistoryRerunIntent } from '../History/history-presentation';
 import { historySourceChangedNotice, prepareStygianRerun } from './history-rerun-prefill';
+import { scenarioUnavailableCopy } from './scenario-unavailable-presentation';
 
 interface StygianWorkspaceProps {
   uid: string;
@@ -303,7 +304,11 @@ export function StygianWorkspace({
         </GtaButton>
         <span className="gta-page-kicker">{isEnglish ? 'Stygian Onslaught' : '幽境危战'}</span>
         <div id="stygian-unavailable-title">
-          <EmptyState kind="offline" locale={language} />
+          <EmptyState
+            kind="offline"
+            locale={language}
+            copy={scenarioUnavailableCopy(scenarioView.reason, language)}
+          />
         </div>
         <p>
           {isEnglish

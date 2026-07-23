@@ -4,21 +4,23 @@ export type { EmptyStateKind } from './empty-state-copy';
 
 export function EmptyState({
   action,
+  copy,
   kind,
   locale = 'zh'
 }: {
   action?: ReactNode;
+  copy?: { title: string; body: string; actionHint: string };
   kind: EmptyStateKind;
   locale?: 'zh' | 'en';
 }) {
-  const copy = emptyStateCopy(kind, locale);
+  const resolvedCopy = copy ?? emptyStateCopy(kind, locale);
   return (
     <section className={`gta-empty-state gta-empty-state--${kind}`} aria-labelledby={`empty-${kind}`}>
       <EmptyStateArt kind={kind} />
       <div>
-        <h3 id={`empty-${kind}`}>{copy.title}</h3>
-        <p>{copy.body}</p>
-        <small>{copy.actionHint}</small>
+        <h3 id={`empty-${kind}`}>{resolvedCopy.title}</h3>
+        <p>{resolvedCopy.body}</p>
+        <small>{resolvedCopy.actionHint}</small>
         {action}
       </div>
     </section>

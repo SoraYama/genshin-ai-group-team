@@ -42,7 +42,6 @@ const statRows: Array<{
 
 export function CharacterCard({ character }: CharacterCardProps) {
   const { locale, t } = useI18n();
-  const [expanded, setExpanded] = useState(false);
   const element = normalizeElement(character.element);
   const rarity = normalizeRarity(character.rarity);
   const reactions = reactionTagsForElement(element);
@@ -106,17 +105,6 @@ export function CharacterCard({ character }: CharacterCardProps) {
             </span>
           </div>
         </div>
-        <button
-          type="button"
-          className="gta-character-expand"
-          aria-expanded={expanded}
-          aria-label={t(expanded ? 'roster.hideDetails' : 'roster.showDetails', {
-            name: character.name
-          })}
-          onClick={() => setExpanded((current) => !current)}
-        >
-          <span aria-hidden="true">{expanded ? '−' : '+'}</span>
-        </button>
       </div>
 
       <div className="gta-character-team-layer">
@@ -142,47 +130,45 @@ export function CharacterCard({ character }: CharacterCardProps) {
         />
       </div>
 
-      {expanded && (
-        <div className="gta-character-detail">
-          <dl className="gta-character-stats">
-            {statRows.map((row) => {
-              const value = character.build?.stats?.[row.key];
-              const label = t(row.label);
-              return (
-                <div className="gta-character-stat" key={row.key}>
-                  <dt title={label}>
-                    <StatIcon name={row.icon} />
-                    <span>{label}</span>
-                  </dt>
-                  <dd>
-                    {value ?? '—'}
-                    {value !== undefined && row.suffix}
-                  </dd>
-                </div>
-              );
-            })}
-          </dl>
-          <div className="gta-character-build">
-            <BuildLine
-              icon="weapon"
-              label={t('roster.weapon')}
-              value={formatWeapon(character, t)}
-            />
-            <BuildLine
-              icon="talents"
-              label={t('roster.talents')}
-              value={formatTalents(character)}
-            />
-            <BuildLine
-              icon="artifacts"
-              label={t('roster.artifacts')}
-              value={formatArtifactSummary(character, t)}
-            />
-          </div>
-          <ArtifactDetails artifacts={character.build?.artifacts} />
-          <ProvenanceDetails character={character} locale={locale} />
+      <div className="gta-character-detail">
+        <dl className="gta-character-stats">
+          {statRows.map((row) => {
+            const value = character.build?.stats?.[row.key];
+            const label = t(row.label);
+            return (
+              <div className="gta-character-stat" key={row.key}>
+                <dt title={label}>
+                  <StatIcon name={row.icon} />
+                  <span>{label}</span>
+                </dt>
+                <dd>
+                  {value ?? '—'}
+                  {value !== undefined && row.suffix}
+                </dd>
+              </div>
+            );
+          })}
+        </dl>
+        <div className="gta-character-build">
+          <BuildLine
+            icon="weapon"
+            label={t('roster.weapon')}
+            value={formatWeapon(character, t)}
+          />
+          <BuildLine
+            icon="talents"
+            label={t('roster.talents')}
+            value={formatTalents(character)}
+          />
+          <BuildLine
+            icon="artifacts"
+            label={t('roster.artifacts')}
+            value={formatArtifactSummary(character, t)}
+          />
         </div>
-      )}
+        <ArtifactDetails artifacts={character.build?.artifacts} />
+        <ProvenanceDetails character={character} locale={locale} />
+      </div>
     </article>
   );
 }

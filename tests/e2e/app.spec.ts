@@ -869,11 +869,14 @@ test('renders profile coverage and known build fields without fake zero values',
   await expect(characterCard).toContainText('融化');
   await expect(characterCard).not.toContainText('主要反应');
   await expect(characterCard).toContainText('充能效率');
-  await expect(characterCard).toContainText('是否够用需结合角色、队伍产球与实战循环判断');
+  await expect(characterCard).toContainText('119.9%');
+  await expect(characterCard).not.toContainText(
+    '是否够用需结合角色、队伍产球与实战循环判断'
+  );
   await expect(characterCard).not.toContainText(/充能偏低|充能中等|充能较高/u);
-  await expect(characterCard.getByTitle('命座')).toBeVisible();
-  await expect(characterCard.getByTitle('元素')).toBeVisible();
-  await expect(characterCard.getByTitle('稀有度')).toBeVisible();
+  await expect(characterCard.getByTitle('命座', { exact: true })).toBeVisible();
+  await expect(characterCard.getByTitle('元素', { exact: true })).toBeVisible();
+  await expect(characterCard.getByTitle('稀有度', { exact: true })).toBeVisible();
 
   const unknownCard = page.locator('article').filter({ hasText: '未知角色' });
   await expect(unknownCard).toContainText('元素未知');
@@ -883,7 +886,9 @@ test('renders profile coverage and known build fields without fake zero values',
   await expect(unknownCard.getByText('可参与反应')).toHaveCount(0);
   await expect(unknownCard).toContainText('暂无可靠面板数据');
 
-  await characterCard.getByRole('button', { name: '查看测试角色详细资料' }).click();
+  await expect(
+    characterCard.getByRole('button', { name: '查看测试角色详细资料' })
+  ).toHaveCount(0);
   for (const title of [
     '生命',
     '攻击',
@@ -930,7 +935,6 @@ test('renders profile coverage and known build fields without fake zero values',
   await page.getByRole('button', { name: '全部', exact: true }).click();
   await expect(unknownCard).toBeVisible();
   await expectNoForbiddenPlayerTerms();
-  await characterCard.getByRole('button', { name: '查看测试角色详细资料' }).click();
   await expectPageFitsEveryViewport('Roster expanded detail');
   await page.setViewportSize({ width: 1024, height: 768 });
   await page.screenshot({ path: path.join(tmpdir(), 'gta-m3-roster-1024x768.png') });

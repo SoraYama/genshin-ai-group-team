@@ -25,6 +25,7 @@ import {
 } from './abyss-presentation';
 import type { HistoryRerunIntent } from '../History/history-presentation';
 import { historySourceChangedNotice, prepareAbyssRerun } from './history-rerun-prefill';
+import { scenarioUnavailableCopy } from './scenario-unavailable-presentation';
 
 interface AbyssWorkspaceProps {
   uid: string;
@@ -313,7 +314,11 @@ export function AbyssWorkspace({ uid, historyRerun, onHistoryRerunConsumed }: Ab
       <section className="gta-abyss-unavailable" aria-labelledby="abyss-unavailable-title">
         <span className="gta-page-kicker">{isEnglish ? 'Spiral Abyss' : '深境螺旋'}</span>
         <div id="abyss-unavailable-title">
-          <EmptyState kind="offline" locale={language} />
+          <EmptyState
+            kind="offline"
+            locale={language}
+            copy={scenarioUnavailableCopy(scenarioView.reason, language)}
+          />
         </div>
         <p>
           {isEnglish

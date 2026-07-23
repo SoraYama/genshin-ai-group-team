@@ -312,9 +312,10 @@
 
 .gta-character-list {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 540px), 1fr));
   align-items: start;
-  gap: 10px;
+  gap: 16px;
+  margin-top: 16px;
 }
 
 .gta-character {
@@ -343,7 +344,7 @@
 
 .gta-character-main {
   display: grid;
-  grid-template-columns: 76px minmax(0, 1fr) 44px;
+  grid-template-columns: 76px minmax(0, 1fr);
   align-items: center;
   gap: 14px;
   min-height: 104px;
@@ -452,24 +453,6 @@
   place-items: center;
   color: var(--gta-text-on-light-faint);
   font-size: 15px;
-}
-
-.gta-character-expand {
-  display: grid;
-  width: 44px;
-  height: 44px;
-  place-items: center;
-  border: 1px solid var(--gta-stroke);
-  color: var(--gta-text-on-light);
-  background: transparent;
-  font-size: 21px;
-  cursor: pointer;
-}
-
-.gta-character-expand:hover,
-.gta-character-expand:focus-visible {
-  border-color: var(--gta-gold);
-  outline: 3px solid var(--gta-gold-soft);
 }
 
 .gta-character-team-layer {
@@ -709,9 +692,6 @@
   .gta-roster-count {
     grid-column: 1 / -1;
   }
-  .gta-character-list {
-    grid-template-columns: 1fr;
-  }
 }
 
 @media (max-width: 720px) {
@@ -734,7 +714,7 @@
     grid-column: auto;
   }
   .gta-character-main {
-    grid-template-columns: 62px minmax(0, 1fr) 44px;
+    grid-template-columns: 62px minmax(0, 1fr);
     gap: 10px;
   }
   .gta-character-mark {
