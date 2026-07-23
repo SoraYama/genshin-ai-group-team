@@ -10,9 +10,9 @@ import { elementPalette, normalizeElement, type Element } from '../../design/tok
 import { useI18n, type TranslationKey } from '../../i18n';
 import {
   artifactStatUsesPercent,
-  classifyEnergyRecharge,
   isRenderableCharacterPortrait,
   presentArtifactStatKey,
+  presentEnergyRecharge,
   reactionTagsForElement
 } from './character-presentation';
 
@@ -46,8 +46,7 @@ export function CharacterCard({ character }: CharacterCardProps) {
   const element = normalizeElement(character.element);
   const rarity = normalizeRarity(character.rarity);
   const reactions = reactionTagsForElement(element);
-  const energyRecharge = character.build?.stats?.energyRecharge;
-  const energyBand = classifyEnergyRecharge(energyRecharge);
+  const energyRecharge = presentEnergyRecharge(character.build?.stats?.energyRecharge);
   const completenessLabel = {
     basic: t('roster.basic'),
     build: t('roster.build'),
@@ -129,10 +128,12 @@ export function CharacterCard({ character }: CharacterCardProps) {
           </div>
         )}
         <TeamFact
-          label={t('roster.energyHintLabel')}
-          value={t(`roster.energyHint.${energyBand}`, {
-            value: energyRecharge ?? '—'
-          })}
+          label={t('roster.energyRecharge')}
+          value={
+            energyRecharge.kind === 'known'
+              ? t('roster.energyPanel.known', { value: energyRecharge.value })
+              : t('roster.energyPanel.unknown')
+          }
         />
       </div>
 

@@ -225,11 +225,9 @@ const zh = {
   'roster.reaction.quicken': '激化',
   'roster.reaction.swirl': '扩散',
   'roster.reaction.crystallize': '结晶',
-  'roster.energyHintLabel': '关键提示',
-  'roster.energyHint.unknown': '充能资料不足；补全详细面板后再验证循环。',
-  'roster.energyHint.low': '{{value}}% · 面板充能偏低；实战循环仍需结合队伍产球验证。',
-  'roster.energyHint.medium': '{{value}}% · 面板充能中等；是否够用仍需结合队伍产球验证。',
-  'roster.energyHint.high': '{{value}}% · 面板充能较高；是否需要这么多仍需结合队伍循环验证。',
+  'roster.energyPanel.known':
+    '{{value}}% · 是否够用需结合角色、队伍产球与实战循环判断。',
+  'roster.energyPanel.unknown': '暂无可靠面板数据。',
   'roster.levelShort': 'Lv.{{level}}',
   'roster.showDetails': '查看{{name}}详细资料',
   'roster.hideDetails': '收起{{name}}详细资料',
@@ -266,7 +264,7 @@ const zh = {
   'roster.def': '防御',
   'roster.critRate': '暴击率',
   'roster.critDmg': '暴击伤害',
-  'roster.energyRecharge': '元素充能',
+  'roster.energyRecharge': '充能效率',
   'roster.elementalMastery': '元素精通',
   'roster.weapon': '武器',
   'roster.refinement': '精{{level}}',
@@ -682,15 +680,9 @@ const en: Record<keyof typeof zh, string> = {
   'roster.reaction.quicken': 'Quicken',
   'roster.reaction.swirl': 'Swirl',
   'roster.reaction.crystallize': 'Crystallize',
-  'roster.energyHintLabel': 'Key note',
-  'roster.energyHint.unknown':
-    'Energy Recharge data is unavailable; verify the rotation after detailed stats are synced.',
-  'roster.energyHint.low':
-    '{{value}}% · Panel Energy Recharge is low; verify the rotation with team particle generation.',
-  'roster.energyHint.medium':
-    '{{value}}% · Panel Energy Recharge is moderate; verify whether it is enough with team particle generation.',
-  'roster.energyHint.high':
-    '{{value}}% · Panel Energy Recharge is high; verify whether this much is needed for the team rotation.',
+  'roster.energyPanel.known':
+    '{{value}}% · Judge sufficiency only with the character, team particle generation, and combat rotation.',
+  'roster.energyPanel.unknown': 'No reliable panel data is available.',
   'roster.levelShort': 'Lv.{{level}}',
   'roster.showDetails': 'Show {{name}} details',
   'roster.hideDetails': 'Hide {{name}} details',

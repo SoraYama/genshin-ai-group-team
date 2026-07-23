@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeElement } from '../../../src/renderer/design/tokens.js';
 import {
-  classifyEnergyRecharge,
-  ENERGY_RECHARGE_THRESHOLDS,
   isRenderableCharacterPortrait,
   presentArtifactStatKey,
+  presentEnergyRecharge,
   reactionTagsForElement
 } from '../../../src/renderer/pages/Roster/character-presentation.js';
 
@@ -21,15 +20,12 @@ describe('character presentation decisions', () => {
     expect(reactionTagsForElement('pyro')).toEqual(['vaporize', 'melt', 'overloaded', 'burning']);
   });
 
-  it('classifies only a valid known energy recharge value with centralized thresholds', () => {
-    expect(ENERGY_RECHARGE_THRESHOLDS).toEqual({ medium: 120, high: 180 });
-    expect(classifyEnergyRecharge(undefined)).toBe('unknown');
-    expect(classifyEnergyRecharge(Number.NaN)).toBe('unknown');
-    expect(classifyEnergyRecharge(0)).toBe('unknown');
-    expect(classifyEnergyRecharge(119.9)).toBe('low');
-    expect(classifyEnergyRecharge(120)).toBe('medium');
-    expect(classifyEnergyRecharge(179.9)).toBe('medium');
-    expect(classifyEnergyRecharge(180)).toBe('high');
+  it('presents Energy Recharge only as known or unknown panel data', () => {
+    expect(presentEnergyRecharge(undefined)).toEqual({ kind: 'unknown' });
+    expect(presentEnergyRecharge(Number.NaN)).toEqual({ kind: 'unknown' });
+    expect(presentEnergyRecharge(0)).toEqual({ kind: 'unknown' });
+    expect(presentEnergyRecharge(117.5)).toEqual({ kind: 'known', value: 117.5 });
+    expect(presentEnergyRecharge(240)).toEqual({ kind: 'known', value: 240 });
   });
 
   it('accepts only the existing main-process image proxy for portraits', () => {

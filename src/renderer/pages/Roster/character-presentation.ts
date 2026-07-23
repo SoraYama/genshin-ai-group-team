@@ -12,18 +12,14 @@ export function isRenderableCharacterPortrait(
   }
 }
 
-export const ENERGY_RECHARGE_THRESHOLDS = {
-  medium: 120,
-  high: 180
-} as const;
+export type PresentedEnergyRecharge =
+  | { kind: 'known'; value: number }
+  | { kind: 'unknown' };
 
-export type EnergyRechargeBand = 'unknown' | 'low' | 'medium' | 'high';
-
-export function classifyEnergyRecharge(value: number | undefined): EnergyRechargeBand {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return 'unknown';
-  if (value < ENERGY_RECHARGE_THRESHOLDS.medium) return 'low';
-  if (value < ENERGY_RECHARGE_THRESHOLDS.high) return 'medium';
-  return 'high';
+export function presentEnergyRecharge(value: number | undefined): PresentedEnergyRecharge {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? { kind: 'known', value }
+    : { kind: 'unknown' };
 }
 
 export type ReactionTag =

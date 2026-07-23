@@ -864,8 +864,9 @@ test('renders profile coverage and known build fields without fake zero values',
   await expect(characterCard).toContainText('蒸发');
   await expect(characterCard).toContainText('融化');
   await expect(characterCard).not.toContainText('主要反应');
-  await expect(characterCard).toContainText('面板充能偏低');
-  await expect(characterCard).toContainText('实战循环仍需结合队伍产球验证');
+  await expect(characterCard).toContainText('充能效率');
+  await expect(characterCard).toContainText('是否够用需结合角色、队伍产球与实战循环判断');
+  await expect(characterCard).not.toContainText(/充能偏低|充能中等|充能较高/u);
   await expect(characterCard.getByTitle('命座')).toBeVisible();
   await expect(characterCard.getByTitle('元素')).toBeVisible();
   await expect(characterCard.getByTitle('稀有度')).toBeVisible();
@@ -876,7 +877,7 @@ test('renders profile coverage and known build fields without fake zero values',
   await expect(unknownCard).not.toContainText('火元素');
   await expect(unknownCard).not.toContainText('1星');
   await expect(unknownCard.getByText('可参与反应')).toHaveCount(0);
-  await expect(unknownCard).toContainText('充能资料不足');
+  await expect(unknownCard).toContainText('暂无可靠面板数据');
 
   await characterCard.getByRole('button', { name: '查看测试角色详细资料' }).click();
   for (const title of [
@@ -885,7 +886,7 @@ test('renders profile coverage and known build fields without fake zero values',
     '防御',
     '暴击率',
     '暴击伤害',
-    '元素充能',
+    '充能效率',
     '元素精通',
     '武器',
     '天赋',
