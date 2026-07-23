@@ -9,9 +9,11 @@ import { OrnamentPanel } from '../../components/ui/OrnamentPanel';
 import { AbyssWorkspace } from './AbyssWorkspace';
 import { StygianWorkspace } from './StygianWorkspace';
 import { TheaterWorkspace } from './TheaterWorkspace';
+import type { HistoryRerunIntent } from '../History/history-presentation';
 
 interface AdvisorPageProps {
   state: ProfileStateView;
+  historyRerun?: HistoryRerunIntent | null;
   onGotoOnboarding: () => void;
 }
 
@@ -36,7 +38,7 @@ function emptySideState(): SideState {
   return { stage: '', message: '', streamText: '', result: null };
 }
 
-export function AdvisorPage({ state, onGotoOnboarding }: AdvisorPageProps) {
+export function AdvisorPage({ state, historyRerun, onGotoOnboarding }: AdvisorPageProps) {
   const { locale, t } = useI18n();
   const activeUid = state.activeUid;
   const [mode, setMode] = useState<Mode>('single');
@@ -53,6 +55,12 @@ export function AdvisorPage({ state, onGotoOnboarding }: AdvisorPageProps) {
   const [single, setSingle] = useState<SideState>(emptySideState());
   const [left, setLeft] = useState<SideState>(emptySideState());
   const [right, setRight] = useState<SideState>(emptySideState());
+
+  useEffect(() => {
+    if (!historyRerun) return;
+    setChallengeMode(historyRerun.mode);
+    setWorkspaceOpen(true);
+  }, [historyRerun]);
 
   const singleScrollRef = useRef<HTMLPreElement | null>(null);
   const leftScrollRef = useRef<HTMLPreElement | null>(null);
@@ -230,11 +238,28 @@ export function AdvisorPage({ state, onGotoOnboarding }: AdvisorPageProps) {
       </div>
 
       {workspaceOpen && challengeMode === 'spiral-abyss' ? (
-        <AbyssWorkspace uid={activeUid} />
+        <AbyssWorkspace
+          uid={activeUid}
+          historyRerun={
+            historyRerun?.mode === 'spiral-abyss' ? historyRerun : undefined
+          }
+        />
       ) : workspaceOpen && challengeMode === 'imaginarium-theater' ? (
-        <TheaterWorkspace uid={activeUid} onBack={() => setWorkspaceOpen(false)} />
+        <TheaterWorkspace
+          uid={activeUid}
+          historyRerun={
+            historyRerun?.mode === 'imaginarium-theater' ? historyRerun : undefined
+          }
+          onBack={() => setWorkspaceOpen(false)}
+        />
       ) : workspaceOpen && challengeMode === 'stygian-onslaught' ? (
-        <StygianWorkspace uid={activeUid} onBack={() => setWorkspaceOpen(false)} />
+        <StygianWorkspace
+          uid={activeUid}
+          historyRerun={
+            historyRerun?.mode === 'stygian-onslaught' ? historyRerun : undefined
+          }
+          onBack={() => setWorkspaceOpen(false)}
+        />
       ) : !workspaceOpen ? (
         <div className="gta-mode-status" aria-live="polite">
           <span className="gta-mode-status-mark" aria-hidden="true">

@@ -44,4 +44,55 @@ describe('history IPC abyss plans', () => {
     ).resolves.toEqual({ ok: true });
     expect(history.removeStygianById).toHaveBeenCalledWith('stygian-history-id');
   });
+
+  it('requires an explicit scope and expected count for destructive group or all-history removal', async () => {
+    const history = {
+      query: vi.fn(),
+      removeById: vi.fn(),
+      removeMany: vi.fn(),
+      queryAbyss: vi.fn().mockReturnValue([]),
+      removeAbyssById: vi.fn(),
+      queryStygian: vi.fn().mockReturnValue([]),
+      removeStygianById: vi.fn(),
+      queryTheater: vi.fn().mockReturnValue([]),
+      removeTheaterById: vi.fn(),
+      getChallengeScopeConfirmation: vi.fn().mockReturnValue({
+        count: 3,
+        confirmationToken: 'a'.repeat(64)
+      }),
+      removeChallengeScope: vi.fn().mockReturnValue(3)
+    };
+    registerHistoryIpc({ history: history as never });
+
+    await expect(
+      handlers.get('history:prepare-delete-scope')?.({
+        scope: 'group',
+        uid: '123456789',
+        mode: 'spiral-abyss',
+        scenarioId: 'abyss.2026-07'
+      })
+    ).resolves.toEqual({ count: 3, confirmationToken: 'a'.repeat(64) });
+    await expect(
+      handlers.get('history:delete-scope')?.({
+        scope: 'group',
+        uid: '123456789',
+        mode: 'spiral-abyss',
+        scenarioId: 'abyss.2026-07',
+        expectedCount: 3,
+        confirmationToken: 'a'.repeat(64)
+      })
+    ).resolves.toEqual({ removed: 3 });
+    expect(history.removeChallengeScope).toHaveBeenCalledWith({
+      scope: 'group',
+      uid: '123456789',
+      mode: 'spiral-abyss',
+      scenarioId: 'abyss.2026-07',
+      expectedCount: 3,
+      confirmationToken: 'a'.repeat(64)
+    });
+
+    await expect(
+      handlers.get('history:delete-scope')?.({ scope: 'all' })
+    ).rejects.toMatchObject({ code: 'IPC_VALIDATION_FAILED' });
+  });
 });

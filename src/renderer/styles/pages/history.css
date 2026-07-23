@@ -1,123 +1,134 @@
-.gta-history-abyss {
-  margin-bottom: var(--gta-s5);
+.gta-history-page {
+  display: grid;
+  gap: var(--gta-s5);
 }
-
-.gta-history-abyss > h3 {
-  margin: 0 0 var(--gta-s3);
-  color: var(--gta-gold);
-  font-size: var(--gta-text-lg);
-  letter-spacing: 0.08em;
-}
-
-.gta-history-list {
+.gta-history-head { align-items: end; }
+.gta-history-groups { display: grid; gap: clamp(24px, 4vw, 48px); }
+.gta-history-group { border-top: 1px solid rgba(196, 173, 111, 0.52); }
+.gta-history-group > header {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  align-items: end;
+  justify-content: space-between;
+  gap: var(--gta-s4);
+  padding: 18px 2px 12px;
+}
+.gta-history-group h3 {
+  margin: 3px 0 0;
+  color: var(--gta-text-on-dark);
+  font-size: clamp(1.15rem, 2vw, 1.5rem);
+  font-weight: 550;
+  letter-spacing: 0.04em;
+}
+.gta-history-list {
+  display: grid;
+  gap: 1px;
   margin: 0;
   padding: 0;
+  background: rgba(168, 187, 191, 0.22);
   list-style: none;
 }
 .gta-history-entry {
   overflow: hidden;
-  border: 1px solid var(--gta-stroke);
   color: var(--gta-text-on-light);
-  background: var(--gta-panel);
-  transition:
-    border-color var(--gta-dur-base),
-    box-shadow var(--gta-dur-base);
+  background: linear-gradient(112deg, rgba(250, 249, 242, 0.98), rgba(235, 241, 239, 0.96));
 }
-.gta-history-entry:hover,
-.gta-history-entry.is-expanded {
-  border-color: var(--gta-gold);
-}
-.gta-history-entry.is-expanded {
-  box-shadow: var(--gta-shadow-card);
-}
+.gta-history-entry.is-expanded { box-shadow: inset 3px 0 0 var(--gta-gold); }
 .gta-history-summary {
-  display: flex;
+  display: grid;
   width: 100%;
-  min-height: 58px;
-  flex-wrap: wrap;
+  min-height: 72px;
+  grid-template-columns: minmax(240px, 1fr) auto minmax(150px, auto) auto;
   align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
+  gap: 14px;
+  padding: 14px 18px;
   border: 0;
-  color: var(--gta-text-on-light);
+  color: inherit;
   background: transparent;
   text-align: left;
   cursor: pointer;
 }
-.gta-history-summary:hover {
-  background: rgba(223, 232, 230, 0.56);
-}
-.gta-history-time,
-.gta-history-uid {
-  color: var(--gta-text-on-light-faint);
-  font-family: var(--gta-font-mono);
-  font-size: var(--gta-text-xs);
-}
-.gta-history-time {
-  min-width: 128px;
-}
-.gta-history-enemies {
-  min-width: 160px;
-  flex: 1;
-  overflow: hidden;
-  font-size: var(--gta-text-sm);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.gta-history-body {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 16px;
-  border-top: 1px solid var(--gta-stroke);
-}
-.gta-history-stats {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  margin: 0 0 10px;
-  color: rgba(238, 244, 242, 0.84);
-  font-family: var(--gta-font-mono);
-  font-size: var(--gta-text-xs);
-}
-
-.gta-history-theater-body section {
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--gta-stroke-soft);
-}
-
-.gta-history-theater-body h4 {
-  margin: 0 0 8px;
-}
-
-.gta-history-theater-body p,
-.gta-history-theater-route small {
+.gta-history-summary:hover,
+.gta-history-summary:focus-visible { background: rgba(211, 224, 223, 0.48); }
+.gta-history-entry-title { font-size: var(--gta-text-lg); font-weight: 650; }
+.gta-history-source,
+.gta-history-sample {
+  padding: 4px 9px;
+  border: 1px solid rgba(112, 136, 139, 0.3);
   color: var(--gta-text-on-light-soft);
   font-size: var(--gta-text-xs);
+  letter-spacing: 0.04em;
 }
-
-.gta-history-theater-cast {
+.gta-history-source.is-smart-service {
+  border-color: rgba(161, 132, 63, 0.5);
+  color: #69531f;
+}
+.gta-history-summary time { color: var(--gta-text-on-light-soft); font-size: var(--gta-text-xs); }
+.gta-history-sample { border-style: dashed; }
+.gta-history-body {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 18px;
+  padding: 20px 22px 24px;
+  border-top: 1px solid var(--gta-stroke);
+  background: rgba(250, 250, 246, 0.76);
+}
+.gta-history-plan-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1px;
   background: var(--gta-stroke-soft);
 }
-
-.gta-history-theater-cast span {
+.gta-history-plan-grid.is-three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.gta-history-plan-grid article {
   display: grid;
-  gap: 2px;
-  padding: 9px 10px;
+  align-content: start;
+  gap: 8px;
+  min-height: 124px;
+  padding: 16px;
+  background: rgba(250, 251, 247, 0.98);
+}
+.gta-history-plan-grid article > span {
+  color: #76622c;
+  font-size: var(--gta-text-xs);
+  letter-spacing: 0.08em;
+}
+.gta-history-plan-grid article > strong { line-height: 1.6; }
+.gta-history-plan-grid article > p,
+.gta-history-rule,
+.gta-history-interventions {
+  margin: 0;
+  color: var(--gta-text-on-light-soft);
+  font-size: var(--gta-text-sm);
+  line-height: 1.65;
+}
+.gta-history-interventions {
+  grid-column: 1 / -1;
+  padding: 10px 14px;
+  background: rgba(224, 231, 227, 0.8);
+}
+.gta-history-theater-cast {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 1px;
+  background: var(--gta-stroke-soft);
+}
+.gta-history-theater-cast span,
+.gta-history-theater-route li {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
   background: #f8faf7;
 }
-
-.gta-history-theater-cast small {
-  color: var(--gta-text-on-light-soft);
-  font-size: var(--gta-text-xs);
+.gta-history-theater-cast small,
+.gta-history-theater-route small { color: var(--gta-text-on-light-soft); font-size: var(--gta-text-xs); }
+.gta-history-theater-route {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  background: var(--gta-stroke-soft);
+  list-style: none;
 }
-
 .gta-history-theater-vigor {
   display: flex;
   flex-wrap: wrap;
@@ -125,20 +136,66 @@
   color: var(--gta-text-on-light-soft);
   font-size: var(--gta-text-xs);
 }
-
-.gta-history-theater-route {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 1px;
-  margin: 0;
-  padding: 0;
-  background: var(--gta-stroke-soft);
-  list-style: none;
+.gta-history-version {
+  padding: 10px 0;
+  border-top: 1px solid var(--gta-stroke-soft);
+  border-bottom: 1px solid var(--gta-stroke-soft);
 }
-
-.gta-history-theater-route li {
+.gta-history-version summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--gta-text-on-light-soft);
+  font-size: var(--gta-text-sm);
+}
+.gta-history-version dl {
   display: grid;
-  gap: 5px;
-  padding: 12px;
-  background: #f8faf7;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 12px 0 0;
+}
+.gta-history-version dl div { min-width: 0; }
+.gta-history-version dt { color: var(--gta-text-on-light-soft); font-size: var(--gta-text-xs); }
+.gta-history-version dd {
+  overflow: hidden;
+  margin: 4px 0 0;
+  font-family: var(--gta-font-mono);
+  font-size: var(--gta-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gta-history-entry-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+.gta-history-error {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  border-left: 3px solid var(--gta-danger);
+  color: var(--gta-text-on-light);
+  background: rgba(249, 241, 231, 0.95);
+}
+.gta-history-legacy-note {
+  margin: 0;
+  color: rgba(238, 244, 242, 0.72);
+  font-size: var(--gta-text-xs);
+}
+@media (max-width: 900px) {
+  .gta-history-summary { grid-template-columns: 1fr auto; }
+  .gta-history-summary time { grid-column: 1; }
+  .gta-history-plan-grid.is-three { grid-template-columns: 1fr; }
+}
+@media (max-width: 680px) {
+  .gta-history-head,
+  .gta-history-group > header,
+  .gta-history-entry-actions { align-items: stretch; flex-direction: column; }
+  .gta-history-summary,
+  .gta-history-plan-grid,
+  .gta-history-version dl { grid-template-columns: 1fr; }
+  .gta-history-summary time { grid-column: auto; }
+  .gta-history-error { grid-template-columns: 1fr; }
 }

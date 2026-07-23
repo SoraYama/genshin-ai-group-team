@@ -393,6 +393,21 @@ export interface HistoryQueryResult {
   hasMore: boolean;
 }
 
+export type HistoryDeleteScopeSelection =
+  | {
+      scope: 'group';
+      uid: string;
+      mode: ScenarioMode;
+      scenarioId: string;
+    }
+  | { scope: 'uid'; uid: string }
+  | { scope: 'all' };
+
+export type HistoryDeleteScope = HistoryDeleteScopeSelection & {
+  expectedCount: number;
+  confirmationToken: string;
+};
+
 export interface AdvisorCompareRequest {
   uid: string;
   left: { enemyNames: string[]; preference?: string };

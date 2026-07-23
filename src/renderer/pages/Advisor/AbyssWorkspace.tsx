@@ -17,9 +17,12 @@ import {
   progressStepLabel,
   type CharacterInterventionState
 } from './abyss-presentation';
+import type { HistoryRerunIntent } from '../History/history-presentation';
+import { prepareAbyssRerun } from './history-rerun-prefill';
 
 interface AbyssWorkspaceProps {
   uid: string;
+  historyRerun?: Extract<HistoryRerunIntent, { mode: 'spiral-abyss' }>;
 }
 
 const PROGRESS_STEPS: AbyssAdvisorProgressStep[] = [
@@ -37,7 +40,7 @@ const DEFAULT_PREFERENCES: PlayerPreferences = {
   noBuildChange: false
 };
 
-export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
+export function AbyssWorkspace({ uid, historyRerun }: AbyssWorkspaceProps) {
   const [scenarioView, setScenarioView] = useState<AbyssScenarioView | null>(null);
   const [profile, setProfile] = useState<PersistedProfile | null>(null);
   const [loadError, setLoadError] = useState('');
@@ -54,6 +57,8 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
   const [running, setRunning] = useState(false);
   const requestSequence = useRef(0);
   const activeCorrelation = useRef<string | null>(null);
+  const appliedHistoryId = useRef<string | null>(null);
+  const [historyNotice, setHistoryNotice] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -76,7 +81,56 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
         setScenarioView(nextScenario);
         setProfile(nextProfile);
         if (nextScenario.status === 'ready') {
-          setFloorNumber(nextScenario.scenario.floors[0]?.floor ?? null);
+          const defaultFloor = nextScenario.scenario.floors[0]?.floor ?? null;
+          setFloorNumber(defaultFloor);
+          if (
+            historyRerun &&
+            appliedHistoryId.current !== historyRerun.historyId &&
+            nextProfile
+          ) {
+            appliedHistoryId.current = historyRerun.historyId;
+            const prepared = prepareAbyssRerun(
+              historyRerun,
+              uid,
+              nextScenario.scenario.floors.map(({ floor }) => floor),
+              nextProfile.characters.map(({ id }) => String(id))
+            );
+            if (prepared.status === 'blocked') {
+              setHistoryNotice(
+                '这份旧方案属于另一个 UID；已保留旧方案查看，但没有带入当前账号。'
+              );
+            } else {
+              const selectedFloor = prepared.floor ?? defaultFloor;
+              const selectedFloorData = nextScenario.scenario.floors.find(
+                ({ floor }) => floor === selectedFloor
+              );
+              const chamber =
+                prepared.chamber &&
+                selectedFloorData?.chambers.some(
+                  ({ chamber: candidate }) => candidate === prepared.chamber
+                )
+                  ? prepared.chamber
+                  : 'all';
+              setFloorNumber(selectedFloor);
+              setChamberNumber(chamber);
+              setPreferences(prepared.preferences);
+              setInterventions({
+                ...Object.fromEntries(prepared.lockedCharacterIds.map((id) => [id, 'locked'])),
+                ...Object.fromEntries(prepared.excludedCharacterIds.map((id) => [id, 'excluded']))
+              });
+              setHistoryNotice(
+                prepared.status === 'adjusted'
+                  ? `已带入旧方案的可用选择；${
+                      prepared.targetUnavailable ? '原楼层已不在当前资料中；' : ''
+                    }${
+                      prepared.removedCharacterCount > 0
+                        ? `${prepared.removedCharacterCount} 名已不在当前角色资料中的角色未带入；`
+                        : ''
+                    }请检查后再点击生成，不会自动调用智能服务。`
+                  : '已带入旧方案的楼层、偏好与角色选择。请检查后再点击生成，不会自动调用智能服务。'
+              );
+            }
+          }
         }
       })
       .catch(() => {
@@ -88,7 +142,7 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
       activeCorrelation.current = null;
       void api.abyssAdvisor.cancel();
     };
-  }, [uid]);
+  }, [historyRerun, uid]);
 
   useEffect(
     () =>
@@ -257,6 +311,12 @@ export function AbyssWorkspace({ uid }: AbyssWorkspaceProps) {
         <div className="gta-abyss-sample-banner" role="status">
           <strong>演练资料，不代表本期</strong>
           <span>以下敌人与规则只用于验证交互和约束；不会冒充正式服当前周期。</span>
+        </div>
+      )}
+      {historyNotice && (
+        <div className="gta-abyss-sample-banner is-history-prefill" role="status">
+          <strong>旧方案已准备</strong>
+          <span>{historyNotice}</span>
         </div>
       )}
       {scenarioReadOnly && (

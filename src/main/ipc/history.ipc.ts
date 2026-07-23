@@ -34,6 +34,55 @@ const clearSchema = z
     message: '至少需要指定 uid / source / enemyKeyword 之一，避免误清空全部历史'
   });
 
+const deleteScopeSelectionSchema = z.discriminatedUnion('scope', [
+  z
+    .object({
+      scope: z.literal('group'),
+      uid: z.string().regex(/^\d{9}$/),
+      mode: z.enum(['spiral-abyss', 'stygian-onslaught', 'imaginarium-theater']),
+      scenarioId: z.string().trim().min(1).max(256)
+    })
+    .strict(),
+  z
+    .object({
+      scope: z.literal('uid'),
+      uid: z.string().regex(/^\d{9}$/)
+    })
+    .strict(),
+  z
+    .object({
+      scope: z.literal('all')
+    })
+    .strict()
+]);
+const deleteScopeSchema = z.discriminatedUnion('scope', [
+  z
+    .object({
+      scope: z.literal('group'),
+      uid: z.string().regex(/^\d{9}$/),
+      mode: z.enum(['spiral-abyss', 'stygian-onslaught', 'imaginarium-theater']),
+      scenarioId: z.string().trim().min(1).max(256),
+      expectedCount: z.number().int().positive(),
+      confirmationToken: z.string().regex(/^[a-f0-9]{64}$/)
+    })
+    .strict(),
+  z
+    .object({
+      scope: z.literal('uid'),
+      uid: z.string().regex(/^\d{9}$/),
+      expectedCount: z.number().int().positive(),
+      confirmationToken: z.string().regex(/^[a-f0-9]{64}$/)
+    })
+    .strict(),
+  z
+    .object({
+      scope: z.literal('all'),
+      expectedCount: z.number().int().positive(),
+      confirmationToken: z.string().regex(/^[a-f0-9]{64}$/)
+    })
+    .strict()
+]);
+
 export interface HistoryIpcDeps {
   history: HistoryStore;
 }
@@ -123,6 +172,33 @@ export function registerHistoryIpc({ history }: HistoryIpcDeps): void {
         parsed.error.issues.map((issue) => issue.message).join('; ')
       );
     return { ok: history.removeTheaterById(parsed.data.id) };
+  });
+
+  registerHandler('history:prepare-delete-scope', async (payload) => {
+    const parsed = deleteScopeSelectionSchema.safeParse(payload);
+    if (!parsed.success)
+      throw new IpcError(
+        IpcErrorCodes.ValidationFailed,
+        parsed.error.issues.map((issue) => issue.message).join('; ')
+      );
+    return history.getChallengeScopeConfirmation(parsed.data);
+  });
+
+  registerHandler('history:delete-scope', async (payload) => {
+    const parsed = deleteScopeSchema.safeParse(payload);
+    if (!parsed.success)
+      throw new IpcError(
+        IpcErrorCodes.ValidationFailed,
+        parsed.error.issues.map((issue) => issue.message).join('; ')
+      );
+    try {
+      return { removed: history.removeChallengeScope(parsed.data) };
+    } catch (error) {
+      throw new IpcError(
+        IpcErrorCodes.ValidationFailed,
+        error instanceof Error ? error.message : 'History selection changed'
+      );
+    }
   });
 
   registerHandler('history:clear', async (payload) => {

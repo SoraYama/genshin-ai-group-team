@@ -9,6 +9,8 @@ import type {
   BindCookieResult,
   HistoryQueryOptions,
   HistoryQueryResult,
+  HistoryDeleteScope,
+  HistoryDeleteScopeSelection,
   LlmConfigInput,
   LlmHealthReport,
   PersistedProfile,
@@ -126,6 +128,11 @@ export interface IpcContract {
   'history:stygian-delete': { req: { id: string }; res: { ok: boolean } };
   'history:theater-list': { req: { uid?: string }; res: TheaterPlanHistoryEntry[] };
   'history:theater-delete': { req: { id: string }; res: { ok: boolean } };
+  'history:prepare-delete-scope': {
+    req: HistoryDeleteScopeSelection;
+    res: { count: number; confirmationToken: string };
+  };
+  'history:delete-scope': { req: HistoryDeleteScope; res: { removed: number } };
   'history:clear': {
     req: { uid?: string; source?: 'llm' | 'fallback'; enemyKeyword?: string };
     res: { removed: number };
@@ -181,6 +188,8 @@ export const ALL_IPC_CHANNELS: IpcChannel[] = [
   'history:stygian-delete',
   'history:theater-list',
   'history:theater-delete',
+  'history:prepare-delete-scope',
+  'history:delete-scope',
   'history:clear'
 ];
 
@@ -282,6 +291,12 @@ export interface RendererApi {
     deleteTheater: (
       input: IpcRequest<'history:theater-delete'>
     ) => Promise<IpcResponse<'history:theater-delete'>>;
+    prepareDeleteScope: (
+      input: IpcRequest<'history:prepare-delete-scope'>
+    ) => Promise<IpcResponse<'history:prepare-delete-scope'>>;
+    deleteScope: (
+      input: IpcRequest<'history:delete-scope'>
+    ) => Promise<IpcResponse<'history:delete-scope'>>;
     clear: (input: IpcRequest<'history:clear'>) => Promise<IpcResponse<'history:clear'>>;
   };
 }

@@ -1,5 +1,9 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import type { RecommendationResult, StygianPlanHistoryEntry } from '../../../src/shared/domain.js';
+import type {
+  AbyssPlanHistoryEntry,
+  RecommendationResult,
+  StygianPlanHistoryEntry
+} from '../../../src/shared/domain.js';
 import { ABYSS_CHARACTERS, abyssInput, validAbyssPlan } from './abyss-test-fixtures.js';
 import { STYGIAN_CHARACTERS, stygianInput, validStygianPlan } from './stygian-test-fixtures.js';
 
@@ -232,6 +236,102 @@ describe('HistoryStore', () => {
     const removed = store.removeMany({ source: 'fallback' });
     expect(removed).toBe(1);
     expect(store.query().total).toBe(2);
+  });
+
+  it('removes an exact challenge group only when the expected count still matches', async () => {
+    const { HistoryStore } = await import('../../../src/main/services/history-store.js');
+    const store = new HistoryStore();
+    const first = abyssEntryForScope('abyss.2026-07');
+    const second = abyssEntryForScope('abyss.2026-07');
+    store.appendAbyss(first);
+    store.appendAbyss(second);
+    store.appendAbyss(abyssEntryForScope('abyss.2026-08'));
+
+    const staleConfirmation = store.getChallengeScopeConfirmation({
+      scope: 'group',
+      uid: first.uid,
+      mode: 'spiral-abyss',
+      scenarioId: first.scenarioId
+    });
+    expect(() =>
+      store.removeChallengeScope({
+        scope: 'group',
+        uid: first.uid,
+        mode: 'spiral-abyss',
+        scenarioId: first.scenarioId,
+        expectedCount: 1,
+        confirmationToken: staleConfirmation.confirmationToken
+      })
+    ).toThrow(/changed/i);
+    expect(store.queryAbyss()).toHaveLength(3);
+
+    const confirmation = store.getChallengeScopeConfirmation({
+      scope: 'group',
+      uid: first.uid,
+      mode: 'spiral-abyss',
+      scenarioId: first.scenarioId
+    });
+    expect(
+      store.removeChallengeScope({
+        scope: 'group',
+        uid: first.uid,
+        mode: 'spiral-abyss',
+        scenarioId: first.scenarioId,
+        expectedCount: 2,
+        confirmationToken: confirmation.confirmationToken
+      })
+    ).toBe(2);
+    expect(store.queryAbyss()).toHaveLength(1);
+  });
+
+  it('clears every history collection only with an exact count guard', async () => {
+    const { HistoryStore } = await import('../../../src/main/services/history-store.js');
+    const store = new HistoryStore();
+    store.append({
+      uid: '111111111',
+      enemyNames: [],
+      result: makeResult(),
+      side: 'single'
+    });
+    store.appendAbyss(abyssEntryForScope('abyss.2026-07'));
+
+    expect(store.getSummary()).toMatchObject({ count: 2 });
+    const firstConfirmation = store.getChallengeScopeConfirmation({ scope: 'all' });
+    expect(() =>
+      store.removeChallengeScope({
+        scope: 'all',
+        expectedCount: 1,
+        confirmationToken: firstConfirmation.confirmationToken
+      })
+    ).toThrow(/changed/i);
+    const confirmation = store.getChallengeScopeConfirmation({ scope: 'all' });
+    expect(
+      store.removeChallengeScope({
+        scope: 'all',
+        expectedCount: 2,
+        confirmationToken: confirmation.confirmationToken
+      })
+    ).toBe(2);
+    expect(store.getSummary()).toMatchObject({ count: 0 });
+  });
+
+  it('rejects a stale confirmation when records are replaced without changing the count', async () => {
+    const { HistoryStore } = await import('../../../src/main/services/history-store.js');
+    const store = new HistoryStore();
+    const original = store.appendAbyss(abyssEntryForScope('abyss.2026-07'));
+    const confirmation = store.getChallengeScopeConfirmation({ scope: 'all' });
+
+    expect(store.removeAbyssById(original.id)).toBe(true);
+    store.appendAbyss(abyssEntryForScope('abyss.2026-08'));
+    expect(store.getSummary().count).toBe(confirmation.count);
+    expect(() =>
+      store.removeChallengeScope({
+        scope: 'all',
+        expectedCount: confirmation.count,
+        confirmationToken: confirmation.confirmationToken
+      })
+    ).toThrow(/changed/i);
+    expect(store.getSummary().count).toBe(1);
   });
 
   it('stores an immutable abyss snapshot with scenario version, target, source, and interventions', async () => {
@@ -523,3 +623,28 @@ describe('HistoryStore', () => {
     expect(store.queryStygian().map(({ id }) => id)).toEqual([valid.id]);
   });
 });
+
+function abyssEntryForScope(
+  scenarioId: string
+): Omit<AbyssPlanHistoryEntry, 'id' | 'createdAt'> {
+  const input = abyssInput();
+  return {
+    uid: input.uid,
+    scenarioId,
+    schemaVersion: 2,
+    dataVersion: input.dataVersion,
+    mode: 'spiral-abyss',
+    target: { floor: input.floor },
+    source: 'local-rules',
+    scenarioTrust: 'production',
+    scenarioFreshness: 'fresh',
+    scenarioNotCurrent: false,
+    interventions: {
+      lockedCharacterIds: [],
+      excludedCharacterIds: [],
+      preferences: input.preferences
+    },
+    characters: [],
+    plan: { ...validAbyssPlan(), scenarioId }
+  };
+}

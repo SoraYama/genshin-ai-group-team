@@ -7,12 +7,14 @@ import { HistoryPage } from './pages/History/HistoryPage';
 import { useProfileState } from './hooks/useProfileState';
 import { useI18n } from './i18n';
 import { AppShell, type AppView } from './components/AppShell';
+import type { HistoryRerunIntent } from './pages/History/history-presentation';
 
 export default function App() {
   const { t } = useI18n();
   const { state, loading, refresh } = useProfileState();
   const [view, setView] = useState<AppView>('roster');
   const [hasInitialized, setHasInitialized] = useState(false);
+  const [historyRerun, setHistoryRerun] = useState<HistoryRerunIntent | null>(null);
 
   useEffect(() => {
     if (hasInitialized || loading || !state) {
@@ -37,9 +39,19 @@ export default function App() {
           onCancel={state.profiles.length > 0 ? () => setView('roster') : undefined}
         />
       ) : view === 'advisor' ? (
-        <AdvisorPage state={state} onGotoOnboarding={() => setView('onboarding')} />
+        <AdvisorPage
+          state={state}
+          historyRerun={historyRerun}
+          onGotoOnboarding={() => setView('onboarding')}
+        />
       ) : view === 'history' ? (
-        <HistoryPage state={state} />
+        <HistoryPage
+          state={state}
+          onRerun={(intent) => {
+            setHistoryRerun(intent);
+            setView('advisor');
+          }}
+        />
       ) : (
         <RosterPage
           state={state}

@@ -22,6 +22,8 @@ import {
   theaterActPresentation,
   theaterEntityName
 } from './theater-presentation';
+import type { HistoryRerunIntent } from '../History/history-presentation';
+import { prepareTheaterRerun } from './history-rerun-prefill';
 
 const PROGRESS: TheaterAdvisorProgressStep[] = [
   'reading-roster',
@@ -32,12 +34,22 @@ const PROGRESS: TheaterAdvisorProgressStep[] = [
 ];
 const OBJECTIVES: TheaterObjective[] = ['eligibility-check', 'safe-clear', 'explore-hard'];
 
-export function TheaterWorkspace({ uid, onBack }: { uid: string; onBack: () => void }) {
+export function TheaterWorkspace({
+  uid,
+  historyRerun,
+  onBack
+}: {
+  uid: string;
+  historyRerun?: Extract<HistoryRerunIntent, { mode: 'imaginarium-theater' }>;
+  onBack: () => void;
+}) {
   const [view, setView] = useState<TheaterScenarioView | null>(null);
   const [profile, setProfile] = useState<PersistedProfile | null>(null);
   const [loadError, setLoadError] = useState('');
   const [target, setTarget] = useState<TheaterObjective>('safe-clear');
+  const [act, setAct] = useState<number | 'all'>('all');
   const [selectedOwned, setSelectedOwned] = useState<string[]>([]);
+  const [excludedOwned, setExcludedOwned] = useState<string[]>([]);
   const [selectedPools, setSelectedPools] = useState<Record<string, string[]>>({
     opening: [],
     trial: [],
@@ -55,6 +67,8 @@ export function TheaterWorkspace({ uid, onBack }: { uid: string; onBack: () => v
   const [result, setResult] = useState<TheaterAdvisorResult | null>(null);
   const activeCorrelation = useRef<string | null>(null);
   const sequence = useRef(0);
+  const appliedHistoryId = useRef<string | null>(null);
+  const [historyNotice, setHistoryNotice] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -65,15 +79,79 @@ export function TheaterWorkspace({ uid, onBack }: { uid: string; onBack: () => v
         setProfile(nextProfile);
         if (nextView.status === 'ready' && nextProfile) {
           const allowed = new Set(nextView.scenario.eligibility.elements);
-          setSelectedOwned(
-            nextProfile.characters
-              .filter(
-                ({ element, level }) =>
-                  allowed.has(element.toLowerCase() as never) &&
-                  (level ?? 0) >= nextView.scenario.eligibility.minimumLevel
-              )
-              .map(({ id }) => String(id))
-          );
+          const eligibleOwned = nextProfile.characters
+            .filter(
+              ({ element, level }) =>
+                allowed.has(element.toLowerCase() as never) &&
+                (level ?? 0) >= nextView.scenario.eligibility.minimumLevel
+            )
+            .map(({ id }) => String(id));
+          setSelectedOwned(eligibleOwned);
+          if (historyRerun && appliedHistoryId.current !== historyRerun.historyId) {
+            appliedHistoryId.current = historyRerun.historyId;
+            const prepared = prepareTheaterRerun(
+              historyRerun,
+              uid,
+              nextView.scenario.acts.map(({ act: number }) => number),
+              eligibleOwned
+            );
+            if (prepared.status === 'blocked') {
+              setHistoryNotice(
+                '这份旧方案属于另一个 UID；已保留旧方案查看，但没有带入当前账号。'
+              );
+            } else {
+              const pools = nextView.scenario.pools;
+              const retainPool = (ids: string[], candidates: Array<{ id: string }>) => {
+                const available = new Set(candidates.map(({ id }) => id));
+                return ids.filter((id) => available.has(id));
+              };
+              const selectedOpening = retainPool(
+                prepared.selectedOpeningCharacterIds,
+                pools.opening
+              );
+              const selectedTrial = retainPool(prepared.selectedTrialCharacterIds, pools.trial);
+              const selectedSpecial = retainPool(
+                prepared.selectedSpecialGuestCharacterIds,
+                pools.specialGuest
+              );
+              const selectedSupport = retainPool(
+                prepared.selectedSupportCharacterIds,
+                pools.support
+              );
+              const removedExternal =
+                prepared.selectedOpeningCharacterIds.length +
+                prepared.selectedTrialCharacterIds.length +
+                prepared.selectedSpecialGuestCharacterIds.length +
+                prepared.selectedSupportCharacterIds.length -
+                selectedOpening.length -
+                selectedTrial.length -
+                selectedSpecial.length -
+                selectedSupport.length;
+              setAct(prepared.act ?? 'all');
+              setTarget(prepared.target);
+              setPreferences(prepared.preferences);
+              setSelectedOwned(prepared.selectedCharacterIds);
+              setExcludedOwned(prepared.excludedCharacterIds);
+              setSelectedPools({
+                opening: selectedOpening,
+                trial: selectedTrial,
+                'special-guest': selectedSpecial,
+                support: selectedSupport
+              });
+              const changed = prepared.status === 'adjusted' || removedExternal > 0;
+              setHistoryNotice(
+                changed
+                  ? `已带入旧方案的可用选择；${
+                      prepared.targetUnavailable ? '原幕次已不在当前资料中；' : ''
+                    }${
+                      prepared.removedCharacterCount + removedExternal > 0
+                        ? `${prepared.removedCharacterCount + removedExternal} 名当前不可用的演员未带入；`
+                        : ''
+                    }请检查后再点击生成，不会自动调用智能服务。`
+                  : '已带入旧方案的幕次、目标、偏好、演员与外援选择。请检查后再点击生成，不会自动调用智能服务。'
+              );
+            }
+          }
         }
       })
       .catch(() => active && setLoadError('读取角色或剧诗资料失败。'));
@@ -84,7 +162,7 @@ export function TheaterWorkspace({ uid, onBack }: { uid: string; onBack: () => v
       activeCorrelation.current = null;
       if (correlation) void api.theaterAdvisor.cancel({ correlationId: correlation });
     };
-  }, [uid]);
+  }, [historyRerun, uid]);
 
   useEffect(
     () =>
@@ -111,9 +189,14 @@ export function TheaterWorkspace({ uid, onBack }: { uid: string; onBack: () => v
   }
   function toggleOwned(id: string) {
     if (running) return;
-    setSelectedOwned((previous) =>
-      previous.includes(id) ? previous.filter((item) => item !== id) : [...previous, id]
-    );
+    if (selectedOwned.includes(id)) {
+      setSelectedOwned((previous) => previous.filter((item) => item !== id));
+      setExcludedOwned((previous) => [...previous, id]);
+    } else if (excludedOwned.includes(id)) {
+      setExcludedOwned((previous) => previous.filter((item) => item !== id));
+    } else {
+      setSelectedOwned((previous) => [...previous, id]);
+    }
     invalidate();
   }
   function togglePool(source: string, id: string) {
@@ -149,10 +232,11 @@ export function TheaterWorkspace({ uid, onBack }: { uid: string; onBack: () => v
         uid,
         scenarioId: scenario.id,
         dataVersion: scenario.meta.dataVersion,
+        ...(act === 'all' ? {} : { act }),
         target,
         preferences,
         selectedCharacterIds: selectedOwned,
-        excludedCharacterIds: [],
+        excludedCharacterIds: excludedOwned,
         selectedOpeningCharacterIds: selectedPools.opening ?? [],
         selectedTrialCharacterIds: selectedPools.trial ?? [],
         selectedSpecialGuestCharacterIds: selectedPools['special-guest'] ?? [],
@@ -218,6 +302,12 @@ export function TheaterWorkspace({ uid, onBack }: { uid: string; onBack: () => v
         <div className="gta-theater-banner" role="status">
           <strong>演练资料，不代表本期</strong>
           <span>元素、演员、敌人与路线都是原创交互样例。</span>
+        </div>
+      )}
+      {historyNotice && (
+        <div className="gta-theater-banner is-history-prefill" role="status">
+          <strong>旧方案已准备</strong>
+          <span>{historyNotice}</span>
         </div>
       )}
       {scenarioReadOnly && (
@@ -308,13 +398,26 @@ export function TheaterWorkspace({ uid, onBack }: { uid: string; onBack: () => v
               type="button"
               disabled={running}
               aria-pressed={selectedOwned.includes(String(character.id))}
+              data-state={
+                selectedOwned.includes(String(character.id))
+                  ? 'selected'
+                  : excludedOwned.includes(String(character.id))
+                    ? 'excluded'
+                    : 'neutral'
+              }
               onClick={() => toggleOwned(String(character.id))}
             >
               <strong>{character.name}</strong>
               <small>
                 {elementLabel(character.element)}元素 · 等级 {character.level}
               </small>
-              <em>{selectedOwned.includes(String(character.id)) ? '优先纳入' : '可入场'}</em>
+              <em>
+                {selectedOwned.includes(String(character.id))
+                  ? '优先纳入'
+                  : excludedOwned.includes(String(character.id))
+                    ? '本次排除'
+                    : '可入场'}
+              </em>
             </button>
           ))}
         </div>
@@ -339,6 +442,33 @@ export function TheaterWorkspace({ uid, onBack }: { uid: string; onBack: () => v
             <span className="gta-page-kicker">本次目标</span>
             <h4 id="theater-controls-title">路线偏好</h4>
           </div>
+        </div>
+        <div className="gta-theater-objectives" role="group" aria-label="选择规划幕次">
+          <button
+            type="button"
+            aria-pressed={act === 'all'}
+            disabled={running}
+            onClick={() => {
+              setAct('all');
+              invalidate();
+            }}
+          >
+            全部幕次
+          </button>
+          {scenario.acts.map(({ act: number }) => (
+            <button
+              key={number}
+              type="button"
+              aria-pressed={act === number}
+              disabled={running}
+              onClick={() => {
+                setAct(number);
+                invalidate();
+              }}
+            >
+              第 {number} 幕
+            </button>
+          ))}
         </div>
         <div className="gta-theater-objectives" role="group" aria-label="选择剧诗目标">
           {OBJECTIVES.map((value) => (

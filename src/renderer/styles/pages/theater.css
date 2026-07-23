@@ -78,6 +78,10 @@
 .gta-theater-banner strong {
   color: #f1d89b;
 }
+.gta-theater-banner.is-history-prefill {
+  border-color: rgba(163, 190, 194, 0.5);
+  background: rgba(22, 49, 61, 0.86);
+}
 .gta-theater-eligibility,
 .gta-theater-cast,
 .gta-theater-roster,
@@ -206,6 +210,10 @@
 .gta-theater-owned button[aria-pressed='true'] {
   background: #f3ecd8;
   box-shadow: inset 3px 0 var(--gta-gold);
+}
+.gta-theater-owned button[data-state='excluded'] {
+  box-shadow: inset 3px 0 rgba(149, 76, 67, 0.72);
+  opacity: 0.7;
 }
 .gta-theater-owned small,
 .gta-theater-owned em {

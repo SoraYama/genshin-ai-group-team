@@ -29,9 +29,12 @@ import {
   stygianMechanicLabels,
   type StygianInterventionState
 } from './stygian-presentation';
+import type { HistoryRerunIntent } from '../History/history-presentation';
+import { prepareStygianRerun } from './history-rerun-prefill';
 
 interface StygianWorkspaceProps {
   uid: string;
+  historyRerun?: Extract<HistoryRerunIntent, { mode: 'stygian-onslaught' }>;
   onBack: () => void;
 }
 
@@ -52,7 +55,7 @@ const DEFAULT_PREFERENCES: PlayerPreferences = {
   noBuildChange: false
 };
 
-export function StygianWorkspace({ uid, onBack }: StygianWorkspaceProps) {
+export function StygianWorkspace({ uid, historyRerun, onBack }: StygianWorkspaceProps) {
   const [scenarioView, setScenarioView] = useState<StygianScenarioView | null>(null);
   const [profile, setProfile] = useState<PersistedProfile | null>(null);
   const [loadError, setLoadError] = useState('');
@@ -66,6 +69,8 @@ export function StygianWorkspace({ uid, onBack }: StygianWorkspaceProps) {
   const [running, setRunning] = useState(false);
   const sequence = useRef(0);
   const activeCorrelation = useRef<string | null>(null);
+  const appliedHistoryId = useRef<string | null>(null);
+  const [historyNotice, setHistoryNotice] = useState('');
 
   useEffect(() => {
     let active = true;
@@ -90,7 +95,45 @@ export function StygianWorkspace({ uid, onBack }: StygianWorkspaceProps) {
           const ordered = nextScenario.scenario.difficulties
             .slice()
             .sort((left, right) => left.order - right.order);
-          setDifficultyId(ordered[0]?.id ?? '');
+          const defaultDifficulty = ordered[0]?.id ?? '';
+          setDifficultyId(defaultDifficulty);
+          if (
+            historyRerun &&
+            appliedHistoryId.current !== historyRerun.historyId &&
+            nextProfile
+          ) {
+            appliedHistoryId.current = historyRerun.historyId;
+            const prepared = prepareStygianRerun(
+              historyRerun,
+              uid,
+              ordered.map(({ id }) => id),
+              nextProfile.characters.map(({ id }) => String(id))
+            );
+            if (prepared.status === 'blocked') {
+              setHistoryNotice(
+                '这份旧方案属于另一个 UID；已保留旧方案查看，但没有带入当前账号。'
+              );
+            } else {
+              setDifficultyId(prepared.difficultyId || defaultDifficulty);
+              setTarget(prepared.target);
+              setPreferences(prepared.preferences);
+              setInterventions({
+                ...Object.fromEntries(prepared.lockedCharacterIds.map((id) => [id, 'locked'])),
+                ...Object.fromEntries(prepared.excludedCharacterIds.map((id) => [id, 'excluded']))
+              });
+              setHistoryNotice(
+                prepared.status === 'adjusted'
+                  ? `已带入旧方案的可用选择；${
+                      prepared.targetUnavailable ? '原难度已不在当前资料中；' : ''
+                    }${
+                      prepared.removedCharacterCount > 0
+                        ? `${prepared.removedCharacterCount} 名已不在当前角色资料中的角色未带入；`
+                        : ''
+                    }请检查后再点击生成，不会自动调用智能服务。`
+                  : '已带入旧方案的难度、目标、偏好与角色选择。请检查后再点击生成，不会自动调用智能服务。'
+              );
+            }
+          }
         }
       })
       .catch(() => {
@@ -103,7 +146,7 @@ export function StygianWorkspace({ uid, onBack }: StygianWorkspaceProps) {
       activeCorrelation.current = null;
       if (correlationId) void api.stygianAdvisor.cancel({ correlationId });
     };
-  }, [uid]);
+  }, [historyRerun, uid]);
 
   useEffect(
     () =>
@@ -255,6 +298,12 @@ export function StygianWorkspace({ uid, onBack }: StygianWorkspaceProps) {
         <div className="gta-stygian-banner" role="status">
           <strong>演练资料，不代表本期</strong>
           <span>三名首领、六档难度与规则均为交互演示，不是正式服当前内容。</span>
+        </div>
+      )}
+      {historyNotice && (
+        <div className="gta-stygian-banner is-history-prefill" role="status">
+          <strong>旧方案已准备</strong>
+          <span>{historyNotice}</span>
         </div>
       )}
       {scenarioReadOnly && (

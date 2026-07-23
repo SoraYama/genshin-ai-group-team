@@ -1,4 +1,5 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { statSync } from 'node:fs';
 import Store from 'electron-store';
 import { z } from 'zod';
 import type {
@@ -9,6 +10,7 @@ import type {
   HistoryQueryResult,
   RecommendationHistoryEntry
 } from '../../shared/domain.js';
+import type { ScenarioMode } from '../../shared/domain.js';
 import {
   canonicalCharacterIdSchema,
   stygianAdvisorPlanSchema,
@@ -655,6 +657,114 @@ export class HistoryStore {
     this.store.set('entries', next);
     return before.length - next.length;
   }
+
+  getSummary(): { count: number; sizeBytes?: number; updatedAt?: string } {
+    const entries = this.store.get('entries');
+    const abyssPlans = this.readAbyssPlans();
+    const stygianPlans = this.readStygianPlans();
+    const theaterPlans = this.readTheaterPlans();
+    const allCreatedAt = [
+      ...entries,
+      ...abyssPlans,
+      ...stygianPlans,
+      ...theaterPlans
+    ].map(({ createdAt }) => createdAt);
+    let sizeBytes: number | undefined;
+    try {
+      if (this.store.path) sizeBytes = statSync(this.store.path).size;
+    } catch {
+      sizeBytes = undefined;
+    }
+    return {
+      count: entries.length + abyssPlans.length + stygianPlans.length + theaterPlans.length,
+      ...(sizeBytes === undefined ? {} : { sizeBytes }),
+      ...(allCreatedAt.length === 0
+        ? {}
+        : { updatedAt: allCreatedAt.sort((left, right) => right.localeCompare(left))[0] })
+    };
+  }
+
+  getChallengeScopeConfirmation(
+    scope:
+      | {
+          scope: 'group';
+          uid: string;
+          mode: ScenarioMode;
+          scenarioId: string;
+        }
+      | { scope: 'uid'; uid: string }
+      | { scope: 'all' }
+  ): { count: number; confirmationToken: string } {
+    const snapshot = this.challengeScopeSnapshot(scope);
+    return {
+      count: snapshot.ids.length,
+      confirmationToken: createHistoryConfirmationToken(snapshot.ids)
+    };
+  }
+
+  removeChallengeScope(
+    scope:
+      | {
+          scope: 'group';
+          uid: string;
+          mode: ScenarioMode;
+          scenarioId: string;
+          expectedCount: number;
+          confirmationToken: string;
+        }
+      | { scope: 'uid'; uid: string; expectedCount: number; confirmationToken: string }
+      | { scope: 'all'; expectedCount: number; confirmationToken: string }
+  ): number {
+    const snapshot = this.challengeScopeSnapshot(scope);
+    const confirmationToken = createHistoryConfirmationToken(snapshot.ids);
+    if (
+      snapshot.ids.length !== scope.expectedCount ||
+      confirmationToken !== scope.confirmationToken
+    ) {
+      throw new Error(
+        `History selection changed: expected ${scope.expectedCount}, found ${snapshot.ids.length}`
+      );
+    }
+    this.store.set('entries', snapshot.legacy.filter((entry) => !snapshot.matches(entry)));
+    this.store.set('abyssPlans', snapshot.abyss.filter((entry) => !snapshot.matches(entry)));
+    this.store.set('stygianPlans', snapshot.stygian.filter((entry) => !snapshot.matches(entry)));
+    this.store.set('theaterPlans', snapshot.theater.filter((entry) => !snapshot.matches(entry)));
+    return snapshot.ids.length;
+  }
+
+  private challengeScopeSnapshot(
+    scope:
+      | {
+          scope: 'group';
+          uid: string;
+          mode: ScenarioMode;
+          scenarioId: string;
+        }
+      | { scope: 'uid'; uid: string }
+      | { scope: 'all' }
+  ) {
+    const legacy = this.store.get('entries');
+    const abyss = this.readAbyssPlans();
+    const stygian = this.readStygianPlans();
+    const theater = this.readTheaterPlans();
+    const matches = (entry: { uid: string; mode?: ScenarioMode; scenarioId?: string }) => {
+      if (scope.scope === 'all') return true;
+      if (entry.uid !== scope.uid) return false;
+      if (scope.scope === 'uid') return true;
+      return entry.mode === scope.mode && entry.scenarioId === scope.scenarioId;
+    };
+    const ids = [
+      ...legacy.filter(matches).map(({ id }) => `legacy:${id}`),
+      ...abyss.filter(matches).map(({ id }) => `abyss:${id}`),
+      ...stygian.filter(matches).map(({ id }) => `stygian:${id}`),
+      ...theater.filter(matches).map(({ id }) => `theater:${id}`)
+    ].sort();
+    return { legacy, abyss, stygian, theater, matches, ids };
+  }
+}
+
+function createHistoryConfirmationToken(ids: string[]): string {
+  return createHash('sha256').update(JSON.stringify(ids)).digest('hex');
 }
 
 function normalizeAbyssPlanHistoryEntry(value: unknown): AbyssPlanHistoryEntry | undefined {

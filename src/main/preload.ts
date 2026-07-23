@@ -135,6 +135,8 @@ const api: RendererApi = {
     deleteStygian: (input) => invoke('history:stygian-delete', input),
     listTheater: (input) => invoke('history:theater-list', input),
     deleteTheater: (input) => invoke('history:theater-delete', input),
+    prepareDeleteScope: (input) => invoke('history:prepare-delete-scope', input),
+    deleteScope: (input) => invoke('history:delete-scope', input),
     clear: (input) => invoke('history:clear', input)
   },
   scenario: {
