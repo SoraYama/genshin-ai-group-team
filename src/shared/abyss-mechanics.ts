@@ -141,6 +141,13 @@ export function characterSatisfiesRequirement(
   );
 }
 
+export function localizedCapabilityRequirement(requirement: {
+  value: string;
+  known: boolean;
+}): string {
+  return requirement.known ? capabilityLabel(requirement.value) : '未识别要求（无法自动确认）';
+}
+
 export function abyssElementLabel(value: string): string {
   return ELEMENT_LABELS[value.toLowerCase()] ?? '其他';
 }

@@ -1,15 +1,24 @@
 import { randomUUID } from 'node:crypto';
 import Store from 'electron-store';
+import { z } from 'zod';
 import type {
   AbyssPlanHistoryEntry,
+  StygianPlanHistoryEntry,
   HistoryQueryOptions,
   HistoryQueryResult,
   RecommendationHistoryEntry
 } from '../../shared/domain.js';
+import {
+  canonicalCharacterIdSchema,
+  stygianAdvisorPlanSchema,
+  stygianRewardTargetSchema
+} from '../../shared/stygian-advisor.js';
+import { crossPartyReusePolicySchema, playerPreferencesSchema } from '../../shared/scenario-v2.js';
 
 interface HistoryStoreSchema {
   entries: RecommendationHistoryEntry[];
   abyssPlans: AbyssPlanHistoryEntry[];
+  stygianPlans: StygianPlanHistoryEntry[];
 }
 
 const MAX_ENTRIES = 200;
@@ -18,8 +27,96 @@ const MAX_LIMIT = 100;
 
 const DEFAULTS: HistoryStoreSchema = {
   entries: [],
-  abyssPlans: []
+  abyssPlans: [],
+  stygianPlans: []
 };
+
+const stygianHistoryEntrySchema = z
+  .object({
+    id: z.string().trim().min(8),
+    createdAt: z.iso.datetime({ offset: true }),
+    uid: z.string().regex(/^\d{9}$/),
+    scenarioId: z.string().trim().min(1),
+    schemaVersion: z.literal(2),
+    dataVersion: z.string().trim().min(1),
+    mode: z.literal('stygian-onslaught'),
+    difficultyId: z.string().trim().min(1),
+    difficultyName: z.string().trim().min(1),
+    phase: z.number().int().min(1).max(3).optional(),
+    target: stygianRewardTargetSchema,
+    reusePolicy: crossPartyReusePolicySchema,
+    source: z.enum(['smart-service', 'local-rules']),
+    scenarioTrust: z.enum(['production', 'development-sample']),
+    scenarioFreshness: z.enum(['fresh', 'expiring', 'stale', 'unknown']),
+    scenarioNotCurrent: z.boolean(),
+    interventions: z
+      .object({
+        lockedCharacterIds: z.array(canonicalCharacterIdSchema),
+        excludedCharacterIds: z.array(canonicalCharacterIdSchema),
+        preferences: playerPreferencesSchema
+      })
+      .strict(),
+    characters: z
+      .array(
+        z
+          .object({
+            id: canonicalCharacterIdSchema,
+            name: z.string().trim().min(1),
+            element: z.string().trim().min(1),
+            level: z.number().int().nonnegative().optional()
+          })
+          .strict()
+      )
+      .min(1),
+    plan: stygianAdvisorPlanSchema
+  })
+  .strict()
+  .superRefine((entry, context) => {
+    const characterIds = entry.characters.map(({ id }) => id);
+    if (new Set(characterIds).size !== characterIds.length) {
+      context.addIssue({
+        code: 'custom',
+        message: 'History character IDs must be unique',
+        path: ['characters']
+      });
+    }
+    const names = new Set(characterIds);
+    const missingNames = entry.plan.phases
+      .flatMap(({ team }) => team.characterIds)
+      .filter((id) => !names.has(id));
+    if (missingNames.length > 0) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Every planned character requires a stored display name',
+        path: ['characters']
+      });
+    }
+    if (
+      entry.plan.scenarioId !== entry.scenarioId ||
+      entry.plan.dataVersion !== entry.dataVersion
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'History plan identity must match its envelope',
+        path: ['plan']
+      });
+    }
+    if (entry.plan.reusePolicyAcknowledgement !== entry.reusePolicy.rule) {
+      context.addIssue({
+        code: 'custom',
+        message: 'History reuse acknowledgement must match its envelope',
+        path: ['reusePolicy']
+      });
+    }
+    const excluded = new Set(entry.interventions.excludedCharacterIds);
+    if (entry.interventions.lockedCharacterIds.some((id) => excluded.has(id))) {
+      context.addIssue({
+        code: 'custom',
+        message: 'History interventions cannot lock and exclude the same character',
+        path: ['interventions']
+      });
+    }
+  });
 
 export class HistoryStore {
   private readonly store: Store<HistoryStoreSchema>;
@@ -69,6 +166,42 @@ export class HistoryStore {
     if (next.length === entries.length) return false;
     this.store.set('abyssPlans', next);
     return true;
+  }
+
+  appendStygian(input: Omit<StygianPlanHistoryEntry, 'id' | 'createdAt'>): StygianPlanHistoryEntry {
+    const entry: StygianPlanHistoryEntry = structuredClone({
+      id: randomUUID(),
+      createdAt: new Date().toISOString(),
+      ...input
+    });
+    const next = [entry, ...this.readStygianPlans()].slice(0, MAX_ENTRIES);
+    this.store.set('stygianPlans', next);
+    return structuredClone(entry);
+  }
+
+  queryStygian(options: { uid?: string } = {}): StygianPlanHistoryEntry[] {
+    return structuredClone(
+      this.readStygianPlans().filter(
+        (entry) => options.uid === undefined || entry.uid === options.uid
+      )
+    );
+  }
+
+  removeStygianById(id: string): boolean {
+    const entries = this.readStygianPlans();
+    const next = entries.filter((entry) => entry.id !== id);
+    if (next.length === entries.length) return false;
+    this.store.set('stygianPlans', next);
+    return true;
+  }
+
+  private readStygianPlans(): StygianPlanHistoryEntry[] {
+    const stored = this.store.get('stygianPlans') as unknown;
+    if (!Array.isArray(stored)) return [];
+    return stored.flatMap((entry) => {
+      const parsed = stygianHistoryEntrySchema.safeParse(entry);
+      return parsed.success ? [structuredClone(parsed.data) as StygianPlanHistoryEntry] : [];
+    });
   }
 
   private readAbyssPlans(): AbyssPlanHistoryEntry[] {
@@ -221,9 +354,7 @@ function normalizeAbyssPlanHistoryEntry(value: unknown): AbyssPlanHistoryEntry |
       ? value.scenarioFreshness
       : 'unknown',
     scenarioNotCurrent:
-      typeof value.scenarioNotCurrent === 'boolean'
-        ? value.scenarioNotCurrent
-        : true
+      typeof value.scenarioNotCurrent === 'boolean' ? value.scenarioNotCurrent : true
   }) as AbyssPlanHistoryEntry;
 }
 

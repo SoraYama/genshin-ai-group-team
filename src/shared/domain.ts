@@ -306,6 +306,37 @@ export interface AbyssPlanHistoryEntry {
   plan: import('./scenario-v2.js').AbyssPlan;
 }
 
+export interface StygianPlanHistoryEntry {
+  id: string;
+  createdAt: string;
+  uid: string;
+  scenarioId: string;
+  schemaVersion: 2;
+  dataVersion: string;
+  mode: 'stygian-onslaught';
+  difficultyId: string;
+  difficultyName: string;
+  phase?: number;
+  target: import('./stygian-advisor.js').StygianRewardTarget;
+  reusePolicy: import('./scenario-v2.js').CrossPartyReusePolicy;
+  source: 'smart-service' | 'local-rules';
+  scenarioTrust: 'production' | 'development-sample';
+  scenarioFreshness: 'fresh' | 'expiring' | 'stale' | 'unknown';
+  scenarioNotCurrent: boolean;
+  interventions: {
+    lockedCharacterIds: string[];
+    excludedCharacterIds: string[];
+    preferences: import('./scenario-v2.js').PlayerPreferences;
+  };
+  characters: Array<{
+    id: string;
+    name: string;
+    element: string;
+    level?: number;
+  }>;
+  plan: import('./scenario-v2.js').StygianPlan;
+}
+
 export interface HistoryQueryOptions {
   uid?: string;
   source?: 'llm' | 'fallback';

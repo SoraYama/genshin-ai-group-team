@@ -1,0 +1,74 @@
+import { describe, expect, it } from 'vitest';
+
+import {
+  cycleStygianIntervention,
+  difficultyDisplayName,
+  difficultySuggestionLabel,
+  progressStepLabel,
+  reuseRuleSummary,
+  rewardTargetLabel,
+  scenarioVersionLabel,
+  stygianBossDisplayName,
+  stygianMechanicLabels
+} from '../../../src/renderer/pages/Advisor/stygian-presentation.js';
+import { stygianScenario } from '../services/stygian-test-fixtures.js';
+
+describe('Stygian presentation', () => {
+  it('renders localized difficulty, boss, goal, reuse, and progress labels without slugs', () => {
+    const scenario = stygianScenario();
+    expect(difficultyDisplayName(scenario.difficulties[5]!)).toBe('难度 6');
+    expect(difficultySuggestionLabel(scenario.difficulties, 'difficulty-4')).toBe('改选难度 4');
+    expect(
+      scenarioVersionLabel({
+        status: 'ready',
+        trust: 'production',
+        snapshotStatus: 'ready',
+        notCurrent: false,
+        usableForRecommendation: true,
+        freshness: 'fresh',
+        checkedAt: '2026-07-23T00:00:00.000Z',
+        scenario
+      })
+    ).toBe('本期正式资料');
+    expect(stygianBossDisplayName(scenario.phases[0]!.boss)).toBe('试炼首领1');
+    expect(rewardTargetLabel('primogems')).toBe('拿原石即可');
+    expect(rewardTargetLabel('high-reward')).toBe('冲高难奖励');
+    expect(rewardTargetLabel('dire-challenge')).toBe('挑战极限难度');
+    expect(reuseRuleSummary({ rule: 'forbidden', notes: [] })).toContain('不可复用');
+    expect(progressStepLabel('allocating-parties')).toBe('分配三队');
+    expect(
+      [
+        difficultyDisplayName(scenario.difficulties[5]!),
+        stygianBossDisplayName(scenario.phases[0]!.boss),
+        reuseRuleSummary(scenario.crossPartyReusePolicy)
+      ].join(' ')
+    ).not.toMatch(/difficulty-|boss-|forbidden|stygian/i);
+  });
+
+  it('shows only localized mechanics and does not invent absent time or energy targets', () => {
+    const phase = stygianScenario().phases[0]!;
+    phase.boss.mechanics.tags = [
+      'requires-capability:bow',
+      'requires-capability:teleport',
+      'internal-tag',
+      '需要快速破盾'
+    ];
+    expect(stygianMechanicLabels(phase)).toEqual([
+      '阶段 1 机制。',
+      '首领 1 修正。',
+      '硬机制要求：弓角色',
+      '硬机制要求：未识别要求（无法自动确认）',
+      '需要快速破盾'
+    ]);
+    phase.phaseModifiers = [];
+    phase.bossModifiers = [];
+    phase.boss.mechanics.tags = [];
+    expect(stygianMechanicLabels(phase)).toEqual([]);
+  });
+
+  it('cycles the accessible neutral, locked, and excluded intervention states', () => {
+    expect(cycleStygianIntervention('neutral')).toBe('locked');
+    expect(cycleStygianIntervention('locked')).toBe('excluded');
+    expect(cycleStygianIntervention('excluded')).toBe('neutral');
+  });
+});

@@ -823,9 +823,171 @@ test('runs the abyss-specific development-sample flow with accessible interventi
   await expect(page.getByRole('heading', { name: '深境螺旋方案' })).toBeVisible();
   await expect(page.getByText('演练资料', { exact: true }).first()).toBeVisible();
   await expect(page.locator('main')).not.toContainText(/development\.|development-sample/);
-  const abyssHistory = page
-    .getByRole('button', { name: /UID 123456789.*12 层.*全部房间/ })
-    .first();
+  const abyssHistory = page.getByRole('button', { name: /UID 123456789.*12 层.*全部房间/ }).first();
   await abyssHistory.click();
   await expect(page.getByRole('button', { name: '删除这条深境螺旋方案' })).toBeVisible();
+});
+
+test('plans three Stygian phases from the development scenario without leaking raw service keys', async () => {
+  test.setTimeout(60_000);
+  await electronApp.close();
+  const fetchedAt = '2026-07-23T00:00:00.000Z';
+  const elements = [
+    'Pyro',
+    'Hydro',
+    'Anemo',
+    'Geo',
+    'Cryo',
+    'Electro',
+    'Dendro',
+    'Hydro',
+    'Pyro',
+    'Cryo',
+    'Electro',
+    'Dendro',
+    'Anemo',
+    'Geo'
+  ];
+  const characters = elements.map((element, index) => ({
+    id: 2001 + index,
+    name: `危战角色${index + 1}`,
+    element,
+    rarity: index < 7 ? 5 : 4,
+    imageUrl: '',
+    level: 80 + (index % 10),
+    build: {
+      stats: {
+        hp: 17_000 + index * 800,
+        atk: 1_100 + index * 80,
+        def: 650 + index * 15,
+        critRate: 45 + index,
+        critDmg: 90 + index * 4,
+        energyRecharge: 110 + index * 6,
+        elementalMastery: index * 15
+      }
+    },
+    completeness: 'build',
+    missingFields: ['weapon', 'artifacts', 'talents'],
+    provenance: {
+      ownership: { source: 'miyoushe-list', fetchedAt },
+      stats: { source: 'enka', fetchedAt }
+    }
+  }));
+  await writeFile(
+    path.join(userDataDir, 'profiles.json'),
+    JSON.stringify({
+      schemaVersion: 2,
+      activeUid: '987654321',
+      profilesByUid: {
+        '987654321': {
+          schemaVersion: 2,
+          uid: '987654321',
+          nickname: '幽境演练账号',
+          source: 'merged',
+          fetchedAt,
+          characters,
+          coverage: {
+            expectedOwnedCount: 14,
+            ownedCount: 14,
+            detailedCount: 0,
+            buildCount: 14,
+            statsCount: 14,
+            enkaShowcaseCount: 14,
+            missingDetailCount: 14,
+            partial: true
+          }
+        }
+      }
+    })
+  );
+  await launchApp();
+  await page.getByRole('button', { name: '挑战配队' }).click();
+  await page.getByRole('button', { name: /幽境危战/ }).click();
+
+  await expect(page.getByRole('heading', { name: '幽境危战作战台' })).toBeVisible();
+  await expect(page.getByText('演练资料，不代表本期')).toBeVisible();
+  await expect(page.getByRole('group', { name: '选择六档难度' }).getByRole('button')).toHaveCount(
+    6
+  );
+  await expect(page.getByRole('group', { name: '选择奖励目标' }).getByRole('button')).toHaveText([
+    '拿原石即可',
+    '冲高难奖励',
+    '挑战极限难度'
+  ]);
+  for (const boss of ['演示首领一', '演示首领二', '演示首领三']) {
+    await expect(page.getByRole('heading', { name: boss })).toBeVisible();
+  }
+  await expect(page.getByText('资料未标注时间、能量或额外增益。')).toBeVisible();
+  await expect(page.locator('main')).not.toContainText(
+    /Demo Boss|Demo Difficulty|development\.|development-sample|dire-challenge/
+  );
+  await expect(page.getByRole('button', { name: '取消生成' })).toBeDisabled();
+
+  await page.setViewportSize({ width: 1024, height: 768 });
+  const narrowPhasePositions = await page
+    .locator('.gta-stygian-phases > article')
+    .evaluateAll((nodes) => nodes.map((node) => Math.round(node.getBoundingClientRect().top)));
+  expect(new Set(narrowPhasePositions).size).toBe(3);
+  await page.getByRole('heading', { name: '幽境危战作战台' }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(tmpdir(), 'gta-m5-stygian-input-1024x768.png') });
+
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  const widePhasePositions = await page
+    .locator('.gta-stygian-phases > article')
+    .evaluateAll((nodes) => nodes.map((node) => Math.round(node.getBoundingClientRect().top)));
+  expect(new Set(widePhasePositions).size).toBe(1);
+  await page.getByRole('heading', { name: '幽境危战作战台' }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(tmpdir(), 'gta-m5-stygian-input-1600x1000.png') });
+
+  for (const preference of ['操作简单', '生存优先', '低练度', '不换装备']) {
+    const chip = page.getByRole('button', { name: preference });
+    await chip.click();
+    await expect(chip).toHaveAttribute('aria-pressed', 'true');
+  }
+  const firstCharacter = page.getByRole('button', { name: /危战角色1，当前：未设置/ });
+  await firstCharacter.click();
+  await expect(page.getByRole('button', { name: /危战角色1，当前：锁定/ })).toBeVisible();
+  const lastCharacter = page.getByRole('button', { name: /危战角色14，当前：未设置/ });
+  await lastCharacter.click();
+  await page.getByRole('button', { name: /危战角色14，当前：锁定/ }).click();
+  await expect(page.getByRole('button', { name: /危战角色14，当前：排除/ })).toBeVisible();
+
+  await page.getByRole('button', { name: '演示难度 6' }).click();
+  await page.getByRole('button', { name: '挑战极限难度' }).click();
+  await page.getByRole('button', { name: '生成三阶段方案' }).click();
+  await expect(page.getByRole('heading', { name: '三队已按当期规则分配' })).toBeVisible();
+  const resultCharacters = await page
+    .locator('[data-stygian-result-character-id]')
+    .evaluateAll((nodes) =>
+      nodes.map((node) => node.getAttribute('data-stygian-result-character-id'))
+    );
+  expect(resultCharacters).toHaveLength(12);
+  expect(new Set(resultCharacters).size).toBe(12);
+  await expect(page.getByText('资料或练度证据不足，建议先降档')).toBeVisible();
+  await expect(page.getByRole('button', { name: /改选.*难度/ })).toBeVisible();
+  await expect(page.locator('.gta-stygian-progress li')).toHaveCount(5);
+  await expect(page.locator('.gta-stygian-progress li').last()).toHaveClass(/is-done/);
+  await expect(page.locator('main')).not.toContainText(/必过|保证通关/);
+  await expectNoForbiddenPlayerTerms();
+  await expectPageFitsEveryViewport('Stygian input and result');
+
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.getByRole('heading', { name: '三队已按当期规则分配' }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(tmpdir(), 'gta-m5-stygian-result-1024x768.png') });
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await page.getByRole('heading', { name: '三队已按当期规则分配' }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(tmpdir(), 'gta-m5-stygian-result-1600x1000.png') });
+
+  await page.getByRole('button', { name: '历史记录' }).click();
+  await expect(page.getByRole('heading', { name: '幽境危战方案' })).toBeVisible();
+  await expect(page.getByText('演练资料', { exact: true }).first()).toBeVisible();
+  const stygianHistory = page
+    .getByRole('button', { name: /UID 987654321.*演示难度 6.*挑战极限难度/ })
+    .first();
+  await stygianHistory.click();
+  await expect(page.getByRole('heading', { name: '第 1 阶段' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '删除这条幽境危战方案' })).toBeVisible();
+  await expect(page.locator('main')).not.toContainText(
+    /development\.|development-sample|dire-challenge/
+  );
 });

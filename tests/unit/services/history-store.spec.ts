@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { RecommendationResult } from '../../../src/shared/domain.js';
 import { ABYSS_CHARACTERS, abyssInput, validAbyssPlan } from './abyss-test-fixtures.js';
+import { STYGIAN_CHARACTERS, stygianInput, validStygianPlan } from './stygian-test-fixtures.js';
 
 const storeState = new Map<string, unknown>();
 
@@ -321,5 +322,102 @@ describe('HistoryStore', () => {
 
     expect(store.query().items[0]?.enemyNames).toEqual(['legacy-enemy']);
     expect(store.queryAbyss({ uid: '111111111' })).toHaveLength(1);
+  });
+
+  it('stores an immutable Stygian snapshot with difficulty, goal, reuse rule, trust, and three-team names', async () => {
+    const { HistoryStore } = await import('../../../src/main/services/history-store.js');
+    const store = new HistoryStore();
+    const input = stygianInput({
+      lockedCharacterIds: ['1001'],
+      target: 'dire-challenge',
+      phase: 2
+    });
+    const plan = validStygianPlan();
+    const entry = store.appendStygian({
+      uid: input.uid,
+      scenarioId: input.scenarioId,
+      schemaVersion: 2,
+      dataVersion: input.dataVersion,
+      mode: 'stygian-onslaught',
+      difficultyId: input.difficultyId,
+      difficultyName: '难度 6',
+      phase: input.phase,
+      target: input.target,
+      reusePolicy: { rule: 'forbidden', notes: [] },
+      source: 'local-rules',
+      scenarioTrust: 'production',
+      scenarioFreshness: 'fresh',
+      scenarioNotCurrent: false,
+      interventions: {
+        lockedCharacterIds: input.lockedCharacterIds,
+        excludedCharacterIds: input.excludedCharacterIds,
+        preferences: input.preferences
+      },
+      characters: STYGIAN_CHARACTERS.slice(0, 12).map(({ id, name, element, level }) => ({
+        id: String(id),
+        name,
+        element,
+        level
+      })),
+      plan
+    });
+
+    plan.phases[0]!.team.characterIds[0] = '9999';
+    input.lockedCharacterIds.push('1002');
+    const stored = store.queryStygian({ uid: input.uid })[0];
+    expect(stored).toMatchObject({
+      mode: 'stygian-onslaught',
+      difficultyId: 'difficulty-6',
+      difficultyName: '难度 6',
+      target: 'dire-challenge',
+      phase: 2,
+      reusePolicy: { rule: 'forbidden' },
+      scenarioTrust: 'production'
+    });
+    expect(stored?.plan.phases[0]?.team.characterIds[0]).toBe('1001');
+    expect(stored?.interventions.lockedCharacterIds).toEqual(['1001']);
+    expect(stored?.characters.map(({ name }) => name)).toContain('幽境角色1');
+    expect(store.removeStygianById(entry.id)).toBe(true);
+    expect(store.queryStygian()).toEqual([]);
+  });
+
+  it('drops corrupt Stygian history records before they can reach the renderer', async () => {
+    const { HistoryStore } = await import('../../../src/main/services/history-store.js');
+    const store = new HistoryStore();
+    const input = stygianInput();
+    const valid = store.appendStygian({
+      uid: input.uid,
+      scenarioId: input.scenarioId,
+      schemaVersion: 2,
+      dataVersion: input.dataVersion,
+      mode: 'stygian-onslaught',
+      difficultyId: input.difficultyId,
+      difficultyName: '难度 6',
+      target: input.target,
+      reusePolicy: { rule: 'forbidden', notes: [] },
+      source: 'local-rules',
+      scenarioTrust: 'production',
+      scenarioFreshness: 'fresh',
+      scenarioNotCurrent: false,
+      interventions: {
+        lockedCharacterIds: [],
+        excludedCharacterIds: [],
+        preferences: input.preferences
+      },
+      characters: STYGIAN_CHARACTERS.slice(0, 12).map(({ id, name, element, level }) => ({
+        id: String(id),
+        name,
+        element,
+        level
+      })),
+      plan: validStygianPlan()
+    });
+    storeState.set('stygianPlans', [
+      { ...valid, reusePolicy: undefined },
+      { ...valid, target: 'internal-target' },
+      { ...valid, plan: { ...valid.plan, phases: [] } },
+      { ...valid, characters: valid.characters.slice(1) }
+    ]);
+    expect(store.queryStygian()).toEqual([]);
   });
 });

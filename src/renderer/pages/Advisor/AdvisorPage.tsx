@@ -7,6 +7,7 @@ import { ChallengeModeEntry, type ChallengeMode } from '../../components/Challen
 import { GtaButton } from '../../components/ui/GtaButton';
 import { OrnamentPanel } from '../../components/ui/OrnamentPanel';
 import { AbyssWorkspace } from './AbyssWorkspace';
+import { StygianWorkspace } from './StygianWorkspace';
 
 interface AdvisorPageProps {
   state: ProfileStateView;
@@ -39,6 +40,7 @@ export function AdvisorPage({ state, onGotoOnboarding }: AdvisorPageProps) {
   const activeUid = state.activeUid;
   const [mode, setMode] = useState<Mode>('single');
   const [challengeMode, setChallengeMode] = useState<ChallengeMode>('spiral-abyss');
+  const [workspaceOpen, setWorkspaceOpen] = useState(true);
   const [singleEnemies, setSingleEnemies] = useState(DEFAULT_ENEMIES_SINGLE);
   const [singlePref, setSinglePref] = useState(() => t('advisor.defaultPreference'));
   const [leftEnemies, setLeftEnemies] = useState('');
@@ -163,6 +165,10 @@ export function AdvisorPage({ state, onGotoOnboarding }: AdvisorPageProps) {
   }
 
   const isRunning = run.kind === 'running';
+  const selectChallengeMode = (next: ChallengeMode) => {
+    setChallengeMode(next);
+    setWorkspaceOpen(true);
+  };
 
   if (!activeUid) {
     return (
@@ -202,7 +208,7 @@ export function AdvisorPage({ state, onGotoOnboarding }: AdvisorPageProps) {
           title={t('advisor.mode.abyss.title')}
           summary={t('advisor.mode.abyss.summary')}
           selected={challengeMode === 'spiral-abyss'}
-          onSelect={setChallengeMode}
+          onSelect={selectChallengeMode}
         />
         <ChallengeModeEntry
           mode="imaginarium-theater"
@@ -210,7 +216,7 @@ export function AdvisorPage({ state, onGotoOnboarding }: AdvisorPageProps) {
           title={t('advisor.mode.theater.title')}
           summary={t('advisor.mode.theater.summary')}
           selected={challengeMode === 'imaginarium-theater'}
-          onSelect={setChallengeMode}
+          onSelect={selectChallengeMode}
         />
         <ChallengeModeEntry
           mode="stygian-onslaught"
@@ -218,12 +224,23 @@ export function AdvisorPage({ state, onGotoOnboarding }: AdvisorPageProps) {
           title={t('advisor.mode.stygian.title')}
           summary={t('advisor.mode.stygian.summary')}
           selected={challengeMode === 'stygian-onslaught'}
-          onSelect={setChallengeMode}
+          onSelect={selectChallengeMode}
         />
       </div>
 
-      {challengeMode === 'spiral-abyss' ? (
+      {workspaceOpen && challengeMode === 'spiral-abyss' ? (
         <AbyssWorkspace uid={activeUid} />
+      ) : workspaceOpen && challengeMode === 'stygian-onslaught' ? (
+        <StygianWorkspace uid={activeUid} onBack={() => setWorkspaceOpen(false)} />
+      ) : !workspaceOpen ? (
+        <div className="gta-mode-status" aria-live="polite">
+          <span className="gta-mode-status-mark" aria-hidden="true">
+            ✦
+          </span>
+          <span>
+            <strong>已返回挑战入口</strong>从上方选择要规划的玩法。
+          </span>
+        </div>
       ) : (
         <div className="gta-mode-status" aria-live="polite">
           <span className="gta-mode-status-mark" aria-hidden="true">

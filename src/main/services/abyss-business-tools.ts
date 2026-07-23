@@ -8,10 +8,14 @@ import {
   localizedMechanicTerm,
   parseRequiredCapabilities
 } from '../../shared/abyss-mechanics.js';
+import type { CharacterKnowledgeReader } from '../../shared/character-knowledge.js';
 import {
-  ALL_CHARACTER_KNOWLEDGE_FIELDS,
-  type CharacterKnowledgeReader
-} from '../../shared/character-knowledge.js';
+  UNKNOWN_CHARACTER_KNOWLEDGE,
+  characterKnowledgeView,
+  errorToolResult,
+  redactedProfileView,
+  textToolResult
+} from './advisor-business-tool-common.js';
 
 export const ABYSS_MCP_TOOL_NAMES = [
   'mcp__genshin__read_profile_cache',
@@ -51,7 +55,7 @@ export interface AbyssBusinessToolsOptions {
 export function createAbyssBusinessTools(options: AbyssBusinessToolsOptions) {
   const maxCharacters = Math.min(Math.max(options.maxCharacters ?? 128, 1), 128);
   const now = options.now ?? Date.now;
-  const knowledge = options.knowledge ?? UNKNOWN_KNOWLEDGE_READER;
+  const knowledge = options.knowledge ?? UNKNOWN_CHARACTER_KNOWLEDGE;
   const auditContext = options.auditContext ?? {
     correlationId: 'unscoped',
     scenarioId: options.getScenario().id,
@@ -77,7 +81,7 @@ export function createAbyssBusinessTools(options: AbyssBusinessToolsOptions) {
         parameterSummary,
         issueCodes: []
       });
-      return textResult(value);
+      return textToolResult(value);
     } catch (error) {
       options.log?.({
         tool: toolName,
@@ -89,7 +93,7 @@ export function createAbyssBusinessTools(options: AbyssBusinessToolsOptions) {
         parameterSummary,
         issueCodes: [failureIssueCode]
       });
-      return errorResult(error instanceof Error ? error.message : 'Tool request failed');
+      return errorToolResult(error instanceof Error ? error.message : 'Tool request failed');
     }
   };
 
@@ -107,20 +111,7 @@ export function createAbyssBusinessTools(options: AbyssBusinessToolsOptions) {
           'PROFILE_NOT_FOUND',
           () => {
             if (!profile) throw new Error('Profile not found');
-            return {
-              uid: profile.uid,
-              fetchedAt: profile.fetchedAt,
-              coverage: profile.coverage,
-              characters: profile.characters.slice(0, maxCharacters).map((character) => ({
-                id: String(character.id),
-                name: character.name,
-                element: character.element,
-                rarity: character.rarity,
-                level: character.level,
-                completeness: character.completeness,
-                energyRecharge: character.build?.stats?.energyRecharge
-              }))
-            };
+            return redactedProfileView(profile, maxCharacters);
           }
         );
       },
@@ -171,33 +162,12 @@ export function createAbyssBusinessTools(options: AbyssBusinessToolsOptions) {
           characterIds.length,
           { requestedCount: characterIds.length },
           'KNOWLEDGE_LOOKUP_FAILED',
-          () => ({
-            knowledgeVersion: knowledge.version,
-            coverage: knowledge.coverageFor(characterIds),
-            characters: characterIds.map((id) => knowledge.lookup(id))
-          })
+          () => characterKnowledgeView(knowledge, characterIds)
         ),
       { annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } }
     )
   ] as const;
 }
-
-const UNKNOWN_KNOWLEDGE_READER: CharacterKnowledgeReader = {
-  version: 'unavailable',
-  coverage: { characterCount: 0, notes: '角色知识资料不可用。' },
-  lookup: (id) => ({
-    status: 'unknown',
-    id,
-    knowledgeVersion: 'unavailable',
-    unknownFields: [...ALL_CHARACTER_KNOWLEDGE_FIELDS]
-  }),
-  coverageFor: (characterIds) => ({
-    knowledgeVersion: 'unavailable',
-    requested: new Set(characterIds).size,
-    known: 0,
-    unknownCharacterIds: Array.from(new Set(characterIds))
-  })
-};
 
 export function createAbyssBusinessMcpServer(options: AbyssBusinessToolsOptions) {
   return createSdkMcpServer({
@@ -237,15 +207,4 @@ function localizedWave(
 function elementLabel(value: string): string {
   if (value === 'untyped') return '无属性';
   return abyssElementLabel(value);
-}
-
-function textResult(value: unknown) {
-  return { content: [{ type: 'text' as const, text: JSON.stringify(value) }] };
-}
-
-function errorResult(message: string) {
-  return {
-    content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }],
-    isError: true
-  };
 }

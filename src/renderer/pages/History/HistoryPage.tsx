@@ -4,10 +4,12 @@ import type {
   AbyssPlanHistoryEntry,
   HistoryQueryResult,
   ProfileStateView,
-  RecommendationHistoryEntry
+  RecommendationHistoryEntry,
+  StygianPlanHistoryEntry
 } from '../../../shared/domain';
 import { ButtonGlyph } from '../../design/Icons';
 import { localizeError, useI18n } from '../../i18n';
+import { rewardTargetLabel, reuseRuleSummary } from '../Advisor/stygian-presentation';
 
 interface HistoryPageProps {
   state: ProfileStateView;
@@ -45,6 +47,7 @@ export function HistoryPage({ state }: HistoryPageProps) {
   });
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [abyssPlans, setAbyssPlans] = useState<AbyssPlanHistoryEntry[]>([]);
+  const [stygianPlans, setStygianPlans] = useState<StygianPlanHistoryEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const filtersRef = useRef(filters);
@@ -54,7 +57,7 @@ export function HistoryPage({ state }: HistoryPageProps) {
       setError(null);
       setLoading(true);
       try {
-        const [result, nextAbyssPlans] = await Promise.all([
+        const [result, nextAbyssPlans, nextStygianPlans] = await Promise.all([
           api.history.list({
             uid: next.scope === 'active' ? state.activeUid : undefined,
             source: next.source === 'all' ? undefined : next.source,
@@ -66,11 +69,27 @@ export function HistoryPage({ state }: HistoryPageProps) {
           }),
           api.history.listAbyss({
             uid: next.scope === 'active' ? state.activeUid : undefined
+          }),
+          api.history.listStygian({
+            uid: next.scope === 'active' ? state.activeUid : undefined
           })
         ]);
         setQuery(result);
         setAbyssPlans(
           nextAbyssPlans.filter((entry) => {
+            const sourceMatches =
+              next.source === 'all' ||
+              (next.source === 'llm' && entry.source === 'smart-service') ||
+              (next.source === 'fallback' && entry.source === 'local-rules');
+            const timestamp = Date.parse(entry.createdAt);
+            const fromMatches =
+              !next.fromDate || timestamp >= Date.parse(`${next.fromDate}T00:00:00`);
+            const toMatches = !next.toDate || timestamp <= Date.parse(`${next.toDate}T23:59:59`);
+            return sourceMatches && fromMatches && toMatches && !next.enemyKeyword.trim();
+          })
+        );
+        setStygianPlans(
+          nextStygianPlans.filter((entry) => {
             const sourceMatches =
               next.source === 'all' ||
               (next.source === 'llm' && entry.source === 'smart-service') ||
@@ -123,6 +142,12 @@ export function HistoryPage({ state }: HistoryPageProps) {
 
   async function deleteAbyssEntry(id: string) {
     await api.history.deleteAbyss({ id });
+    if (expandedId === id) setExpandedId(null);
+    await load(filters, query.offset);
+  }
+
+  async function deleteStygianEntry(id: string) {
+    await api.history.deleteStygian({ id });
     if (expandedId === id) setExpandedId(null);
     await load(filters, query.offset);
   }
@@ -288,6 +313,27 @@ export function HistoryPage({ state }: HistoryPageProps) {
         )}
       </section>
 
+      <section className="gta-history-abyss" aria-labelledby="stygian-history-title">
+        <h3 id="stygian-history-title">幽境危战方案</h3>
+        {stygianPlans.length === 0 ? (
+          <p className="gta-hint">当前筛选下没有已保存的幽境危战三阶段方案。</p>
+        ) : (
+          <ul className="gta-history-list">
+            {stygianPlans.map((entry) => (
+              <StygianHistoryListItem
+                key={entry.id}
+                entry={entry}
+                expanded={expandedId === entry.id}
+                onToggle={() =>
+                  setExpandedId((previous) => (previous === entry.id ? null : entry.id))
+                }
+                onDelete={() => void deleteStygianEntry(entry.id)}
+              />
+            ))}
+          </ul>
+        )}
+      </section>
+
       <p className="gta-history-stats">
         <span>{t('history.total', { count: query.total })}</span>
         <span>
@@ -339,6 +385,66 @@ export function HistoryPage({ state }: HistoryPageProps) {
         </button>
       </div>
     </section>
+  );
+}
+
+function StygianHistoryListItem({
+  entry,
+  expanded,
+  onToggle,
+  onDelete
+}: {
+  entry: StygianPlanHistoryEntry;
+  expanded: boolean;
+  onToggle: () => void;
+  onDelete: () => void;
+}) {
+  const characters = new Map(entry.characters.map((character) => [character.id, character]));
+  const teamNames = (ids: string[]) =>
+    ids.map((id) => characters.get(id)?.name ?? '未知角色').join(' · ');
+  return (
+    <li className={expanded ? 'gta-history-entry is-expanded' : 'gta-history-entry'}>
+      <button type="button" className="gta-history-summary" onClick={onToggle}>
+        <span className="gta-history-time">{formatTime(entry.createdAt)}</span>
+        <span
+          className={entry.source === 'smart-service' ? 'gta-tag is-llm' : 'gta-tag is-fallback'}
+        >
+          {entry.source === 'smart-service' ? '智能服务' : '本地规则'}
+        </span>
+        {entry.scenarioTrust === 'development-sample' && (
+          <span className="gta-tag is-accent">演练资料</span>
+        )}
+        <span className="gta-history-uid">UID {entry.uid}</span>
+        <span className="gta-history-enemies">
+          {entry.difficultyName} · {rewardTargetLabel(entry.target)} ·{' '}
+          {entry.phase === undefined ? '' : `重点第 ${entry.phase} 阶段 · `}
+          {entry.scenarioTrust === 'development-sample' ? '演练版本' : '正式版本'}
+        </span>
+      </button>
+      {expanded && (
+        <div className="gta-history-body">
+          <p className="gta-hint" style={{ margin: 0 }}>
+            {reuseRuleSummary(entry.reusePolicy)}
+          </p>
+          {entry.plan.phases
+            .slice()
+            .sort((left, right) => left.phase - right.phase)
+            .map((phase) => (
+              <article key={phase.phase} className="gta-team-card">
+                <h4>第 {phase.phase} 阶段</h4>
+                <p>{teamNames(phase.team.characterIds)}</p>
+                <p>{phase.team.purpose}</p>
+                <p>{phase.team.rotationNotes.join('；')}</p>
+              </article>
+            ))}
+          <div className="gta-actions">
+            <button type="button" className="gta-btn gta-btn--danger" onClick={onDelete}>
+              删除这条幽境危战方案
+            </button>
+          </div>
+        </div>
+      )}
+    </li>
   );
 }
 

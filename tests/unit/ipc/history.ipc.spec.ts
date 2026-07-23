@@ -21,7 +21,9 @@ describe('history IPC abyss plans', () => {
       removeById: vi.fn(),
       removeMany: vi.fn(),
       queryAbyss: vi.fn().mockReturnValue([{ id: 'abyss-history-id' }]),
-      removeAbyssById: vi.fn().mockReturnValue(true)
+      removeAbyssById: vi.fn().mockReturnValue(true),
+      queryStygian: vi.fn().mockReturnValue([{ id: 'stygian-history-id' }]),
+      removeStygianById: vi.fn().mockReturnValue(true)
     };
     registerHistoryIpc({ history: history as never });
 
@@ -33,5 +35,13 @@ describe('history IPC abyss plans', () => {
       handlers.get('history:abyss-delete')?.({ id: 'abyss-history-id' })
     ).resolves.toEqual({ ok: true });
     expect(history.removeAbyssById).toHaveBeenCalledWith('abyss-history-id');
+    await expect(handlers.get('history:stygian-list')?.({ uid: '123456789' })).resolves.toEqual([
+      { id: 'stygian-history-id' }
+    ]);
+    expect(history.queryStygian).toHaveBeenCalledWith({ uid: '123456789' });
+    await expect(
+      handlers.get('history:stygian-delete')?.({ id: 'stygian-history-id' })
+    ).resolves.toEqual({ ok: true });
+    expect(history.removeStygianById).toHaveBeenCalledWith('stygian-history-id');
   });
 });

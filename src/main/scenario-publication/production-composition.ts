@@ -4,6 +4,7 @@ import path from 'node:path';
 import { z } from 'zod';
 
 import type { ScenarioPublicationSnapshot } from './contracts.js';
+import type { ScenarioModeV2 } from './contracts.js';
 import { HttpScenarioPublicationReader, type ScenarioHttpRequest } from './readers.js';
 import { ScenePublicationService } from './service.js';
 import { FileScenarioPublicationStorage } from './storage.js';
@@ -27,7 +28,7 @@ const packagedConfigSchema = z.discriminatedUnion('enabled', [
 export type ProductionScenarioPublicationSource =
   | {
       status: 'configured';
-      refresh: (mode: 'spiral-abyss') => Promise<ScenarioPublicationSnapshot>;
+      refresh: (mode: ScenarioModeV2) => Promise<ScenarioPublicationSnapshot>;
     }
   | {
       status: 'unavailable';

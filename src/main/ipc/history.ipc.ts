@@ -83,6 +83,28 @@ export function registerHistoryIpc({ history }: HistoryIpcDeps): void {
     return { ok: history.removeAbyssById(parsed.data.id) };
   });
 
+  registerHandler('history:stygian-list', async (payload) => {
+    const parsed = abyssListSchema.safeParse(payload ?? {});
+    if (!parsed.success) {
+      throw new IpcError(
+        IpcErrorCodes.ValidationFailed,
+        parsed.error.issues.map((issue) => issue.message).join('; ')
+      );
+    }
+    return history.queryStygian(parsed.data);
+  });
+
+  registerHandler('history:stygian-delete', async (payload) => {
+    const parsed = deleteSchema.safeParse(payload);
+    if (!parsed.success) {
+      throw new IpcError(
+        IpcErrorCodes.ValidationFailed,
+        parsed.error.issues.map((issue) => issue.message).join('; ')
+      );
+    }
+    return { ok: history.removeStygianById(parsed.data.id) };
+  });
+
   registerHandler('history:clear', async (payload) => {
     const parsed = clearSchema.safeParse(payload);
     if (!parsed.success) {
