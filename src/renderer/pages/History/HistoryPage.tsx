@@ -509,7 +509,9 @@ function StygianDetails({
           entry.phaseGuidance.map((guidance) => (
             <article key={guidance.phase}>
               <strong>
-                {isEnglish ? `Phase ${guidance.phase}` : `第 ${guidance.phase} 阶段`}
+                {isEnglish
+                  ? `Phase ${guidance.phase} guidance`
+                  : `第 ${guidance.phase} 阶段依据`}
               </strong>
               <DetailList
                 label={isEnglish ? 'Mechanism basis' : '机制依据'}
