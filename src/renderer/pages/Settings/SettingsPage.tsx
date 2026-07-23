@@ -9,7 +9,12 @@ import type {
 import { DEFAULT_BASE_URL, DEFAULT_MODEL } from '../../../shared/domain';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { GtaDialog } from '../../components/ui/GtaDialog';
-import { localizeError, useI18n } from '../../i18n';
+import {
+  destructiveErrorRecovery,
+  getErrorCode,
+  localizeError,
+  useI18n
+} from '../../i18n';
 import { api } from '../../ipc';
 import { dataClearCopy, formatStorageSize } from './settings-presentation';
 import { SettingsLoadState } from './SettingsLoadState';
@@ -54,6 +59,8 @@ export function SettingsPage({
   const [updateActionError, setUpdateActionError] = useState('');
   const [pendingClear, setPendingClear] = useState<PendingClear | null>(null);
   const [dataError, setDataError] = useState('');
+  const [dataErrorCode, setDataErrorCode] = useState('');
+  const [dataRetryScope, setDataRetryScope] = useState<DataManagementScope | null>(null);
   const [loadFailure, setLoadFailure] = useState('');
   const cancelClearRef = useRef<HTMLButtonElement>(null);
 
@@ -128,11 +135,15 @@ export function SettingsPage({
 
   async function prepareClear(scope: DataManagementScope) {
     setDataError('');
+    setDataErrorCode('');
+    setDataRetryScope(null);
     try {
       const confirmation = await api.dataManagement.prepareClear({ scope });
       setPendingClear({ scope, ...confirmation });
     } catch (error) {
       setDataError(localizeError(error, locale, t, 'common.error.validation'));
+      setDataErrorCode(getErrorCode(error));
+      setDataRetryScope(scope);
     }
   }
 
@@ -141,6 +152,8 @@ export function SettingsPage({
     const request = pendingClear;
     setPendingClear(null);
     setDataError('');
+    setDataErrorCode('');
+    setDataRetryScope(null);
     try {
       const result = await api.dataManagement.clear({
         scope: request.scope,
@@ -156,6 +169,8 @@ export function SettingsPage({
       if (request.scope === 'profiles') await onProfileDataChange?.();
     } catch (error) {
       setDataError(localizeError(error, locale, t, 'common.error.validation'));
+      setDataErrorCode(getErrorCode(error));
+      setDataRetryScope(request.scope);
       await refresh();
     }
   }
@@ -195,6 +210,7 @@ export function SettingsPage({
         : isEnglish
           ? 'Not configured'
           : '未配置';
+  const dataErrorRecovery = destructiveErrorRecovery(dataErrorCode, locale);
 
   return (
     <section className="gta-settings-page">
@@ -410,9 +426,18 @@ export function SettingsPage({
           />
         </div>
         {dataError && (
-          <p className="gta-error" role="alert">
-            {dataError}
-          </p>
+          <div className="gta-error gta-data-management-error" role="alert">
+            <span>{dataError}</span>
+            {dataRetryScope && dataErrorRecovery.kind !== 'none' && (
+              <button
+                type="button"
+                className="gta-text-action"
+                onClick={() => void prepareClear(dataRetryScope)}
+              >
+                {dataErrorRecovery.label}
+              </button>
+            )}
+          </div>
         )}
       </section>
 

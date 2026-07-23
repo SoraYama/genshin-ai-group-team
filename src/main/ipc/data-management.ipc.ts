@@ -26,10 +26,7 @@ export function registerDataManagementIpc({ service }: { service: DataManagement
     try {
       return await service.prepareClear(parsed.data.scope);
     } catch (error) {
-      throw new IpcError(
-        IpcErrorCodes.ValidationFailed,
-        error instanceof Error ? error.message : 'Nothing to clear'
-      );
+      throw dataManagementRequestError(error);
     }
   });
   registerHandler('data-management:clear', async (payload) => {
@@ -43,12 +40,29 @@ export function registerDataManagementIpc({ service }: { service: DataManagement
       const result = await service.clear(parsed.data);
       return { removed: result.removed, summary: publicSummary(result.summary) };
     } catch (error) {
-      throw new IpcError(
-        IpcErrorCodes.ValidationFailed,
-        error instanceof Error ? error.message : 'Data selection changed'
-      );
+      throw dataManagementRequestError(error);
     }
   });
+}
+
+function dataManagementRequestError(error: unknown): IpcError {
+  const code =
+    typeof error === 'object' && error !== null && 'code' in error
+      ? String((error as { code?: unknown }).code ?? '')
+      : '';
+  const ipcCode =
+    code === 'DATA_CONFIRMATION_EXPIRED' || code === 'HISTORY_CONFIRMATION_EXPIRED'
+      ? IpcErrorCodes.ConfirmationExpired
+      : code === 'DATA_SELECTION_CHANGED' || code === 'HISTORY_SELECTION_CHANGED'
+        ? IpcErrorCodes.SelectionChanged
+        : code === 'DATA_FILE_INSPECTION_FAILED'
+          ? IpcErrorCodes.FileInspectionFailed
+          : code === 'DATA_NOTHING_TO_CLEAR'
+            ? IpcErrorCodes.NothingToClear
+            : code === 'HISTORY_IDENTITY_UNKNOWN'
+              ? IpcErrorCodes.HistoryIdentityUnknown
+              : IpcErrorCodes.Internal;
+  return new IpcError(ipcCode, 'Data management request failed');
 }
 
 function publicSummary(summary: DataManagementSummary): DataManagementSummary {

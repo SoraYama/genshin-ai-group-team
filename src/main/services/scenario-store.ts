@@ -49,6 +49,21 @@ interface ScenarioDataManagementSnapshot {
   fingerprint: string;
 }
 
+export type ScenarioDataManagementErrorCode =
+  | 'SCENARIO_FILE_INSPECTION_FAILED'
+  | 'SCENARIO_SELECTION_CHANGED';
+
+export class ScenarioDataManagementError extends Error {
+  override readonly name = 'ScenarioDataManagementError';
+
+  constructor(
+    readonly code: ScenarioDataManagementErrorCode,
+    message: string
+  ) {
+    super(message);
+  }
+}
+
 const STALE_GRACE_MS = 24 * 60 * 60 * 1000;
 
 function isScenarioEnvelope(value: unknown): value is ScenarioEnvelope<ScenarioPayload> {
@@ -266,14 +281,20 @@ export class ScenarioStore {
     return this.runScenarioFilesExclusive(async () => {
       const files = await this.inspectDataManagementFiles();
       if (files.some(({ state }) => state === 'unknown')) {
-        throw new Error('Scenario data could not be fully inspected; nothing was deleted');
+        throw new ScenarioDataManagementError(
+          'SCENARIO_FILE_INSPECTION_FAILED',
+          'Scenario data could not be fully inspected; nothing was deleted'
+        );
       }
       const current = this.summarizeDataManagementFiles(files);
       if (
         current.clearableCount !== expected.count ||
         current.fingerprint !== expected.fingerprint
       ) {
-        throw new Error('Scenario data selection changed; confirm again');
+        throw new ScenarioDataManagementError(
+          'SCENARIO_SELECTION_CHANGED',
+          'Scenario data selection changed; confirm again'
+        );
       }
       let removed = 0;
       for (const file of files) {

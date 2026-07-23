@@ -181,7 +181,11 @@ export function registerHistoryIpc({ history }: HistoryIpcDeps): void {
         IpcErrorCodes.ValidationFailed,
         parsed.error.issues.map((issue) => issue.message).join('; ')
       );
-    return history.getChallengeScopeConfirmation(parsed.data);
+    try {
+      return history.getChallengeScopeConfirmation(parsed.data);
+    } catch (error) {
+      throw historyRequestError(error);
+    }
   });
 
   registerHandler('history:delete-scope', async (payload) => {
@@ -194,10 +198,7 @@ export function registerHistoryIpc({ history }: HistoryIpcDeps): void {
     try {
       return { removed: history.removeChallengeScope(parsed.data) };
     } catch (error) {
-      throw new IpcError(
-        IpcErrorCodes.ValidationFailed,
-        error instanceof Error ? error.message : 'History selection changed'
-      );
+      throw historyRequestError(error);
     }
   });
 
@@ -213,10 +214,23 @@ export function registerHistoryIpc({ history }: HistoryIpcDeps): void {
       const removed = history.removeMany(parsed.data);
       return { removed };
     } catch (error) {
-      throw new IpcError(
-        IpcErrorCodes.ValidationFailed,
-        error instanceof Error ? error.message : 'history clear failed'
-      );
+      throw historyRequestError(error);
     }
   });
+}
+
+function historyRequestError(error: unknown): IpcError {
+  const code =
+    typeof error === 'object' && error !== null && 'code' in error
+      ? String((error as { code?: unknown }).code ?? '')
+      : '';
+  const ipcCode =
+    code === 'HISTORY_CONFIRMATION_EXPIRED'
+      ? IpcErrorCodes.ConfirmationExpired
+      : code === 'HISTORY_SELECTION_CHANGED'
+        ? IpcErrorCodes.SelectionChanged
+        : code === 'HISTORY_IDENTITY_UNKNOWN'
+          ? IpcErrorCodes.HistoryIdentityUnknown
+          : IpcErrorCodes.Internal;
+  return new IpcError(ipcCode, 'History request failed');
 }

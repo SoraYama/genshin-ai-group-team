@@ -15,6 +15,40 @@ import { registerDataManagementIpc } from '../../../src/main/ipc/data-management
 beforeEach(() => handlers.clear());
 
 describe('data management IPC', () => {
+  it('preserves stable data-management error meaning without forwarding service messages', async () => {
+    const service = {
+      getSummary: vi.fn(),
+      prepareClear: vi.fn().mockRejectedValue(
+        Object.assign(new Error('Scenario files at /private/path could not be fully inspected'), {
+          code: 'DATA_FILE_INSPECTION_FAILED'
+        })
+      ),
+      clear: vi.fn().mockRejectedValue(
+        Object.assign(new Error('Clear confirmation expired; token abc'), {
+          code: 'DATA_CONFIRMATION_EXPIRED'
+        })
+      )
+    };
+    registerDataManagementIpc({ service: service as never });
+
+    await expect(
+      handlers.get('data-management:prepare-clear')?.({ scope: 'scenarios' })
+    ).rejects.toMatchObject({
+      code: 'IPC_FILE_INSPECTION_FAILED',
+      message: 'Data management request failed'
+    });
+    await expect(
+      handlers.get('data-management:clear')?.({
+        scope: 'profiles',
+        expectedCount: 1,
+        confirmationToken: 'confirmation-token'
+      })
+    ).rejects.toMatchObject({
+      code: 'IPC_CONFIRMATION_EXPIRED',
+      message: 'Data management request failed'
+    });
+  });
+
   it('validates explicit scopes, passes opaque tokens, and allowlists public summary fields', async () => {
     const summaryWithPrivateFields = {
       profiles: { count: 0, fingerprint: 'private-profile-fingerprint' },

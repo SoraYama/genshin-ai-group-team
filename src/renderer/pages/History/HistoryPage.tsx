@@ -7,7 +7,12 @@ import type {
 } from '../../../shared/domain';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { GtaDialog } from '../../components/ui/GtaDialog';
-import { localizeError, useI18n } from '../../i18n';
+import {
+  destructiveErrorRecovery,
+  getErrorCode,
+  localizeError,
+  useI18n
+} from '../../i18n';
 import { api } from '../../ipc';
 import { rewardTargetLabel, reuseRuleSummary } from '../Advisor/stygian-presentation';
 import { objectiveLabel, pathChoiceLabel, poolSourceLabel } from '../Advisor/theater-presentation';
@@ -44,6 +49,7 @@ export function HistoryPage({ state, onRerun }: HistoryPageProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
   const [error, setError] = useState('');
+  const [errorCode, setErrorCode] = useState('');
   const [loading, setLoading] = useState(true);
   const cancelDeleteRef = useRef<HTMLButtonElement>(null);
   const activeUid = state.activeUid;
@@ -52,6 +58,7 @@ export function HistoryPage({ state, onRerun }: HistoryPageProps) {
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
+    setErrorCode('');
     if (!activeUid) {
       setAllEntries([]);
       setLegacyCount(0);
@@ -69,6 +76,7 @@ export function HistoryPage({ state, onRerun }: HistoryPageProps) {
       setLegacyCount(legacy.total);
     } catch (loadError) {
       setError(localizeError(loadError, locale, t, 'history.error.load'));
+      setErrorCode(getErrorCode(loadError));
     } finally {
       setLoading(false);
     }
@@ -80,10 +88,12 @@ export function HistoryPage({ state, onRerun }: HistoryPageProps) {
 
   const groups = useMemo(() => groupChallengeHistory(allEntries), [allEntries]);
   const totalCount = allEntries.length + legacyCount;
+  const errorRecovery = destructiveErrorRecovery(errorCode, locale);
 
   async function confirmDelete() {
     if (!pendingDelete) return;
     setError('');
+    setErrorCode('');
     try {
       if (pendingDelete.kind === 'single') {
         await deleteSingle(pendingDelete.entry);
@@ -113,6 +123,7 @@ export function HistoryPage({ state, onRerun }: HistoryPageProps) {
     } catch (deleteError) {
       setPendingDelete(null);
       setError(localizeError(deleteError, locale, t, 'history.error.clear'));
+      setErrorCode(getErrorCode(deleteError));
     }
   }
 
@@ -129,6 +140,7 @@ export function HistoryPage({ state, onRerun }: HistoryPageProps) {
       setPendingDelete({ kind: 'group', group, ...confirmation });
     } catch (prepareError) {
       setError(localizeError(prepareError, locale, t, 'history.error.clear'));
+      setErrorCode(getErrorCode(prepareError));
     }
   }
 
@@ -140,6 +152,7 @@ export function HistoryPage({ state, onRerun }: HistoryPageProps) {
         setPendingDelete({ kind: 'uid', uid: activeUid, ...confirmation });
     } catch (prepareError) {
       setError(localizeError(prepareError, locale, t, 'history.error.clear'));
+      setErrorCode(getErrorCode(prepareError));
     }
   }
 
@@ -188,9 +201,11 @@ export function HistoryPage({ state, onRerun }: HistoryPageProps) {
         <div className="gta-history-error" role="alert">
           <strong>{isEnglish ? 'History could not be updated' : '推荐记录未能更新'}</strong>
           <span>{error}</span>
-          <button type="button" className="gta-text-action" onClick={() => void load()}>
-            {isEnglish ? 'Try again' : '重新读取'}
-          </button>
+          {errorRecovery.kind !== 'none' && (
+            <button type="button" className="gta-text-action" onClick={() => void load()}>
+              {errorRecovery.label}
+            </button>
+          )}
         </div>
       )}
 

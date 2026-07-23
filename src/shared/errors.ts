@@ -2,7 +2,12 @@ export const IpcErrorCodes = {
   ValidationFailed: 'IPC_VALIDATION_FAILED',
   Unauthorized: 'IPC_UNAUTHORIZED',
   UpstreamUnavailable: 'IPC_UPSTREAM_UNAVAILABLE',
-  Internal: 'IPC_INTERNAL'
+  Internal: 'IPC_INTERNAL',
+  ConfirmationExpired: 'IPC_CONFIRMATION_EXPIRED',
+  SelectionChanged: 'IPC_SELECTION_CHANGED',
+  HistoryIdentityUnknown: 'IPC_HISTORY_IDENTITY_UNKNOWN',
+  FileInspectionFailed: 'IPC_FILE_INSPECTION_FAILED',
+  NothingToClear: 'IPC_NOTHING_TO_CLEAR'
 } as const;
 
 export type IpcErrorCode = (typeof IpcErrorCodes)[keyof typeof IpcErrorCodes];

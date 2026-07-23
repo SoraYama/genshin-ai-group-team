@@ -145,6 +145,12 @@
   color: var(--gta-text-on-light-soft);
   font-size: var(--gta-text-xs);
 }
+.gta-data-management-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
 .gta-settings-advanced {
   padding: 0;
   border-top: 1px solid rgba(198, 174, 110, 0.56);

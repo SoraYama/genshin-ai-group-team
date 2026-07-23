@@ -1,5 +1,10 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
+export {
+  destructiveErrorRecovery,
+  getErrorCode,
+  localizeError
+} from './error-localization';
 
 export type Locale = 'zh-CN' | 'en-US';
 
@@ -36,6 +41,13 @@ const zh = {
   'common.error.unauthorized': '登录凭据已失效，请重新登录。',
   'common.error.upstream': '外部服务暂时不可用，请稍后重试。',
   'common.error.internal': '应用内部请求失败，请重试。',
+  'common.error.confirmationExpired': '确认已过期，未执行删除。请重新打开确认框后再试。',
+  'common.error.selectionChanged': '待删除内容在确认后发生变化，未执行删除。请刷新后重新确认。',
+  'common.error.historyIdentity':
+    '部分旧记录无法安全识别，未执行删除。请保留这些记录，或刷新后重试。',
+  'common.error.fileInspection':
+    '部分本地挑战资料无法完整读取。为避免误删，暂时不能清理；请重新检查。',
+  'common.error.nothingToClear': '当前没有可清理的内容。',
   'settings.title': '智能服务设置',
   'settings.privacy':
     '设置保存在本机。服务密钥与自定义请求头会由系统钥匙串加密，仅在测试连接或生成建议时发往你填写的服务地址。',
@@ -471,6 +483,15 @@ const en: Record<keyof typeof zh, string> = {
   'common.error.unauthorized': 'Your sign-in session has expired. Sign in again.',
   'common.error.upstream': 'An external service is temporarily unavailable. Try again later.',
   'common.error.internal': 'The application request failed. Try again.',
+  'common.error.confirmationExpired':
+    'The confirmation expired. Nothing was deleted. Open the confirmation again and retry.',
+  'common.error.selectionChanged':
+    'The selected data changed after confirmation. Nothing was deleted. Refresh and confirm again.',
+  'common.error.historyIdentity':
+    'Some older records cannot be identified safely. Nothing was deleted. Keep them or refresh and retry.',
+  'common.error.fileInspection':
+    'Some local challenge data could not be fully read. Cleanup is paused to avoid data loss. Check again.',
+  'common.error.nothingToClear': 'There is nothing to clear in this category.',
   'settings.title': 'Smart service settings',
   'settings.privacy':
     'Settings stay on this device. Your service key and custom-header values are encrypted by the system keychain and sent only to the service address you enter when testing or generating recommendations.',
@@ -944,28 +965,4 @@ export function useI18n(): I18nValue {
   const value = useContext(I18nContext);
   if (!value) throw new Error('useI18n must be used inside I18nProvider');
   return value;
-}
-
-export function localizeError(
-  error: unknown,
-  locale: Locale,
-  t: I18nValue['t'],
-  fallback: TranslationKey
-): string {
-  const code =
-    typeof error === 'object' && error !== null && 'code' in error
-      ? String((error as { code?: unknown }).code ?? '')
-      : '';
-  if (locale === 'en-US') {
-    const key = {
-      IPC_VALIDATION_FAILED: 'common.error.validation',
-      IPC_UNAUTHORIZED: 'common.error.unauthorized',
-      IPC_UPSTREAM_UNAVAILABLE: 'common.error.upstream',
-      IPC_INTERNAL: 'common.error.internal'
-    }[code] as TranslationKey | undefined;
-    if (key) return t(key);
-    const message = error instanceof Error ? error.message : '';
-    return message && !/[\u3400-\u9fff]/u.test(message) ? message : t(fallback);
-  }
-  return error instanceof Error ? error.message : t(fallback);
 }

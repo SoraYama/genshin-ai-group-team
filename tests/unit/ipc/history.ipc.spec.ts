@@ -15,6 +15,29 @@ import { registerHistoryIpc } from '../../../src/main/ipc/history.ipc.js';
 beforeEach(() => handlers.clear());
 
 describe('history IPC abyss plans', () => {
+  it('maps stable history errors without forwarding internal messages', async () => {
+    const history = {
+      removeChallengeScope: vi.fn().mockImplementation(() => {
+        throw Object.assign(new Error('History fingerprint changed: secret details'), {
+          code: 'HISTORY_SELECTION_CHANGED'
+        });
+      })
+    };
+    registerHistoryIpc({ history: history as never });
+
+    await expect(
+      handlers.get('history:delete-scope')?.({
+        scope: 'uid',
+        uid: '123456789',
+        expectedCount: 1,
+        confirmationToken: 'opaque-confirmation-token'
+      })
+    ).rejects.toMatchObject({
+      code: 'IPC_SELECTION_CHANGED',
+      message: 'History request failed'
+    });
+  });
+
   it('lists and deletes the separate immutable abyss history collection', async () => {
     const history = {
       query: vi.fn(),

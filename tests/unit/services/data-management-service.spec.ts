@@ -131,7 +131,9 @@ describe('DataManagementService', () => {
       summary: { serviceKey: { count: 0 } }
     });
     expect(deps.config.clearApiKey).toHaveBeenCalledOnce();
-    await expect(service.clear(request)).rejects.toThrow(/expired/i);
+    await expect(service.clear(request)).rejects.toMatchObject({
+      code: 'DATA_CONFIRMATION_EXPIRED'
+    });
   });
 
   it('passes the confirmed scenario snapshot into the serialized clear operation', async () => {
@@ -156,7 +158,28 @@ describe('DataManagementService', () => {
     deps.state.scenarios.sizeBytes = undefined as never;
     const service = new DataManagementService(deps);
 
-    await expect(service.prepareClear('scenarios')).rejects.toThrow(/fully inspected/i);
+    await expect(service.prepareClear('scenarios')).rejects.toMatchObject({
+      code: 'DATA_FILE_INSPECTION_FAILED'
+    });
     expect(deps.scenarios.clearDownloadedCache).not.toHaveBeenCalled();
+  });
+
+  it('turns a scenario fingerprint change into a stable selection-changed error', async () => {
+    const deps = createDeps();
+    const service = new DataManagementService(deps);
+    const confirmation = await service.prepareClear('scenarios');
+    deps.scenarios.clearDownloadedCache.mockRejectedValueOnce(
+      Object.assign(new Error('Scenario fingerprint changed at /private/cache'), {
+        code: 'SCENARIO_SELECTION_CHANGED'
+      })
+    );
+
+    await expect(
+      service.clear({
+        scope: 'scenarios',
+        expectedCount: confirmation.count,
+        confirmationToken: confirmation.confirmationToken
+      })
+    ).rejects.toMatchObject({ code: 'DATA_SELECTION_CHANGED' });
   });
 });

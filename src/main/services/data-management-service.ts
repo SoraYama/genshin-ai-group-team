@@ -58,6 +58,23 @@ export interface DataManagementDeps {
   config: ConfigDataManager;
 }
 
+export type DataManagementErrorCode =
+  | 'DATA_CONFIRMATION_EXPIRED'
+  | 'DATA_SELECTION_CHANGED'
+  | 'DATA_FILE_INSPECTION_FAILED'
+  | 'DATA_NOTHING_TO_CLEAR';
+
+export class DataManagementError extends Error {
+  override readonly name = 'DataManagementError';
+
+  constructor(
+    readonly code: DataManagementErrorCode,
+    message: string
+  ) {
+    super(message);
+  }
+}
+
 export class DataManagementService {
   private readonly confirmations = new Map<
     string,
@@ -85,7 +102,8 @@ export class DataManagementService {
     scope: DataManagementScope
   ): Promise<{ count: number; confirmationToken: string }> {
     const snapshot = await this.snapshot(scope);
-    if (snapshot.count < 1) throw new Error('Nothing to clear for this scope');
+    if (snapshot.count < 1)
+      throw new DataManagementError('DATA_NOTHING_TO_CLEAR', 'Nothing to clear for this scope');
     const confirmationToken = randomUUID();
     this.confirmations.set(confirmationToken, {
       scope,
@@ -101,17 +119,40 @@ export class DataManagementService {
     const confirmation = this.confirmations.get(request.confirmationToken);
     this.confirmations.delete(request.confirmationToken);
     if (!confirmation || confirmation.expiresAt < this.now()) {
-      throw new Error('Clear confirmation expired; confirm again');
+      throw new DataManagementError(
+        'DATA_CONFIRMATION_EXPIRED',
+        'Clear confirmation expired; confirm again'
+      );
     }
     if (
       confirmation.scope !== request.scope ||
       confirmation.snapshot.count !== request.expectedCount
     ) {
-      throw new Error('Clear scope changed; confirm again');
+      throw new DataManagementError('DATA_SELECTION_CHANGED', 'Clear scope changed; confirm again');
     }
     let removed = 0;
     if (request.scope === 'scenarios') {
-      removed = await this.deps.scenarios.clearDownloadedCache(confirmation.snapshot);
+      try {
+        removed = await this.deps.scenarios.clearDownloadedCache(confirmation.snapshot);
+      } catch (error) {
+        const code =
+          typeof error === 'object' && error !== null && 'code' in error
+            ? String((error as { code?: unknown }).code ?? '')
+            : '';
+        if (code === 'SCENARIO_FILE_INSPECTION_FAILED') {
+          throw new DataManagementError(
+            'DATA_FILE_INSPECTION_FAILED',
+            'Scenario files could not be fully inspected; clear is unavailable'
+          );
+        }
+        if (code === 'SCENARIO_SELECTION_CHANGED') {
+          throw new DataManagementError(
+            'DATA_SELECTION_CHANGED',
+            'Scenario data changed; confirm again'
+          );
+        }
+        throw error;
+      }
       return { removed, summary: await this.getSummary() };
     }
     const current = await this.snapshot(request.scope);
@@ -119,7 +160,10 @@ export class DataManagementService {
       current.count !== confirmation.snapshot.count ||
       current.fingerprint !== confirmation.snapshot.fingerprint
     ) {
-      throw new Error('Data selection changed; confirm again');
+      throw new DataManagementError(
+        'DATA_SELECTION_CHANGED',
+        'Data selection changed; confirm again'
+      );
     }
     switch (request.scope) {
       case 'profiles':
@@ -151,7 +195,10 @@ export class DataManagementService {
       case 'scenarios': {
         const value = await this.deps.scenarios.getDataManagementSnapshot();
         if (value.sizeBytes === undefined) {
-          throw new Error('Scenario files could not be fully inspected; clear is unavailable');
+          throw new DataManagementError(
+            'DATA_FILE_INSPECTION_FAILED',
+            'Scenario files could not be fully inspected; clear is unavailable'
+          );
         }
         return { count: value.clearableCount, fingerprint: value.fingerprint };
       }
