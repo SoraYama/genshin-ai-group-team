@@ -1026,3 +1026,229 @@ test('plans three Stygian phases from the development scenario without leaking r
     /development\.|development-sample|dire-challenge/
   );
 });
+
+test('keeps Theater generation blocked when external actors do not satisfy hard eligibility', async () => {
+  test.setTimeout(45_000);
+  await electronApp.close();
+  const fetchedAt = '2026-07-23T00:00:00.000Z';
+  const characters = Array.from({ length: 8 }, (_, index) => ({
+    id: 2901 + index,
+    name: `资格角色${index + 1}`,
+    element: index % 2 === 0 ? 'Anemo' : 'Geo',
+    rarity: 4,
+    imageUrl: '',
+    level: index === 7 ? 60 : 80,
+    build: {
+      stats: {
+        hp: 15_000,
+        atk: 1_100,
+        def: 650,
+        critRate: 40,
+        critDmg: 80,
+        energyRecharge: 120,
+        elementalMastery: 0
+      }
+    },
+    completeness: 'build',
+    missingFields: [],
+    provenance: {
+      ownership: { source: 'miyoushe-list', fetchedAt },
+      stats: { source: 'enka', fetchedAt }
+    }
+  }));
+  await writeFile(
+    path.join(userDataDir, 'profiles.json'),
+    JSON.stringify({
+      schemaVersion: 2,
+      activeUid: '135792468',
+      profilesByUid: {
+        '135792468': {
+          schemaVersion: 2,
+          uid: '135792468',
+          nickname: '资格不足账号',
+          source: 'merged',
+          fetchedAt,
+          characters,
+          coverage: {
+            expectedOwnedCount: 8,
+            ownedCount: 8,
+            detailedCount: 0,
+            buildCount: 8,
+            statsCount: 8,
+            enkaShowcaseCount: 8,
+            missingDetailCount: 0,
+            partial: false
+          }
+        }
+      }
+    })
+  );
+  await launchApp();
+  await page.getByRole('button', { name: '挑战配队' }).click();
+  await page.getByRole('button', { name: /幻想真境剧诗/ }).click();
+
+  await expect(page.getByText('7 / 8 名可入场')).toBeVisible();
+  await expect(page.getByRole('alert')).toContainText('还缺 1 名可入场角色');
+  await expect(page.getByRole('alert')).toContainText('优先提升 资格角色8 至 70 级可补位');
+  await expect(page.getByRole('button', { name: '角色不足，暂不能生成' })).toBeDisabled();
+  await page.getByRole('button', { name: /演示试用角色/ }).click();
+  await expect(page.getByText('7 / 8 名可入场')).toBeVisible();
+  await expect(page.getByRole('button', { name: /演示试用角色/ })).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  );
+  await expect(page.getByRole('button', { name: '角色不足，暂不能生成' })).toBeDisabled();
+  await expect(page.locator('.gta-theater-progress')).toHaveCount(0);
+  await expectNoForbiddenPlayerTerms();
+});
+
+test('checks Theater eligibility and renders a cast-vigor route instead of team cards', async () => {
+  test.setTimeout(60_000);
+  await electronApp.close();
+  const fetchedAt = '2026-07-23T00:00:00.000Z';
+  const elements = [
+    'Anemo',
+    'Geo',
+    'Anemo',
+    'Geo',
+    'Anemo',
+    'Geo',
+    'Anemo',
+    'Geo',
+    'Pyro',
+    'Hydro',
+    'Geo',
+    'Pyro'
+  ];
+  const characters = elements.map((element, index) => ({
+    id: 3001 + index,
+    name: `剧诗角色${index + 1}`,
+    element,
+    rarity: index < 6 ? 5 : 4,
+    imageUrl: '',
+    level: index === 10 ? 60 : 90 - (index % 4),
+    build: {
+      stats: {
+        hp: 18_000 + index * 500,
+        atk: 1_200 + index * 70,
+        def: 680 + index * 12,
+        critRate: 45 + index,
+        critDmg: 90 + index * 4,
+        energyRecharge: 115 + index * 4,
+        elementalMastery: index * 12
+      }
+    },
+    completeness: index < 8 ? 'detailed' : 'build',
+    missingFields: index < 8 ? [] : ['weapon', 'artifacts', 'talents'],
+    provenance: {
+      ownership: { source: 'miyoushe-list', fetchedAt },
+      stats: { source: 'enka', fetchedAt }
+    }
+  }));
+  await writeFile(
+    path.join(userDataDir, 'profiles.json'),
+    JSON.stringify({
+      schemaVersion: 2,
+      activeUid: '246813579',
+      profilesByUid: {
+        '246813579': {
+          schemaVersion: 2,
+          uid: '246813579',
+          nickname: '剧诗演练账号',
+          source: 'merged',
+          fetchedAt,
+          characters,
+          coverage: {
+            expectedOwnedCount: 12,
+            ownedCount: 12,
+            detailedCount: 8,
+            buildCount: 12,
+            statsCount: 12,
+            enkaShowcaseCount: 8,
+            missingDetailCount: 4,
+            partial: true
+          }
+        }
+      }
+    })
+  );
+  await launchApp();
+  await page.getByRole('button', { name: '挑战配队' }).click();
+  await page.getByRole('button', { name: /幻想真境剧诗/ }).click();
+
+  await expect(page.getByRole('heading', { name: '幻想真境剧诗手册' })).toBeVisible();
+  await expect(page.getByText('演练资料，不代表本期')).toBeVisible();
+  await expect(page.getByText('8 / 8 名可入场')).toBeVisible();
+  await expect(page.getByText('当期元素：风、岩')).toBeVisible();
+  await expect(page.getByText('演示开幕角色')).toBeVisible();
+  await expect(page.getByText('演示试用角色')).toBeVisible();
+  await expect(page.getByText('演示特邀角色')).toBeVisible();
+  await expect(page.getByText('演示助演角色')).toBeVisible();
+  await expect(page.getByText(/场景未说明外部演员是否计入硬资格/)).toBeVisible();
+  await page.getByText(/查看不符合的自有角色/).click();
+  await expect(page.getByText('元素不符合', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('等级不足', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '取消生成' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: '生成剧诗路线' })).toBeEnabled();
+  await expect(page.locator('main')).not.toContainText(
+    /development\.|development-sample|trial\.1|support\.1|imaginarium-theater/
+  );
+
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await expectPageFitsEveryViewport('Theater eligibility');
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.getByRole('heading', { name: '幻想真境剧诗手册' }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(tmpdir(), 'gta-m6-theater-input-1024x768.png') });
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await page.getByRole('heading', { name: '幻想真境剧诗手册' }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(tmpdir(), 'gta-m6-theater-input-1600x1000.png') });
+
+  for (const preference of ['操作简单', '生存优先', '低练度']) {
+    await page.getByRole('button', { name: preference }).click();
+    await expect(page.getByRole('button', { name: preference })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
+  }
+  await page.getByRole('button', { name: '生成剧诗路线' }).click();
+  await expect(page.getByRole('heading', { name: '演员池与活力已排成幕次路线' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '入场演员池' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '逐幕活力预算' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '保留与分支优先级' })).toBeVisible();
+  await expect(page.locator('[data-theater-actor-id]')).toHaveCount(8);
+  await expect(page.locator('.gta-theater-progress li')).toHaveCount(5);
+  await expect(page.locator('.gta-theater-progress li').last()).toHaveClass(/is-done/);
+  await expect(page.locator('main')).not.toContainText(
+    /上半队伍|下半队伍|三队已按当期规则分配|team card/i
+  );
+  await expectNoForbiddenPlayerTerms();
+  await expectPageFitsEveryViewport('Theater route');
+
+  await page.setViewportSize({ width: 1024, height: 768 });
+  expect(
+    await page
+      .locator('.gta-theater-route')
+      .evaluate(
+        (element) => element.ownerDocument.defaultView?.getComputedStyle(element).gridAutoFlow
+      )
+  ).toBe('row');
+  await page.getByRole('heading', { name: '演员池与活力已排成幕次路线' }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(tmpdir(), 'gta-m6-theater-result-1024x768.png') });
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  expect(
+    await page
+      .locator('.gta-theater-route')
+      .evaluate(
+        (element) => element.ownerDocument.defaultView?.getComputedStyle(element).gridAutoFlow
+      )
+  ).toBe('column');
+  await page.getByRole('heading', { name: '演员池与活力已排成幕次路线' }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: path.join(tmpdir(), 'gta-m6-theater-result-1600x1000.png') });
+
+  await page.getByRole('button', { name: '历史记录' }).click();
+  await expect(page.getByRole('heading', { name: '幻想真境剧诗方案' })).toBeVisible();
+  const theaterHistory = page.getByRole('button', { name: /UID 246813579.*稳妥通关/ }).first();
+  await theaterHistory.click();
+  await expect(page.getByRole('heading', { name: '逐幕活力预算' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '删除这条幻想真境剧诗方案' })).toBeVisible();
+});

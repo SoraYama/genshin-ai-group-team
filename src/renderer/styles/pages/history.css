@@ -83,3 +83,43 @@
   font-family: var(--gta-font-mono);
   font-size: var(--gta-text-xs);
 }
+
+.gta-history-theater-body section {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--gta-stroke-soft);
+}
+
+.gta-history-theater-body h4 {
+  margin: 0 0 8px;
+}
+
+.gta-history-theater-body p,
+.gta-history-theater-route small {
+  color: var(--gta-text-on-light-soft);
+  font-size: var(--gta-text-xs);
+}
+
+.gta-history-theater-vigor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  color: var(--gta-text-on-light-soft);
+  font-size: var(--gta-text-xs);
+}
+
+.gta-history-theater-route {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  background: var(--gta-stroke-soft);
+  list-style: none;
+}
+
+.gta-history-theater-route li {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  background: #f8faf7;
+}

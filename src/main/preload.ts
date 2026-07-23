@@ -4,11 +4,13 @@ import {
   ADVISOR_EVENT_CHANNEL,
   ABYSS_ADVISOR_EVENT_CHANNEL,
   STYGIAN_ADVISOR_EVENT_CHANNEL,
+  THEATER_ADVISOR_EVENT_CHANNEL,
   UPDATE_EVENT_CHANNEL
 } from '../shared/ipc-contract.js';
 import type { IpcChannel, IpcContract, RendererApi } from '../shared/ipc-contract.js';
 import type { AbyssAdvisorEvent } from '../shared/abyss-advisor.js';
 import type { StygianAdvisorEvent } from '../shared/stygian-advisor.js';
+import type { TheaterAdvisorEvent } from '../shared/theater-advisor.js';
 import type { AdvisorEvent, UpdateStatus } from '../shared/domain.js';
 
 interface IpcEnvelope<T> {
@@ -114,6 +116,16 @@ const api: RendererApi = {
       };
     }
   },
+  theaterAdvisor: {
+    getScenario: () => invoke('advisor-v2:theater-scenario', undefined),
+    recommend: (input) => invoke('advisor-v2:theater-plan', input),
+    cancel: (input) => invoke('advisor-v2:theater-cancel', input),
+    onEvent: (cb: (event: TheaterAdvisorEvent) => void): (() => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, value: TheaterAdvisorEvent) => cb(value);
+      ipcRenderer.on(THEATER_ADVISOR_EVENT_CHANNEL, handler);
+      return () => ipcRenderer.removeListener(THEATER_ADVISOR_EVENT_CHANNEL, handler);
+    }
+  },
   history: {
     list: (input) => invoke('history:list', input),
     delete: (input) => invoke('history:delete', input),
@@ -121,6 +133,8 @@ const api: RendererApi = {
     deleteAbyss: (input) => invoke('history:abyss-delete', input),
     listStygian: (input) => invoke('history:stygian-list', input),
     deleteStygian: (input) => invoke('history:stygian-delete', input),
+    listTheater: (input) => invoke('history:theater-list', input),
+    deleteTheater: (input) => invoke('history:theater-delete', input),
     clear: (input) => invoke('history:clear', input)
   },
   scenario: {

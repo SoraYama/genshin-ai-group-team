@@ -8,6 +8,7 @@ import { GtaButton } from '../../components/ui/GtaButton';
 import { OrnamentPanel } from '../../components/ui/OrnamentPanel';
 import { AbyssWorkspace } from './AbyssWorkspace';
 import { StygianWorkspace } from './StygianWorkspace';
+import { TheaterWorkspace } from './TheaterWorkspace';
 
 interface AdvisorPageProps {
   state: ProfileStateView;
@@ -230,6 +231,8 @@ export function AdvisorPage({ state, onGotoOnboarding }: AdvisorPageProps) {
 
       {workspaceOpen && challengeMode === 'spiral-abyss' ? (
         <AbyssWorkspace uid={activeUid} />
+      ) : workspaceOpen && challengeMode === 'imaginarium-theater' ? (
+        <TheaterWorkspace uid={activeUid} onBack={() => setWorkspaceOpen(false)} />
       ) : workspaceOpen && challengeMode === 'stygian-onslaught' ? (
         <StygianWorkspace uid={activeUid} onBack={() => setWorkspaceOpen(false)} />
       ) : !workspaceOpen ? (

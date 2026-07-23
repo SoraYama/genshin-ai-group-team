@@ -105,6 +105,26 @@ export function registerHistoryIpc({ history }: HistoryIpcDeps): void {
     return { ok: history.removeStygianById(parsed.data.id) };
   });
 
+  registerHandler('history:theater-list', async (payload) => {
+    const parsed = abyssListSchema.safeParse(payload ?? {});
+    if (!parsed.success)
+      throw new IpcError(
+        IpcErrorCodes.ValidationFailed,
+        parsed.error.issues.map((issue) => issue.message).join('; ')
+      );
+    return history.queryTheater(parsed.data);
+  });
+
+  registerHandler('history:theater-delete', async (payload) => {
+    const parsed = deleteSchema.safeParse(payload);
+    if (!parsed.success)
+      throw new IpcError(
+        IpcErrorCodes.ValidationFailed,
+        parsed.error.issues.map((issue) => issue.message).join('; ')
+      );
+    return { ok: history.removeTheaterById(parsed.data.id) };
+  });
+
   registerHandler('history:clear', async (payload) => {
     const parsed = clearSchema.safeParse(payload);
     if (!parsed.success) {

@@ -43,6 +43,7 @@ import { registerProfileIpc } from './ipc/profile.ipc.js';
 import { registerAdvisorIpc } from './ipc/advisor.ipc.js';
 import { registerAbyssAdvisorIpc } from './ipc/abyss-advisor.ipc.js';
 import { registerStygianAdvisorIpc } from './ipc/stygian-advisor.ipc.js';
+import { registerTheaterAdvisorIpc } from './ipc/theater-advisor.ipc.js';
 import { registerHistoryIpc } from './ipc/history.ipc.js';
 import { registerScenarioIpc } from './ipc/scenario.ipc.js';
 import { ensureAllChannelsRegistered } from './ipc/registry.js';
@@ -53,6 +54,8 @@ import { AbyssScenarioService } from './services/abyss-scenario-service.js';
 import { AbyssAdvisorService } from './services/abyss-advisor-service.js';
 import { StygianScenarioService } from './services/stygian-scenario-service.js';
 import { StygianAdvisorService } from './services/stygian-advisor-service.js';
+import { TheaterScenarioService } from './services/theater-scenario-service.js';
+import { TheaterAdvisorService } from './services/theater-advisor-service.js';
 import { createProductionScenarioPublicationSource } from './scenario-publication/production-composition.js';
 import { CharacterKnowledgeStore } from './services/character-knowledge-store.js';
 
@@ -170,6 +173,29 @@ async function bootstrapServices(): Promise<void> {
     auditLog: (event) => console.info('[stygian-advisor]', event),
     sdkEnvironment: { cwd: app.getPath('userData'), clientVersion: app.getVersion() }
   });
+  const theaterScenario = new TheaterScenarioService({
+    enableDevelopmentScenarios: process.env.GTA_ENABLE_DEVELOPMENT_SCENARIOS === '1',
+    developmentFixturePath: path.join(
+      resolveBundledScenarioDir(),
+      'v2',
+      'development-source',
+      'imaginarium-theater.json'
+    ),
+    ...(productionScenarios.status === 'configured'
+      ? { productionSnapshot: () => productionScenarios.refresh('imaginarium-theater') }
+      : { productionUnavailableReason: productionScenarios.reason })
+  });
+  const theaterAdvisor = new TheaterAdvisorService({
+    runner: new AgentSdkAdapter(),
+    scenarioService: theaterScenario,
+    profiles,
+    history,
+    config,
+    knowledge: characterKnowledge,
+    toolLog: (event) => console.info('[theater-business-tool]', event),
+    auditLog: (event) => console.info('[theater-advisor]', event),
+    sdkEnvironment: { cwd: app.getPath('userData'), clientVersion: app.getVersion() }
+  });
   const updates = new UpdateService({
     enabled: app.isPackaged && !packagedSdkSmokeUrl,
     onStatus: (status) => mainWindow?.webContents.send(UPDATE_EVENT_CHANNEL, status)
@@ -205,6 +231,11 @@ async function bootstrapServices(): Promise<void> {
   registerStygianAdvisorIpc({
     scenario: stygianScenario,
     advisor: stygianAdvisor,
+    getMainWindow: () => mainWindow
+  });
+  registerTheaterAdvisorIpc({
+    scenario: theaterScenario,
+    advisor: theaterAdvisor,
     getMainWindow: () => mainWindow
   });
   registerHistoryIpc({ history });

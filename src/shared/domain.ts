@@ -339,6 +339,35 @@ export interface StygianPlanHistoryEntry {
   plan: import('./scenario-v2.js').StygianPlan;
 }
 
+export interface TheaterPlanHistoryEntry {
+  id: string;
+  createdAt: string;
+  uid: string;
+  scenarioId: string;
+  schemaVersion: 2;
+  dataVersion: string;
+  mode: 'imaginarium-theater';
+  act?: number;
+  target: import('./theater-advisor.js').TheaterObjective;
+  source: 'smart-service' | 'local-rules';
+  scenarioTrust: 'production' | 'development-sample';
+  scenarioFreshness: 'fresh' | 'expiring' | 'stale' | 'unknown';
+  scenarioNotCurrent: boolean;
+  interventions: import('./theater-advisor.js').TheaterAdvisorPlanInput;
+  eligibility: import('./theater-advisor.js').TheaterEligibilityReport;
+  cast: Array<{
+    id: string;
+    name: string;
+    element?: string;
+    level?: number;
+    source: 'owned' | 'opening' | 'trial' | 'special-guest' | 'support';
+    poolSources?: Array<'opening' | 'trial' | 'special-guest' | 'support'>;
+  }>;
+  vigorBudget: Array<{ act: number; before: number; spent: number; after: number }>;
+  routeGuidance: import('./theater-advisor.js').TheaterRouteGuidance;
+  plan: import('./scenario-v2.js').TheaterPlan;
+}
+
 export interface HistoryQueryOptions {
   uid?: string;
   source?: 'llm' | 'fallback';

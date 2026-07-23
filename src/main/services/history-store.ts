@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type {
   AbyssPlanHistoryEntry,
   StygianPlanHistoryEntry,
+  TheaterPlanHistoryEntry,
   HistoryQueryOptions,
   HistoryQueryResult,
   RecommendationHistoryEntry
@@ -13,12 +14,22 @@ import {
   stygianAdvisorPlanSchema,
   stygianRewardTargetSchema
 } from '../../shared/stygian-advisor.js';
-import { crossPartyReusePolicySchema, playerPreferencesSchema } from '../../shared/scenario-v2.js';
+import {
+  theaterAdvisorPlanInputSchema,
+  theaterEligibilityReportSchema,
+  theaterObjectiveSchema
+} from '../../shared/theater-advisor.js';
+import {
+  crossPartyReusePolicySchema,
+  playerPreferencesSchema,
+  theaterPlanSchema
+} from '../../shared/scenario-v2.js';
 
 interface HistoryStoreSchema {
   entries: RecommendationHistoryEntry[];
   abyssPlans: AbyssPlanHistoryEntry[];
   stygianPlans: StygianPlanHistoryEntry[];
+  theaterPlans: TheaterPlanHistoryEntry[];
 }
 
 const MAX_ENTRIES = 200;
@@ -28,8 +39,146 @@ const MAX_LIMIT = 100;
 const DEFAULTS: HistoryStoreSchema = {
   entries: [],
   abyssPlans: [],
-  stygianPlans: []
+  stygianPlans: [],
+  theaterPlans: []
 };
+
+const theaterHistoryEntrySchema = z
+  .object({
+    id: z.string().trim().min(8),
+    createdAt: z.iso.datetime({ offset: true }),
+    uid: z.string().regex(/^\d{9}$/),
+    scenarioId: z.string().trim().min(1),
+    schemaVersion: z.literal(2),
+    dataVersion: z.string().trim().min(1),
+    mode: z.literal('imaginarium-theater'),
+    act: z.number().int().min(1).max(10).optional(),
+    target: theaterObjectiveSchema,
+    source: z.enum(['smart-service', 'local-rules']),
+    scenarioTrust: z.enum(['production', 'development-sample']),
+    scenarioFreshness: z.enum(['fresh', 'expiring', 'stale', 'unknown']),
+    scenarioNotCurrent: z.boolean(),
+    interventions: theaterAdvisorPlanInputSchema,
+    eligibility: theaterEligibilityReportSchema,
+    cast: z
+      .array(
+        z
+          .object({
+            id: z.string().trim().min(1),
+            name: z.string().trim().min(1),
+            element: z.string().trim().min(1).optional(),
+            level: z.number().int().nonnegative().optional(),
+            source: z.enum(['owned', 'opening', 'trial', 'special-guest', 'support']),
+            poolSources: z
+              .array(z.enum(['opening', 'trial', 'special-guest', 'support']))
+              .optional()
+          })
+          .strict()
+      )
+      .min(1),
+    vigorBudget: z.array(
+      z
+        .object({
+          act: z.number().int().min(1).max(10),
+          before: z.number().int().nonnegative(),
+          spent: z.number().int().nonnegative(),
+          after: z.number().int().nonnegative()
+        })
+        .strict()
+    ),
+    routeGuidance: z
+      .object({
+        preserveCharacterIds: z.array(canonicalCharacterIdSchema),
+        arcanaPriorityIds: z.array(z.string().trim().min(1)),
+        notes: z.array(z.string().trim().min(1)).min(1)
+      })
+      .strict(),
+    plan: theaterPlanSchema
+  })
+  .strict()
+  .superRefine((entry, context) => {
+    if (
+      entry.scenarioId !== entry.plan.scenarioId ||
+      entry.dataVersion !== entry.plan.dataVersion ||
+      entry.interventions.scenarioId !== entry.scenarioId ||
+      entry.interventions.dataVersion !== entry.dataVersion
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['plan'],
+        message: 'Theater history identity must remain immutable'
+      });
+    }
+    if (
+      entry.interventions.uid !== entry.uid ||
+      entry.interventions.target !== entry.target ||
+      entry.interventions.act !== entry.act
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['interventions'],
+        message: 'Theater history target must match its envelope'
+      });
+    }
+    const ids = entry.cast.map(({ id }) => id);
+    if (new Set(ids).size !== ids.length)
+      context.addIssue({
+        code: 'custom',
+        path: ['cast'],
+        message: 'Theater history cast IDs must be unique'
+      });
+    const byId = new Map(entry.cast.map((item) => [item.id, item]));
+    entry.plan.cast.selectedCharacterIds.forEach((id) => {
+      if (byId.get(id)?.source !== 'owned')
+        context.addIssue({
+          code: 'custom',
+          path: ['cast'],
+          message: 'Selected owned cast cannot be stored as an external source'
+        });
+    });
+    const allPlanIds = new Set([
+      ...entry.plan.cast.selectedCharacterIds,
+      ...entry.plan.cast.openingCharacterIds,
+      ...entry.plan.cast.trialCharacterIds,
+      ...entry.plan.cast.specialGuestCharacterIds,
+      ...entry.plan.cast.supportCharacterIds,
+      ...entry.plan.acts.flatMap(({ candidateCharacterIds }) => candidateCharacterIds)
+    ]);
+    if ([...allPlanIds].some((id) => !byId.has(id)) || ids.some((id) => !allPlanIds.has(id))) {
+      context.addIssue({
+        code: 'custom',
+        path: ['cast'],
+        message: 'Theater history cast snapshots must exactly cover the plan'
+      });
+    }
+    const plannedActs = entry.plan.acts.map(({ act }) => act);
+    if (
+      new Set(entry.vigorBudget.map(({ act }) => act)).size !== entry.vigorBudget.length ||
+      entry.vigorBudget.length !== plannedActs.length ||
+      entry.vigorBudget.some(({ act }, index) => act !== plannedActs[index])
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['vigorBudget'],
+        message: 'Theater history vigor budget must align with every planned act'
+      });
+    }
+    entry.vigorBudget.forEach(({ before, spent, after }, index) => {
+      if (before - spent !== after || (index > 0 && before !== entry.vigorBudget[index - 1]?.after))
+        context.addIssue({
+          code: 'custom',
+          path: ['vigorBudget', index],
+          message: 'Theater history vigor budget chain is invalid'
+        });
+    });
+    if (entry.routeGuidance.preserveCharacterIds.some((id) => byId.get(id)?.source !== 'owned')) {
+      context.addIssue({
+        code: 'custom',
+        path: ['routeGuidance', 'preserveCharacterIds'],
+        message: 'Only owned actors can be preserved by canonical ID'
+      });
+    }
+  });
 
 const stygianHistoryEntrySchema = z
   .object({
@@ -255,6 +404,39 @@ export class HistoryStore {
     if (next.length === entries.length) return false;
     this.store.set('stygianPlans', next);
     return true;
+  }
+
+  appendTheater(input: Omit<TheaterPlanHistoryEntry, 'id' | 'createdAt'>): TheaterPlanHistoryEntry {
+    const entry = theaterHistoryEntrySchema.parse(
+      structuredClone({ id: randomUUID(), createdAt: new Date().toISOString(), ...input })
+    ) as TheaterPlanHistoryEntry;
+    this.store.set('theaterPlans', [entry, ...this.readTheaterPlans()].slice(0, MAX_ENTRIES));
+    return structuredClone(entry);
+  }
+
+  queryTheater(options: { uid?: string } = {}): TheaterPlanHistoryEntry[] {
+    return structuredClone(
+      this.readTheaterPlans().filter(
+        (entry) => options.uid === undefined || entry.uid === options.uid
+      )
+    );
+  }
+
+  removeTheaterById(id: string): boolean {
+    const entries = this.readTheaterPlans();
+    const next = entries.filter((entry) => entry.id !== id);
+    if (next.length === entries.length) return false;
+    this.store.set('theaterPlans', next);
+    return true;
+  }
+
+  private readTheaterPlans(): TheaterPlanHistoryEntry[] {
+    const stored = this.store.get('theaterPlans') as unknown;
+    if (!Array.isArray(stored)) return [];
+    return stored.flatMap((entry) => {
+      const parsed = theaterHistoryEntrySchema.safeParse(entry);
+      return parsed.success ? [structuredClone(parsed.data) as TheaterPlanHistoryEntry] : [];
+    });
   }
 
   private readStygianPlans(): StygianPlanHistoryEntry[] {

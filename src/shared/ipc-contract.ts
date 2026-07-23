@@ -5,6 +5,7 @@ import type {
   AdvisorRequest,
   AbyssPlanHistoryEntry,
   StygianPlanHistoryEntry,
+  TheaterPlanHistoryEntry,
   BindCookieResult,
   HistoryQueryOptions,
   HistoryQueryResult,
@@ -33,10 +34,17 @@ import type {
   StygianAdvisorResult,
   StygianScenarioView
 } from './stygian-advisor.js';
+import type {
+  TheaterAdvisorEvent,
+  TheaterAdvisorPlanInput,
+  TheaterAdvisorResult,
+  TheaterScenarioView
+} from './theater-advisor.js';
 
 export const ADVISOR_EVENT_CHANNEL = 'advisor:event' as const;
 export const ABYSS_ADVISOR_EVENT_CHANNEL = 'abyss-advisor:event' as const;
 export const STYGIAN_ADVISOR_EVENT_CHANNEL = 'stygian-advisor:event' as const;
+export const THEATER_ADVISOR_EVENT_CHANNEL = 'theater-advisor:event' as const;
 export const UPDATE_EVENT_CHANNEL = 'update:event' as const;
 
 export interface IpcContract {
@@ -96,6 +104,9 @@ export interface IpcContract {
   'advisor-v2:stygian-scenario': { req: void; res: StygianScenarioView };
   'advisor-v2:stygian-plan': { req: StygianAdvisorPlanInput; res: StygianAdvisorResult };
   'advisor-v2:stygian-cancel': { req: { correlationId: string }; res: { ok: boolean } };
+  'advisor-v2:theater-scenario': { req: void; res: TheaterScenarioView };
+  'advisor-v2:theater-plan': { req: TheaterAdvisorPlanInput; res: TheaterAdvisorResult };
+  'advisor-v2:theater-cancel': { req: { correlationId: string }; res: { ok: boolean } };
 
   'scenario:list': { req: void; res: ScenarioListItem[] };
   'scenario:get': {
@@ -113,6 +124,8 @@ export interface IpcContract {
   'history:abyss-delete': { req: { id: string }; res: { ok: boolean } };
   'history:stygian-list': { req: { uid?: string }; res: StygianPlanHistoryEntry[] };
   'history:stygian-delete': { req: { id: string }; res: { ok: boolean } };
+  'history:theater-list': { req: { uid?: string }; res: TheaterPlanHistoryEntry[] };
+  'history:theater-delete': { req: { id: string }; res: { ok: boolean } };
   'history:clear': {
     req: { uid?: string; source?: 'llm' | 'fallback'; enemyKeyword?: string };
     res: { removed: number };
@@ -154,6 +167,9 @@ export const ALL_IPC_CHANNELS: IpcChannel[] = [
   'advisor-v2:stygian-scenario',
   'advisor-v2:stygian-plan',
   'advisor-v2:stygian-cancel',
+  'advisor-v2:theater-scenario',
+  'advisor-v2:theater-plan',
+  'advisor-v2:theater-cancel',
   'scenario:list',
   'scenario:get',
   'scenario:refresh',
@@ -163,6 +179,8 @@ export const ALL_IPC_CHANNELS: IpcChannel[] = [
   'history:abyss-delete',
   'history:stygian-list',
   'history:stygian-delete',
+  'history:theater-list',
+  'history:theater-delete',
   'history:clear'
 ];
 
@@ -228,6 +246,16 @@ export interface RendererApi {
     ) => Promise<IpcResponse<'advisor-v2:stygian-cancel'>>;
     onEvent: (cb: (event: StygianAdvisorEvent) => void) => () => void;
   };
+  theaterAdvisor: {
+    getScenario: () => Promise<IpcResponse<'advisor-v2:theater-scenario'>>;
+    recommend: (
+      input: IpcRequest<'advisor-v2:theater-plan'>
+    ) => Promise<IpcResponse<'advisor-v2:theater-plan'>>;
+    cancel: (
+      input: IpcRequest<'advisor-v2:theater-cancel'>
+    ) => Promise<IpcResponse<'advisor-v2:theater-cancel'>>;
+    onEvent: (cb: (event: TheaterAdvisorEvent) => void) => () => void;
+  };
   scenario: {
     list: () => Promise<IpcResponse<'scenario:list'>>;
     get: (input: IpcRequest<'scenario:get'>) => Promise<IpcResponse<'scenario:get'>>;
@@ -248,6 +276,12 @@ export interface RendererApi {
     deleteStygian: (
       input: IpcRequest<'history:stygian-delete'>
     ) => Promise<IpcResponse<'history:stygian-delete'>>;
+    listTheater: (
+      input: IpcRequest<'history:theater-list'>
+    ) => Promise<IpcResponse<'history:theater-list'>>;
+    deleteTheater: (
+      input: IpcRequest<'history:theater-delete'>
+    ) => Promise<IpcResponse<'history:theater-delete'>>;
     clear: (input: IpcRequest<'history:clear'>) => Promise<IpcResponse<'history:clear'>>;
   };
 }

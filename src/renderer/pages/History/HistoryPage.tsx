@@ -5,11 +5,13 @@ import type {
   HistoryQueryResult,
   ProfileStateView,
   RecommendationHistoryEntry,
-  StygianPlanHistoryEntry
+  StygianPlanHistoryEntry,
+  TheaterPlanHistoryEntry
 } from '../../../shared/domain';
 import { ButtonGlyph } from '../../design/Icons';
 import { localizeError, useI18n } from '../../i18n';
 import { rewardTargetLabel, reuseRuleSummary } from '../Advisor/stygian-presentation';
+import { objectiveLabel, pathChoiceLabel } from '../Advisor/theater-presentation';
 
 interface HistoryPageProps {
   state: ProfileStateView;
@@ -48,6 +50,7 @@ export function HistoryPage({ state }: HistoryPageProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [abyssPlans, setAbyssPlans] = useState<AbyssPlanHistoryEntry[]>([]);
   const [stygianPlans, setStygianPlans] = useState<StygianPlanHistoryEntry[]>([]);
+  const [theaterPlans, setTheaterPlans] = useState<TheaterPlanHistoryEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const filtersRef = useRef(filters);
@@ -57,7 +60,7 @@ export function HistoryPage({ state }: HistoryPageProps) {
       setError(null);
       setLoading(true);
       try {
-        const [result, nextAbyssPlans, nextStygianPlans] = await Promise.all([
+        const [result, nextAbyssPlans, nextStygianPlans, nextTheaterPlans] = await Promise.all([
           api.history.list({
             uid: next.scope === 'active' ? state.activeUid : undefined,
             source: next.source === 'all' ? undefined : next.source,
@@ -71,6 +74,9 @@ export function HistoryPage({ state }: HistoryPageProps) {
             uid: next.scope === 'active' ? state.activeUid : undefined
           }),
           api.history.listStygian({
+            uid: next.scope === 'active' ? state.activeUid : undefined
+          }),
+          api.history.listTheater({
             uid: next.scope === 'active' ? state.activeUid : undefined
           })
         ]);
@@ -90,6 +96,19 @@ export function HistoryPage({ state }: HistoryPageProps) {
         );
         setStygianPlans(
           nextStygianPlans.filter((entry) => {
+            const sourceMatches =
+              next.source === 'all' ||
+              (next.source === 'llm' && entry.source === 'smart-service') ||
+              (next.source === 'fallback' && entry.source === 'local-rules');
+            const timestamp = Date.parse(entry.createdAt);
+            const fromMatches =
+              !next.fromDate || timestamp >= Date.parse(`${next.fromDate}T00:00:00`);
+            const toMatches = !next.toDate || timestamp <= Date.parse(`${next.toDate}T23:59:59`);
+            return sourceMatches && fromMatches && toMatches && !next.enemyKeyword.trim();
+          })
+        );
+        setTheaterPlans(
+          nextTheaterPlans.filter((entry) => {
             const sourceMatches =
               next.source === 'all' ||
               (next.source === 'llm' && entry.source === 'smart-service') ||
@@ -148,6 +167,12 @@ export function HistoryPage({ state }: HistoryPageProps) {
 
   async function deleteStygianEntry(id: string) {
     await api.history.deleteStygian({ id });
+    if (expandedId === id) setExpandedId(null);
+    await load(filters, query.offset);
+  }
+
+  async function deleteTheaterEntry(id: string) {
+    await api.history.deleteTheater({ id });
     if (expandedId === id) setExpandedId(null);
     await load(filters, query.offset);
   }
@@ -334,6 +359,27 @@ export function HistoryPage({ state }: HistoryPageProps) {
         )}
       </section>
 
+      <section className="gta-history-abyss" aria-labelledby="theater-history-title">
+        <h3 id="theater-history-title">幻想真境剧诗方案</h3>
+        {theaterPlans.length === 0 ? (
+          <p className="gta-hint">当前筛选下没有已保存的剧诗演员与活力路线。</p>
+        ) : (
+          <ul className="gta-history-list">
+            {theaterPlans.map((entry) => (
+              <TheaterHistoryListItem
+                key={entry.id}
+                entry={entry}
+                expanded={expandedId === entry.id}
+                onToggle={() =>
+                  setExpandedId((previous) => (previous === entry.id ? null : entry.id))
+                }
+                onDelete={() => void deleteTheaterEntry(entry.id)}
+              />
+            ))}
+          </ul>
+        )}
+      </section>
+
       <p className="gta-history-stats">
         <span>{t('history.total', { count: query.total })}</span>
         <span>
@@ -385,6 +431,90 @@ export function HistoryPage({ state }: HistoryPageProps) {
         </button>
       </div>
     </section>
+  );
+}
+
+function TheaterHistoryListItem({
+  entry,
+  expanded,
+  onToggle,
+  onDelete
+}: {
+  entry: TheaterPlanHistoryEntry;
+  expanded: boolean;
+  onToggle: () => void;
+  onDelete: () => void;
+}) {
+  const names = new Map(entry.cast.map((actor) => [actor.id, actor.name]));
+  return (
+    <li className={expanded ? 'gta-history-entry is-expanded' : 'gta-history-entry'}>
+      <button type="button" className="gta-history-summary" onClick={onToggle}>
+        <span className="gta-history-time">{formatTime(entry.createdAt)}</span>
+        <span
+          className={entry.source === 'smart-service' ? 'gta-tag is-llm' : 'gta-tag is-fallback'}
+        >
+          {entry.source === 'smart-service' ? '智能服务' : '本地规则'}
+        </span>
+        {entry.scenarioTrust === 'development-sample' && (
+          <span className="gta-tag is-accent">演练资料</span>
+        )}
+        <span className="gta-history-uid">UID {entry.uid}</span>
+        <span className="gta-history-enemies">
+          {objectiveLabel(entry.target)} · {entry.eligibility.hardQualifiedCount} /{' '}
+          {entry.eligibility.requiredHeadcount} 名可入场 ·{' '}
+          {entry.act === undefined ? '全部幕次' : `第 ${entry.act} 幕`}
+        </span>
+      </button>
+      {expanded && (
+        <div className="gta-history-body gta-history-theater-body">
+          <section>
+            <h4>入场演员池</h4>
+            <p>
+              {entry.plan.cast.selectedCharacterIds
+                .map((id) => names.get(id) ?? '未命名演员')
+                .join(' · ')}
+            </p>
+          </section>
+          <section>
+            <h4>逐幕活力预算</h4>
+            <div className="gta-history-theater-vigor">
+              {entry.vigorBudget.map((item) => (
+                <span key={item.act}>
+                  第 {item.act} 幕：{item.before} → {item.after}（花费 {item.spent}）
+                </span>
+              ))}
+            </div>
+          </section>
+          <section>
+            <h4>幕次路线</h4>
+            <ol className="gta-history-theater-route">
+              {entry.plan.acts.map((act) => (
+                <li key={act.act}>
+                  <strong>第 {act.act} 幕</strong>
+                  <span>
+                    {act.candidateCharacterIds
+                      .map((id) => names.get(id) ?? '未命名演员')
+                      .join('、')}
+                  </span>
+                  <small>{pathChoiceLabel(act.pathChoice)}</small>
+                </li>
+              ))}
+            </ol>
+          </section>
+          <section>
+            <h4>保留与分支优先级</h4>
+            {entry.routeGuidance.notes.map((note) => (
+              <p key={note}>{note}</p>
+            ))}
+          </section>
+          <div className="gta-actions">
+            <button type="button" className="gta-btn gta-btn--danger" onClick={onDelete}>
+              删除这条幻想真境剧诗方案
+            </button>
+          </div>
+        </div>
+      )}
+    </li>
   );
 }
 
