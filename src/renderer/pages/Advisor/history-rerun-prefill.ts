@@ -13,13 +13,31 @@ interface RerunAdjustment {
   status: 'ready' | 'adjusted';
   removedCharacterCount: number;
   targetUnavailable: boolean;
+  scenarioChanged: boolean;
+  dataVersionChanged: boolean;
+}
+
+interface CurrentRerunSource {
+  scenarioId: string;
+  dataVersion: string;
+}
+
+export function historySourceChangedNotice(
+  change: Pick<RerunAdjustment, 'scenarioChanged' | 'dataVersionChanged'>,
+  locale: 'zh' | 'en'
+): string {
+  if (!change.scenarioChanged && !change.dataVersionChanged) return '';
+  return locale === 'en'
+    ? 'Challenge data has changed. Saved choices were checked against the current data; '
+    : '当前挑战资料已更新，已按新资料重新核对保存选项；';
 }
 
 export function prepareAbyssRerun(
   intent: AbyssIntent,
   activeUid: string,
   availableFloors: number[],
-  ownedCharacterIds: string[]
+  ownedCharacterIds: string[],
+  currentSource?: CurrentRerunSource
 ):
   | BlockedRerun
   | (RerunAdjustment &
@@ -44,7 +62,8 @@ export function prepareAbyssRerun(
     lockedCharacterIds,
     excludedCharacterIds,
     removedCharacterCount,
-    targetUnavailable
+    targetUnavailable,
+    ...sourceChange(intent, currentSource)
   } as RerunAdjustment &
     Pick<
       AbyssIntent,
@@ -56,7 +75,8 @@ export function prepareStygianRerun(
   intent: StygianIntent,
   activeUid: string,
   availableDifficultyIds: string[],
-  ownedCharacterIds: string[]
+  ownedCharacterIds: string[],
+  currentSource?: CurrentRerunSource
 ):
   | BlockedRerun
   | (RerunAdjustment &
@@ -82,7 +102,8 @@ export function prepareStygianRerun(
     lockedCharacterIds,
     excludedCharacterIds,
     removedCharacterCount,
-    targetUnavailable
+    targetUnavailable,
+    ...sourceChange(intent, currentSource)
   };
 }
 
@@ -90,7 +111,8 @@ export function prepareTheaterRerun(
   intent: TheaterIntent,
   activeUid: string,
   availableActs: number[],
-  ownedCharacterIds: string[]
+  ownedCharacterIds: string[],
+  currentSource?: CurrentRerunSource
 ):
   | BlockedRerun
   | (RerunAdjustment &
@@ -128,6 +150,19 @@ export function prepareTheaterRerun(
     selectedSpecialGuestCharacterIds: [...intent.selectedSpecialGuestCharacterIds],
     selectedSupportCharacterIds: [...intent.selectedSupportCharacterIds],
     removedCharacterCount,
-    targetUnavailable
+    targetUnavailable,
+    ...sourceChange(intent, currentSource)
+  };
+}
+
+function sourceChange(
+  intent: HistoryRerunIntent,
+  currentSource: CurrentRerunSource | undefined
+): Pick<RerunAdjustment, 'scenarioChanged' | 'dataVersionChanged'> {
+  return {
+    scenarioChanged:
+      currentSource !== undefined && currentSource.scenarioId !== intent.previousScenarioId,
+    dataVersionChanged:
+      currentSource !== undefined && currentSource.dataVersion !== intent.previousDataVersion
   };
 }

@@ -19,11 +19,12 @@ import {
   type CharacterInterventionState
 } from './abyss-presentation';
 import type { HistoryRerunIntent } from '../History/history-presentation';
-import { prepareAbyssRerun } from './history-rerun-prefill';
+import { historySourceChangedNotice, prepareAbyssRerun } from './history-rerun-prefill';
 
 interface AbyssWorkspaceProps {
   uid: string;
   historyRerun?: Extract<HistoryRerunIntent, { mode: 'spiral-abyss' }>;
+  onHistoryRerunConsumed?: (historyId: string) => void;
 }
 
 const PROGRESS_STEPS: AbyssAdvisorProgressStep[] = [
@@ -41,7 +42,11 @@ const DEFAULT_PREFERENCES: PlayerPreferences = {
   noBuildChange: false
 };
 
-export function AbyssWorkspace({ uid, historyRerun }: AbyssWorkspaceProps) {
+export function AbyssWorkspace({
+  uid,
+  historyRerun,
+  onHistoryRerunConsumed
+}: AbyssWorkspaceProps) {
   const [scenarioView, setScenarioView] = useState<AbyssScenarioView | null>(null);
   const [profile, setProfile] = useState<PersistedProfile | null>(null);
   const [loadError, setLoadError] = useState('');
@@ -58,7 +63,9 @@ export function AbyssWorkspace({ uid, historyRerun }: AbyssWorkspaceProps) {
   const [running, setRunning] = useState(false);
   const requestSequence = useRef(0);
   const activeCorrelation = useRef<string | null>(null);
-  const appliedHistoryId = useRef<string | null>(null);
+  const pendingHistoryRerun = useRef(historyRerun);
+  const historyConsumedCallback = useRef(onHistoryRerunConsumed);
+  historyConsumedCallback.current = onHistoryRerunConsumed;
   const [historyNotice, setHistoryNotice] = useState('');
 
   useEffect(() => {
@@ -72,6 +79,7 @@ export function AbyssWorkspace({ uid, historyRerun }: AbyssWorkspaceProps) {
     setFloorNumber(null);
     setChamberNumber('all');
     setInterventions({});
+    setHistoryNotice('');
     setResult(null);
     setResultNeedsUpdate(false);
     setActiveStep(null);
@@ -84,13 +92,17 @@ export function AbyssWorkspace({ uid, historyRerun }: AbyssWorkspaceProps) {
         if (nextScenario.status === 'ready') {
           const defaultFloor = nextScenario.scenario.floors[0]?.floor ?? null;
           setFloorNumber(defaultFloor);
-          if (historyRerun && appliedHistoryId.current !== historyRerun.historyId && nextProfile) {
-            appliedHistoryId.current = historyRerun.historyId;
+          const rerun = pendingHistoryRerun.current;
+          if (rerun && nextProfile) {
             const prepared = prepareAbyssRerun(
-              historyRerun,
+              rerun,
               uid,
               nextScenario.scenario.floors.map(({ floor }) => floor),
-              nextProfile.characters.map(({ id }) => String(id))
+              nextProfile.characters.map(({ id }) => String(id)),
+              {
+                scenarioId: nextScenario.scenario.id,
+                dataVersion: nextScenario.scenario.meta.dataVersion
+              }
             );
             if (prepared.status === 'blocked') {
               setHistoryNotice('这份旧方案属于另一个 UID；已保留旧方案查看，但没有带入当前账号。');
@@ -114,7 +126,7 @@ export function AbyssWorkspace({ uid, historyRerun }: AbyssWorkspaceProps) {
                 ...Object.fromEntries(prepared.excludedCharacterIds.map((id) => [id, 'excluded']))
               });
               setHistoryNotice(
-                prepared.status === 'adjusted'
+                `${historySourceChangedNotice(prepared, 'zh')}${prepared.status === 'adjusted'
                   ? `已带入旧方案的可用选择；${
                       prepared.targetUnavailable ? '原楼层已不在当前资料中；' : ''
                     }${
@@ -122,9 +134,11 @@ export function AbyssWorkspace({ uid, historyRerun }: AbyssWorkspaceProps) {
                         ? `${prepared.removedCharacterCount} 名已不在当前角色资料中的角色未带入；`
                         : ''
                     }请检查后再点击生成，不会自动调用智能服务。`
-                  : '已带入旧方案的楼层、偏好与角色选择。请检查后再点击生成，不会自动调用智能服务。'
+                  : '已带入旧方案的楼层、偏好与角色选择。请检查后再点击生成，不会自动调用智能服务。'}`
               );
             }
+            pendingHistoryRerun.current = undefined;
+            historyConsumedCallback.current?.(rerun.historyId);
           }
         }
       })
@@ -137,7 +151,7 @@ export function AbyssWorkspace({ uid, historyRerun }: AbyssWorkspaceProps) {
       activeCorrelation.current = null;
       void api.abyssAdvisor.cancel();
     };
-  }, [historyRerun, uid]);
+  }, [uid]);
 
   useEffect(
     () =>

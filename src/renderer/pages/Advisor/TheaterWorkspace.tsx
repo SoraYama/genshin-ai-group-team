@@ -24,7 +24,7 @@ import {
   theaterEntityName
 } from './theater-presentation';
 import type { HistoryRerunIntent } from '../History/history-presentation';
-import { prepareTheaterRerun } from './history-rerun-prefill';
+import { historySourceChangedNotice, prepareTheaterRerun } from './history-rerun-prefill';
 
 const PROGRESS: TheaterAdvisorProgressStep[] = [
   'reading-roster',
@@ -38,10 +38,12 @@ const OBJECTIVES: TheaterObjective[] = ['eligibility-check', 'safe-clear', 'expl
 export function TheaterWorkspace({
   uid,
   historyRerun,
+  onHistoryRerunConsumed,
   onBack
 }: {
   uid: string;
   historyRerun?: Extract<HistoryRerunIntent, { mode: 'imaginarium-theater' }>;
+  onHistoryRerunConsumed?: (historyId: string) => void;
   onBack: () => void;
 }) {
   const [view, setView] = useState<TheaterScenarioView | null>(null);
@@ -68,11 +70,14 @@ export function TheaterWorkspace({
   const [result, setResult] = useState<TheaterAdvisorResult | null>(null);
   const activeCorrelation = useRef<string | null>(null);
   const sequence = useRef(0);
-  const appliedHistoryId = useRef<string | null>(null);
+  const pendingHistoryRerun = useRef(historyRerun);
+  const historyConsumedCallback = useRef(onHistoryRerunConsumed);
+  historyConsumedCallback.current = onHistoryRerunConsumed;
   const [historyNotice, setHistoryNotice] = useState('');
 
   useEffect(() => {
     let active = true;
+    setHistoryNotice('');
     void Promise.all([api.theaterAdvisor.getScenario(), api.profile.get({ uid })])
       .then(([nextView, nextProfile]) => {
         if (!active) return;
@@ -88,13 +93,17 @@ export function TheaterWorkspace({
             )
             .map(({ id }) => String(id));
           setSelectedOwned(eligibleOwned);
-          if (historyRerun && appliedHistoryId.current !== historyRerun.historyId) {
-            appliedHistoryId.current = historyRerun.historyId;
+          const rerun = pendingHistoryRerun.current;
+          if (rerun) {
             const prepared = prepareTheaterRerun(
-              historyRerun,
+              rerun,
               uid,
               nextView.scenario.acts.map(({ act: number }) => number),
-              eligibleOwned
+              eligibleOwned,
+              {
+                scenarioId: nextView.scenario.id,
+                dataVersion: nextView.scenario.meta.dataVersion
+              }
             );
             if (prepared.status === 'blocked') {
               setHistoryNotice('这份旧方案属于另一个 UID；已保留旧方案查看，但没有带入当前账号。');
@@ -139,7 +148,7 @@ export function TheaterWorkspace({
               });
               const changed = prepared.status === 'adjusted' || removedExternal > 0;
               setHistoryNotice(
-                changed
+                `${historySourceChangedNotice(prepared, 'zh')}${changed
                   ? `已带入旧方案的可用选择；${
                       prepared.targetUnavailable ? '原幕次已不在当前资料中；' : ''
                     }${
@@ -147,9 +156,11 @@ export function TheaterWorkspace({
                         ? `${prepared.removedCharacterCount + removedExternal} 名当前不可用的演员未带入；`
                         : ''
                     }请检查后再点击生成，不会自动调用智能服务。`
-                  : '已带入旧方案的幕次、目标、偏好、演员与外援选择。请检查后再点击生成，不会自动调用智能服务。'
+                  : '已带入旧方案的幕次、目标、偏好、演员与外援选择。请检查后再点击生成，不会自动调用智能服务。'}`
               );
             }
+            pendingHistoryRerun.current = undefined;
+            historyConsumedCallback.current?.(rerun.historyId);
           }
         }
       })
@@ -161,7 +172,7 @@ export function TheaterWorkspace({
       activeCorrelation.current = null;
       if (correlation) void api.theaterAdvisor.cancel({ correlationId: correlation });
     };
-  }, [historyRerun, uid]);
+  }, [uid]);
 
   useEffect(
     () =>

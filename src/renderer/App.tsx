@@ -8,6 +8,11 @@ import { useProfileState } from './hooks/useProfileState';
 import { useI18n } from './i18n';
 import { AppShell, type AppView } from './components/AppShell';
 import type { HistoryRerunIntent } from './pages/History/history-presentation';
+import {
+  consumeHistoryRerun,
+  historyRerunAfterNavigation,
+  historyRerunForActiveUid
+} from './pages/Advisor/history-rerun-state';
 
 export default function App() {
   const { t } = useI18n();
@@ -24,8 +29,17 @@ export default function App() {
     setHasInitialized(true);
   }, [hasInitialized, loading, state]);
 
+  useEffect(() => {
+    setHistoryRerun((current) => historyRerunForActiveUid(current, state?.activeUid));
+  }, [state?.activeUid]);
+
+  const navigate = (nextView: AppView) => {
+    setHistoryRerun((current) => historyRerunAfterNavigation(current, nextView));
+    setView(nextView);
+  };
+
   return (
-    <AppShell activeUid={state?.activeUid} view={view} onNavigate={setView}>
+    <AppShell activeUid={state?.activeUid} view={view} onNavigate={navigate}>
       {loading || !state ? (
         <p className="gta-hint gta-on-bg">{t('common.loading')}</p>
       ) : view === 'settings' ? (
@@ -34,15 +48,18 @@ export default function App() {
         <OnboardingPage
           onBound={async () => {
             await refresh();
-            setView('roster');
+            navigate('roster');
           }}
-          onCancel={state.profiles.length > 0 ? () => setView('roster') : undefined}
+          onCancel={state.profiles.length > 0 ? () => navigate('roster') : undefined}
         />
       ) : view === 'advisor' ? (
         <AdvisorPage
           state={state}
           historyRerun={historyRerun}
-          onGotoOnboarding={() => setView('onboarding')}
+          onHistoryRerunConsumed={(historyId) =>
+            setHistoryRerun((current) => consumeHistoryRerun(current, historyId))
+          }
+          onGotoOnboarding={() => navigate('onboarding')}
         />
       ) : view === 'history' ? (
         <HistoryPage
@@ -56,7 +73,7 @@ export default function App() {
         <RosterPage
           state={state}
           onStateChange={refresh}
-          onGotoOnboarding={() => setView('onboarding')}
+          onGotoOnboarding={() => navigate('onboarding')}
         />
       )}
     </AppShell>

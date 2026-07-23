@@ -31,11 +31,12 @@ import {
   type StygianInterventionState
 } from './stygian-presentation';
 import type { HistoryRerunIntent } from '../History/history-presentation';
-import { prepareStygianRerun } from './history-rerun-prefill';
+import { historySourceChangedNotice, prepareStygianRerun } from './history-rerun-prefill';
 
 interface StygianWorkspaceProps {
   uid: string;
   historyRerun?: Extract<HistoryRerunIntent, { mode: 'stygian-onslaught' }>;
+  onHistoryRerunConsumed?: (historyId: string) => void;
   onBack: () => void;
 }
 
@@ -56,7 +57,12 @@ const DEFAULT_PREFERENCES: PlayerPreferences = {
   noBuildChange: false
 };
 
-export function StygianWorkspace({ uid, historyRerun, onBack }: StygianWorkspaceProps) {
+export function StygianWorkspace({
+  uid,
+  historyRerun,
+  onHistoryRerunConsumed,
+  onBack
+}: StygianWorkspaceProps) {
   const [scenarioView, setScenarioView] = useState<StygianScenarioView | null>(null);
   const [profile, setProfile] = useState<PersistedProfile | null>(null);
   const [loadError, setLoadError] = useState('');
@@ -70,7 +76,9 @@ export function StygianWorkspace({ uid, historyRerun, onBack }: StygianWorkspace
   const [running, setRunning] = useState(false);
   const sequence = useRef(0);
   const activeCorrelation = useRef<string | null>(null);
-  const appliedHistoryId = useRef<string | null>(null);
+  const pendingHistoryRerun = useRef(historyRerun);
+  const historyConsumedCallback = useRef(onHistoryRerunConsumed);
+  historyConsumedCallback.current = onHistoryRerunConsumed;
   const [historyNotice, setHistoryNotice] = useState('');
 
   useEffect(() => {
@@ -84,6 +92,7 @@ export function StygianWorkspace({ uid, historyRerun, onBack }: StygianWorkspace
     setScenarioView(null);
     setProfile(null);
     setLoadError('');
+    setHistoryNotice('');
     setResult(null);
     setActiveStep(null);
     setRunning(false);
@@ -98,13 +107,17 @@ export function StygianWorkspace({ uid, historyRerun, onBack }: StygianWorkspace
             .sort((left, right) => left.order - right.order);
           const defaultDifficulty = ordered[0]?.id ?? '';
           setDifficultyId(defaultDifficulty);
-          if (historyRerun && appliedHistoryId.current !== historyRerun.historyId && nextProfile) {
-            appliedHistoryId.current = historyRerun.historyId;
+          const rerun = pendingHistoryRerun.current;
+          if (rerun && nextProfile) {
             const prepared = prepareStygianRerun(
-              historyRerun,
+              rerun,
               uid,
               ordered.map(({ id }) => id),
-              nextProfile.characters.map(({ id }) => String(id))
+              nextProfile.characters.map(({ id }) => String(id)),
+              {
+                scenarioId: nextScenario.scenario.id,
+                dataVersion: nextScenario.scenario.meta.dataVersion
+              }
             );
             if (prepared.status === 'blocked') {
               setHistoryNotice('这份旧方案属于另一个 UID；已保留旧方案查看，但没有带入当前账号。');
@@ -117,7 +130,7 @@ export function StygianWorkspace({ uid, historyRerun, onBack }: StygianWorkspace
                 ...Object.fromEntries(prepared.excludedCharacterIds.map((id) => [id, 'excluded']))
               });
               setHistoryNotice(
-                prepared.status === 'adjusted'
+                `${historySourceChangedNotice(prepared, 'zh')}${prepared.status === 'adjusted'
                   ? `已带入旧方案的可用选择；${
                       prepared.targetUnavailable ? '原难度已不在当前资料中；' : ''
                     }${
@@ -125,9 +138,11 @@ export function StygianWorkspace({ uid, historyRerun, onBack }: StygianWorkspace
                         ? `${prepared.removedCharacterCount} 名已不在当前角色资料中的角色未带入；`
                         : ''
                     }请检查后再点击生成，不会自动调用智能服务。`
-                  : '已带入旧方案的难度、目标、偏好与角色选择。请检查后再点击生成，不会自动调用智能服务。'
+                  : '已带入旧方案的难度、目标、偏好与角色选择。请检查后再点击生成，不会自动调用智能服务。'}`
               );
             }
+            pendingHistoryRerun.current = undefined;
+            historyConsumedCallback.current?.(rerun.historyId);
           }
         }
       })
@@ -141,7 +156,7 @@ export function StygianWorkspace({ uid, historyRerun, onBack }: StygianWorkspace
       activeCorrelation.current = null;
       if (correlationId) void api.stygianAdvisor.cancel({ correlationId });
     };
-  }, [historyRerun, uid]);
+  }, [uid]);
 
   useEffect(
     () =>

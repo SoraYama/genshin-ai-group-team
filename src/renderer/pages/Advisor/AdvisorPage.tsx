@@ -14,6 +14,7 @@ import type { HistoryRerunIntent } from '../History/history-presentation';
 interface AdvisorPageProps {
   state: ProfileStateView;
   historyRerun?: HistoryRerunIntent | null;
+  onHistoryRerunConsumed: (historyId: string) => void;
   onGotoOnboarding: () => void;
 }
 
@@ -38,7 +39,12 @@ function emptySideState(): SideState {
   return { stage: '', message: '', streamText: '', result: null };
 }
 
-export function AdvisorPage({ state, historyRerun, onGotoOnboarding }: AdvisorPageProps) {
+export function AdvisorPage({
+  state,
+  historyRerun,
+  onHistoryRerunConsumed,
+  onGotoOnboarding
+}: AdvisorPageProps) {
   const { locale, t } = useI18n();
   const activeUid = state.activeUid;
   const [mode, setMode] = useState<Mode>('single');
@@ -243,6 +249,7 @@ export function AdvisorPage({ state, historyRerun, onGotoOnboarding }: AdvisorPa
           historyRerun={
             historyRerun?.mode === 'spiral-abyss' ? historyRerun : undefined
           }
+          onHistoryRerunConsumed={onHistoryRerunConsumed}
         />
       ) : workspaceOpen && challengeMode === 'imaginarium-theater' ? (
         <TheaterWorkspace
@@ -250,6 +257,7 @@ export function AdvisorPage({ state, historyRerun, onGotoOnboarding }: AdvisorPa
           historyRerun={
             historyRerun?.mode === 'imaginarium-theater' ? historyRerun : undefined
           }
+          onHistoryRerunConsumed={onHistoryRerunConsumed}
           onBack={() => setWorkspaceOpen(false)}
         />
       ) : workspaceOpen && challengeMode === 'stygian-onslaught' ? (
@@ -258,6 +266,7 @@ export function AdvisorPage({ state, historyRerun, onGotoOnboarding }: AdvisorPa
           historyRerun={
             historyRerun?.mode === 'stygian-onslaught' ? historyRerun : undefined
           }
+          onHistoryRerunConsumed={onHistoryRerunConsumed}
           onBack={() => setWorkspaceOpen(false)}
         />
       ) : !workspaceOpen ? (

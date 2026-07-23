@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  historySourceChangedNotice,
   prepareAbyssRerun,
   prepareStygianRerun,
   prepareTheaterRerun
@@ -14,6 +15,15 @@ const preferences = {
 };
 
 describe('history rerun prefill', () => {
+  it('uses a friendly source-change warning without exposing scenario or version slugs', () => {
+    const notice = historySourceChangedNotice(
+      { scenarioChanged: true, dataVersionChanged: true },
+      'zh'
+    );
+    expect(notice).toBe('当前挑战资料已更新，已按新资料重新核对保存选项；');
+    expect(notice).not.toMatch(/old-cycle|new-cycle|old-v1|new-v2/u);
+  });
+
   it('blocks a mismatched UID and never converts the intent into a request', () => {
     const intent: HistoryRerunIntent = {
       historyId: 'history-1',
@@ -47,13 +57,20 @@ describe('history rerun prefill', () => {
       lockedCharacterIds: ['1', '2'],
       excludedCharacterIds: ['3']
     };
-    expect(prepareAbyssRerun(intent, intent.uid, [11], ['1', '3'])).toMatchObject({
+    expect(
+      prepareAbyssRerun(intent, intent.uid, [11], ['1', '3'], {
+        scenarioId: 'new-cycle',
+        dataVersion: 'new-v2'
+      })
+    ).toMatchObject({
       status: 'adjusted',
       floor: undefined,
       lockedCharacterIds: ['1'],
       excludedCharacterIds: ['3'],
       removedCharacterCount: 1,
-      targetUnavailable: true
+      targetUnavailable: true,
+      scenarioChanged: true,
+      dataVersionChanged: true
     });
   });
 
@@ -71,10 +88,17 @@ describe('history rerun prefill', () => {
       lockedCharacterIds: ['1'],
       excludedCharacterIds: []
     };
-    expect(prepareStygianRerun(stygian, stygian.uid, ['hard'], ['1'])).toMatchObject({
+    expect(
+      prepareStygianRerun(stygian, stygian.uid, ['hard'], ['1'], {
+        scenarioId: 'old-stygian',
+        dataVersion: 'new-v2'
+      })
+    ).toMatchObject({
       status: 'ready',
       difficultyId: 'hard',
-      target: 'high-reward'
+      target: 'high-reward',
+      scenarioChanged: false,
+      dataVersionChanged: true
     });
 
     const theater: HistoryRerunIntent = {
@@ -94,12 +118,19 @@ describe('history rerun prefill', () => {
       selectedSpecialGuestCharacterIds: [],
       selectedSupportCharacterIds: ['support:a']
     };
-    expect(prepareTheaterRerun(theater, theater.uid, [8], ['1'])).toMatchObject({
+    expect(
+      prepareTheaterRerun(theater, theater.uid, [8], ['1'], {
+        scenarioId: 'old-theater',
+        dataVersion: 'old-v1'
+      })
+    ).toMatchObject({
       status: 'ready',
       act: 8,
       selectedCharacterIds: ['1'],
       selectedOpeningCharacterIds: ['opening:a'],
-      selectedSupportCharacterIds: ['support:a']
+      selectedSupportCharacterIds: ['support:a'],
+      scenarioChanged: false,
+      dataVersionChanged: false
     });
   });
 });
