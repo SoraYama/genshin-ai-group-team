@@ -1,4 +1,5 @@
 import { readdir, readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -82,7 +83,7 @@ describe('release security and copyright gates', () => {
     }
   });
 
-  it('accounts for every generated background and original/OFL visual family in credits', async () => {
+  it('accounts for every generated background and font dependency in credits', async () => {
     const credits = await readFile(path.join(RESOURCES_ROOT, 'credits.md'), 'utf8');
     const backgrounds = (await readdir(path.join(RESOURCES_ROOT, 'backgrounds')))
       .filter((name) => name.endsWith('.webp'))
@@ -96,8 +97,35 @@ describe('release security and copyright gates', () => {
     }
     expect(credits).toContain('Noto Sans SC — SIL Open Font License 1.1');
     expect(credits).toContain('JetBrains Mono — SIL Open Font License 1.1');
-    expect(credits).toContain('All application SVG/CSS decorations and icons');
-    expect(credits).toContain('does not bundle game artwork');
+    expect(credits).toContain('All application SVG/CSS decorations and non-element icons');
+  });
+
+  it('accounts for every bundled official element icon by source and sha256', async () => {
+    const directory = path.join(RESOURCES_ROOT, 'official/genshin-elements');
+    const manifest = JSON.parse(await readFile(path.join(directory, 'manifest.json'), 'utf8')) as {
+      owner: string;
+      sourcePage: string;
+      icons: Record<string, { file: string; source: string; sha256: string }>;
+    };
+    expect(manifest.owner).toBe('COGNOSPHERE / HoYoverse');
+    expect(Object.keys(manifest.icons).sort()).toEqual([
+      'anemo',
+      'cryo',
+      'dendro',
+      'electro',
+      'geo',
+      'hydro',
+      'pyro'
+    ]);
+    for (const icon of Object.values(manifest.icons)) {
+      const data = await readFile(path.join(directory, icon.file));
+      expect(data.subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
+      expect(createHash('sha256').update(data).digest('hex')).toBe(icon.sha256);
+      expect(icon.source).toMatch(/^https:\/\/wiki\.hoyolab\.com\//u);
+    }
+    const credits = await readFile(path.join(RESOURCES_ROOT, 'credits.md'), 'utf8');
+    expect(credits).toContain('HoYoLAB official Wiki element icons');
+    expect(credits).toContain(manifest.sourcePage);
   });
 
   it('does not introduce filenames that imply copied game portraits, UI slices, or proprietary fonts', async () => {
