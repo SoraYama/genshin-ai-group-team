@@ -194,6 +194,10 @@ async function bootstrapServices(): Promise<void> {
     knowledge: characterKnowledge,
     toolLog: (event) => console.info('[theater-business-tool]', event),
     auditLog: (event) => console.info('[theater-advisor]', event),
+    planningDelayMs:
+      process.env.NODE_ENV === 'test'
+        ? Number(process.env.GTA_E2E_THEATER_PLANNING_DELAY_MS ?? 0)
+        : 0,
     sdkEnvironment: { cwd: app.getPath('userData'), clientVersion: app.getVersion() }
   });
   const updates = new UpdateService({

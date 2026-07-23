@@ -11,7 +11,7 @@ import type {
 import { ButtonGlyph } from '../../design/Icons';
 import { localizeError, useI18n } from '../../i18n';
 import { rewardTargetLabel, reuseRuleSummary } from '../Advisor/stygian-presentation';
-import { objectiveLabel, pathChoiceLabel } from '../Advisor/theater-presentation';
+import { objectiveLabel, pathChoiceLabel, poolSourceLabel } from '../Advisor/theater-presentation';
 
 interface HistoryPageProps {
   state: ProfileStateView;
@@ -469,18 +469,22 @@ function TheaterHistoryListItem({
         <div className="gta-history-body gta-history-theater-body">
           <section>
             <h4>入场演员池</h4>
-            <p>
-              {entry.plan.cast.selectedCharacterIds
-                .map((id) => names.get(id) ?? '未命名演员')
-                .join(' · ')}
-            </p>
+            <div className="gta-history-theater-cast">
+              {entry.cast.map(({ id, name, source }) => (
+                <span key={`${source}:${id}`}>
+                  <strong>{name}</strong>
+                  <small>{source === 'owned' ? '自有角色' : poolSourceLabel(source)}</small>
+                </span>
+              ))}
+            </div>
           </section>
           <section>
             <h4>逐幕活力预算</h4>
             <div className="gta-history-theater-vigor">
               {entry.vigorBudget.map((item) => (
-                <span key={item.act}>
-                  第 {item.act} 幕：{item.before} → {item.after}（花费 {item.spent}）
+                <span key={`${item.act}:${item.characterId}`}>
+                  第 {item.act} 幕 · {names.get(item.characterId) ?? '未命名演员'}：{item.before} →{' '}
+                  {item.after}（花费 {item.spent}）
                 </span>
               ))}
             </div>

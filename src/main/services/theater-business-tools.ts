@@ -147,10 +147,7 @@ export function createTheaterBusinessTools(options: TheaterBusinessToolsOptions)
       'query_genshin_db',
       '查询当前本地角色可确认的有限角色知识；未知保持未知。',
       {
-        characterIds: z
-          .array(z.string().regex(/^[1-9]\d*$/))
-          .min(1)
-          .max(32)
+        characterIds: z.array(z.string().trim().min(1).max(128)).min(1).max(32)
       },
       async ({ characterIds }) =>
         run(

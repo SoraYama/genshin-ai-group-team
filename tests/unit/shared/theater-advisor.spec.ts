@@ -91,7 +91,7 @@ describe('theater advisor contracts', () => {
         constructionAdvice: []
       },
       plan: validTheaterPlan(),
-      vigorBudget: [{ act: 1, before: 2, spent: 1, after: 1 }],
+      vigorBudget: [{ act: 1, characterId: '1001', before: 2, spent: 1, after: 1 }],
       routeGuidance: {
         preserveCharacterIds: ['1001'],
         arcanaPriorityIds: [],

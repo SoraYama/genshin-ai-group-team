@@ -56,7 +56,8 @@ class Runner {
   calls: Array<{ prompt: string; options: AgentSdkRunOptions }> = [];
   constructor(
     private outputs: unknown[],
-    private toolRounds: number[] = [0, 1]
+    private toolRounds: number[] = [0, 1],
+    private knowledgeIds: string[] = Array.from({ length: 8 }, (_, index) => String(1001 + index))
   ) {}
   async *run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown> {
     this.calls.push({ prompt, options });
@@ -71,7 +72,7 @@ class Runner {
       {
         id: 'knowledge',
         name: 'mcp__genshin__query_genshin_db',
-        input: { characterIds: Array.from({ length: 8 }, (_, index) => String(1001 + index)) }
+        input: { characterIds: this.knowledgeIds }
       }
     ];
     if (this.toolRounds.includes(round)) {
@@ -167,5 +168,41 @@ describe('TheaterPlanAgent', () => {
       issues: [expect.objectContaining({ code: 'AGENT_OUTPUT_INVALID' })]
     });
     expect(runner.calls).toHaveLength(2);
+  });
+
+  it('requires an explicit knowledge read for external cast and candidate actors each round', async () => {
+    const external = validTheaterPlan();
+    external.cast.trialCharacterIds = ['trial.1'];
+    external.acts[1]!.candidateCharacterIds[3] = 'trial.1';
+    external.acts[1]!.plannedVigorSpend[3] = { characterId: 'trial.1', cost: 1 };
+    const runner = new Runner([external, external]);
+    const result = await new TheaterPlanAgent(runner).compose({
+      input: theaterInput({ selectedTrialCharacterIds: ['trial.1'] }),
+      scenario: theaterScenario(),
+      characters: THEATER_CHARACTERS,
+      knowledge: groupingKnowledge,
+      sdkOptions: sdkOptions()
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      issues: [expect.objectContaining({ code: 'AGENT_OUTPUT_INVALID', path: ['tools'] })]
+    });
+  });
+
+  it('accepts an external actor only after the tool has returned an explicit knowledge result', async () => {
+    const external = validTheaterPlan();
+    external.cast.trialCharacterIds = ['trial.1'];
+    external.acts[1]!.candidateCharacterIds[3] = 'trial.1';
+    external.acts[1]!.plannedVigorSpend[3] = { characterId: 'trial.1', cost: 1 };
+    const queried = [...Array.from({ length: 8 }, (_, index) => String(1001 + index)), 'trial.1'];
+    const runner = new Runner([external], [0], queried);
+    const result = await new TheaterPlanAgent(runner).compose({
+      input: theaterInput({ selectedTrialCharacterIds: ['trial.1'] }),
+      scenario: theaterScenario(),
+      characters: THEATER_CHARACTERS,
+      knowledge: groupingKnowledge,
+      sdkOptions: sdkOptions()
+    });
+    expect(result).toMatchObject({ ok: true, repaired: false });
   });
 });

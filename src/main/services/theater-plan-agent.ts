@@ -107,10 +107,30 @@ function requiredTools(
     )
       missing.push(`query_theater_act:${act}`);
   });
-  const selected =
-    isRecord(plan) && isRecord(plan['cast']) && Array.isArray(plan['cast']['selectedCharacterIds'])
-      ? plan['cast']['selectedCharacterIds'].filter((id): id is string => typeof id === 'string')
+  const cast = isRecord(plan) && isRecord(plan['cast']) ? plan['cast'] : undefined;
+  const castKeys = [
+    'selectedCharacterIds',
+    'openingCharacterIds',
+    'trialCharacterIds',
+    'specialGuestCharacterIds',
+    'supportCharacterIds'
+  ] as const;
+  const selected = cast
+    ? castKeys.flatMap((key) =>
+        Array.isArray(cast[key])
+          ? cast[key].filter((id): id is string => typeof id === 'string')
+          : []
+      )
+    : [];
+  const candidates =
+    isRecord(plan) && Array.isArray(plan['acts'])
+      ? plan['acts'].flatMap((act) =>
+          isRecord(act) && Array.isArray(act['candidateCharacterIds'])
+            ? act['candidateCharacterIds'].filter((id): id is string => typeof id === 'string')
+            : []
+        )
       : [];
+  const requiredKnowledgeIds = [...new Set([...selected, ...candidates])];
   const queried = new Set(
     successful
       .filter(({ name }) => name === 'mcp__genshin__query_genshin_db')
@@ -120,8 +140,8 @@ function requiredTools(
           : []
       )
   );
-  if (selected.length === 0 || selected.some((id) => !queried.has(id)))
-    missing.push('query_genshin_db:selected-characters');
+  if (requiredKnowledgeIds.length === 0 || requiredKnowledgeIds.some((id) => !queried.has(id)))
+    missing.push('query_genshin_db:all-cast-and-candidates');
   return missing.length === 0
     ? undefined
     : {

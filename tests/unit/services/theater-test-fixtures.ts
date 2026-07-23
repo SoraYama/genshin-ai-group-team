@@ -183,7 +183,7 @@ export function validTheaterPlan(overrides: Partial<TheaterPlan> = {}): TheaterP
     warnings: [],
     assumptions: [],
     cast: {
-      openingCharacterIds: ['1001'],
+      openingCharacterIds: [],
       selectedCharacterIds: Array.from({ length: 8 }, (_, index) => String(1001 + index)),
       trialCharacterIds: [],
       specialGuestCharacterIds: [],
@@ -193,19 +193,19 @@ export function validTheaterPlan(overrides: Partial<TheaterPlan> = {}): TheaterP
       {
         act: 1,
         candidateCharacterIds: ['1001', '1002', '1003', '1004'],
-        plannedVigorSpend: [
-          { characterId: '1001', cost: 1 },
-          { characterId: '1002', cost: 0 }
-        ],
+        plannedVigorSpend: ['1001', '1002', '1003', '1004'].map((characterId) => ({
+          characterId,
+          cost: 1
+        })),
         pathChoice: { kind: 'conditional', note: '如果群怪分散，优先聚怪路线。' }
       },
       {
         act: 2,
         candidateCharacterIds: ['1005', '1006', '1007', '1008'],
-        plannedVigorSpend: [
-          { characterId: '1005', cost: 1 },
-          { characterId: '1006', cost: 0 }
-        ],
+        plannedVigorSpend: ['1005', '1006', '1007', '1008'].map((characterId) => ({
+          characterId,
+          cost: 1
+        })),
         pathChoice: { kind: 'random', note: '随机结果确定后，再按敌人类型选择应对分支。' }
       }
     ],

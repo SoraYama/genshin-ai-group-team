@@ -109,12 +109,14 @@ export function TheaterWorkspace({ uid, onBack }: { uid: string; onBack: () => v
     setActiveStep(null);
   }
   function toggleOwned(id: string) {
+    if (running) return;
     setSelectedOwned((previous) =>
       previous.includes(id) ? previous.filter((item) => item !== id) : [...previous, id]
     );
     invalidate();
   }
   function togglePool(source: string, id: string) {
+    if (running) return;
     setSelectedPools((previous) => ({
       ...previous,
       [source]: previous[source]?.includes(id)
@@ -137,6 +139,7 @@ export function TheaterWorkspace({ uid, onBack }: { uid: string; onBack: () => v
     const correlationId = `theater-${Date.now()}-${request}`;
     activeCorrelation.current = correlationId;
     setRunning(true);
+    setLoadError('');
     setResult(null);
     setActiveStep('reading-roster');
     try {
@@ -273,6 +276,7 @@ export function TheaterWorkspace({ uid, onBack }: { uid: string; onBack: () => v
               source={source}
               scenario={scenario}
               selected={selectedPools[source] ?? []}
+              disabled={running}
               onToggle={togglePool}
             />
           ))}
@@ -295,6 +299,7 @@ export function TheaterWorkspace({ uid, onBack }: { uid: string; onBack: () => v
             <button
               key={character.id}
               type="button"
+              disabled={running}
               aria-pressed={selectedOwned.includes(String(character.id))}
               onClick={() => toggleOwned(String(character.id))}
             >
@@ -411,11 +416,13 @@ function Pool({
   source,
   scenario,
   selected,
+  disabled,
   onToggle
 }: {
   source: 'opening' | 'trial' | 'special-guest' | 'support';
   scenario: TheaterScenario;
   selected: string[];
+  disabled: boolean;
   onToggle: (source: string, id: string) => void;
 }) {
   const key = source === 'special-guest' ? 'specialGuest' : source;
@@ -427,6 +434,7 @@ function Pool({
           <button
             key={item.id}
             type="button"
+            disabled={disabled}
             aria-pressed={selected.includes(item.id)}
             onClick={() => onToggle(source, item.id)}
           >
@@ -472,6 +480,16 @@ function TheaterResult({
   );
   const actorName = (id: string) =>
     byId.get(id)?.name ?? (poolById.get(id) ? theaterEntityName(poolById.get(id)!) : '未命名演员');
+  const castEntries = [
+    ...result.plan.cast.selectedCharacterIds.map((id) => ({ id, source: 'owned' as const })),
+    ...result.plan.cast.openingCharacterIds.map((id) => ({ id, source: 'opening' as const })),
+    ...result.plan.cast.trialCharacterIds.map((id) => ({ id, source: 'trial' as const })),
+    ...result.plan.cast.specialGuestCharacterIds.map((id) => ({
+      id,
+      source: 'special-guest' as const
+    })),
+    ...result.plan.cast.supportCharacterIds.map((id) => ({ id, source: 'support' as const }))
+  ];
   return (
     <section className="gta-theater-result" aria-labelledby="theater-result-title">
       <header>
@@ -484,10 +502,10 @@ function TheaterResult({
       <section className="gta-theater-result-cast">
         <h5>入场演员池</h5>
         <div>
-          {result.plan.cast.selectedCharacterIds.map((id) => (
-            <span key={id} data-theater-actor-id={id}>
+          {castEntries.map(({ id, source }) => (
+            <span key={`${source}:${id}`} data-theater-actor-id={id}>
               <strong>{actorName(id)}</strong>
-              <small>自有角色</small>
+              <small>{source === 'owned' ? '自有角色' : poolSourceLabel(source)}</small>
             </span>
           ))}
         </div>
@@ -496,8 +514,10 @@ function TheaterResult({
         <h5>逐幕活力预算</h5>
         <div>
           {result.vigorBudget.map((item) => (
-            <span key={item.act}>
-              <small>第 {item.act} 幕</small>
+            <span key={`${item.act}:${item.characterId}`}>
+              <small>
+                第 {item.act} 幕 · {actorName(item.characterId)}
+              </small>
               <strong>
                 {item.before} → {item.after}
               </strong>

@@ -167,6 +167,7 @@ export const theaterPlanIssueCodeSchema = z.enum([
   'ROSTER_INSUFFICIENT',
   'CHARACTER_NOT_OWNED',
   'CHARACTER_EXCLUDED',
+  'CAST_ELIGIBILITY_INVALID',
   'CAST_SOURCE_MISMATCH',
   'CAST_DUPLICATE',
   'ACT_COVERAGE_INVALID',
@@ -251,13 +252,18 @@ const vigorBudgetSchema = z
     z
       .object({
         act: z.number().int().min(1).max(10),
+        characterId: externalCastIdSchema,
         before: z.number().int().nonnegative(),
         spent: z.number().int().nonnegative(),
         after: z.number().int().nonnegative()
       })
       .strict()
   )
-  .refine((items) => new Set(items.map(({ act }) => act)).size === items.length);
+  .refine(
+    (items) =>
+      new Set(items.map(({ act, characterId }) => `${act}:${characterId}`)).size === items.length,
+    'Vigor ledger entries must be unique per act and actor'
+  );
 
 const routeGuidanceSchema = z
   .object({
@@ -309,6 +315,7 @@ export type TheaterObjective = z.infer<typeof theaterObjectiveSchema>;
 export type TheaterPlanIssue = z.infer<typeof theaterPlanIssueSchema>;
 export type TheaterEligibilityReport = z.infer<typeof theaterEligibilityReportSchema>;
 export type TheaterRouteGuidance = z.infer<typeof routeGuidanceSchema>;
+export type TheaterVigorBudgetItem = z.infer<typeof vigorBudgetSchema>[number];
 export type TheaterScenarioView = z.infer<typeof theaterScenarioViewSchema>;
 export type TheaterAdvisorResult = z.infer<typeof theaterAdvisorResultSchema>;
 export type TheaterAdvisorProgressStep = z.infer<typeof theaterAdvisorProgressStepSchema>;

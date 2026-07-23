@@ -37,6 +37,7 @@ export interface TheaterAdvisorServiceOptions {
   };
   sdkEnvironment: { cwd: string; clientVersion: string };
   agentTimeoutMs?: number;
+  planningDelayMs?: number;
   toolLog?: (event: TheaterBusinessToolLog) => void;
   auditLog?: (event: TheaterAdvisorAuditLog) => void;
   knowledge?: CharacterKnowledgeReader;
@@ -47,7 +48,7 @@ export interface TheaterAdvisorAuditLog {
   scenarioId: string;
   dataVersion: string;
   knowledgeVersion: string;
-  outcome: 'planned' | 'blocked';
+  outcome: 'planned' | 'blocked' | 'history-write-failed';
   source: TheaterAdvisorResult['source'];
   issueCodes: string[];
   parameterSummary: Readonly<{
@@ -236,6 +237,14 @@ export class TheaterAdvisorService {
       });
       ensureActive();
       if (local.status === 'blocked') return finish(local);
+      const planningDelayMs = Math.max(0, Math.min(this.options.planningDelayMs ?? 0, 1_000));
+      if (planningDelayMs > 0) {
+        await abortable(
+          new Promise<void>((resolve) => setTimeout(resolve, planningDelayMs)),
+          requestAbort.signal
+        );
+        ensureActive();
+      }
       let result: TheaterAdvisorResult = local;
       const apiKey = this.options.config.getApiKey();
       if (apiKey) {
@@ -359,6 +368,17 @@ export class TheaterAdvisorService {
           .flat()
           .map((entry) => [entry.id, entry])
       );
+      const sourceById = new Map<
+        string,
+        'owned' | 'opening' | 'trial' | 'special-guest' | 'support'
+      >();
+      result.plan.cast.selectedCharacterIds.forEach((id) => sourceById.set(id, 'owned'));
+      result.plan.cast.openingCharacterIds.forEach((id) => sourceById.set(id, 'opening'));
+      result.plan.cast.trialCharacterIds.forEach((id) => sourceById.set(id, 'trial'));
+      result.plan.cast.specialGuestCharacterIds.forEach((id) =>
+        sourceById.set(id, 'special-guest')
+      );
+      result.plan.cast.supportCharacterIds.forEach((id) => sourceById.set(id, 'support'));
       this.options.history.appendTheater({
         uid: input.uid,
         scenarioId: result.plan.scenarioId,
@@ -376,7 +396,10 @@ export class TheaterAdvisorService {
         cast: planIds.map((id) => {
           const owned = ownedById.get(id);
           const sources = poolSources.get(id) ?? [];
-          if (owned)
+          const source = sourceById.get(id);
+          if (!source) throw new Error('Validated plan actor source missing');
+          if (source === 'owned') {
+            if (!owned) throw new Error('Validated owned actor snapshot missing');
             return {
               id,
               name: owned.name,
@@ -385,12 +408,15 @@ export class TheaterAdvisorService {
               source: 'owned' as const,
               ...(sources.length ? { poolSources: sources } : {})
             };
+          }
           const entity = entityById.get(id);
-          const source = sources[0] ?? 'support';
           return {
             id,
-            name: entity?.names['zh-CN'] ?? entity?.names['zh-Hans'] ?? '未命名演员',
-            source
+            name: entity?.names['zh-CN'] ?? entity?.names['zh-Hans'] ?? owned?.name ?? '未命名演员',
+            ...(owned?.element ? { element: owned.element } : {}),
+            ...(owned?.level === undefined ? {} : { level: owned.level }),
+            source,
+            ...(sources.length ? { poolSources: sources } : {})
           };
         }),
         vigorBudget: result.vigorBudget,
@@ -398,7 +424,25 @@ export class TheaterAdvisorService {
         plan: result.plan
       });
     } catch {
-      /* history is secondary */
+      try {
+        this.options.auditLog?.({
+          correlationId: input.correlationId,
+          scenarioId: input.scenarioId,
+          dataVersion: input.dataVersion,
+          knowledgeVersion: this.options.knowledge?.version ?? 'unavailable',
+          outcome: 'history-write-failed',
+          source: result.source,
+          issueCodes: ['HISTORY_WRITE_FAILED'],
+          parameterSummary: {
+            target: input.target,
+            act: input.act ?? 'all',
+            selectedCount: input.selectedCharacterIds.length,
+            excludedCount: input.excludedCharacterIds.length
+          }
+        });
+      } catch {
+        /* secondary audit must not alter a checked plan */
+      }
     }
   }
 }

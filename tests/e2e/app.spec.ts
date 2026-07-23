@@ -79,6 +79,7 @@ async function launchApp(): Promise<void> {
       NODE_ENV: 'test',
       GTA_DISABLE_BACKGROUND_REFRESH: '1',
       GTA_ENABLE_DEVELOPMENT_SCENARIOS: '1',
+      GTA_E2E_THEATER_PLANNING_DELAY_MS: '500',
       GTA_E2E_USER_DATA_DIR: userDataDir,
       ELECTRON_DISABLE_SECURITY_WARNINGS: 'true'
     }
@@ -1210,12 +1211,17 @@ test('checks Theater eligibility and renders a cast-vigor route instead of team 
       'true'
     );
   }
+  await page.getByRole('button', { name: /演示试用角色/ }).click();
   await page.getByRole('button', { name: '生成剧诗路线' }).click();
+  await expect(page.getByRole('button', { name: /演示试用角色/ })).toBeDisabled();
+  await expect(page.getByRole('button', { name: /剧诗角色1.*优先纳入/ })).toBeDisabled();
   await expect(page.getByRole('heading', { name: '演员池与活力已排成幕次路线' })).toBeVisible();
   await expect(page.getByRole('heading', { name: '入场演员池' })).toBeVisible();
   await expect(page.getByRole('heading', { name: '逐幕活力预算' })).toBeVisible();
   await expect(page.getByRole('heading', { name: '保留与分支优先级' })).toBeVisible();
-  await expect(page.locator('[data-theater-actor-id]')).toHaveCount(8);
+  await expect(page.locator('[data-theater-actor-id]')).toHaveCount(9);
+  await expect(page.locator('.gta-theater-result-cast')).toContainText('演示试用角色');
+  await expect(page.locator('.gta-theater-result-cast')).toContainText('试用演员');
   await expect(page.locator('.gta-theater-progress li')).toHaveCount(5);
   await expect(page.locator('.gta-theater-progress li').last()).toHaveClass(/is-done/);
   await expect(page.locator('main')).not.toContainText(
@@ -1250,5 +1256,7 @@ test('checks Theater eligibility and renders a cast-vigor route instead of team 
   const theaterHistory = page.getByRole('button', { name: /UID 246813579.*稳妥通关/ }).first();
   await theaterHistory.click();
   await expect(page.getByRole('heading', { name: '逐幕活力预算' })).toBeVisible();
+  await expect(page.locator('.gta-history-theater-cast')).toContainText('演示试用角色');
+  await expect(page.locator('.gta-history-theater-cast')).toContainText('试用演员');
   await expect(page.getByRole('button', { name: '删除这条幻想真境剧诗方案' })).toBeVisible();
 });

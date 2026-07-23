@@ -363,7 +363,13 @@ export interface TheaterPlanHistoryEntry {
     source: 'owned' | 'opening' | 'trial' | 'special-guest' | 'support';
     poolSources?: Array<'opening' | 'trial' | 'special-guest' | 'support'>;
   }>;
-  vigorBudget: Array<{ act: number; before: number; spent: number; after: number }>;
+  vigorBudget: Array<{
+    act: number;
+    characterId: string;
+    before: number;
+    spent: number;
+    after: number;
+  }>;
   routeGuidance: import('./theater-advisor.js').TheaterRouteGuidance;
   plan: import('./scenario-v2.js').TheaterPlan;
 }

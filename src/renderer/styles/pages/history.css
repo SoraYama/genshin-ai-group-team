@@ -99,6 +99,25 @@
   font-size: var(--gta-text-xs);
 }
 
+.gta-history-theater-cast {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 1px;
+  background: var(--gta-stroke-soft);
+}
+
+.gta-history-theater-cast span {
+  display: grid;
+  gap: 2px;
+  padding: 9px 10px;
+  background: #f8faf7;
+}
+
+.gta-history-theater-cast small {
+  color: var(--gta-text-on-light-soft);
+  font-size: var(--gta-text-xs);
+}
+
 .gta-history-theater-vigor {
   display: flex;
   flex-wrap: wrap;

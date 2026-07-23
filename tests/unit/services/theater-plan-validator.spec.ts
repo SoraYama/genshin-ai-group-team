@@ -63,11 +63,82 @@ describe('validateTheaterPlan', () => {
       })
     ).toMatchObject({
       ok: true,
-      vigorBudget: [
-        { act: 1, before: 2, spent: 1, after: 1 },
-        { act: 2, before: 1, spent: 1, after: 0 }
-      ]
+      vigorBudget: expect.arrayContaining([
+        { act: 1, characterId: '1001', before: 2, spent: 1, after: 1 },
+        { act: 1, characterId: '1004', before: 2, spent: 1, after: 1 },
+        { act: 2, characterId: '1005', before: 2, spent: 1, after: 1 },
+        { act: 2, characterId: '1008', before: 2, spent: 1, after: 1 }
+      ])
     });
+  });
+
+  it('rechecks final cast headcount, level, and element instead of trusting the preflight roster', () => {
+    const cases = [
+      validTheaterPlan({
+        cast: { ...validTheaterPlan().cast, selectedCharacterIds: ['1001'] }
+      }),
+      validTheaterPlan({
+        cast: {
+          ...validTheaterPlan().cast,
+          selectedCharacterIds: ['1001', '1002', '1003', '1004', '1005', '1006', '1007', '1009']
+        }
+      }),
+      validTheaterPlan({
+        cast: {
+          ...validTheaterPlan().cast,
+          selectedCharacterIds: ['1001', '1002', '1003', '1004', '1005', '1006', '1007', '1011']
+        }
+      })
+    ];
+    for (const plan of cases) {
+      expect(
+        validateTheaterPlan({
+          input: theaterInput(),
+          scenario: theaterScenario(),
+          characters: THEATER_CHARACTERS,
+          knowledge: groupingKnowledge,
+          plan
+        })
+      ).toMatchObject({
+        ok: false,
+        issues: expect.arrayContaining([
+          expect.objectContaining({ code: 'CAST_ELIGIBILITY_INVALID' })
+        ])
+      });
+    }
+  });
+
+  it('blocks when a target act has no explicit vigor cost instead of inferring zero', () => {
+    const scenario = theaterScenario();
+    scenario.vigor.actCosts = scenario.vigor.actCosts.filter(({ act }) => act !== 2);
+    expect(
+      validateTheaterPlan({
+        input: theaterInput(),
+        scenario,
+        characters: THEATER_CHARACTERS,
+        knowledge: groupingKnowledge,
+        plan: validTheaterPlan()
+      })
+    ).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([expect.objectContaining({ code: 'VIGOR_BUDGET_INVALID' })])
+    });
+  });
+
+  it('normalizes valid agent acts by act number before returning the plan and ledger', () => {
+    const plan = validTheaterPlan();
+    plan.acts.reverse();
+    const result = validateTheaterPlan({
+      input: theaterInput(),
+      scenario: theaterScenario(),
+      characters: THEATER_CHARACTERS,
+      knowledge: groupingKnowledge,
+      plan
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('Expected valid plan');
+    expect(result.plan.acts.map(({ act }) => act)).toEqual([1, 2]);
+    expect(result.vigorBudget.map(({ act }) => act)).toEqual([1, 1, 1, 1, 2, 2, 2, 2]);
   });
 
   it('rejects cast source mismatch and an external pool entry masquerading as owned', () => {
@@ -86,6 +157,23 @@ describe('validateTheaterPlan', () => {
         expect.objectContaining({ code: 'CAST_SOURCE_MISMATCH' }),
         expect.objectContaining({ code: 'CHARACTER_NOT_OWNED' })
       ])
+    });
+  });
+
+  it('rejects one actor ID assigned to more than one cast source', () => {
+    const plan = validTheaterPlan();
+    plan.cast.openingCharacterIds = ['1001'];
+    expect(
+      validateTheaterPlan({
+        input: theaterInput({ selectedOpeningCharacterIds: ['1001'] }),
+        scenario: theaterScenario(),
+        characters: THEATER_CHARACTERS,
+        knowledge: groupingKnowledge,
+        plan
+      })
+    ).toMatchObject({
+      ok: false,
+      issues: expect.arrayContaining([expect.objectContaining({ code: 'CAST_DUPLICATE' })])
     });
   });
 
@@ -112,7 +200,9 @@ describe('validateTheaterPlan', () => {
     const plan = validTheaterPlan();
     plan.acts[0]!.plannedVigorSpend = [
       { characterId: '1001', cost: 2 },
-      { characterId: '1002', cost: 1 }
+      { characterId: '1002', cost: 1 },
+      { characterId: '1003', cost: 1 },
+      { characterId: '1004', cost: 1 }
     ];
     expect(
       validateTheaterPlan({

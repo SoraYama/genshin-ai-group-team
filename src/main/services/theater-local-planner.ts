@@ -22,6 +22,13 @@ export interface BuildLocalTheaterPlanOptions {
   scenarioFreshness?: 'fresh' | 'expiring' | 'stale' | 'unknown';
 }
 
+type TheaterActorSource = 'owned' | 'opening' | 'trial' | 'special-guest' | 'support';
+interface LocalTheaterActor {
+  id: string;
+  source: TheaterActorSource;
+  character?: CharacterProfile;
+}
+
 export function buildLocalTheaterPlan({
   input,
   scenario,
@@ -60,14 +67,75 @@ export function buildLocalTheaterPlan({
   }
 
   const byId = new Map(characters.map((character) => [String(character.id), character]));
+  const selectedBySource = [
+    ['opening', input.selectedOpeningCharacterIds],
+    ['trial', input.selectedTrialCharacterIds],
+    ['special-guest', input.selectedSpecialGuestCharacterIds],
+    ['support', input.selectedSupportCharacterIds]
+  ] as const;
+  const selectedExternalIds = new Set<string>();
+  const duplicateExternalIds = new Set<string>();
+  for (const [, ids] of selectedBySource) {
+    ids.forEach((id) => {
+      if (selectedExternalIds.has(id)) duplicateExternalIds.add(id);
+      selectedExternalIds.add(id);
+    });
+  }
+  if (duplicateExternalIds.size > 0) {
+    return theaterAdvisorResultSchema.parse({
+      status: 'blocked',
+      ...common,
+      issues: [
+        {
+          code: 'CAST_DUPLICATE',
+          path: ['cast'],
+          message: '同一演员被选择为多个来源，请只保留一个实际来源。',
+          details: { characterIds: [...duplicateExternalIds] }
+        }
+      ],
+      warnings: [],
+      assumptions: ['演员来源必须唯一，历史才能准确复原本次选择。']
+    });
+  }
   const selectedOwned = eligibility.eligibleOwnedCharacterIds
+    .filter((id) => !selectedExternalIds.has(id))
     .map((id) => byId.get(id))
     .filter((value): value is CharacterProfile => Boolean(value))
     .sort(compareCharacters(input));
+  const externalActors: LocalTheaterActor[] = selectedBySource.flatMap(([source, ids]) =>
+    ids.map((id) => ({ id, source, ...(byId.get(id) ? { character: byId.get(id) } : {}) }))
+  );
+  const actorPool: LocalTheaterActor[] = [
+    ...externalActors,
+    ...selectedOwned.map((character) => ({
+      id: String(character.id),
+      source: 'owned' as const,
+      character
+    }))
+  ];
   const targetActs = scenario.acts
     .filter(({ act }) => input.act === undefined || input.act === act)
     .slice()
     .sort((left, right) => left.act - right.act);
+  const configuredActCosts = new Map(scenario.vigor.actCosts.map(({ act, cost }) => [act, cost]));
+  const missingCostActs = targetActs
+    .map(({ act }) => act)
+    .filter((act) => !configuredActCosts.has(act));
+  if (missingCostActs.length > 0) {
+    return theaterAdvisorResultSchema.parse({
+      status: 'blocked',
+      ...common,
+      issues: [
+        {
+          code: 'VIGOR_BUDGET_INVALID',
+          path: ['scenario', 'vigor', 'actCosts'],
+          message: `第 ${missingCostActs.join('、')} 幕缺少已确认的活力规则，不能按零消耗推断。`
+        }
+      ],
+      warnings: ['当期活力资料不完整，已停止生成路线。'],
+      assumptions: ['未知活力消耗不会被自动视为零。']
+    });
+  }
   const scarceIds = new Set<string>();
   const acts = targetActs.map((act, actIndex) => {
     const requirements = unique(
@@ -80,39 +148,29 @@ export function buildLocalTheaterPlan({
       )
     );
     const required = requirements.flatMap((requirement) => {
-      const match = selectedOwned.find((character) =>
-        characterSatisfiesRequirement(String(character.id), requirement, knowledge)
+      const match = actorPool.find((actor) =>
+        characterSatisfiesRequirement(actor.id, requirement, knowledge)
       );
-      if (match) scarceIds.add(String(match.id));
+      if (match?.source === 'owned') scarceIds.add(match.id);
       return match ? [match] : [];
     });
-    const preferred = selectedOwned.filter(
-      ({ id }) => !scarceIds.has(String(id)) || required.some((item) => item.id === id)
+    const preferred = actorPool.filter(
+      ({ id }) => !scarceIds.has(id) || required.some((item) => item.id === id)
     );
     const rotated = [...preferred.slice(actIndex * 4), ...preferred.slice(0, actIndex * 4)];
-    const candidates = uniqueCharacters([...required, ...rotated]).slice(0, 4);
-    const scenarioCost =
-      scenario.vigor.actCosts.find(({ act: number }) => number === act.act)?.cost ?? 0;
+    const candidates = uniqueActors([...required, ...rotated]).slice(0, 4);
+    const scenarioCost = configuredActCosts.get(act.act)!;
     return {
       act: act.act,
-      candidateCharacterIds: candidates.map(({ id }) => String(id)),
-      plannedVigorSpend:
-        candidates[0] && scenarioCost > 0
-          ? [{ characterId: String(candidates[0].id), cost: scenarioCost }]
-          : [],
+      candidateCharacterIds: candidates.map(({ id }) => id),
+      plannedVigorSpend: candidates.map(({ id }) => ({
+        characterId: id,
+        cost: scenarioCost
+      })),
       pathChoice: pathChoiceFor(act.pathNotes)
     };
   });
-  let remaining = scenario.vigor.initial;
-  for (const act of acts) {
-    const spend = act.plannedVigorSpend.reduce((total, item) => total + item.cost, 0);
-    if (spend > remaining) act.plannedVigorSpend = [];
-    else remaining -= spend;
-  }
   const warnings = [
-    ...(acts.some(({ plannedVigorSpend }) => plannedVigorSpend.length === 0)
-      ? ['已知总活力无法覆盖每一幕的预计花费，未确认部分保留为现场调整。']
-      : []),
     ...eligibility.pools
       .filter(({ qualification }) => qualification === 'unknown')
       .map(({ source }) => `${poolLabel(source)}的硬资格计入规则未说明，本次不依赖其达标。`)
@@ -185,6 +243,8 @@ function completenessScore(character: CharacterProfile): number {
 }
 
 function pathChoiceFor(notes: TheaterScenario['acts'][number]['pathNotes']) {
+  if (notes.length === 0)
+    return { kind: 'fixed' as const, note: '当期资料没有声明分支节点，按单一路线规划。' };
   const fixed = notes.find(({ kind }) => kind === 'fixed');
   if (fixed) return { kind: 'fixed' as const, note: fixed.text };
   const conditional = notes.find(
@@ -206,8 +266,8 @@ function unique<T>(values: T[]): T[] {
   return [...new Set(values)];
 }
 
-function uniqueCharacters(values: CharacterProfile[]): CharacterProfile[] {
-  const seen = new Set<number>();
+function uniqueActors(values: LocalTheaterActor[]): LocalTheaterActor[] {
+  const seen = new Set<string>();
   return values.filter(({ id }) => (seen.has(id) ? false : (seen.add(id), true)));
 }
 

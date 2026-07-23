@@ -73,7 +73,11 @@ describe('buildLocalTheaterPlan', () => {
       knowledge
     });
     if (result.status !== 'planned') throw new Error('Expected planned');
-    expect(result.vigorBudget.every(({ after }) => after >= 0)).toBe(true);
+    expect(result.vigorBudget).toHaveLength(8);
+    expect(result.vigorBudget.every(({ before, spent, after }) => before - spent === after)).toBe(
+      true
+    );
+    expect(result.vigorBudget.every(({ characterId }) => /^\d+$/.test(characterId))).toBe(true);
     expect(result.plan.acts[1]?.pathChoice.kind).toBe('conditional');
     expect(result.plan.acts[1]?.pathChoice.note).toContain('如果');
   });
@@ -102,5 +106,52 @@ describe('buildLocalTheaterPlan', () => {
     expect(result.status).toBe('planned');
     if (result.status !== 'planned') throw new Error('Expected planned');
     expect(result.plan.acts.map(({ act }) => act)).toEqual([1]);
+  });
+
+  it('blocks instead of treating a missing target-act vigor cost as zero', () => {
+    const scenario = theaterScenario();
+    scenario.vigor.actCosts = scenario.vigor.actCosts.filter(({ act }) => act !== 2);
+    const result = buildLocalTheaterPlan({
+      input: theaterInput(),
+      scenario,
+      characters: THEATER_CHARACTERS,
+      knowledge
+    });
+    expect(result).toMatchObject({
+      status: 'blocked',
+      issues: expect.arrayContaining([expect.objectContaining({ code: 'VIGOR_BUDGET_INVALID' })])
+    });
+  });
+
+  it('routes a selected external actor with an explicit source instead of leaving it unused', () => {
+    const result = buildLocalTheaterPlan({
+      input: theaterInput({ selectedTrialCharacterIds: ['trial.1'] }),
+      scenario: theaterScenario(),
+      characters: THEATER_CHARACTERS,
+      knowledge
+    });
+    expect(result.status).toBe('planned');
+    if (result.status !== 'planned') throw new Error('Expected planned');
+    expect(result.plan.cast.trialCharacterIds).toEqual(['trial.1']);
+    expect(
+      result.plan.acts.flatMap(({ candidateCharacterIds }) => candidateCharacterIds)
+    ).toContain('trial.1');
+    expect(result.vigorBudget).toContainEqual(
+      expect.objectContaining({ characterId: 'trial.1', spent: 1 })
+    );
+  });
+
+  it('treats an act with no declared branch notes as a fixed no-branch route', () => {
+    const scenario = theaterScenario();
+    scenario.acts[0]!.pathNotes = [];
+    const result = buildLocalTheaterPlan({
+      input: theaterInput(),
+      scenario,
+      characters: THEATER_CHARACTERS,
+      knowledge
+    });
+    expect(result.status).toBe('planned');
+    if (result.status !== 'planned') throw new Error('Expected planned');
+    expect(result.plan.acts[0]?.pathChoice).toMatchObject({ kind: 'fixed' });
   });
 });

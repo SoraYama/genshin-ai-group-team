@@ -71,6 +71,7 @@ function service(
     apiKey?: string;
     view?: ReturnType<typeof readyView>;
     history?: ReturnType<typeof vi.fn>;
+    audit?: ReturnType<typeof vi.fn>;
     timeout?: number;
   } = {}
 ) {
@@ -87,7 +88,8 @@ function service(
     },
     sdkEnvironment: { cwd: '/tmp', clientVersion: 'test' },
     agentTimeoutMs: options.timeout,
-    knowledge: THEATER_KNOWLEDGE
+    knowledge: THEATER_KNOWLEDGE,
+    auditLog: options.audit
   });
 }
 
@@ -110,11 +112,52 @@ describe('TheaterAdvisorService', () => {
         target: 'safe-clear',
         scenarioTrust: 'production',
         eligibility: expect.objectContaining({ hardQualifiedCount: 9 }),
-        vigorBudget: [
-          { act: 1, before: 2, spent: 1, after: 1 },
-          { act: 2, before: 1, spent: 1, after: 0 }
-        ],
+        vigorBudget: expect.arrayContaining([
+          expect.objectContaining({
+            act: 1,
+            characterId: '1001',
+            before: 2,
+            spent: 1,
+            after: 1
+          }),
+          expect.objectContaining({
+            act: 2,
+            characterId: '1008',
+            before: 2,
+            spent: 1,
+            after: 1
+          })
+        ]),
         cast: expect.arrayContaining([expect.objectContaining({ id: '1001', source: 'owned' })])
+      })
+    );
+  });
+
+  it('persists the source actually selected in the plan even for external actors', async () => {
+    const history = vi.fn();
+    const result = await service({ history }).recommend(
+      theaterInput({ selectedOpeningCharacterIds: ['1001'] })
+    );
+    expect(result.status).toBe('planned');
+    expect(history).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cast: expect.arrayContaining([expect.objectContaining({ id: '1001', source: 'opening' })])
+      })
+    );
+  });
+
+  it('emits a structured audit event when secondary history persistence fails', async () => {
+    const audit = vi.fn();
+    const history = vi.fn(() => {
+      throw new Error('disk unavailable');
+    });
+    const result = await service({ history, audit }).recommend(theaterInput());
+    expect(result.status).toBe('planned');
+    expect(audit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: 'history-write-failed',
+        correlationId: 'theater-test-request',
+        issueCodes: ['HISTORY_WRITE_FAILED']
       })
     );
   });

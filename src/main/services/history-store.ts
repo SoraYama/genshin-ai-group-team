@@ -80,6 +80,7 @@ const theaterHistoryEntrySchema = z
       z
         .object({
           act: z.number().int().min(1).max(10),
+          characterId: z.string().trim().min(1),
           before: z.number().int().nonnegative(),
           spent: z.number().int().nonnegative(),
           after: z.number().int().nonnegative()
@@ -151,26 +152,65 @@ const theaterHistoryEntrySchema = z
         message: 'Theater history cast snapshots must exactly cover the plan'
       });
     }
-    const plannedActs = entry.plan.acts.map(({ act }) => act);
-    if (
-      new Set(entry.vigorBudget.map(({ act }) => act)).size !== entry.vigorBudget.length ||
-      entry.vigorBudget.length !== plannedActs.length ||
-      entry.vigorBudget.some(({ act }, index) => act !== plannedActs[index])
-    ) {
+    const uniqueLedgerKeys = new Set(
+      entry.vigorBudget.map(({ act, characterId }) => `${act}:${characterId}`)
+    );
+    if (uniqueLedgerKeys.size !== entry.vigorBudget.length) {
       context.addIssue({
         code: 'custom',
         path: ['vigorBudget'],
-        message: 'Theater history vigor budget must align with every planned act'
+        message: 'Theater history vigor ledger entries must be unique per act and actor'
       });
     }
-    entry.vigorBudget.forEach(({ before, spent, after }, index) => {
-      if (before - spent !== after || (index > 0 && before !== entry.vigorBudget[index - 1]?.after))
+    const budgetByAct = new Map<number, typeof entry.vigorBudget>();
+    entry.vigorBudget.forEach((item) =>
+      budgetByAct.set(item.act, [...(budgetByAct.get(item.act) ?? []), item])
+    );
+    entry.plan.acts.forEach((actPlan) => {
+      const expected = new Set(actPlan.plannedVigorSpend.map(({ characterId }) => characterId));
+      const actual = new Set(
+        (budgetByAct.get(actPlan.act) ?? []).map(({ characterId }) => characterId)
+      );
+      if (
+        expected.size !== actual.size ||
+        [...expected].some((characterId) => !actual.has(characterId))
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['vigorBudget'],
+          message: 'Theater history vigor ledger must cover every planned actor spend'
+        });
+      }
+    });
+    const ledgerByCharacter = new Map<string, typeof entry.vigorBudget>();
+    entry.vigorBudget.forEach((item) =>
+      ledgerByCharacter.set(item.characterId, [
+        ...(ledgerByCharacter.get(item.characterId) ?? []),
+        item
+      ])
+    );
+    entry.vigorBudget.forEach(({ act, characterId, before, spent, after }, index) => {
+      const plannedSpend = entry.plan.acts
+        .find((item) => item.act === act)
+        ?.plannedVigorSpend.find((item) => item.characterId === characterId)?.cost;
+      if (before - spent !== after || plannedSpend !== spent)
         context.addIssue({
           code: 'custom',
           path: ['vigorBudget', index],
-          message: 'Theater history vigor budget chain is invalid'
+          message: 'Theater history vigor ledger entry is invalid'
         });
     });
+    for (const ledger of ledgerByCharacter.values()) {
+      const sorted = ledger.slice().sort((left, right) => left.act - right.act);
+      sorted.forEach((item, index) => {
+        if (index > 0 && item.before !== sorted[index - 1]?.after)
+          context.addIssue({
+            code: 'custom',
+            path: ['vigorBudget'],
+            message: 'Theater history per-actor vigor chain is invalid'
+          });
+      });
+    }
     if (entry.routeGuidance.preserveCharacterIds.some((id) => byId.get(id)?.source !== 'owned')) {
       context.addIssue({
         code: 'custom',

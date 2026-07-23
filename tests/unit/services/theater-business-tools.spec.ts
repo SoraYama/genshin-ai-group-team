@@ -74,5 +74,9 @@ describe('theater business tools', () => {
     );
     const knowledge = payload(await tools[2]!.handler({ characterIds: ['1001'] }, {}));
     expect(JSON.stringify(knowledge)).toContain('unknown');
+    const external = payload(await tools[2]!.handler({ characterIds: ['trial.1'] }, {}));
+    expect(external).toMatchObject({
+      characters: [expect.objectContaining({ id: 'trial.1', status: 'unknown' })]
+    });
   });
 });

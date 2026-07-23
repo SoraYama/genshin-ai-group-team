@@ -55,8 +55,20 @@ function input(): Omit<TheaterPlanHistoryEntry, 'id' | 'createdAt'> {
       source: 'owned' as const
     })),
     vigorBudget: [
-      { act: 1, before: 2, spent: 1, after: 1 },
-      { act: 2, before: 1, spent: 1, after: 0 }
+      ...['1001', '1002', '1003', '1004'].map((characterId) => ({
+        act: 1,
+        characterId,
+        before: 2,
+        spent: 1,
+        after: 1
+      })),
+      ...['1005', '1006', '1007', '1008'].map((characterId) => ({
+        act: 2,
+        characterId,
+        before: 2,
+        spent: 1,
+        after: 1
+      }))
     ],
     routeGuidance: {
       preserveCharacterIds: ['1001'],
@@ -84,7 +96,7 @@ describe('Theater history deep validation', () => {
     const invalid = input();
     invalid.cast[0]!.source = 'trial';
     invalid.cast.pop();
-    invalid.vigorBudget[1]!.after = -1;
+    invalid.vigorBudget[1]!.after = 0;
     expect(() => store.appendTheater(invalid)).toThrow();
   });
 });
