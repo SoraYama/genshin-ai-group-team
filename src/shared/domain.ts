@@ -326,6 +326,8 @@ export interface StygianPlanHistoryEntry {
   interventions: {
     lockedCharacterIds: string[];
     excludedCharacterIds: string[];
+    target: import('./stygian-advisor.js').StygianRewardTarget;
+    difficultyId: string;
     preferences: import('./scenario-v2.js').PlayerPreferences;
   };
   characters: Array<{

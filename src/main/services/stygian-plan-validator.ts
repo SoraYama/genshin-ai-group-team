@@ -8,6 +8,7 @@ import {
 } from '../../shared/stygian-advisor.js';
 import { findAbyssMechanicCoverageGaps } from '../../shared/abyss-mechanics.js';
 import type { CharacterKnowledgeReader } from '../../shared/character-knowledge.js';
+import { isStygianTargetDifficultyCompatible } from '../../shared/stygian-reward-policy.js';
 
 export type StygianPlanValidationResult =
   | { ok: true; issues: []; plan: StygianPlanOutput }
@@ -46,10 +47,19 @@ export function validateStygianPlan({
     addIssue(issues, 'DATA_VERSION_MISMATCH', ['dataVersion'], '方案使用的挑战资料版本不一致。');
   }
 
-  if (!scenario.difficulties.some(({ id }) => id === input.difficultyId)) {
+  const difficulty = scenario.difficulties.find(({ id }) => id === input.difficultyId);
+  if (!difficulty) {
     addIssue(issues, 'DIFFICULTY_NOT_FOUND', ['difficultyId'], '所选难度不在当前资料中。', {
       difficultyId: input.difficultyId
     });
+  } else if (!isStygianTargetDifficultyCompatible(input.target, difficulty.order)) {
+    addIssue(
+      issues,
+      'TARGET_DIFFICULTY_CONFLICT',
+      ['target'],
+      '所选难度低于当前应用内目标档位，请提高难度或降低奖励目标。',
+      { target: input.target, difficultyOrder: difficulty.order, policy: 'app-target-orders-v1' }
+    );
   }
   if (input.phase !== undefined && !scenario.phases.some(({ phase }) => phase === input.phase)) {
     addIssue(issues, 'PHASE_NOT_FOUND', ['phase'], '所选阶段不在当前资料中。', {

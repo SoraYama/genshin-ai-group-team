@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { StygianPlanAgent } from '../../../src/main/services/stygian-plan-agent.js';
 import type { AgentSdkRunOptions } from '../../../src/main/services/agent-sdk-adapter.js';
@@ -12,10 +12,14 @@ import {
 class FixtureRunner {
   readonly calls: Array<{ prompt: string; options: AgentSdkRunOptions }> = [];
 
-  constructor(private readonly outputs: unknown[]) {}
+  constructor(
+    private readonly outputs: unknown[],
+    private readonly toolRounds: readonly number[] = [0, 1]
+  ) {}
 
   async *run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown> {
     this.calls.push({ prompt, options });
+    const round = this.calls.length - 1;
     const toolUses = [
       {
         id: 'profile',
@@ -38,21 +42,23 @@ class FixtureRunner {
         input: { characterIds: STYGIAN_CHARACTERS.slice(0, 12).map(({ id }) => String(id)) }
       }
     ];
-    yield {
-      type: 'assistant',
-      message: { content: toolUses.map((use) => ({ type: 'tool_use', ...use })) }
-    };
-    yield {
-      type: 'user',
-      message: {
-        content: toolUses.map(({ id }) => ({
-          type: 'tool_result',
-          tool_use_id: id,
-          is_error: false,
-          content: 'ok'
-        }))
-      }
-    };
+    if (this.toolRounds.includes(round)) {
+      yield {
+        type: 'assistant',
+        message: { content: toolUses.map((use) => ({ type: 'tool_use', ...use })) }
+      };
+      yield {
+        type: 'user',
+        message: {
+          content: toolUses.map(({ id }) => ({
+            type: 'tool_result',
+            tool_use_id: id,
+            is_error: false,
+            content: 'ok'
+          }))
+        }
+      };
+    }
     yield {
       type: 'result',
       result: JSON.stringify(this.outputs.shift()),
@@ -129,6 +135,29 @@ describe('StygianPlanAgent', () => {
     expect(runner.calls).toBe(2);
   });
 
+  it('rejects a valid repair that borrows required tool evidence from the compose turn', async () => {
+    const invalid = {
+      ...validStygianPlan(),
+      phases: validStygianPlan().phases.map((phase) => ({
+        ...phase,
+        team: { ...phase.team, characterIds: ['1001', '1002', '1003', '1004'] }
+      }))
+    };
+    const runner = new FixtureRunner([invalid, validStygianPlan()], [0]);
+    const result = await new StygianPlanAgent(runner).compose({
+      input: stygianInput(),
+      scenario: stygianScenario(),
+      characters: STYGIAN_CHARACTERS,
+      sdkOptions: sdkOptions()
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      issues: [{ code: 'AGENT_OUTPUT_INVALID', path: ['tools'] }]
+    });
+    expect(runner.calls).toHaveLength(2);
+  });
+
   it('returns deterministic issues after one failed repair rather than scraping narrative', async () => {
     const runner = new FixtureRunner(['not-json', '```json\n{}\n```']);
     const result = await new StygianPlanAgent(runner).compose({
@@ -139,5 +168,33 @@ describe('StygianPlanAgent', () => {
     });
     expect(result).toMatchObject({ ok: false, issues: [{ code: 'AGENT_OUTPUT_INVALID' }] });
     expect(runner.calls).toHaveLength(2);
+  });
+
+  it('creates independently scoped SDK options for compose and repair rounds', async () => {
+    const invalid = {
+      ...validStygianPlan(),
+      phases: validStygianPlan().phases.map((phase) => ({
+        ...phase,
+        team: { ...phase.team, characterIds: ['1001', '1002', '1003', '1004'] }
+      }))
+    };
+    const runner = new FixtureRunner([invalid, validStygianPlan()]);
+    const sdkOptionsForRound = vi.fn((round: 'compose' | 'repair') => ({
+      ...sdkOptions(),
+      mcpServers: {
+        genshin: { type: 'sdk' as const, name: `genshin-${round}`, instance: {} as never }
+      }
+    }));
+    const result = await new StygianPlanAgent(runner).compose({
+      input: stygianInput(),
+      scenario: stygianScenario(),
+      characters: STYGIAN_CHARACTERS,
+      sdkOptions: sdkOptions(),
+      sdkOptionsForRound
+    });
+
+    expect(result.ok).toBe(true);
+    expect(sdkOptionsForRound.mock.calls.map(([round]) => round)).toEqual(['compose', 'repair']);
+    expect(runner.calls[0]?.options.mcpServers).not.toBe(runner.calls[1]?.options.mcpServers);
   });
 });

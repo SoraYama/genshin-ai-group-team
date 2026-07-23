@@ -219,35 +219,42 @@ export class StygianAdvisorService {
           Math.max(1, Math.min(this.options.agentTimeoutMs ?? 60_000, 120_000))
         );
         try {
-          const mcpServer = createStygianBusinessMcpServer({
-            getProfile: (uid) => (uid === input.uid ? profile : null),
-            getScenario: () => scenario,
-            knowledge: this.options.knowledge,
-            auditContext: {
-              correlationId: input.correlationId,
-              scenarioId: scenario.id,
-              dataVersion: scenario.meta.dataVersion
-            },
-            log: this.options.toolLog
+          const baseSdkOptions = {
+            apiKey,
+            baseUrl: this.options.config.getBaseUrl(),
+            model: this.options.config.getModel(),
+            customHeaders: this.options.config.getCustomHeaders(),
+            systemPrompt: '',
+            cwd: this.options.sdkEnvironment.cwd,
+            clientVersion: this.options.sdkEnvironment.clientVersion,
+            abortController: agentAbort,
+            maxTurns: 4,
+            allowedBusinessTools: [...STYGIAN_MCP_TOOL_NAMES]
+          };
+          const sdkOptionsForRound = (round: 'compose' | 'repair') => ({
+            ...baseSdkOptions,
+            mcpServers: {
+              genshin: createStygianBusinessMcpServer({
+                getProfile: (uid) => (uid === input.uid ? profile : null),
+                getScenario: () => scenario,
+                knowledge: this.options.knowledge,
+                auditContext: {
+                  correlationId: input.correlationId,
+                  scenarioId: scenario.id,
+                  dataVersion: scenario.meta.dataVersion,
+                  round
+                },
+                log: this.options.toolLog
+              })
+            }
           });
           const agent = await this.planAgent.compose({
             input,
             scenario,
             characters: profile.characters,
             knowledge: this.options.knowledge,
-            sdkOptions: {
-              apiKey,
-              baseUrl: this.options.config.getBaseUrl(),
-              model: this.options.config.getModel(),
-              customHeaders: this.options.config.getCustomHeaders(),
-              systemPrompt: '',
-              cwd: this.options.sdkEnvironment.cwd,
-              clientVersion: this.options.sdkEnvironment.clientVersion,
-              abortController: agentAbort,
-              maxTurns: 4,
-              mcpServers: { genshin: mcpServer },
-              allowedBusinessTools: [...STYGIAN_MCP_TOOL_NAMES]
-            }
+            sdkOptions: baseSdkOptions,
+            sdkOptionsForRound
           });
           this.options.config.recordUsage?.(
             agent.usage.inputTokens,
@@ -321,6 +328,8 @@ export class StygianAdvisorService {
         interventions: {
           lockedCharacterIds: input.lockedCharacterIds,
           excludedCharacterIds: input.excludedCharacterIds,
+          target: input.target,
+          difficultyId: input.difficultyId,
           preferences: input.preferences
         },
         characters: usedIds.flatMap((id) => {

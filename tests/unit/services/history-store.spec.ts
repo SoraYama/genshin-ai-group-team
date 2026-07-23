@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import type { RecommendationResult } from '../../../src/shared/domain.js';
+import type { RecommendationResult, StygianPlanHistoryEntry } from '../../../src/shared/domain.js';
 import { ABYSS_CHARACTERS, abyssInput, validAbyssPlan } from './abyss-test-fixtures.js';
 import { STYGIAN_CHARACTERS, stygianInput, validStygianPlan } from './stygian-test-fixtures.js';
 
@@ -49,6 +49,39 @@ function makeResult(source: 'llm' | 'fallback' = 'llm'): RecommendationResult {
         rotationTip: 'go'
       }
     ]
+  };
+}
+
+function stygianHistoryInput(): Omit<StygianPlanHistoryEntry, 'id' | 'createdAt'> {
+  const input = stygianInput();
+  return {
+    uid: input.uid,
+    scenarioId: input.scenarioId,
+    schemaVersion: 2,
+    dataVersion: input.dataVersion,
+    mode: 'stygian-onslaught',
+    difficultyId: input.difficultyId,
+    difficultyName: '难度 6',
+    target: input.target,
+    reusePolicy: { rule: 'forbidden', notes: [] },
+    source: 'local-rules',
+    scenarioTrust: 'production',
+    scenarioFreshness: 'fresh',
+    scenarioNotCurrent: false,
+    interventions: {
+      lockedCharacterIds: [],
+      excludedCharacterIds: [],
+      target: input.target,
+      difficultyId: input.difficultyId,
+      preferences: input.preferences
+    },
+    characters: STYGIAN_CHARACTERS.slice(0, 12).map(({ id, name, element, level }) => ({
+      id: String(id),
+      name,
+      element,
+      level
+    })),
+    plan: validStygianPlan()
   };
 }
 
@@ -351,6 +384,8 @@ describe('HistoryStore', () => {
       interventions: {
         lockedCharacterIds: input.lockedCharacterIds,
         excludedCharacterIds: input.excludedCharacterIds,
+        target: input.target,
+        difficultyId: input.difficultyId,
         preferences: input.preferences
       },
       characters: STYGIAN_CHARACTERS.slice(0, 12).map(({ id, name, element, level }) => ({
@@ -376,6 +411,10 @@ describe('HistoryStore', () => {
     });
     expect(stored?.plan.phases[0]?.team.characterIds[0]).toBe('1001');
     expect(stored?.interventions.lockedCharacterIds).toEqual(['1001']);
+    expect(stored?.interventions).toMatchObject({
+      target: 'dire-challenge',
+      difficultyId: 'difficulty-6'
+    });
     expect(stored?.characters.map(({ name }) => name)).toContain('幽境角色1');
     expect(store.removeStygianById(entry.id)).toBe(true);
     expect(store.queryStygian()).toEqual([]);
@@ -402,6 +441,8 @@ describe('HistoryStore', () => {
       interventions: {
         lockedCharacterIds: [],
         excludedCharacterIds: [],
+        target: input.target,
+        difficultyId: input.difficultyId,
         preferences: input.preferences
       },
       characters: STYGIAN_CHARACTERS.slice(0, 12).map(({ id, name, element, level }) => ({
@@ -416,8 +457,69 @@ describe('HistoryStore', () => {
       { ...valid, reusePolicy: undefined },
       { ...valid, target: 'internal-target' },
       { ...valid, plan: { ...valid.plan, phases: [] } },
-      { ...valid, characters: valid.characters.slice(1) }
+      { ...valid, characters: valid.characters.slice(1) },
+      {
+        ...valid,
+        plan: {
+          ...valid.plan,
+          phases: valid.plan.phases.map((phase) => ({
+            ...phase,
+            team: { ...phase.team, characterIds: ['1001', '1002', '1003', '1004'] }
+          }))
+        }
+      },
+      {
+        ...valid,
+        reusePolicy: { rule: 'limited', maxPartyAppearancesPerCharacter: 2, notes: [] },
+        plan: {
+          ...valid.plan,
+          reusePolicyAcknowledgement: 'limited',
+          phases: valid.plan.phases.map((phase) => ({
+            ...phase,
+            team: { ...phase.team, characterIds: ['1001', '1002', '1003', '1004'] }
+          }))
+        }
+      },
+      {
+        ...valid,
+        interventions: { ...valid.interventions, lockedCharacterIds: ['1014'] }
+      },
+      {
+        ...valid,
+        interventions: { ...valid.interventions, excludedCharacterIds: ['1001'] }
+      },
+      {
+        ...valid,
+        interventions: { ...valid.interventions, target: 'primogems' }
+      },
+      {
+        ...valid,
+        interventions: { ...valid.interventions, difficultyId: 'difficulty-5' }
+      },
+      {
+        ...valid,
+        characters: [
+          ...valid.characters,
+          { id: '1013', name: '无关快照角色', element: 'Pyro', level: 90 }
+        ]
+      }
     ]);
     expect(store.queryStygian()).toEqual([]);
+  });
+
+  it('rejects a semantically invalid Stygian entry before mutating storage', async () => {
+    const { HistoryStore } = await import('../../../src/main/services/history-store.js');
+    const store = new HistoryStore();
+    const valid = store.appendStygian(stygianHistoryInput());
+    const before = structuredClone(storeState.get('stygianPlans'));
+    const invalid = stygianHistoryInput();
+    invalid.plan.phases = invalid.plan.phases.map((phase) => ({
+      ...phase,
+      team: { ...phase.team, characterIds: ['1001', '1002', '1003', '1004'] }
+    }));
+
+    expect(() => store.appendStygian(invalid)).toThrow();
+    expect(storeState.get('stygianPlans')).toEqual(before);
+    expect(store.queryStygian().map(({ id }) => id)).toEqual([valid.id]);
   });
 });

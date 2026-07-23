@@ -53,6 +53,8 @@ const stygianHistoryEntrySchema = z
       .object({
         lockedCharacterIds: z.array(canonicalCharacterIdSchema),
         excludedCharacterIds: z.array(canonicalCharacterIdSchema),
+        target: stygianRewardTargetSchema,
+        difficultyId: z.string().trim().min(1),
         preferences: playerPreferencesSchema
       })
       .strict(),
@@ -73,6 +75,9 @@ const stygianHistoryEntrySchema = z
   .strict()
   .superRefine((entry, context) => {
     const characterIds = entry.characters.map(({ id }) => id);
+    const plannedTeams = entry.plan.phases.map(({ team }) => team.characterIds);
+    const plannedIds = plannedTeams.flat();
+    const plannedUniqueIds = new Set(plannedIds);
     if (new Set(characterIds).size !== characterIds.length) {
       context.addIssue({
         code: 'custom',
@@ -81,9 +86,7 @@ const stygianHistoryEntrySchema = z
       });
     }
     const names = new Set(characterIds);
-    const missingNames = entry.plan.phases
-      .flatMap(({ team }) => team.characterIds)
-      .filter((id) => !names.has(id));
+    const missingNames = plannedIds.filter((id) => !names.has(id));
     if (missingNames.length > 0) {
       context.addIssue({
         code: 'custom',
@@ -91,6 +94,22 @@ const stygianHistoryEntrySchema = z
         path: ['characters']
       });
     }
+    if (characterIds.some((id) => !plannedUniqueIds.has(id))) {
+      context.addIssue({
+        code: 'custom',
+        message: 'History character snapshots must match the planned roster exactly',
+        path: ['characters']
+      });
+    }
+    plannedTeams.forEach((ids, index) => {
+      if (ids.length !== 4 || new Set(ids).size !== 4) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Every stored Stygian team must contain four unique characters',
+          path: ['plan', 'phases', index, 'team', 'characterIds']
+        });
+      }
+    });
     if (
       entry.plan.scenarioId !== entry.scenarioId ||
       entry.plan.dataVersion !== entry.dataVersion
@@ -108,11 +127,52 @@ const stygianHistoryEntrySchema = z
         path: ['reusePolicy']
       });
     }
+    const appearances = new Map<string, number>();
+    plannedTeams.forEach((ids) => {
+      new Set(ids).forEach((id) => appearances.set(id, (appearances.get(id) ?? 0) + 1));
+    });
+    const maximumAppearances =
+      entry.reusePolicy.rule === 'forbidden'
+        ? 1
+        : entry.reusePolicy.rule === 'limited'
+          ? entry.reusePolicy.maxPartyAppearancesPerCharacter
+          : 3;
+    if ([...appearances.values()].some((count) => count > maximumAppearances)) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Stored team appearances violate the recorded reuse policy',
+        path: ['plan', 'phases']
+      });
+    }
     const excluded = new Set(entry.interventions.excludedCharacterIds);
     if (entry.interventions.lockedCharacterIds.some((id) => excluded.has(id))) {
       context.addIssue({
         code: 'custom',
         message: 'History interventions cannot lock and exclude the same character',
+        path: ['interventions']
+      });
+    }
+    if (entry.interventions.lockedCharacterIds.some((id) => !plannedUniqueIds.has(id))) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Every stored locked character must appear in the plan',
+        path: ['interventions', 'lockedCharacterIds']
+      });
+    }
+    if (entry.interventions.excludedCharacterIds.some((id) => plannedUniqueIds.has(id))) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Stored excluded characters cannot appear in the plan',
+        path: ['interventions', 'excludedCharacterIds']
+      });
+    }
+    if (
+      entry.interventions.target !== entry.target ||
+      entry.interventions.difficultyId !== entry.difficultyId
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Stored intervention target must match the history envelope',
         path: ['interventions']
       });
     }
@@ -169,11 +229,13 @@ export class HistoryStore {
   }
 
   appendStygian(input: Omit<StygianPlanHistoryEntry, 'id' | 'createdAt'>): StygianPlanHistoryEntry {
-    const entry: StygianPlanHistoryEntry = structuredClone({
-      id: randomUUID(),
-      createdAt: new Date().toISOString(),
-      ...input
-    });
+    const entry = stygianHistoryEntrySchema.parse(
+      structuredClone({
+        id: randomUUID(),
+        createdAt: new Date().toISOString(),
+        ...input
+      })
+    ) as StygianPlanHistoryEntry;
     const next = [entry, ...this.readStygianPlans()].slice(0, MAX_ENTRIES);
     this.store.set('stygianPlans', next);
     return structuredClone(entry);

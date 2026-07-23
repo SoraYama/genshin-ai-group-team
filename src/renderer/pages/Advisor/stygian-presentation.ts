@@ -12,6 +12,7 @@ import {
   localizedMechanicTerm,
   parseRequiredCapabilities
 } from '../../../shared/abyss-mechanics.js';
+import { localizeStygianModifier } from '../../../shared/stygian-modifier-localization.js';
 
 export type StygianInterventionState = 'neutral' | 'locked' | 'excluded';
 
@@ -31,6 +32,12 @@ export function difficultyDisplayName(
     difficulty.name.names['zh-Hans'] ??
     `第 ${difficulty.order} 档`
   );
+}
+
+export function difficultyModifierLabels(
+  difficulty: StygianOnslaughtScenario['difficulties'][number]
+): string[] {
+  return difficulty.modifiers.map(localizeStygianModifier);
 }
 
 export function difficultySuggestionLabel(
@@ -72,8 +79,8 @@ export function reuseRuleSummary(policy: CrossPartyReusePolicy): string {
 export function stygianMechanicLabels(phase: StygianOnslaughtScenario['phases'][number]): string[] {
   return Array.from(
     new Set([
-      ...phase.phaseModifiers.map(({ description }) => description),
-      ...phase.bossModifiers.map(({ description }) => description),
+      ...phase.phaseModifiers.map(localizeStygianModifier),
+      ...phase.bossModifiers.map(localizeStygianModifier),
       ...phase.boss.mechanics.shields.map(
         ({ element, strength }) =>
           `${localizedMechanicTerm(element)}护盾${strength === undefined ? '' : ` · 强度 ${strength}`}`

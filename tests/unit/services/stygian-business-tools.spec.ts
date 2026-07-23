@@ -120,7 +120,8 @@ describe('stygian in-process business tools', () => {
       auditContext: {
         correlationId: 'stygian-audit',
         scenarioId: scenario.id,
-        dataVersion: scenario.meta.dataVersion
+        dataVersion: scenario.meta.dataVersion,
+        round: 'repair'
       },
       log
     });
@@ -137,10 +138,47 @@ describe('stygian in-process business tools', () => {
         scenarioId: scenario.id,
         dataVersion: scenario.meta.dataVersion,
         knowledgeVersion: 'stygian-knowledge-v1',
+        round: 'repair',
         parameterSummary: { requestedCount: 2 },
         issueCodes: []
       })
     );
     expect(JSON.stringify(log.mock.calls)).not.toMatch(/123456789|1001|9999|authorization/i);
+  });
+
+  it('localizes difficulty, phase, and boss modifiers before returning Agent context', async () => {
+    const scenario = stygianScenario();
+    scenario.difficulties[5]!.modifiers = [
+      { id: 'energy-pressure', description: 'Energy pressure increased' }
+    ];
+    scenario.phases[0]!.phaseModifiers = [{ id: 'unknown-phase', description: 'phase_damage_up' }];
+    scenario.phases[0]!.bossModifiers = [
+      { id: 'unknown-boss', description: 'Boss gains increased resistance' }
+    ];
+    const tools = createStygianBusinessTools({
+      getProfile: () => null,
+      getScenario: () => scenario
+    });
+
+    const payload = textPayload(
+      await tools[1]!.handler(
+        {
+          scenarioId: scenario.id,
+          dataVersion: scenario.meta.dataVersion,
+          difficultyId: 'difficulty-6',
+          phase: 1
+        },
+        {}
+      )
+    ) as {
+      difficultyModifiers: string[];
+      phaseModifiers: string[];
+      bossModifiers: string[];
+    };
+
+    expect(payload.difficultyModifiers).toEqual(['能量回复压力上升。']);
+    expect(payload.phaseModifiers).toEqual(['挑战修正暂无中文说明']);
+    expect(payload.bossModifiers).toEqual(['挑战修正暂无中文说明']);
+    expect(JSON.stringify(payload)).not.toMatch(/Energy pressure|phase_damage_up|Boss gains/i);
   });
 });

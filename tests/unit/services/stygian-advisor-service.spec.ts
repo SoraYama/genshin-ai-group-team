@@ -2,7 +2,13 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { StygianAdvisorService } from '../../../src/main/services/stygian-advisor-service.js';
 import type { AgentSdkRunOptions } from '../../../src/main/services/agent-sdk-adapter.js';
-import { STYGIAN_CHARACTERS, stygianInput, stygianScenario } from './stygian-test-fixtures.js';
+import type { StygianPlanAgentRunner } from '../../../src/main/services/stygian-plan-agent.js';
+import {
+  STYGIAN_CHARACTERS,
+  stygianInput,
+  stygianScenario,
+  validStygianPlan
+} from './stygian-test-fixtures.js';
 
 const profile = {
   schemaVersion: 2 as const,
@@ -39,6 +45,61 @@ class WaitingAgentRunner {
   }
 }
 
+class ComposeToolsOnlyRepairRunner implements StygianPlanAgentRunner {
+  calls = 0;
+
+  async *run(): AsyncIterable<unknown> {
+    const round = this.calls;
+    this.calls += 1;
+    const toolUses = [
+      {
+        id: 'profile',
+        name: 'mcp__genshin__read_profile_cache',
+        input: { uid: '123456789' }
+      },
+      ...[1, 2, 3].map((phase) => ({
+        id: `phase-${phase}`,
+        name: 'mcp__genshin__query_stygian_phase',
+        input: {
+          scenarioId: 'stygian.2026-07',
+          dataVersion: '2026.07.1',
+          difficultyId: 'difficulty-6',
+          phase
+        }
+      })),
+      {
+        id: 'knowledge',
+        name: 'mcp__genshin__query_genshin_db',
+        input: { characterIds: STYGIAN_CHARACTERS.slice(0, 12).map(({ id }) => String(id)) }
+      }
+    ];
+    if (round === 0) {
+      yield {
+        type: 'assistant',
+        message: { content: toolUses.map((use) => ({ type: 'tool_use', ...use })) }
+      };
+      yield {
+        type: 'user',
+        message: {
+          content: toolUses.map(({ id }) => ({
+            type: 'tool_result',
+            tool_use_id: id,
+            is_error: false,
+            content: 'ok'
+          }))
+        }
+      };
+    }
+    const plan = validStygianPlan();
+    if (round === 0) {
+      plan.phases.forEach((phase) => {
+        phase.team.characterIds = ['1001', '1002', '1003', '1004'];
+      });
+    }
+    yield { type: 'result', result: JSON.stringify(plan) };
+  }
+}
+
 function readyView(overrides: Record<string, unknown> = {}) {
   return {
     status: 'ready' as const,
@@ -56,7 +117,7 @@ function readyView(overrides: Record<string, unknown> = {}) {
 function service(
   options: {
     apiKey?: string;
-    runner?: InvalidAgentRunner | WaitingAgentRunner;
+    runner?: StygianPlanAgentRunner;
     view?: ReturnType<typeof readyView>;
     history?: ReturnType<typeof vi.fn>;
     audit?: ReturnType<typeof vi.fn>;
@@ -145,6 +206,15 @@ describe('StygianAdvisorService', () => {
   it('falls back once to the checked local plan when smart output and repair both fail', async () => {
     const runner = new InvalidAgentRunner();
     const result = await service({ apiKey: 'secret', runner }).recommend(stygianInput());
+    expect(runner.calls).toBe(2);
+    expect(result).toMatchObject({ status: 'planned', source: 'local-rules' });
+    expect(result.warnings.join('')).toContain('本地规则');
+  });
+
+  it('falls back when a repair turn returns a valid plan without its own required tool reads', async () => {
+    const runner = new ComposeToolsOnlyRepairRunner();
+    const result = await service({ apiKey: 'secret', runner }).recommend(stygianInput());
+
     expect(runner.calls).toBe(2);
     expect(result).toMatchObject({ status: 'planned', source: 'local-rules' });
     expect(result.warnings.join('')).toContain('本地规则');

@@ -28,6 +28,7 @@ export interface StygianPlanAgentInput {
   characters: CharacterProfile[];
   knowledge?: CharacterKnowledgeReader;
   sdkOptions: AgentSdkRunOptions;
+  sdkOptionsForRound?: (round: 'compose' | 'repair') => AgentSdkRunOptions;
 }
 
 export type StygianPlanAgentResult =
@@ -38,15 +39,18 @@ export class StygianPlanAgent {
   constructor(private readonly runner: StygianPlanAgentRunner) {}
 
   async compose(context: StygianPlanAgentInput): Promise<StygianPlanAgentResult> {
+    const composeOptions = context.sdkOptionsForRound?.('compose') ?? context.sdkOptions;
     const firstTurn = await runAuditedAgentTurn({
       runner: this.runner,
       prompt: buildComposePayload(context),
-      sdkOptions: context.sdkOptions,
-      systemPrompt: STYGIAN_COMPOSER_PROMPT_V1
+      sdkOptions: composeOptions,
+      systemPrompt: STYGIAN_COMPOSER_PROMPT_V1,
+      auditContext: { correlationId: context.input.correlationId, round: 'compose' }
     });
     const first = validateAgentOutput(firstTurn.text, context, firstTurn.tools);
     if (first.ok) return { ok: true, repaired: false, plan: first.plan, usage: firstTurn.usage };
 
+    const repairOptions = context.sdkOptionsForRound?.('repair') ?? context.sdkOptions;
     const repairTurn = await runAuditedAgentTurn({
       runner: this.runner,
       prompt: JSON.stringify({
@@ -55,13 +59,11 @@ export class StygianPlanAgent {
         previousOutput: parseJsonOrRaw(firstTurn.text),
         request: publicRequest(context)
       }),
-      sdkOptions: context.sdkOptions,
-      systemPrompt: `${STYGIAN_COMPOSER_PROMPT_V1}\n\n${STYGIAN_REPAIR_PROMPT_V1}`
+      sdkOptions: repairOptions,
+      systemPrompt: `${STYGIAN_COMPOSER_PROMPT_V1}\n\n${STYGIAN_REPAIR_PROMPT_V1}`,
+      auditContext: { correlationId: context.input.correlationId, round: 'repair' }
     });
-    const repaired = validateAgentOutput(repairTurn.text, context, [
-      ...firstTurn.tools,
-      ...repairTurn.tools
-    ]);
+    const repaired = validateAgentOutput(repairTurn.text, context, repairTurn.tools);
     const usage = addAgentUsage(firstTurn.usage, repairTurn.usage);
     if (!repaired.ok) return { ...repaired, usage };
     return { ok: true, repaired: true, plan: repaired.plan, usage };

@@ -5,6 +5,7 @@ import type { PersistedProfile } from '../../shared/domain.js';
 import type { StygianScenario } from '../../shared/stygian-advisor.js';
 import { localizedMechanicTerm, parseRequiredCapabilities } from '../../shared/abyss-mechanics.js';
 import type { CharacterKnowledgeReader } from '../../shared/character-knowledge.js';
+import { localizeStygianModifier } from '../../shared/stygian-modifier-localization.js';
 import {
   UNKNOWN_CHARACTER_KNOWLEDGE,
   characterKnowledgeView,
@@ -28,6 +29,7 @@ export interface StygianBusinessToolLog {
   scenarioId: string;
   dataVersion: string;
   knowledgeVersion: string;
+  round: 'compose' | 'repair' | 'single';
   parameterSummary: Readonly<Record<string, string | number | boolean>>;
   issueCodes: string[];
 }
@@ -36,7 +38,12 @@ export interface StygianBusinessToolsOptions {
   getProfile: (uid: string) => PersistedProfile | null;
   getScenario: () => StygianScenario;
   knowledge?: CharacterKnowledgeReader;
-  auditContext?: { correlationId: string; scenarioId: string; dataVersion: string };
+  auditContext?: {
+    correlationId: string;
+    scenarioId: string;
+    dataVersion: string;
+    round: StygianBusinessToolLog['round'];
+  };
   maxCharacters?: number;
   log?: (event: StygianBusinessToolLog) => void;
   now?: () => number;
@@ -50,7 +57,8 @@ export function createStygianBusinessTools(options: StygianBusinessToolsOptions)
   const auditContext = options.auditContext ?? {
     correlationId: 'unscoped',
     scenarioId: current.id,
-    dataVersion: current.meta.dataVersion
+    dataVersion: current.meta.dataVersion,
+    round: 'single'
   };
   const run = async <T>(
     toolName: StygianBusinessToolLog['tool'],
@@ -136,11 +144,9 @@ export function createStygianBusinessTools(options: StygianBusinessToolsOptions)
             return {
               phase,
               difficulty: localName(selectedDifficulty.name),
-              difficultyModifiers: selectedDifficulty.modifiers.map(
-                ({ description }) => description
-              ),
-              phaseModifiers: selectedPhase.phaseModifiers.map(({ description }) => description),
-              bossModifiers: selectedPhase.bossModifiers.map(({ description }) => description),
+              difficultyModifiers: selectedDifficulty.modifiers.map(localizeStygianModifier),
+              phaseModifiers: selectedPhase.phaseModifiers.map(localizeStygianModifier),
+              bossModifiers: selectedPhase.bossModifiers.map(localizeStygianModifier),
               boss: localizedBoss(selectedPhase.boss),
               reusePolicy: scenario.crossPartyReusePolicy
             };

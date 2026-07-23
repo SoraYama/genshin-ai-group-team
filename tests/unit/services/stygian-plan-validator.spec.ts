@@ -52,6 +52,36 @@ const shieldKnowledge: CharacterKnowledgeReader = {
 };
 
 describe('validateStygianPlan', () => {
+  it('enforces the complete application target-to-difficulty compatibility matrix', () => {
+    const minimumOrder = {
+      primogems: 1,
+      'high-reward': 5,
+      'dire-challenge': 6
+    } as const;
+    const scenario = stygianScenario();
+
+    for (const target of ['primogems', 'high-reward', 'dire-challenge'] as const) {
+      for (let order = 1; order <= 6; order += 1) {
+        const result = validateStygianPlan({
+          input: stygianInput({ target, difficultyId: `difficulty-${order}` }),
+          scenario,
+          characters: STYGIAN_CHARACTERS,
+          plan: validStygianPlan()
+        });
+        if (order >= minimumOrder[target]) {
+          expect(result.ok, `${target} order ${order}`).toBe(true);
+        } else {
+          expect(result.ok, `${target} order ${order}`).toBe(false);
+          if (!result.ok) {
+            expect(result.issues).toContainEqual(
+              expect.objectContaining({ code: 'TARGET_DIFFICULTY_CONFLICT' })
+            );
+          }
+        }
+      }
+    }
+  });
+
   it('accepts exactly three four-person owned parties under a forbidden reuse rule', () => {
     expect(
       validateStygianPlan({

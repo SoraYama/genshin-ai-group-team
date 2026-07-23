@@ -15,6 +15,8 @@ export interface ToolAudit {
   name: string;
   input: Record<string, unknown>;
   succeeded: boolean;
+  correlationId: string;
+  round: 'compose' | 'repair' | 'single';
 }
 
 export async function runAuditedAgentTurn(options: {
@@ -22,6 +24,10 @@ export async function runAuditedAgentTurn(options: {
   prompt: string;
   sdkOptions: AgentSdkRunOptions;
   systemPrompt: string;
+  auditContext?: {
+    correlationId: string;
+    round: ToolAudit['round'];
+  };
 }): Promise<{ text: string; tools: ToolAudit[]; usage: AgentUsage }> {
   let resultText = '';
   let assistantText = '';
@@ -61,7 +67,9 @@ export async function runAuditedAgentTurn(options: {
             id: block['id'],
             name: block['name'],
             input: isRecord(block['input']) ? block['input'] : {},
-            succeeded: false
+            succeeded: false,
+            correlationId: options.auditContext?.correlationId ?? 'unscoped',
+            round: options.auditContext?.round ?? 'single'
           });
         }
       }

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   cycleStygianIntervention,
   difficultyDisplayName,
+  difficultyModifierLabels,
   difficultySuggestionLabel,
   progressStepLabel,
   reuseRuleSummary,
@@ -70,5 +71,28 @@ describe('Stygian presentation', () => {
     expect(cycleStygianIntervention('neutral')).toBe('locked');
     expect(cycleStygianIntervention('locked')).toBe('excluded');
     expect(cycleStygianIntervention('excluded')).toBe('neutral');
+  });
+
+  it('never exposes raw phase or boss modifier sentences and internal keys', () => {
+    const phase = stygianScenario().phases[0]!;
+    phase.phaseModifiers = [{ id: 'phase_damage_up', description: 'phase_damage_up' }];
+    phase.bossModifiers = [
+      { id: 'boss-internal-key', description: 'Boss gains increased resistance' }
+    ];
+
+    expect(stygianMechanicLabels(phase)).toEqual(['挑战修正暂无中文说明']);
+  });
+
+  it('localizes difficulty modifiers through the same UI presentation boundary', () => {
+    const difficulty = stygianScenario().difficulties[5]!;
+    difficulty.modifiers = [
+      { id: 'energy-pressure', description: 'Energy pressure increased' },
+      { id: 'unknown-difficulty', description: 'enemy_resistance_up' }
+    ];
+
+    expect(difficultyModifierLabels(difficulty)).toEqual([
+      '能量回复压力上升。',
+      '挑战修正暂无中文说明'
+    ]);
   });
 });

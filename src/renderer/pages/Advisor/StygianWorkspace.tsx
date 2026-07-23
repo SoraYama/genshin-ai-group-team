@@ -9,12 +9,17 @@ import type {
   StygianScenarioView
 } from '../../../shared/stygian-advisor';
 import type { PlayerPreferences } from '../../../shared/scenario-v2';
+import {
+  clampDifficultyForStygianTarget,
+  isStygianTargetDifficultyCompatible
+} from '../../../shared/stygian-reward-policy';
 import { GtaButton } from '../../components/ui/GtaButton';
 import { api } from '../../ipc';
 import { characterElementLabel } from './abyss-presentation';
 import {
   cycleStygianIntervention,
   difficultyDisplayName,
+  difficultyModifierLabels,
   difficultySuggestionLabel,
   progressStepLabel,
   reuseRuleSummary,
@@ -278,7 +283,7 @@ export function StygianWorkspace({ uid, onBack }: StygianWorkspaceProps) {
               <button
                 key={item.id}
                 type="button"
-                disabled={running}
+                disabled={running || !isStygianTargetDifficultyCompatible(target, item.order)}
                 aria-pressed={difficultyId === item.id}
                 onClick={() => {
                   setDifficultyId(item.id);
@@ -299,6 +304,9 @@ export function StygianWorkspace({ uid, onBack }: StygianWorkspaceProps) {
               aria-pressed={target === value}
               onClick={() => {
                 setTarget(value);
+                setDifficultyId((current) =>
+                  clampDifficultyForStygianTarget(value, current, readyScenario.difficulties)
+                );
                 invalidateResult();
               }}
             >
@@ -306,12 +314,15 @@ export function StygianWorkspace({ uid, onBack }: StygianWorkspaceProps) {
             </button>
           ))}
         </div>
+        <p className="gta-stygian-policy-note">
+          应用内目标档位，不代表官方奖励解锁条件；正式场景阈值发布后将优先使用其版本化规则。
+        </p>
         <div className="gta-stygian-modifiers">
           <strong>所选难度修正</strong>
           {difficulty && difficulty.modifiers.length > 0 ? (
             <ul>
-              {difficulty.modifiers.map(({ id, description }) => (
-                <li key={id}>{description}</li>
+              {difficultyModifierLabels(difficulty).map((label, index) => (
+                <li key={difficulty.modifiers[index]?.id ?? label}>{label}</li>
               ))}
             </ul>
           ) : (
@@ -458,7 +469,6 @@ export function StygianWorkspace({ uid, onBack }: StygianWorkspaceProps) {
           difficulties={readyScenario.difficulties}
           onLowerDifficulty={(id) => {
             setDifficultyId(id);
-            setTarget('primogems');
             invalidateResult();
           }}
         />
@@ -561,7 +571,9 @@ function StygianResult({
         <div className="gta-stygian-honesty" role="status">
           <strong>
             {result.difficultyAssessment.recommendation === 'lower-difficulty'
-              ? '资料或练度证据不足，建议先降档'
+              ? result.difficultyAssessment.suggestedDifficultyId
+                ? '资料或练度证据不足，建议先降档'
+                : '资料或练度证据不足，建议降低奖励目标'
               : '可谨慎尝试，但不能判定能否通过'}
           </strong>
           {result.difficultyAssessment.evidence.map((text) => (

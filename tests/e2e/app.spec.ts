@@ -914,6 +914,27 @@ test('plans three Stygian phases from the development scenario without leaking r
     '冲高难奖励',
     '挑战极限难度'
   ]);
+  await expect(
+    page.getByText(
+      '应用内目标档位，不代表官方奖励解锁条件；正式场景阈值发布后将优先使用其版本化规则。'
+    )
+  ).toBeVisible();
+  await expect(page.getByRole('button', { name: '演示难度 1' })).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  );
+  await page.getByRole('button', { name: '冲高难奖励' }).click();
+  await expect(page.getByRole('button', { name: '演示难度 5' })).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  );
+  await expect(page.getByRole('button', { name: '演示难度 4' })).toBeDisabled();
+  await page.getByRole('button', { name: '挑战极限难度' }).click();
+  await expect(page.getByRole('button', { name: '演示难度 6' })).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  );
+  await expect(page.getByRole('button', { name: '演示难度 5' })).toBeDisabled();
   for (const boss of ['演示首领一', '演示首领二', '演示首领三']) {
     await expect(page.getByRole('heading', { name: boss })).toBeVisible();
   }
@@ -939,6 +960,21 @@ test('plans three Stygian phases from the development scenario without leaking r
   await page.getByRole('heading', { name: '幽境危战作战台' }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: path.join(tmpdir(), 'gta-m5-stygian-input-1600x1000.png') });
 
+  await page.getByRole('button', { name: '冲高难奖励' }).click();
+  await page.getByRole('button', { name: '生成三阶段方案' }).click();
+  await expect(page.getByRole('heading', { name: '三队已按当期规则分配' })).toBeVisible();
+  await page.getByRole('button', { name: '改选演示难度 5' }).click();
+  await expect(page.getByRole('button', { name: '冲高难奖励' })).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  );
+  await expect(page.getByRole('button', { name: '演示难度 5' })).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  );
+  await expect(page.getByRole('heading', { name: '三队已按当期规则分配' })).toHaveCount(0);
+  await page.getByRole('button', { name: '挑战极限难度' }).click();
+
   for (const preference of ['操作简单', '生存优先', '低练度', '不换装备']) {
     const chip = page.getByRole('button', { name: preference });
     await chip.click();
@@ -952,8 +988,6 @@ test('plans three Stygian phases from the development scenario without leaking r
   await page.getByRole('button', { name: /危战角色14，当前：锁定/ }).click();
   await expect(page.getByRole('button', { name: /危战角色14，当前：排除/ })).toBeVisible();
 
-  await page.getByRole('button', { name: '演示难度 6' }).click();
-  await page.getByRole('button', { name: '挑战极限难度' }).click();
   await page.getByRole('button', { name: '生成三阶段方案' }).click();
   await expect(page.getByRole('heading', { name: '三队已按当期规则分配' })).toBeVisible();
   const resultCharacters = await page
@@ -963,8 +997,9 @@ test('plans three Stygian phases from the development scenario without leaking r
     );
   expect(resultCharacters).toHaveLength(12);
   expect(new Set(resultCharacters).size).toBe(12);
-  await expect(page.getByText('资料或练度证据不足，建议先降档')).toBeVisible();
-  await expect(page.getByRole('button', { name: /改选.*难度/ })).toBeVisible();
+  await expect(page.getByText('资料或练度证据不足，建议降低奖励目标')).toBeVisible();
+  await expect(page.getByText(/当前已在.*目标的.*最低档/)).toBeVisible();
+  await expect(page.getByRole('button', { name: /改选.*难度/ })).toHaveCount(0);
   await expect(page.locator('.gta-stygian-progress li')).toHaveCount(5);
   await expect(page.locator('.gta-stygian-progress li').last()).toHaveClass(/is-done/);
   await expect(page.locator('main')).not.toContainText(/必过|保证通关/);
