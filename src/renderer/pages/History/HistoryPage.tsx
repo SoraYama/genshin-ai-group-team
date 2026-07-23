@@ -21,6 +21,7 @@ import {
   groupChallengeHistory,
   historyCardTitle,
   historyConfidenceLabel,
+  historyDeleteRecoveryKind,
   historySavedVersion,
   type ChallengeHistoryEntry,
   type ChallengeHistoryGroup,
@@ -48,6 +49,7 @@ export function HistoryPage({ state, onRerun }: HistoryPageProps) {
   const [legacyCount, setLegacyCount] = useState(0);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
+  const [retryDelete, setRetryDelete] = useState<PendingDelete | null>(null);
   const [error, setError] = useState('');
   const [errorCode, setErrorCode] = useState('');
   const [loading, setLoading] = useState(true);
@@ -59,6 +61,7 @@ export function HistoryPage({ state, onRerun }: HistoryPageProps) {
     setLoading(true);
     setError('');
     setErrorCode('');
+    setRetryDelete(null);
     if (!activeUid) {
       setAllEntries([]);
       setLegacyCount(0);
@@ -121,15 +124,24 @@ export function HistoryPage({ state, onRerun }: HistoryPageProps) {
       setPendingDelete(null);
       await load();
     } catch (deleteError) {
+      const code = getErrorCode(deleteError);
+      setRetryDelete(
+        historyDeleteRecoveryKind(code, pendingDelete.kind) === 'reconfirm'
+          ? pendingDelete
+          : null
+      );
       setPendingDelete(null);
       setError(localizeError(deleteError, locale, t, 'history.error.clear'));
-      setErrorCode(getErrorCode(deleteError));
+      setErrorCode(code);
     }
   }
 
   async function prepareGroupDelete(group: ChallengeHistoryGroup) {
     const uid = group.entries[0]?.uid;
     if (!uid) return;
+    setError('');
+    setErrorCode('');
+    setRetryDelete(null);
     try {
       const confirmation = await api.history.prepareDeleteScope({
         scope: 'group',
@@ -137,7 +149,8 @@ export function HistoryPage({ state, onRerun }: HistoryPageProps) {
         mode: group.mode,
         scenarioId: group.scenarioId
       });
-      setPendingDelete({ kind: 'group', group, ...confirmation });
+      if (confirmation.count > 0) setPendingDelete({ kind: 'group', group, ...confirmation });
+      else await load();
     } catch (prepareError) {
       setError(localizeError(prepareError, locale, t, 'history.error.clear'));
       setErrorCode(getErrorCode(prepareError));
@@ -146,14 +159,35 @@ export function HistoryPage({ state, onRerun }: HistoryPageProps) {
 
   async function prepareAllDelete() {
     if (!activeUid) return;
+    await prepareUidDelete(activeUid);
+  }
+
+  async function prepareUidDelete(uid: string) {
+    setError('');
+    setErrorCode('');
+    setRetryDelete(null);
     try {
-      const confirmation = await api.history.prepareDeleteScope({ scope: 'uid', uid: activeUid });
+      const confirmation = await api.history.prepareDeleteScope({ scope: 'uid', uid });
       if (confirmation.count > 0)
-        setPendingDelete({ kind: 'uid', uid: activeUid, ...confirmation });
+        setPendingDelete({ kind: 'uid', uid, ...confirmation });
+      else await load();
     } catch (prepareError) {
       setError(localizeError(prepareError, locale, t, 'history.error.clear'));
       setErrorCode(getErrorCode(prepareError));
     }
+  }
+
+  async function recoverHistoryError() {
+    const target = retryDelete;
+    if (!target || historyDeleteRecoveryKind(errorCode, target.kind) === 'reload') {
+      await load();
+      return;
+    }
+    if (target.kind === 'group') {
+      await prepareGroupDelete(target.group);
+      return;
+    }
+    if (target.kind === 'uid') await prepareUidDelete(target.uid);
   }
 
   async function deleteSingle(entry: ChallengeHistoryEntry) {
@@ -202,7 +236,11 @@ export function HistoryPage({ state, onRerun }: HistoryPageProps) {
           <strong>{isEnglish ? 'History could not be updated' : '推荐记录未能更新'}</strong>
           <span>{error}</span>
           {errorRecovery.kind !== 'none' && (
-            <button type="button" className="gta-text-action" onClick={() => void load()}>
+            <button
+              type="button"
+              className="gta-text-action"
+              onClick={() => void recoverHistoryError()}
+            >
               {errorRecovery.label}
             </button>
           )}

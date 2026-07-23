@@ -79,6 +79,16 @@ export function historyConfidenceLabel(
     : `建议把握：${zh[confidence]}`;
 }
 
+export function historyDeleteRecoveryKind(
+  errorCode: string,
+  pendingKind: 'single' | 'group' | 'uid'
+): 'reload' | 'reconfirm' {
+  return pendingKind !== 'single' &&
+    (errorCode === 'IPC_CONFIRMATION_EXPIRED' || errorCode === 'IPC_SELECTION_CHANGED')
+    ? 'reconfirm'
+    : 'reload';
+}
+
 export function historyCardTitle(entry: ChallengeHistoryEntry): string {
   switch (entry.mode) {
     case 'spiral-abyss':

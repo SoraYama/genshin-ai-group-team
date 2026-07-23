@@ -9,6 +9,7 @@ import {
   groupChallengeHistory,
   historyCardTitle,
   historyConfidenceLabel,
+  historyDeleteRecoveryKind,
   historyDetailSemanticSnapshot,
   historySavedVersion,
   periodLabelFromScenario
@@ -127,6 +128,13 @@ function theaterEntry(): TheaterPlanHistoryEntry {
 }
 
 describe('history presentation', () => {
+  it('re-prepares a failed confirmed scope instead of only reloading the list', () => {
+    expect(historyDeleteRecoveryKind('IPC_CONFIRMATION_EXPIRED', 'group')).toBe('reconfirm');
+    expect(historyDeleteRecoveryKind('IPC_SELECTION_CHANGED', 'uid')).toBe('reconfirm');
+    expect(historyDeleteRecoveryKind('IPC_SELECTION_CHANGED', 'single')).toBe('reload');
+    expect(historyDeleteRecoveryKind('IPC_INTERNAL', 'group')).toBe('reload');
+  });
+
   it('uses player-facing titles and derives a stable cycle label', () => {
     expect(historyCardTitle(abyssEntry())).toBe('深境螺旋 12 层 · 第 2 间');
     expect(historyCardTitle(stygianEntry())).toBe('幽境危战 · 难度 5');
