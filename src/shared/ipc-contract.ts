@@ -22,7 +22,10 @@ import type {
   ScenarioListItem,
   ScenarioMode,
   ScenarioPayload,
-  UpdateStatus
+  UpdateStatus,
+  DataManagementSummary,
+  DataManagementScope,
+  DataClearRequest
 } from './domain.js';
 import type {
   AbyssAdvisorEvent,
@@ -54,6 +57,15 @@ export interface IpcContract {
   'config:set-llm': { req: LlmConfigInput; res: { ok: true } };
   'config:test-llm': { req: void; res: LlmHealthReport };
   'config:clear-llm': { req: void; res: { ok: true } };
+  'data-management:summary': { req: void; res: DataManagementSummary };
+  'data-management:prepare-clear': {
+    req: { scope: DataManagementScope };
+    res: { count: number; confirmationToken: string };
+  };
+  'data-management:clear': {
+    req: DataClearRequest;
+    res: { removed: number; summary: DataManagementSummary };
+  };
 
   'update:get-state': { req: void; res: UpdateStatus };
   'update:check': { req: void; res: { ok: true } };
@@ -149,6 +161,9 @@ export const ALL_IPC_CHANNELS: IpcChannel[] = [
   'config:set-llm',
   'config:test-llm',
   'config:clear-llm',
+  'data-management:summary',
+  'data-management:prepare-clear',
+  'data-management:clear',
   'update:get-state',
   'update:check',
   'update:download',
@@ -199,6 +214,15 @@ export interface RendererApi {
     setLlm: (input: IpcRequest<'config:set-llm'>) => Promise<IpcResponse<'config:set-llm'>>;
     testLlm: () => Promise<IpcResponse<'config:test-llm'>>;
     clearLlm: () => Promise<IpcResponse<'config:clear-llm'>>;
+  };
+  dataManagement: {
+    summary: () => Promise<IpcResponse<'data-management:summary'>>;
+    prepareClear: (
+      input: IpcRequest<'data-management:prepare-clear'>
+    ) => Promise<IpcResponse<'data-management:prepare-clear'>>;
+    clear: (
+      input: IpcRequest<'data-management:clear'>
+    ) => Promise<IpcResponse<'data-management:clear'>>;
   };
   update: {
     getState: () => Promise<IpcResponse<'update:get-state'>>;

@@ -7,8 +7,9 @@ import type {
   AbyssScenarioView
 } from '../../../shared/abyss-advisor';
 import type { EnemyInstance, EnemyWave, PlayerPreferences } from '../../../shared/scenario-v2';
-import { api } from '../../ipc';
+import { EmptyState } from '../../components/ui/EmptyState';
 import { GtaButton } from '../../components/ui/GtaButton';
+import { api } from '../../ipc';
 import {
   characterElementLabel,
   cycleCharacterIntervention,
@@ -83,11 +84,7 @@ export function AbyssWorkspace({ uid, historyRerun }: AbyssWorkspaceProps) {
         if (nextScenario.status === 'ready') {
           const defaultFloor = nextScenario.scenario.floors[0]?.floor ?? null;
           setFloorNumber(defaultFloor);
-          if (
-            historyRerun &&
-            appliedHistoryId.current !== historyRerun.historyId &&
-            nextProfile
-          ) {
+          if (historyRerun && appliedHistoryId.current !== historyRerun.historyId && nextProfile) {
             appliedHistoryId.current = historyRerun.historyId;
             const prepared = prepareAbyssRerun(
               historyRerun,
@@ -96,9 +93,7 @@ export function AbyssWorkspace({ uid, historyRerun }: AbyssWorkspaceProps) {
               nextProfile.characters.map(({ id }) => String(id))
             );
             if (prepared.status === 'blocked') {
-              setHistoryNotice(
-                '这份旧方案属于另一个 UID；已保留旧方案查看，但没有带入当前账号。'
-              );
+              setHistoryNotice('这份旧方案属于另一个 UID；已保留旧方案查看，但没有带入当前账号。');
             } else {
               const selectedFloor = prepared.floor ?? defaultFloor;
               const selectedFloorData = nextScenario.scenario.floors.find(
@@ -271,7 +266,8 @@ export function AbyssWorkspace({ uid, historyRerun }: AbyssWorkspaceProps) {
   if (loadError) {
     return (
       <div className="gta-abyss-unavailable" role="alert">
-        {loadError}
+        <EmptyState kind="offline" />
+        <p>{loadError}</p>
       </div>
     );
   }
@@ -282,7 +278,9 @@ export function AbyssWorkspace({ uid, historyRerun }: AbyssWorkspaceProps) {
     return (
       <section className="gta-abyss-unavailable" aria-labelledby="abyss-unavailable-title">
         <span className="gta-page-kicker">深境螺旋</span>
-        <h3 id="abyss-unavailable-title">本期挑战资料暂不可用</h3>
+        <div id="abyss-unavailable-title">
+          <EmptyState kind="offline" />
+        </div>
         <p>{scenarioView.message} 你仍可查看角色与历史方案；恢复可信资料后才能生成新方案。</p>
       </section>
     );

@@ -76,6 +76,20 @@ function makeProfile(uid: string, characterCount = 0): PersistedProfile {
 }
 
 describe('ProfileStore', () => {
+  it('summarizes and clears only locally saved profiles for data management', async () => {
+    const { ProfileStore } = await import('../../../src/main/services/profile-store.js');
+    const store = new ProfileStore();
+    store.upsert(makeProfile('111111111', 2));
+    store.upsert(makeProfile('222222222', 1));
+    const before = store.getDataManagementSnapshot();
+
+    expect(before).toMatchObject({ count: 2 });
+    expect(before.fingerprint).toMatch(/^[a-f0-9]{64}$/);
+    expect(store.clearAll()).toBe(2);
+    expect(store.getStateView().profiles).toEqual([]);
+    expect(store.getDataManagementSnapshot()).toMatchObject({ count: 0 });
+  });
+
   it('repairs persisted v2 completeness when only secondary stats were stored', async () => {
     const profile = makeProfile('111111111', 1);
     profile.characters[0]!.build!.stats = {

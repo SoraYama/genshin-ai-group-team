@@ -8,6 +8,7 @@ import {
   createHistoryRerunIntent,
   groupChallengeHistory,
   historyCardTitle,
+  historySavedVersion,
   periodLabelFromScenario
 } from '../../../src/renderer/pages/History/history-presentation.js';
 import { abyssInput, validAbyssPlan } from '../services/abyss-test-fixtures.js';
@@ -125,6 +126,21 @@ describe('history presentation', () => {
     expect(historyCardTitle(theaterEntry())).toBe('幻想真境剧诗 · 第 8 幕');
     expect(periodLabelFromScenario('theater.2026-07-season')).toBe('2026-07');
     expect(periodLabelFromScenario('opaque-cycle')).toBe('记录周期');
+  });
+
+  it('keeps development identifiers out of player-facing saved-version details', () => {
+    const entry = {
+      ...stygianEntry(),
+      scenarioId: 'development.stygian-onslaught.sample-001',
+      dataVersion: 'development.2026-01.1',
+      scenarioTrust: 'development-sample' as const
+    };
+
+    expect(historySavedVersion(entry, 'zh')).toEqual({
+      scenario: '演练周期',
+      data: '演练资料'
+    });
+    expect(JSON.stringify(historySavedVersion(entry, 'zh'))).not.toContain('development');
   });
 
   it('groups by mode and immutable scenario identity with newest groups first', () => {

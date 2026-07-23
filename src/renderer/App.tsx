@@ -29,7 +29,7 @@ export default function App() {
       {loading || !state ? (
         <p className="gta-hint gta-on-bg">{t('common.loading')}</p>
       ) : view === 'settings' ? (
-        <SettingsPage />
+        <SettingsPage onProfileDataChange={refresh} />
       ) : view === 'onboarding' ? (
         <OnboardingPage
           onBound={async () => {

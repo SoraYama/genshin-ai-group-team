@@ -147,16 +147,23 @@ test('boots with isolated data and navigates through preload-backed pages', asyn
 
   await accountButton.click();
   await accountMenu.getByRole('menuitem', { name: '设置' }).click();
-  await expect(page.getByRole('heading', { name: /智能服务设置/ })).toBeVisible();
-  await expect(page.getByText('未配置', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '设置', exact: true })).toBeVisible();
+  await expect(page.getByText('未配置', { exact: true }).first()).toBeVisible();
   await expectNoForbiddenPlayerTerms();
 
-  await page.getByLabel('服务密钥').fill('e2e-api-secret');
-  await page.getByLabel('本次保存时替换自定义请求头').check();
-  await page.getByLabel('自定义请求头', { exact: true }).fill('X-E2E-Key: e2e-header-secret');
-  await page.getByRole('button', { name: '保存配置' }).click();
-  await expect(page.getByText('配置已保存。')).toBeVisible();
-  await expect(page.getByText(/已加密保存：X-E2E-Key/)).toBeVisible();
+  await page.getByLabel('新的服务密钥').fill('e2e-api-secret');
+  const advancedSettings = page.getByRole('button', {
+    name: '高级设置 服务地址、模型编辑、连接诊断、用量与应用更新'
+  });
+  await advancedSettings.click();
+  await expect(advancedSettings).toHaveAttribute('aria-expanded', 'true');
+  await page.getByLabel('本次保存时替换附加请求信息').check();
+  await page
+    .getByRole('textbox', { name: /附加请求信息/ })
+    .fill('X-E2E-Key: e2e-header-secret');
+  await page.getByRole('button', { name: '保存服务设置' }).click();
+  await expect(page.getByText('服务设置已保存。')).toBeVisible();
+  await expect(page.getByText('已安全保存', { exact: true }).first()).toBeVisible();
   await expect(page.locator('body')).not.toContainText('e2e-header-secret');
   const persistedConfig = await readFile(path.join(userDataDir, 'config.json'), 'utf8');
   expect(persistedConfig).not.toContain('e2e-api-secret');
@@ -165,11 +172,14 @@ test('boots with isolated data and navigates through preload-backed pages', asyn
   await page.getByRole('button', { name: '账号与设置' }).click();
   await page.getByRole('menuitem', { name: '切换语言，当前：中文' }).click();
   await expect(page.getByRole('navigation', { name: 'Primary navigation' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: /Smart service settings/ })).toBeVisible();
-  await expect(page.getByText('Configured (encrypted)', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible();
+  await expect(page.getByText('Saved securely', { exact: true }).first()).toBeVisible();
   await expectNoForbiddenPlayerTerms();
-  await page.getByRole('button', { name: 'Clear service key' }).click();
-  await expect(page.getByText('Not configured', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Clear service key', exact: true }).click();
+  const clearKeyDialog = page.getByRole('dialog', { name: 'Clear the saved service key?' });
+  await expect(clearKeyDialog.getByRole('button', { name: 'Keep and go back' })).toBeFocused();
+  await clearKeyDialog.getByRole('button', { name: 'Clear the saved service key' }).click();
+  await expect(page.getByText('Not configured', { exact: true }).first()).toBeVisible();
   await page.getByRole('button', { name: 'Account and settings' }).click();
   await page.getByRole('menuitem', { name: 'Switch language, current: English' }).click();
 
@@ -240,7 +250,7 @@ test('keeps focus on the account trigger after every menu command', async () => 
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Enter');
   await expect(accountButton).toBeFocused();
-  await expect(page.getByRole('heading', { name: /智能服务设置/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '设置', exact: true })).toBeVisible();
 
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('ArrowDown');
@@ -652,15 +662,19 @@ test('renders profile coverage and known build fields without fake zero values',
   await page.screenshot({ path: path.join(tmpdir(), 'gta-m2-challenge-1600x1000.png') });
 
   await page.getByRole('button', { name: '历史记录' }).click();
-  await expect(page.getByRole('heading', { name: '推荐历史' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '推荐记录' })).toBeVisible();
   await expectNoForbiddenPlayerTerms();
   await expectPageFitsEveryViewport('History');
 
   await page.getByRole('button', { name: '账号与设置' }).click();
   await page.getByRole('menuitem', { name: '设置' }).click();
-  await expect(page.getByRole('heading', { name: /智能服务设置/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '设置', exact: true })).toBeVisible();
   await expectNoForbiddenPlayerTerms();
   await expectPageFitsEveryViewport('Settings');
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.screenshot({ path: path.join(tmpdir(), 'gta-m7-settings-1024x768.png') });
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await page.screenshot({ path: path.join(tmpdir(), 'gta-m7-settings-1600x1000.png') });
 
   await page.getByRole('button', { name: '角色一览' }).click();
   await page.getByRole('button', { name: '账号维护' }).click();
@@ -821,12 +835,21 @@ test('runs the abyss-specific development-sample flow with accessible interventi
   expect(preservedLowerAfter).toEqual(preservedLowerBefore);
 
   await page.getByRole('button', { name: '历史记录' }).click();
-  await expect(page.getByRole('heading', { name: '深境螺旋方案' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '推荐记录' })).toBeVisible();
   await expect(page.getByText('演练资料', { exact: true }).first()).toBeVisible();
   await expect(page.locator('main')).not.toContainText(/development\.|development-sample/);
-  const abyssHistory = page.getByRole('button', { name: /UID 123456789.*12 层.*全部房间/ }).first();
+  const abyssHistory = page.getByRole('button', { name: /深境螺旋 12 层/ }).first();
   await abyssHistory.click();
-  await expect(page.getByRole('button', { name: '删除这条深境螺旋方案' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '删除这份方案' })).toBeVisible();
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.screenshot({ path: path.join(tmpdir(), 'gta-m7-history-1024x768.png') });
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await page.screenshot({ path: path.join(tmpdir(), 'gta-m7-history-1600x1000.png') });
+  await page.getByRole('button', { name: '基于这次方案重新计算' }).click();
+  await expect(page.getByText('旧方案已准备', { exact: true })).toBeVisible();
+  await expect(page.getByText(/不会自动调用智能服务/)).toBeVisible();
+  await expect(page.getByRole('button', { name: '生成上下半方案' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '上下半零重复' })).toHaveCount(0);
 });
 
 test('plans three Stygian phases from the development scenario without leaking raw service keys', async () => {
@@ -1015,14 +1038,12 @@ test('plans three Stygian phases from the development scenario without leaking r
   await page.screenshot({ path: path.join(tmpdir(), 'gta-m5-stygian-result-1600x1000.png') });
 
   await page.getByRole('button', { name: '历史记录' }).click();
-  await expect(page.getByRole('heading', { name: '幽境危战方案' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '推荐记录' })).toBeVisible();
   await expect(page.getByText('演练资料', { exact: true }).first()).toBeVisible();
-  const stygianHistory = page
-    .getByRole('button', { name: /UID 987654321.*演示难度 6.*挑战极限难度/ })
-    .first();
+  const stygianHistory = page.getByRole('button', { name: /幽境危战 · 演示难度 6/ }).first();
   await stygianHistory.click();
-  await expect(page.getByRole('heading', { name: '第 1 阶段' })).toBeVisible();
-  await expect(page.getByRole('button', { name: '删除这条幽境危战方案' })).toBeVisible();
+  await expect(page.getByText('第 1 阶段', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '删除这份方案' })).toBeVisible();
   await expect(page.locator('main')).not.toContainText(
     /development\.|development-sample|dire-challenge/
   );
@@ -1272,13 +1293,11 @@ test('checks Theater eligibility and renders a cast-vigor route instead of team 
   await page.screenshot({ path: path.join(tmpdir(), 'gta-m6-theater-result-1600x1000.png') });
 
   await page.getByRole('button', { name: '历史记录' }).click();
-  await expect(page.getByRole('heading', { name: '幻想真境剧诗方案' })).toBeVisible();
-  const theaterHistory = page.getByRole('button', { name: /UID 246813579.*稳妥通关/ }).first();
+  await expect(page.getByRole('heading', { name: '推荐记录' })).toBeVisible();
+  const theaterHistory = page.getByRole('button', { name: /幻想真境剧诗/ }).first();
   await theaterHistory.click();
-  await expect(page.getByRole('heading', { name: '逐幕活力预算' })).toBeVisible();
   await expect(page.locator('.gta-history-theater-cast')).toContainText('演示试用角色');
   await expect(page.locator('.gta-history-theater-cast')).toContainText('试用演员');
-  await expect(page.locator('.gta-history-theater-body')).toContainText('演示聚敌秘法');
-  await expect(page.locator('.gta-history-theater-body')).toContainText('节点资源消耗：1');
-  await expect(page.getByRole('button', { name: '删除这条幻想真境剧诗方案' })).toBeVisible();
+  await expect(page.locator('.gta-history-theater-route')).toContainText('第 1 幕');
+  await expect(page.getByRole('button', { name: '删除这份方案' })).toBeVisible();
 });

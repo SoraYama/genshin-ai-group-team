@@ -1,4 +1,5 @@
-import { copyFileSync, existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { copyFileSync, existsSync, statSync } from 'node:fs';
 import Store from 'electron-store';
 import { z } from 'zod';
 import { hasCoreCharacterStats } from '../../shared/domain.js';
@@ -359,6 +360,50 @@ export class ProfileStore {
         .map(toListItem)
         .sort((a, b) => b.fetchedAt.localeCompare(a.fetchedAt))
     };
+  }
+
+  getDataManagementSnapshot(): {
+    count: number;
+    sizeBytes?: number;
+    updatedAt?: string;
+    fingerprint: string;
+  } {
+    const profiles = this.getAll();
+    const entries = Object.values(profiles).sort((left, right) =>
+      left.uid.localeCompare(right.uid)
+    );
+    let sizeBytes: number | undefined;
+    try {
+      if (this.store.path) sizeBytes = statSync(this.store.path).size;
+    } catch {
+      sizeBytes = undefined;
+    }
+    const updatedAt = entries
+      .map(({ fetchedAt }) => fetchedAt)
+      .sort((left, right) => right.localeCompare(left))[0];
+    return {
+      count: entries.length,
+      ...(sizeBytes === undefined ? {} : { sizeBytes }),
+      ...(updatedAt ? { updatedAt } : {}),
+      fingerprint: createHash('sha256')
+        .update(
+          JSON.stringify(
+            entries.map((profile) => ({
+              uid: profile.uid,
+              fetchedAt: profile.fetchedAt,
+              characters: profile.characters.map(({ id }) => id).sort((left, right) => left - right)
+            }))
+          )
+        )
+        .digest('hex')
+    };
+  }
+
+  clearAll(): number {
+    const count = Object.keys(this.getAll()).length;
+    this.store.set('profilesByUid', {});
+    this.store.delete('activeUid');
+    return count;
   }
 
   private getAll(): Record<string, PersistedProfile> {

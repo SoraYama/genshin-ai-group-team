@@ -13,6 +13,7 @@ import {
   clampDifficultyForStygianTarget,
   isStygianTargetDifficultyCompatible
 } from '../../../shared/stygian-reward-policy';
+import { EmptyState } from '../../components/ui/EmptyState';
 import { GtaButton } from '../../components/ui/GtaButton';
 import { api } from '../../ipc';
 import { characterElementLabel } from './abyss-presentation';
@@ -97,11 +98,7 @@ export function StygianWorkspace({ uid, historyRerun, onBack }: StygianWorkspace
             .sort((left, right) => left.order - right.order);
           const defaultDifficulty = ordered[0]?.id ?? '';
           setDifficultyId(defaultDifficulty);
-          if (
-            historyRerun &&
-            appliedHistoryId.current !== historyRerun.historyId &&
-            nextProfile
-          ) {
+          if (historyRerun && appliedHistoryId.current !== historyRerun.historyId && nextProfile) {
             appliedHistoryId.current = historyRerun.historyId;
             const prepared = prepareStygianRerun(
               historyRerun,
@@ -110,9 +107,7 @@ export function StygianWorkspace({ uid, historyRerun, onBack }: StygianWorkspace
               nextProfile.characters.map(({ id }) => String(id))
             );
             if (prepared.status === 'blocked') {
-              setHistoryNotice(
-                '这份旧方案属于另一个 UID；已保留旧方案查看，但没有带入当前账号。'
-              );
+              setHistoryNotice('这份旧方案属于另一个 UID；已保留旧方案查看，但没有带入当前账号。');
             } else {
               setDifficultyId(prepared.difficultyId || defaultDifficulty);
               setTarget(prepared.target);
@@ -256,7 +251,8 @@ export function StygianWorkspace({ uid, historyRerun, onBack }: StygianWorkspace
   if (loadError && (!scenarioView || !profile)) {
     return (
       <div className="gta-stygian-unavailable" role="alert">
-        {loadError}
+        <EmptyState kind="offline" />
+        <p>{loadError}</p>
       </div>
     );
   }
@@ -270,7 +266,9 @@ export function StygianWorkspace({ uid, historyRerun, onBack }: StygianWorkspace
           返回挑战入口
         </GtaButton>
         <span className="gta-page-kicker">幽境危战</span>
-        <h3 id="stygian-unavailable-title">本期挑战资料暂不可用</h3>
+        <div id="stygian-unavailable-title">
+          <EmptyState kind="offline" />
+        </div>
         <p>{scenarioView.message} 你仍可查看角色与历史方案。</p>
       </section>
     );

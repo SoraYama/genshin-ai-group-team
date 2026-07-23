@@ -1,17 +1,253 @@
-.gta-update-row {
+.gta-settings-page {
+  display: grid;
+  gap: clamp(22px, 3.5vw, 40px);
+}
+.gta-settings-section,
+.gta-settings-advanced {
+  padding: clamp(22px, 3.5vw, 38px);
+  color: var(--gta-text-on-light);
+  background: linear-gradient(115deg, rgba(250, 249, 242, 0.98), rgba(231, 238, 236, 0.95));
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.7);
+}
+.gta-settings-section {
+  border-left: 3px solid rgba(184, 158, 91, 0.72);
+}
+.gta-settings-section-head {
   display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--gta-stroke);
+}
+.gta-settings-section-head h3 {
+  margin: 3px 0 0;
+  font-size: clamp(1.25rem, 2.4vw, 1.8rem);
+  font-weight: 570;
+}
+.gta-settings-section-head > span {
+  padding: 5px 10px;
+  border: 1px solid var(--gta-stroke);
+  color: var(--gta-text-on-light-soft);
+  font-size: var(--gta-text-xs);
+}
+.gta-settings-section-head > span.is-ready {
+  border-color: rgba(59, 120, 93, 0.42);
+  color: #315f4a;
+}
+.gta-settings-section-head > span.is-missing {
+  border-color: rgba(151, 103, 65, 0.4);
+  color: #79533d;
+}
+.gta-settings-section-head > p {
+  max-width: 420px;
+  margin: 0;
+  color: var(--gta-text-on-light-soft);
+  font-size: var(--gta-text-sm);
+  line-height: 1.6;
+}
+.gta-settings-status {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin: 22px 0;
+  background: var(--gta-stroke-soft);
+}
+.gta-settings-status > div {
+  min-width: 0;
+  padding: 15px 16px;
+  background: rgba(250, 251, 247, 0.94);
+}
+.gta-settings-status dt {
+  color: var(--gta-text-on-light-soft);
+  font-size: var(--gta-text-xs);
+}
+.gta-settings-status dd {
+  overflow: hidden;
+  margin: 6px 0 0;
+  font-weight: 620;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gta-settings-status.is-data dd {
+  display: grid;
+  gap: 5px;
+  white-space: normal;
+}
+.gta-settings-status.is-data dd strong {
+  font-size: 1.5rem;
+}
+.gta-settings-status.is-data dd span {
+  color: var(--gta-text-on-light-soft);
+  font-size: var(--gta-text-xs);
+}
+.gta-settings-service .gta-empty-state {
+  min-height: 210px;
+  margin: 18px 0;
+  padding: 20px 28px;
+  grid-template-columns: 180px 1fr;
+}
+.gta-settings-service .gta-empty-state small {
+  color: rgba(239, 244, 240, 0.72);
+}
+.gta-settings-key-row {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto;
+  align-items: end;
+  gap: 14px;
+}
+.gta-settings-key-row label,
+.gta-settings-advanced-grid label,
+.gta-settings-header-input {
+  display: grid;
+  gap: 7px;
+  font-size: var(--gta-text-sm);
+  font-weight: 600;
+}
+.gta-settings-key-row input,
+.gta-settings-advanced-grid input,
+.gta-settings-header-input textarea {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--gta-stroke);
+  padding: 9px 11px;
+  color: var(--gta-text-on-light);
+  background: rgba(255, 255, 252, 0.82);
+}
+.gta-settings-privacy {
+  margin: 12px 0 0;
+  color: var(--gta-text-on-light-soft);
+  font-size: var(--gta-text-xs);
+  line-height: 1.7;
+}
+.gta-data-management-list {
+  display: grid;
+}
+.gta-data-management-list article {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 22px;
+  padding: 18px 2px;
+  border-bottom: 1px solid var(--gta-stroke-soft);
+}
+.gta-data-management-list h4 {
+  margin: 0 0 5px;
+  font-size: var(--gta-text-md);
+}
+.gta-data-management-list strong {
+  color: #6d5a2a;
+  font-size: var(--gta-text-xs);
+}
+.gta-data-management-list p {
+  margin: 5px 0 0;
+  color: var(--gta-text-on-light-soft);
+  font-size: var(--gta-text-xs);
+}
+.gta-settings-advanced {
+  padding: 0;
+  border-top: 1px solid rgba(198, 174, 110, 0.56);
+}
+.gta-settings-advanced-trigger {
+  display: flex;
+  width: 100%;
   align-items: center;
   justify-content: space-between;
+  gap: 20px;
+  padding: 20px 24px;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.gta-settings-advanced-trigger > span:first-child {
+  display: grid;
+  gap: 4px;
+}
+.gta-settings-advanced-trigger small {
+  color: var(--gta-text-on-light-soft);
+}
+.gta-settings-advanced-trigger > span:last-child {
+  color: #806a32;
+  font-size: 1.5rem;
+}
+#advanced-settings-content {
+  display: grid;
+  gap: 20px;
+  padding: 0 24px 26px;
+  border-top: 1px solid var(--gta-stroke-soft);
+}
+#advanced-settings-content[hidden] {
+  display: none;
+}
+.gta-settings-advanced-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
+  padding-top: 22px;
 }
-.gta-update-progress {
+.gta-settings-header-input small {
+  color: var(--gta-text-on-light-soft);
+  font-weight: 400;
+}
+.gta-settings-diagnostics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  background: var(--gta-stroke-soft);
+}
+.gta-settings-diagnostics div {
+  padding: 12px;
+  background: rgba(248, 250, 247, 0.9);
+}
+.gta-settings-diagnostics dt {
+  color: var(--gta-text-on-light-soft);
+  font-size: var(--gta-text-xs);
+}
+.gta-settings-diagnostics dd {
+  margin: 5px 0 0;
+  font-family: var(--gta-font-mono);
+  font-size: var(--gta-text-sm);
+}
+.gta-settings-update {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--gta-stroke);
+}
+.gta-settings-update h4,
+.gta-settings-update p {
+  margin: 0;
+}
+.gta-settings-update p {
+  color: var(--gta-text-on-light-soft);
+  font-size: var(--gta-text-xs);
+}
+.gta-settings-update progress {
   width: 100%;
-  height: 8px;
-  accent-color: var(--gta-gold);
+  grid-column: 1 / -1;
 }
-@media (max-width: 680px) {
-  .gta-update-row {
+@media (max-width: 760px) {
+  .gta-settings-section-head {
     align-items: stretch;
     flex-direction: column;
+  }
+  .gta-settings-status,
+  .gta-settings-advanced-grid,
+  .gta-settings-diagnostics,
+  .gta-settings-key-row {
+    grid-template-columns: 1fr;
+  }
+  .gta-settings-service .gta-empty-state {
+    grid-template-columns: 1fr;
+  }
+  .gta-data-management-list article,
+  .gta-settings-update {
+    grid-template-columns: 1fr;
+    align-items: stretch;
   }
 }

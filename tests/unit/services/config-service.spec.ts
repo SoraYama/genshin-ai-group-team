@@ -40,6 +40,19 @@ beforeEach(() => {
 });
 
 describe('ConfigService', () => {
+  it('changes its non-secret management fingerprint when the saved key changes', async () => {
+    const { ConfigService } = await import('../../../src/main/services/config-service.js');
+    const config = new ConfigService();
+    const empty = config.getSecretFingerprint();
+    config.setLlm({ apiKey: 'first-key' });
+    const first = config.getSecretFingerprint();
+    config.setLlm({ apiKey: 'second-key' });
+
+    expect(empty).toMatch(/^[a-f0-9]{64}$/);
+    expect(first).not.toBe(empty);
+    expect(config.getSecretFingerprint()).not.toBe(first);
+  });
+
   it('round-trips an api key through safeStorage encryption', async () => {
     const { ConfigService } = await import('../../../src/main/services/config-service.js');
     const config = new ConfigService();
@@ -76,6 +89,28 @@ describe('ConfigService', () => {
     expect(view.hasApiKey).toBe(false);
     expect(view.baseUrl).toBe('https://api.anthropic.com');
     expect(config.getApiKey()).toBeUndefined();
+  });
+
+  it('clears only the api key while preserving service options and encrypted headers', async () => {
+    const { ConfigService } = await import('../../../src/main/services/config-service.js');
+    const config = new ConfigService();
+
+    config.setLlm({
+      apiKey: 'sk-test',
+      baseUrl: 'https://example.com',
+      model: 'claude-test-9',
+      customHeaders: { 'X-Private-Route': 'secret-route' }
+    });
+    config.clearApiKey();
+
+    expect(config.getApiKey()).toBeUndefined();
+    expect(config.getPublicView()).toMatchObject({
+      hasApiKey: false,
+      baseUrl: 'https://example.com',
+      model: 'claude-test-9',
+      customHeaderKeys: ['X-Private-Route']
+    });
+    expect(config.getCustomHeaders()).toEqual({ 'X-Private-Route': 'secret-route' });
   });
 
   it('does not overwrite existing key when called with empty apiKey', async () => {

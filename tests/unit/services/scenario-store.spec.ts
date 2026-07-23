@@ -56,6 +56,44 @@ afterEach(async () => {
 });
 
 describe('ScenarioStore', () => {
+  it('summarizes and clears downloaded caches while restoring bundled scenarios', async () => {
+    const { root, bundled, cache } = await makeTempDirs();
+    const publicationCache = path.join(root, 'scenario-publications-v2');
+    tempRoot = root;
+    await writeBundled(bundled);
+    await fs.writeFile(
+      path.join(cache, 'spiral-abyss.json'),
+      JSON.stringify(abyssEnvelope('cached-newer'))
+    );
+    await fs.mkdir(path.join(publicationCache, 'production'), { recursive: true });
+    await fs.writeFile(
+      path.join(publicationCache, 'production', 'spiral-abyss.json'),
+      JSON.stringify({ signed: 'production-snapshot' })
+    );
+    const { ScenarioStore } = await import('../../../src/main/services/scenario-store.js');
+    const store = new ScenarioStore({
+      bundledDir: bundled,
+      cacheDir: cache,
+      productionCacheDir: publicationCache
+    });
+    await store.init();
+
+    await expect(store.getDataManagementSnapshot()).resolves.toMatchObject({
+      count: 3,
+      clearableCount: 2,
+      fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/)
+    });
+    await expect(store.clearDownloadedCache()).resolves.toBe(2);
+    expect(store.getScenario('spiral-abyss').meta.sourceVersion).toBe('bundled-spiral-abyss');
+    await expect(store.getDataManagementSnapshot()).resolves.toMatchObject({
+      count: 3,
+      clearableCount: 0
+    });
+    await expect(
+      fs.stat(path.join(publicationCache, 'production', 'spiral-abyss.json'))
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('loads bundled JSON on first init and exposes meta via list()', async () => {
     const { root, bundled, cache } = await makeTempDirs();
     tempRoot = root;
@@ -106,7 +144,10 @@ describe('ScenarioStore', () => {
               JSON.stringify({
                 updatedAt: 'manifest-v2',
                 scenarios: {
-                  'spiral-abyss': { url: 'https://example.com/abyss.json', sha256: 'definitely-wrong-' + actualSha }
+                  'spiral-abyss': {
+                    url: 'https://example.com/abyss.json',
+                    sha256: 'definitely-wrong-' + actualSha
+                  }
                 }
               })
           }

@@ -1,0 +1,71 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const { handlers } = vi.hoisted(() => ({
+  handlers: new Map<string, (payload: unknown) => Promise<unknown> | unknown>()
+}));
+
+vi.mock('../../../src/main/ipc/registry.js', () => ({
+  registerHandler: (channel: string, handler: (payload: unknown) => Promise<unknown> | unknown) => {
+    handlers.set(channel, handler);
+  }
+}));
+
+import { registerDataManagementIpc } from '../../../src/main/ipc/data-management.ipc.js';
+
+beforeEach(() => handlers.clear());
+
+describe('data management IPC', () => {
+  it('validates explicit scopes, passes opaque tokens, and allowlists public summary fields', async () => {
+    const summaryWithPrivateFields = {
+      profiles: { count: 0, fingerprint: 'private-profile-fingerprint' },
+      scenarios: {
+        count: 2,
+        clearableCount: 1,
+        sizeBytes: 128,
+        fingerprint: 'private-scenario-fingerprint'
+      },
+      history: { count: 0, fingerprint: 'private-history-fingerprint' },
+      serviceKey: { count: 1, fingerprint: 'private-key-fingerprint' }
+    };
+    const service = {
+      getSummary: vi.fn().mockResolvedValue(summaryWithPrivateFields),
+      prepareClear: vi
+        .fn()
+        .mockResolvedValue({ count: 2, confirmationToken: 'confirmation-token' }),
+      clear: vi.fn().mockResolvedValue({ removed: 2, summary: summaryWithPrivateFields })
+    };
+    registerDataManagementIpc({ service: service as never });
+
+    await expect(handlers.get('data-management:summary')?.(undefined)).resolves.toEqual({
+      profiles: { count: 0 },
+      scenarios: { count: 2, clearableCount: 1, sizeBytes: 128 },
+      history: { count: 0 },
+      serviceKey: { count: 1 }
+    });
+    await expect(
+      handlers.get('data-management:prepare-clear')?.({ scope: 'profiles' })
+    ).resolves.toEqual({ count: 2, confirmationToken: 'confirmation-token' });
+    await expect(
+      handlers.get('data-management:clear')?.({
+        scope: 'profiles',
+        expectedCount: 2,
+        confirmationToken: 'confirmation-token'
+      })
+    ).resolves.toEqual({
+      removed: 2,
+      summary: {
+        profiles: { count: 0 },
+        scenarios: { count: 2, clearableCount: 1, sizeBytes: 128 },
+        history: { count: 0 },
+        serviceKey: { count: 1 }
+      }
+    });
+    await expect(
+      handlers.get('data-management:clear')?.({
+        scope: 'everything',
+        expectedCount: 2,
+        confirmationToken: 'confirmation-token'
+      })
+    ).rejects.toMatchObject({ code: 'IPC_VALIDATION_FAILED' });
+  });
+});

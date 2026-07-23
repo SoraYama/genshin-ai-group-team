@@ -51,6 +51,11 @@ const api: RendererApi = {
     testLlm: () => invoke('config:test-llm', undefined),
     clearLlm: () => invoke('config:clear-llm', undefined)
   },
+  dataManagement: {
+    summary: () => invoke('data-management:summary', undefined),
+    prepareClear: (input) => invoke('data-management:prepare-clear', input),
+    clear: (input) => invoke('data-management:clear', input)
+  },
   update: {
     getState: () => invoke('update:get-state', undefined),
     check: () => invoke('update:check', undefined),

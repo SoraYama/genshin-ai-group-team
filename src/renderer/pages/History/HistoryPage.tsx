@@ -15,6 +15,7 @@ import {
   createHistoryRerunIntent,
   groupChallengeHistory,
   historyCardTitle,
+  historySavedVersion,
   type ChallengeHistoryEntry,
   type ChallengeHistoryGroup,
   type HistoryRerunIntent
@@ -43,7 +44,7 @@ export function HistoryPage({ state, onRerun }: HistoryPageProps) {
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
-  const destructiveRef = useRef<HTMLButtonElement>(null);
+  const cancelDeleteRef = useRef<HTMLButtonElement>(null);
   const activeUid = state.activeUid;
   const isEnglish = locale === 'en-US';
 
@@ -107,9 +108,7 @@ export function HistoryPage({ state, onRerun }: HistoryPageProps) {
       await load();
     } catch (deleteError) {
       setPendingDelete(null);
-      setError(
-        localizeError(deleteError, locale, t, 'history.error.clear')
-      );
+      setError(localizeError(deleteError, locale, t, 'history.error.clear'));
     }
   }
 
@@ -159,9 +158,7 @@ export function HistoryPage({ state, onRerun }: HistoryPageProps) {
           <span className="gta-page-kicker">
             {activeUid ? `UID ${activeUid}` : isEnglish ? 'Local records' : '本机记录'}
           </span>
-          <h2 className="gta-section-title">
-            {isEnglish ? 'Recommendation history' : '推荐记录'}
-          </h2>
+          <h2 className="gta-section-title">{isEnglish ? 'Recommendation history' : '推荐记录'}</h2>
           <p className="gta-page-lead">
             {isEnglish
               ? 'Plans are preserved with the challenge rules and character choices used at the time.'
@@ -248,7 +245,7 @@ export function HistoryPage({ state, onRerun }: HistoryPageProps) {
         open={pendingDelete !== null}
         title={deleteDialogTitle(pendingDelete, isEnglish)}
         closeLabel={isEnglish ? 'Close confirmation' : '关闭确认框'}
-        initialFocusRef={destructiveRef}
+        initialFocusRef={cancelDeleteRef}
         onClose={() => setPendingDelete(null)}
       >
         {pendingDelete && (
@@ -261,7 +258,6 @@ export function HistoryPage({ state, onRerun }: HistoryPageProps) {
             </p>
             <div className="gta-actions">
               <button
-                ref={destructiveRef}
                 type="button"
                 className="gta-btn gta-btn--danger"
                 onClick={() => void confirmDelete()}
@@ -269,6 +265,7 @@ export function HistoryPage({ state, onRerun }: HistoryPageProps) {
                 {deleteDialogAction(pendingDelete, isEnglish)}
               </button>
               <button
+                ref={cancelDeleteRef}
                 type="button"
                 className="gta-btn gta-btn--ghost"
                 onClick={() => setPendingDelete(null)}
@@ -298,9 +295,15 @@ function HistoryEntry({
   onRerun: () => void;
   onToggle: () => void;
 }) {
+  const savedVersion = historySavedVersion(entry, isEnglish ? 'en' : 'zh');
   return (
     <li className={expanded ? 'gta-history-entry is-expanded' : 'gta-history-entry'}>
-      <button type="button" className="gta-history-summary" aria-expanded={expanded} onClick={onToggle}>
+      <button
+        type="button"
+        className="gta-history-summary"
+        aria-expanded={expanded}
+        onClick={onToggle}
+      >
         <span className="gta-history-entry-title">{historyCardTitle(entry)}</span>
         <span className={`gta-history-source is-${entry.source}`}>
           {entry.source === 'smart-service'
@@ -313,9 +316,7 @@ function HistoryEntry({
         </span>
         <time dateTime={entry.createdAt}>{formatTime(entry.createdAt)}</time>
         {entry.scenarioTrust === 'development-sample' && (
-          <span className="gta-history-sample">
-            {isEnglish ? 'Practice data' : '演练资料'}
-          </span>
+          <span className="gta-history-sample">{isEnglish ? 'Practice data' : '演练资料'}</span>
         )}
       </button>
       {expanded && (
@@ -332,11 +333,11 @@ function HistoryEntry({
             <dl>
               <div>
                 <dt>{isEnglish ? 'Challenge record' : '挑战记录'}</dt>
-                <dd>{entry.scenarioId}</dd>
+                <dd>{savedVersion.scenario}</dd>
               </div>
               <div>
                 <dt>{isEnglish ? 'Data version' : '资料版本'}</dt>
-                <dd>{entry.dataVersion}</dd>
+                <dd>{savedVersion.data}</dd>
               </div>
               <div>
                 <dt>{isEnglish ? 'Record format' : '记录格式'}</dt>
@@ -358,13 +359,7 @@ function HistoryEntry({
   );
 }
 
-function AbyssDetails({
-  entry,
-  isEnglish
-}: {
-  entry: AbyssPlanHistoryEntry;
-  isEnglish: boolean;
-}) {
+function AbyssDetails({ entry, isEnglish }: { entry: AbyssPlanHistoryEntry; isEnglish: boolean }) {
   const names = new Map(entry.characters.map((character) => [character.id, character.name]));
   const teamNames = (ids: string[]) =>
     ids.map((id) => names.get(id) ?? (isEnglish ? 'Saved character' : '已保存角色')).join(' · ');
@@ -408,9 +403,7 @@ function StygianDetails({
           .sort((left, right) => left.phase - right.phase)
           .map((phase) => (
             <article key={phase.phase}>
-              <span>
-                {isEnglish ? `Phase ${phase.phase}` : `第 ${phase.phase} 阶段`}
-              </span>
+              <span>{isEnglish ? `Phase ${phase.phase}` : `第 ${phase.phase} 阶段`}</span>
               <strong>
                 {phase.team.characterIds
                   .map((id) => characters.get(id) ?? (isEnglish ? 'Saved character' : '已保存角色'))
@@ -514,11 +507,7 @@ function deleteDialogTitle(pending: PendingDelete | null, isEnglish: boolean): s
 
 function deleteDialogBody(pending: PendingDelete, isEnglish: boolean): string {
   const count =
-    pending.kind === 'single'
-      ? 1
-      : pending.kind === 'group'
-        ? pending.count
-        : pending.count;
+    pending.kind === 'single' ? 1 : pending.kind === 'group' ? pending.count : pending.count;
   return isEnglish
     ? `This removes ${count} recommendation ${count === 1 ? 'record' : 'records'} from this device.`
     : `这会从本机删除 ${count} 条推荐记录。`;
@@ -526,12 +515,10 @@ function deleteDialogBody(pending: PendingDelete, isEnglish: boolean): string {
 
 function deleteDialogAction(pending: PendingDelete, isEnglish: boolean): string {
   const count =
-    pending.kind === 'single'
-      ? 1
-      : pending.kind === 'group'
-        ? pending.count
-        : pending.count;
-  return isEnglish ? `Delete ${count} ${count === 1 ? 'record' : 'records'}` : `删除 ${count} 条记录`;
+    pending.kind === 'single' ? 1 : pending.kind === 'group' ? pending.count : pending.count;
+  return isEnglish
+    ? `Delete ${count} ${count === 1 ? 'record' : 'records'}`
+    : `删除 ${count} 条记录`;
 }
 
 function formatTime(value: string): string {

@@ -9,6 +9,7 @@ import type {
   TheaterScenarioView
 } from '../../../shared/theater-advisor';
 import type { PlayerPreferences } from '../../../shared/scenario-v2';
+import { EmptyState } from '../../components/ui/EmptyState';
 import { GtaButton } from '../../components/ui/GtaButton';
 import { api } from '../../ipc';
 import {
@@ -96,9 +97,7 @@ export function TheaterWorkspace({
               eligibleOwned
             );
             if (prepared.status === 'blocked') {
-              setHistoryNotice(
-                '这份旧方案属于另一个 UID；已保留旧方案查看，但没有带入当前账号。'
-              );
+              setHistoryNotice('这份旧方案属于另一个 UID；已保留旧方案查看，但没有带入当前账号。');
             } else {
               const pools = nextView.scenario.pools;
               const retainPool = (ids: string[], candidates: Array<{ id: string }>) => {
@@ -265,7 +264,8 @@ export function TheaterWorkspace({
   if (loadError && (!view || !profile))
     return (
       <div className="gta-theater-unavailable" role="alert">
-        {loadError}
+        <EmptyState kind="offline" />
+        <p>{loadError}</p>
       </div>
     );
   if (!view || !profile)
@@ -276,7 +276,7 @@ export function TheaterWorkspace({
         <GtaButton tone="ghost" onClick={onBack}>
           返回挑战入口
         </GtaButton>
-        <h3>本期剧诗资料暂不可用</h3>
+        <EmptyState kind="offline" />
         <p>{view.message}</p>
       </section>
     );

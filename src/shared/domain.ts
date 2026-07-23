@@ -34,6 +34,31 @@ export interface LlmMonthlyUsage {
   estimatedCostUsd: number;
 }
 
+export type DataManagementScope = 'profiles' | 'scenarios' | 'history' | 'service-key';
+
+export interface DataAreaSummary {
+  count: number;
+  sizeBytes?: number;
+  updatedAt?: string;
+}
+
+export interface ScenarioDataAreaSummary extends DataAreaSummary {
+  clearableCount: number;
+}
+
+export interface DataManagementSummary {
+  profiles: DataAreaSummary;
+  scenarios: ScenarioDataAreaSummary;
+  history: DataAreaSummary;
+  serviceKey: { count: 0 | 1 };
+}
+
+export interface DataClearRequest {
+  scope: DataManagementScope;
+  expectedCount: number;
+  confirmationToken: string;
+}
+
 export type UpdateStatus =
   | { state: 'disabled'; currentVersion: string; reason: 'development' | 'unsupported' }
   | { state: 'idle'; currentVersion: string }

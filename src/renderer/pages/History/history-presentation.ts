@@ -50,9 +50,8 @@ const MODE_LABELS: Record<ChallengeHistoryEntry['mode'], string> = {
 };
 
 export function periodLabelFromScenario(scenarioId: string): string {
-  return scenarioId.match(/(?:^|[._-])((?:20)\d{2})[._-](0[1-9]|1[0-2])(?:$|[._-])/u)
-    ? `${RegExp.$1}-${RegExp.$2}`
-    : '记录周期';
+  const match = scenarioId.match(/(?:^|[._-])((?:20)\d{2})[._-](0[1-9]|1[0-2])(?:$|[._-])/u);
+  return match ? `${match[1]}-${match[2]}` : '记录周期';
 }
 
 export function historyCardTitle(entry: ChallengeHistoryEntry): string {
@@ -68,9 +67,19 @@ export function historyCardTitle(entry: ChallengeHistoryEntry): string {
   }
 }
 
-export function groupChallengeHistory(
-  entries: ChallengeHistoryEntry[]
-): ChallengeHistoryGroup[] {
+export function historySavedVersion(
+  entry: ChallengeHistoryEntry,
+  locale: 'zh' | 'en'
+): { scenario: string; data: string } {
+  if (entry.scenarioTrust === 'development-sample') {
+    return locale === 'en'
+      ? { scenario: 'Practice cycle', data: 'Practice data' }
+      : { scenario: '演练周期', data: '演练资料' };
+  }
+  return { scenario: entry.scenarioId, data: entry.dataVersion };
+}
+
+export function groupChallengeHistory(entries: ChallengeHistoryEntry[]): ChallengeHistoryGroup[] {
   const byKey = new Map<string, ChallengeHistoryEntry[]>();
   for (const entry of entries) {
     const key = `${entry.mode}:${entry.scenarioId}`;

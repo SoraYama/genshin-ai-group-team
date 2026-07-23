@@ -58,6 +58,8 @@ import { TheaterScenarioService } from './services/theater-scenario-service.js';
 import { TheaterAdvisorService } from './services/theater-advisor-service.js';
 import { createProductionScenarioPublicationSource } from './scenario-publication/production-composition.js';
 import { CharacterKnowledgeStore } from './services/character-knowledge-store.js';
+import { DataManagementService } from './services/data-management-service.js';
+import { registerDataManagementIpc } from './ipc/data-management.ipc.js';
 
 const isolatedUserDataDir = process.env.GTA_E2E_USER_DATA_DIR;
 if (isolatedUserDataDir) {
@@ -207,12 +209,20 @@ async function bootstrapServices(): Promise<void> {
 
   const scenarioStore = new ScenarioStore({
     bundledDir: resolveBundledScenarioDir(),
-    cacheDir: path.join(app.getPath('userData'), 'cache', 'scenarios')
+    cacheDir: path.join(app.getPath('userData'), 'cache', 'scenarios'),
+    productionCacheDir: path.join(app.getPath('userData'), 'cache', 'scenario-publications-v2')
   });
   await scenarioStore.init();
   scenarioRefresher = new ScenarioRefresher(scenarioStore);
+  const dataManagement = new DataManagementService({
+    profiles,
+    scenarios: scenarioStore,
+    history,
+    config
+  });
 
   registerConfigIpc({ config, advisor });
+  registerDataManagementIpc({ service: dataManagement });
   registerProfileIpc({
     miyoushe,
     miyousheGameRecord,

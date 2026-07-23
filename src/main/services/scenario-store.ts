@@ -17,6 +17,7 @@ export const DEFAULT_MANIFEST_URL =
 export interface ScenarioStoreOptions {
   bundledDir: string;
   cacheDir: string;
+  productionCacheDir?: string;
   manifestUrl?: string;
   manifestTimeoutMs?: number;
   fetchImpl?: typeof request;
@@ -54,6 +55,7 @@ export class ScenarioStore {
   private readonly bundledDir: string;
   private readonly cacheDir: string;
   private readonly manifestUrl: string;
+  private readonly productionCacheDir?: string;
   private readonly manifestTimeoutMs: number;
   private readonly cache = new Map<ScenarioMode, ScenarioEnvelope<ScenarioPayload>>();
   private readonly fetchImpl: typeof request;
@@ -62,6 +64,7 @@ export class ScenarioStore {
   constructor(options: ScenarioStoreOptions) {
     this.bundledDir = options.bundledDir;
     this.cacheDir = options.cacheDir;
+    this.productionCacheDir = options.productionCacheDir;
     this.manifestUrl = options.manifestUrl ?? DEFAULT_MANIFEST_URL;
     this.manifestTimeoutMs = options.manifestTimeoutMs ?? 3_000;
     this.fetchImpl = options.fetchImpl ?? request;
@@ -168,6 +171,70 @@ export class ScenarioStore {
   /** For diagnostics / refresher's WebFetch fallback gate (v0.7+). */
   getManifestFailureCount(): number {
     return this.manifestFailureCount;
+  }
+
+  async getDataManagementSnapshot(): Promise<{
+    count: number;
+    clearableCount: number;
+    sizeBytes?: number;
+    updatedAt?: string;
+    fingerprint: string;
+  }> {
+    const files = await Promise.all(
+      this.dataManagementCacheFiles().map(async ({ key, filePath }) => {
+        try {
+          const [bytes, stat] = await Promise.all([fs.readFile(filePath), fs.stat(filePath)]);
+          return {
+            key,
+            size: stat.size,
+            hash: createHash('sha256').update(bytes).digest('hex')
+          };
+        } catch {
+          return { key, size: 0, hash: 'missing' };
+        }
+      })
+    );
+    const updatedAt = [...this.cache.values()]
+      .map(({ meta }) => meta.fetchedAt)
+      .sort((left, right) => right.localeCompare(left))[0];
+    const clearable = files.filter(({ hash }) => hash !== 'missing');
+    return {
+      count: this.cache.size,
+      clearableCount: clearable.length,
+      sizeBytes: clearable.reduce((total, { size }) => total + size, 0),
+      ...(updatedAt ? { updatedAt } : {}),
+      fingerprint: createHash('sha256')
+        .update(JSON.stringify(files.map(({ key, hash }) => ({ key, hash }))))
+        .digest('hex')
+    };
+  }
+
+  async clearDownloadedCache(): Promise<number> {
+    let removed = 0;
+    for (const { filePath } of this.dataManagementCacheFiles()) {
+      try {
+        await fs.unlink(filePath);
+        removed += 1;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+    }
+    await this.init();
+    return removed;
+  }
+
+  private dataManagementCacheFiles(): Array<{ key: string; filePath: string }> {
+    const legacy = ALL_SCENARIO_MODES.map((mode) => ({
+      key: `legacy:${mode}`,
+      filePath: path.join(this.cacheDir, `${mode}.json`)
+    }));
+    const production = this.productionCacheDir
+      ? ALL_SCENARIO_MODES.map((mode) => ({
+          key: `production:${mode}`,
+          filePath: path.join(this.productionCacheDir!, 'production', `${mode}.json`)
+        }))
+      : [];
+    return [...legacy, ...production];
   }
 
   private async loadFromDisk(mode: ScenarioMode): Promise<ScenarioEnvelope<ScenarioPayload>> {

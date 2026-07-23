@@ -1,11 +1,8 @@
 import { app, safeStorage } from 'electron';
+import { createHash } from 'node:crypto';
 import Store from 'electron-store';
 import { DEFAULT_BASE_URL, DEFAULT_MODEL } from '../../shared/domain.js';
-import type {
-  LlmConfigInput,
-  LlmConfigPublicView,
-  PublicConfig
-} from '../../shared/domain.js';
+import type { LlmConfigInput, LlmConfigPublicView, PublicConfig } from '../../shared/domain.js';
 
 interface PersistedSchema {
   llm: {
@@ -120,6 +117,12 @@ export class ConfigService {
     this.store.set('llm', { ...DEFAULTS.llm });
   }
 
+  clearApiKey(): void {
+    const next = { ...this.store.get('llm') };
+    delete next.encryptedApiKey;
+    this.store.set('llm', next);
+  }
+
   getPublicView(): LlmConfigPublicView {
     const llm = this.store.get('llm');
     return {
@@ -143,6 +146,12 @@ export class ConfigService {
     };
   }
 
+  getSecretFingerprint(): string {
+    return createHash('sha256')
+      .update(this.store.get('llm').encryptedApiKey ?? '')
+      .digest('hex');
+  }
+
   recordUsage(inputTokens: number, outputTokens: number, estimatedCostUsd = 0): void {
     const month = new Date().toISOString().slice(0, 7);
     const current = this.getMonthlyUsage();
@@ -152,8 +161,7 @@ export class ConfigService {
       outputTokens:
         (current.month === month ? current.outputTokens : 0) + Math.max(0, outputTokens),
       estimatedCostUsd:
-        (current.month === month ? current.estimatedCostUsd : 0) +
-        Math.max(0, estimatedCostUsd)
+        (current.month === month ? current.estimatedCostUsd : 0) + Math.max(0, estimatedCostUsd)
     });
   }
 
