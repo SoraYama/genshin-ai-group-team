@@ -367,6 +367,8 @@ const zh = {
   'advisor.mode.stygian.summary': '三阶段首领，根据跨队复用规则分配核心角色。',
   'advisor.mode.selected': '已选择 {{mode}}',
   'advisor.mode.pending': '你可以先在下方自定义敌人与偏好，生成可执行的配队建议。',
+  'advisor.mode.returnedTitle': '已返回挑战入口',
+  'advisor.mode.returnedHelp': '从上方选择要规划的玩法。',
   'advisor.advanced': '自定义演练（高级）',
   'advisor.advancedHelp': '输入敌人与操作偏好，快速演练单个或两个挑战环境。',
   'advisor.advancedModeLabel': '自定义演练模式',
@@ -837,6 +839,8 @@ const en: Record<keyof typeof zh, string> = {
   'advisor.mode.selected': '{{mode}} selected',
   'advisor.mode.pending':
     'Use the custom drill below to enter enemies and preferences for an actionable recommendation.',
+  'advisor.mode.returnedTitle': 'Returned to challenge selection',
+  'advisor.mode.returnedHelp': 'Choose a mode above to start planning.',
   'advisor.advanced': 'Custom drill (advanced)',
   'advisor.advancedHelp':
     'Enter enemies and play-style preferences to rehearse one or two challenge scenarios.',

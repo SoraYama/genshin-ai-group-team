@@ -1458,6 +1458,14 @@ test('plans three Stygian phases from the development scenario without leaking r
   await page.getByRole('heading', { name: '三队已按当期规则分配' }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: path.join(tmpdir(), 'gta-m5-stygian-result-1600x1000.png') });
 
+  await switchToEnglish();
+  await page.getByRole('button', { name: 'Back to challenge selection' }).click();
+  const stygianReturnStatus = page.locator('.gta-mode-status');
+  await expect(page.getByText('Returned to challenge selection', { exact: true })).toBeVisible();
+  await expect(stygianReturnStatus).toContainText('Choose a mode above to start planning.');
+  await expectNoChineseChrome(/已返回挑战入口|从上方选择要规划的玩法/u);
+  await switchToChinese();
+
   await page.getByRole('button', { name: '历史记录' }).click();
   await expect(page.getByRole('heading', { name: '推荐记录' })).toBeVisible();
   await expect(page.getByText('演练资料', { exact: true }).first()).toBeVisible();
@@ -1772,6 +1780,14 @@ test('checks Theater eligibility and renders a cast-vigor route instead of team 
   ).toBe('column');
   await page.getByRole('heading', { name: '演员池与活力已排成幕次路线' }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: path.join(tmpdir(), 'gta-m6-theater-result-1600x1000.png') });
+
+  await switchToEnglish();
+  await page.getByRole('button', { name: 'Back to challenge selection' }).click();
+  const theaterReturnStatus = page.locator('.gta-mode-status');
+  await expect(page.getByText('Returned to challenge selection', { exact: true })).toBeVisible();
+  await expect(theaterReturnStatus).toContainText('Choose a mode above to start planning.');
+  await expectNoChineseChrome(/已返回挑战入口|从上方选择要规划的玩法/u);
+  await switchToChinese();
 
   await page.getByRole('button', { name: '历史记录' }).click();
   await expect(page.getByRole('heading', { name: '推荐记录' })).toBeVisible();

@@ -275,7 +275,8 @@ export function AdvisorPage({
             ✦
           </span>
           <span>
-            <strong>已返回挑战入口</strong>从上方选择要规划的玩法。
+            <strong>{t('advisor.mode.returnedTitle')}</strong>
+            {t('advisor.mode.returnedHelp')}
           </span>
         </div>
       ) : (
