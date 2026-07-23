@@ -30,6 +30,9 @@ describe('Theater presentation', () => {
     expect(pathChoiceLabel({ kind: 'random', note: 'Adapt after reveal' }, 'en')).toBe(
       'Random branch: Adapt after reveal'
     );
+    expect(pathChoiceLabel({ kind: 'random', note: '随机后应变' }, 'en')).toBe(
+      'Random branch: Saved route note is unavailable in English.'
+    );
     expect(eligibilityReasonLabel(['element', 'level'], 'en')).toBe(
       'Element not eligible, Level too low'
     );

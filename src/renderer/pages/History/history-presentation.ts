@@ -123,8 +123,36 @@ export function historyDifficultyLabel(
   if (locale === 'zh' && legacy) return `旧记录原始名称：${legacy.text}`;
   if (locale === 'en' && legacy?.locale === 'en-US') return legacy.text;
   return locale === 'en'
-    ? `Legacy difficulty · ${entry.difficultyId} (original label not localized)`
+    ? 'Saved difficulty (original label unavailable in English)'
     : `旧难度记录 · ${entry.difficultyId}`;
+}
+
+export function historyEntityName(options: {
+  names?: Record<string, string>;
+  rawText?: string;
+  id: string;
+  orderedIds: string[];
+  kind: 'character' | 'actor' | 'arcana' | 'enemy';
+  locale: 'zh' | 'en';
+}): string {
+  const { names, rawText, id, orderedIds, kind, locale } = options;
+  const localized =
+    locale === 'en'
+      ? (names?.['en-US'] ?? names?.en ?? names?.['en-GB'])
+      : (names?.['zh-CN'] ?? names?.['zh-Hans'] ?? names?.zh);
+  if (localized) return localized;
+  if (locale === 'zh' && rawText) return rawText;
+
+  const uniqueIds = [...new Set(orderedIds)];
+  const position = uniqueIds.indexOf(id);
+  const ordinal = position >= 0 ? position + 1 : uniqueIds.length + 1;
+  const labels = {
+    character: locale === 'en' ? 'Saved character' : '已保存角色',
+    actor: locale === 'en' ? 'Saved actor' : '已保存演员',
+    arcana: locale === 'en' ? 'Saved Arcana' : '已保存秘法',
+    enemy: locale === 'en' ? 'Saved enemy' : '已保存敌人'
+  } as const;
+  return `${labels[kind]} ${ordinal}`;
 }
 
 export function historySavedVersion(

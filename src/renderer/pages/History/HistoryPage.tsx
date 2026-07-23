@@ -11,7 +11,7 @@ import { destructiveErrorRecovery, getErrorCode, localizeError, useI18n } from '
 import { api } from '../../ipc';
 import { rewardTargetLabel, reuseRuleSummary } from '../Advisor/stygian-presentation';
 import { objectiveLabel, pathChoiceLabel, poolSourceLabel } from '../Advisor/theater-presentation';
-import { localizedResultText } from '../Advisor/abyss-presentation';
+import { localizedPlanText, narrativeTargetPresentation } from '../Advisor/abyss-presentation';
 import {
   createHistoryRerunIntent,
   groupChallengeHistory,
@@ -19,6 +19,7 @@ import {
   historyConfidenceLabel,
   historyDeleteRecoveryKind,
   historyDifficultyLabel,
+  historyEntityName,
   historySavedVersion,
   type ChallengeHistoryEntry,
   type ChallengeHistoryGroup,
@@ -433,9 +434,43 @@ export function HistoryDetails({
 }
 
 function AbyssDetails({ entry, isEnglish }: { entry: AbyssPlanHistoryEntry; isEnglish: boolean }) {
-  const names = new Map(entry.characters.map((character) => [character.id, character.name]));
+  const locale = isEnglish ? 'en' : 'zh';
+  const orderedCharacterIds = [
+    ...entry.plan.firstHalfTeam.characterIds,
+    ...entry.plan.secondHalfTeam.characterIds,
+    ...entry.characters.map(({ id }) => id)
+  ];
+  const names = new Map(
+    entry.characters.map((character) => [
+      character.id,
+      historyEntityName({
+        rawText: character.name,
+        id: character.id,
+        orderedIds: orderedCharacterIds,
+        kind: 'character',
+        locale
+      })
+    ])
+  );
   const teamNames = (ids: string[]) =>
-    ids.map((id) => names.get(id) ?? (isEnglish ? 'Saved character' : '已保存角色')).join(' · ');
+    ids
+      .map(
+        (id) =>
+          names.get(id) ??
+          historyEntityName({
+            id,
+            orderedIds: orderedCharacterIds,
+            kind: 'character',
+            locale
+          })
+      )
+      .join(' · ');
+  const targetGuidance = (targetKey: string, rawText: string) => {
+    const narrative = narrativeTargetPresentation(entry.narrative, targetKey, locale);
+    return narrative.status === 'localized'
+      ? narrative.body
+      : (localizedPlanText(rawText, locale) ?? narrative.body);
+  };
   return (
     <div className="gta-history-plan-grid">
       <p>
@@ -467,13 +502,7 @@ function AbyssDetails({ entry, isEnglish }: { entry: AbyssPlanHistoryEntry; isEn
       <article>
         <span>{isEnglish ? 'First half' : '上半队伍'}</span>
         <strong>{teamNames(entry.plan.firstHalfTeam.characterIds)}</strong>
-        <p>
-          {localizedResultText(
-            entry.plan.firstHalfTeam.purpose,
-            isEnglish ? 'en' : 'zh',
-            'Saved first-half team purpose'
-          )}
-        </p>
+        <p>{targetGuidance('abyss-team:first', entry.plan.firstHalfTeam.purpose)}</p>
         <DetailList
           label={isEnglish ? 'Rotation' : '循环手法'}
           items={entry.plan.firstHalfTeam.rotationNotes}
@@ -482,13 +511,7 @@ function AbyssDetails({ entry, isEnglish }: { entry: AbyssPlanHistoryEntry; isEn
       <article>
         <span>{isEnglish ? 'Second half' : '下半队伍'}</span>
         <strong>{teamNames(entry.plan.secondHalfTeam.characterIds)}</strong>
-        <p>
-          {localizedResultText(
-            entry.plan.secondHalfTeam.purpose,
-            isEnglish ? 'en' : 'zh',
-            'Saved second-half team purpose'
-          )}
-        </p>
+        <p>{targetGuidance('abyss-team:second', entry.plan.secondHalfTeam.purpose)}</p>
         <DetailList
           label={isEnglish ? 'Rotation' : '循环手法'}
           items={entry.plan.secondHalfTeam.rotationNotes}
@@ -517,7 +540,12 @@ function AbyssDetails({ entry, isEnglish }: { entry: AbyssPlanHistoryEntry; isEn
                 <strong>{isEnglish ? 'First-half tactics' : '上半打法'}</strong>
                 <DetailList
                   label={isEnglish ? 'Tactics' : '要点'}
-                  items={chamber.firstHalf.tactics}
+                  items={[
+                    targetGuidance(
+                      `abyss-chamber:${chamber.floor}:${chamber.chamber}:first`,
+                      chamber.firstHalf.tactics.join(isEnglish ? '; ' : '；')
+                    )
+                  ]}
                 />
                 <DetailList label={isEnglish ? 'Risks' : '风险'} items={chamber.firstHalf.risks} />
                 <DetailList
@@ -529,7 +557,12 @@ function AbyssDetails({ entry, isEnglish }: { entry: AbyssPlanHistoryEntry; isEn
                 <strong>{isEnglish ? 'Second-half tactics' : '下半打法'}</strong>
                 <DetailList
                   label={isEnglish ? 'Tactics' : '要点'}
-                  items={chamber.secondHalf.tactics}
+                  items={[
+                    targetGuidance(
+                      `abyss-chamber:${chamber.floor}:${chamber.chamber}:second`,
+                      chamber.secondHalf.tactics.join(isEnglish ? '; ' : '；')
+                    )
+                  ]}
                 />
                 <DetailList label={isEnglish ? 'Risks' : '风险'} items={chamber.secondHalf.risks} />
                 <DetailList
@@ -552,12 +585,28 @@ function StygianDetails({
   entry: StygianPlanHistoryEntry;
   isEnglish: boolean;
 }) {
-  const characters = new Map(entry.characters.map((character) => [character.id, character.name]));
+  const locale = isEnglish ? 'en' : 'zh';
+  const orderedCharacterIds = [
+    ...entry.plan.phases.flatMap((phase) => phase.team.characterIds),
+    ...entry.characters.map(({ id }) => id)
+  ];
+  const characters = new Map(
+    entry.characters.map((character) => [
+      character.id,
+      historyEntityName({
+        rawText: character.name,
+        id: character.id,
+        orderedIds: orderedCharacterIds,
+        kind: 'character',
+        locale
+      })
+    ])
+  );
   return (
     <>
       <p className="gta-history-rule">
-        {historyDifficultyLabel(entry, isEnglish ? 'en' : 'zh')}{' '}
-        · {rewardTargetLabel(entry.target, isEnglish ? 'en' : 'zh')} ·{' '}
+        {historyDifficultyLabel(entry, isEnglish ? 'en' : 'zh')} ·{' '}
+        {rewardTargetLabel(entry.target, isEnglish ? 'en' : 'zh')} ·{' '}
         {reuseRuleSummary(entry.reusePolicy, isEnglish ? 'en' : 'zh')}
       </p>
       <p>
@@ -569,27 +618,41 @@ function StygianDetails({
         {entry.plan.phases
           .slice()
           .sort((left, right) => left.phase - right.phase)
-          .map((phase) => (
-            <article key={phase.phase}>
-              <span>{isEnglish ? `Phase ${phase.phase}` : `第 ${phase.phase} 阶段`}</span>
-              <strong>
-                {phase.team.characterIds
-                  .map((id) => characters.get(id) ?? (isEnglish ? 'Saved character' : '已保存角色'))
-                  .join(' · ')}
-              </strong>
-              <p>
-                {localizedResultText(
-                  phase.team.purpose,
-                  isEnglish ? 'en' : 'zh',
-                  `Saved purpose for phase ${phase.phase}`
-                )}
-              </p>
-              <DetailList
-                label={isEnglish ? 'Rotation' : '循环手法'}
-                items={phase.team.rotationNotes}
-              />
-            </article>
-          ))}
+          .map((phase) => {
+            const narrative = narrativeTargetPresentation(
+              entry.narrative,
+              `stygian-phase:${phase.phase}`,
+              locale
+            );
+            return (
+              <article key={phase.phase}>
+                <span>{isEnglish ? `Phase ${phase.phase}` : `第 ${phase.phase} 阶段`}</span>
+                <strong>
+                  {phase.team.characterIds
+                    .map(
+                      (id) =>
+                        characters.get(id) ??
+                        historyEntityName({
+                          id,
+                          orderedIds: orderedCharacterIds,
+                          kind: 'character',
+                          locale
+                        })
+                    )
+                    .join(' · ')}
+                </strong>
+                <p>
+                  {narrative.status === 'localized'
+                    ? narrative.body
+                    : (localizedPlanText(phase.team.purpose, locale) ?? narrative.body)}
+                </p>
+                <DetailList
+                  label={isEnglish ? 'Rotation' : '循环手法'}
+                  items={phase.team.rotationNotes}
+                />
+              </article>
+            );
+          })}
       </div>
       <section className="gta-history-stygian-guidance">
         <h4>{isEnglish ? 'Saved phase guidance' : '当时的阶段依据'}</h4>
@@ -666,22 +729,64 @@ function TheaterDetails({
   entry: TheaterPlanHistoryEntry;
   isEnglish: boolean;
 }) {
+  const locale = isEnglish ? 'en' : 'zh';
+  const orderedActorIds = [
+    ...entry.plan.acts.flatMap((act) => act.candidateCharacterIds),
+    ...entry.cast.map(({ id }) => id)
+  ];
   const names = new Map(
-    entry.cast.map((actor) => [actor.id, localizedSnapshotName(actor.names, isEnglish, actor.name)])
+    entry.cast.map((actor) => [
+      actor.id,
+      historyEntityName({
+        names: actor.names,
+        rawText: actor.name,
+        id: actor.id,
+        orderedIds: orderedActorIds,
+        kind: actor.source === 'owned' ? 'character' : 'actor',
+        locale
+      })
+    ])
   );
+  const orderedArcanaIds = [
+    ...(entry.arcanaSnapshots ?? []).map(({ id }) => id),
+    ...entry.routeGuidance.arcanaPriorities.map(({ nodeId }) => nodeId)
+  ];
   const arcanaNames = new Map<string, string>(
     (entry.arcanaSnapshots ?? []).map((snapshot) => [
       snapshot.id,
-      localizedSnapshotName(snapshot.names, isEnglish, snapshot.nameRef)
+      historyEntityName({
+        names: snapshot.names,
+        id: snapshot.id,
+        orderedIds: orderedArcanaIds,
+        kind: 'arcana',
+        locale
+      })
     ])
   );
   entry.routeGuidance.arcanaPriorities.forEach((priority) => {
-    if (!arcanaNames.has(priority.nodeId)) arcanaNames.set(priority.nodeId, priority.name);
+    if (!arcanaNames.has(priority.nodeId))
+      arcanaNames.set(
+        priority.nodeId,
+        historyEntityName({
+          rawText: priority.name,
+          id: priority.nodeId,
+          orderedIds: orderedArcanaIds,
+          kind: 'arcana',
+          locale
+        })
+      );
   });
   const nodeLabel = (nodeId: string) => {
     const savedName = arcanaNames.get(nodeId);
-    if (!savedName) return isEnglish ? 'Saved node' : '已保存节点';
-    return localizedResultText(savedName, isEnglish ? 'en' : 'zh', 'Saved node');
+    return (
+      savedName ??
+      historyEntityName({
+        id: nodeId,
+        orderedIds: orderedArcanaIds,
+        kind: 'arcana',
+        locale
+      })
+    );
   };
 
   return (
@@ -699,7 +804,7 @@ function TheaterDetails({
       <div className="gta-history-theater-cast">
         {entry.cast.map((actor) => (
           <span key={`${actor.source}:${actor.id}`}>
-            <strong>{localizedSnapshotName(actor.names, isEnglish, actor.name)}</strong>
+            <strong>{names.get(actor.id)}</strong>
             <small>
               {actor.source === 'owned'
                 ? isEnglish
@@ -711,44 +816,86 @@ function TheaterDetails({
         ))}
       </div>
       <ol className="gta-history-theater-route">
-        {entry.plan.acts.map((act) => (
-          <li key={act.act}>
-            <strong>{isEnglish ? `Act ${act.act}` : `第 ${act.act} 幕`}</strong>
-            <span>
-              {act.candidateCharacterIds
-                .map((id) => names.get(id) ?? (isEnglish ? 'Saved actor' : '已保存演员'))
-                .join(isEnglish ? ', ' : '、')}
-            </span>
-            <small>{pathChoiceLabel(act.pathChoice, isEnglish ? 'en' : 'zh')}</small>
-            <small>
-              {isEnglish ? 'Planned Vigor: ' : '计划活力：'}
-              {act.plannedVigorSpend.length > 0
-                ? act.plannedVigorSpend
-                    .map(
-                      ({ characterId, cost }) =>
-                        `${names.get(characterId) ?? (isEnglish ? 'Saved actor' : '已保存演员')} −${cost}`
-                    )
-                    .join(isEnglish ? ', ' : '、')
-                : isEnglish
-                  ? 'No spend recorded'
-                  : '未记录消耗'}
-            </small>
-          </li>
-        ))}
+        {entry.plan.acts.map((act) => {
+          const narrative = narrativeTargetPresentation(
+            entry.narrative,
+            `theater-act:${act.act}`,
+            locale
+          );
+          const localizedPathNote = localizedPlanText(act.pathChoice.note, locale);
+          return (
+            <li key={act.act}>
+              <strong>{isEnglish ? `Act ${act.act}` : `第 ${act.act} 幕`}</strong>
+              <span>
+                {act.candidateCharacterIds
+                  .map(
+                    (id) =>
+                      names.get(id) ??
+                      historyEntityName({
+                        id,
+                        orderedIds: orderedActorIds,
+                        kind: 'actor',
+                        locale
+                      })
+                  )
+                  .join(isEnglish ? ', ' : '、')}
+              </span>
+              <small>
+                {narrative.status === 'localized'
+                  ? narrative.body
+                  : localizedPathNote
+                    ? pathChoiceLabel(act.pathChoice, locale)
+                    : narrative.body}
+              </small>
+              <small>
+                {isEnglish ? 'Planned Vigor: ' : '计划活力：'}
+                {act.plannedVigorSpend.length > 0
+                  ? act.plannedVigorSpend
+                      .map(
+                        ({ characterId, cost }) =>
+                          `${
+                            names.get(characterId) ??
+                            historyEntityName({
+                              id: characterId,
+                              orderedIds: orderedActorIds,
+                              kind: 'actor',
+                              locale
+                            })
+                          } −${cost}`
+                      )
+                      .join(isEnglish ? ', ' : '、')
+                  : isEnglish
+                    ? 'No spend recorded'
+                    : '未记录消耗'}
+              </small>
+            </li>
+          );
+        })}
       </ol>
       {(entry.encounterSnapshots?.length ?? 0) > 0 && (
         <section className="gta-history-theater-guidance">
           <h4>{isEnglish ? 'Saved encounter references' : '已保存的敌情引用'}</h4>
-          {entry.encounterSnapshots?.map((snapshot) => (
-            <article key={`${snapshot.act}:${snapshot.encounterId}`}>
-              <strong>{isEnglish ? `Act ${snapshot.act}` : `第 ${snapshot.act} 幕`}</strong>
-              <p>
-                {snapshot.enemyRefs
-                  .map((enemy) => localizedSnapshotName(enemy.names, isEnglish, enemy.id))
-                  .join(isEnglish ? ', ' : '、')}
-              </p>
-            </article>
-          ))}
+          {entry.encounterSnapshots?.map((snapshot) => {
+            const orderedEnemyIds = snapshot.enemyRefs.map(({ id }) => id);
+            return (
+              <article key={`${snapshot.act}:${snapshot.encounterId}`}>
+                <strong>{isEnglish ? `Act ${snapshot.act}` : `第 ${snapshot.act} 幕`}</strong>
+                <p>
+                  {snapshot.enemyRefs
+                    .map((enemy) =>
+                      historyEntityName({
+                        names: enemy.names,
+                        id: enemy.id,
+                        orderedIds: orderedEnemyIds,
+                        kind: 'enemy',
+                        locale
+                      })
+                    )
+                    .join(isEnglish ? ', ' : '、')}
+                </p>
+              </article>
+            );
+          })}
         </section>
       )}
       {entry.vigorBudget.length > 0 && (
@@ -756,7 +903,13 @@ function TheaterDetails({
           {entry.vigorBudget.map((item) => (
             <span key={`${item.act}:${item.characterId}`}>
               {isEnglish ? `Act ${item.act}` : `第 ${item.act} 幕`} ·{' '}
-              {names.get(item.characterId) ?? (isEnglish ? 'Saved actor' : '已保存演员')}
+              {names.get(item.characterId) ??
+                historyEntityName({
+                  id: item.characterId,
+                  orderedIds: orderedActorIds,
+                  kind: 'actor',
+                  locale
+                })}
               {isEnglish ? ': ' : '：'}
               {item.before} − {item.spent} → {item.after}
             </span>
@@ -768,7 +921,14 @@ function TheaterDetails({
         <DetailList
           label={isEnglish ? 'Preserve' : '建议保留'}
           items={entry.routeGuidance.preserveCharacterIds.map(
-            (id) => names.get(id) ?? (isEnglish ? 'Saved actor' : '已保存演员')
+            (id) =>
+              names.get(id) ??
+              historyEntityName({
+                id,
+                orderedIds: orderedActorIds,
+                kind: 'actor',
+                locale
+              })
           )}
         />
         <DetailList
@@ -779,18 +939,16 @@ function TheaterDetails({
           <article key={priority.nodeId}>
             <strong>{nodeLabel(priority.nodeId)}</strong>
             <p>
-              {localizedResultText(
-                priority.condition,
-                isEnglish ? 'en' : 'zh',
-                'Condition saved with this plan'
-              )}
+              {localizedPlanText(priority.condition, locale) ??
+                (isEnglish
+                  ? 'Saved trigger details are unavailable in English.'
+                  : '没有保存可显示的触发条件。')}
             </p>
             <small>
-              {localizedResultText(
-                priority.reason,
-                isEnglish ? 'en' : 'zh',
-                'Reason saved with this plan'
-              )}
+              {localizedPlanText(priority.reason, locale) ??
+                (isEnglish
+                  ? 'Saved rationale is unavailable in English.'
+                  : '没有保存可显示的选择依据。')}
             </small>
           </article>
         ))}
@@ -818,16 +976,6 @@ function TheaterDetails({
   );
 }
 
-function localizedSnapshotName(
-  names: Record<string, string> | undefined,
-  isEnglish: boolean,
-  fallback: string
-): string {
-  return isEnglish
-    ? (names?.['en-US'] ?? names?.['en'] ?? fallback)
-    : (names?.['zh-CN'] ?? names?.['zh-Hans'] ?? fallback);
-}
-
 function DetailList({ items, label }: { items: string[]; label: string }) {
   if (items.length === 0) return null;
   const isEnglish = !/[\u3400-\u9fff]/u.test(label);
@@ -837,7 +985,10 @@ function DetailList({ items, label }: { items: string[]; label: string }) {
       <ul>
         {items.map((item, index) => (
           <li key={`${index}:${item}`}>
-            {localizedResultText(item, isEnglish ? 'en' : 'zh', 'Details saved with this plan')}
+            {localizedPlanText(item, isEnglish ? 'en' : 'zh') ??
+              (isEnglish
+                ? `Saved ${label.toLocaleLowerCase()} details are unavailable in English.`
+                : '没有保存可显示的详情。')}
           </li>
         ))}
       </ul>

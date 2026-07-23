@@ -167,10 +167,84 @@ describe('history presentation', () => {
     };
 
     expect(historyDifficultyLabel(legacy, 'en')).toBe(
-      `Legacy difficulty · ${legacy.difficultyId} (original label not localized)`
+      'Saved difficulty (original label unavailable in English)'
     );
     expect(historyDifficultyLabel(legacy, 'en')).not.toContain('绝境');
+    expect(historyDifficultyLabel(legacy, 'en')).not.toContain(legacy.difficultyId);
     expect(historyDifficultyLabel(legacy, 'zh')).toBe('旧记录原始名称：绝境');
+  });
+
+  it('uses bilingual snapshots for new records and neutral stable labels for legacy names', async () => {
+    const presentation =
+      (await import('../../../src/renderer/pages/History/history-presentation.js')) as Record<
+        string,
+        unknown
+      >;
+    expect(presentation.historyEntityName).toBeTypeOf('function');
+    const historyEntityName = presentation.historyEntityName as (options: {
+      names?: Record<string, string>;
+      rawText?: string;
+      id: string;
+      orderedIds: string[];
+      kind: 'character' | 'actor' | 'arcana' | 'enemy';
+      locale: 'zh' | 'en';
+    }) => string;
+
+    expect(
+      historyEntityName({
+        names: { 'zh-CN': '试用演员', 'en-US': 'Trial Actor' },
+        rawText: '试用演员',
+        id: 'trial.internal.1',
+        orderedIds: ['trial.internal.1'],
+        kind: 'actor',
+        locale: 'en'
+      })
+    ).toBe('Trial Actor');
+    expect(
+      historyEntityName({
+        rawText: '旧中文角色',
+        id: '10000001',
+        orderedIds: ['10000001', '10000002'],
+        kind: 'character',
+        locale: 'en'
+      })
+    ).toBe('Saved character 1');
+    expect(
+      historyEntityName({
+        rawText: '旧中文秘法',
+        id: 'arcana.internal',
+        orderedIds: ['arcana.other', 'arcana.internal'],
+        kind: 'arcana',
+        locale: 'en'
+      })
+    ).toBe('Saved Arcana 2');
+    expect(
+      historyEntityName({
+        rawText: '旧中文敌人',
+        id: 'enemy.internal',
+        orderedIds: ['enemy.internal'],
+        kind: 'enemy',
+        locale: 'en'
+      })
+    ).toBe('Saved enemy 1');
+    expect(
+      [
+        historyEntityName({
+          rawText: '旧中文演员',
+          id: 'actor.internal',
+          orderedIds: ['actor.internal'],
+          kind: 'actor',
+          locale: 'en'
+        }),
+        historyEntityName({
+          rawText: '旧中文敌人',
+          id: 'enemy.internal',
+          orderedIds: ['enemy.internal'],
+          kind: 'enemy',
+          locale: 'en'
+        })
+      ].join(' ')
+    ).not.toMatch(/[\u3400-\u9fff]|internal/u);
   });
 
   it('uses the immutable player period for opaque scenario identities and never exposes the slug', () => {

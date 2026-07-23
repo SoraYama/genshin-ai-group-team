@@ -1,4 +1,5 @@
 import type { AbyssAdvisorProgressStep } from '../../../shared/abyss-advisor.js';
+import type { AdvisorNarrative } from '../../../shared/advisor-narrative.js';
 import {
   abyssElementLabel,
   localizedMechanicTerm,
@@ -8,6 +9,9 @@ import type { EnemyInstance, EnemyMechanics } from '../../../shared/scenario-v2.
 
 export type CharacterInterventionState = 'neutral' | 'locked' | 'excluded';
 export type PresentationLocale = 'zh' | 'en';
+export type NarrativeTargetPresentation =
+  | { status: 'localized'; title: string; body: string }
+  | { status: 'unavailable'; title: string; body: string };
 
 const ELEMENT_LABELS: Record<string, string> = {
   pyro: '火',
@@ -70,22 +74,55 @@ export function localizedEntityName(
   fallback: { zh: string; en: string }
 ): string {
   return locale === 'en'
-    ? names['en-US'] ?? names.en ?? names['en-GB'] ?? fallback.en
-    : names['zh-CN'] ?? names['zh-Hans'] ?? names.zh ?? fallback.zh;
+    ? (names['en-US'] ?? names.en ?? names['en-GB'] ?? fallback.en)
+    : (names['zh-CN'] ?? names['zh-Hans'] ?? names.zh ?? fallback.zh);
 }
 
-export function localizedResultText(
-  value: string,
-  locale: PresentationLocale,
-  englishFallback: string
-): string {
-  return locale === 'en' && /[\u3400-\u9fff]/u.test(value) ? englishFallback : value;
+export function localizedPlanText(value: string, locale: PresentationLocale): string | null {
+  if (locale === 'en' && /[\u3400-\u9fff]/u.test(value)) return null;
+  return value;
 }
 
-export function enemyDisplayName(
-  enemy: EnemyInstance,
-  locale: PresentationLocale = 'zh'
+export function localizedProfileName(
+  name: string,
+  id: string,
+  orderedIds: string[],
+  locale: PresentationLocale
 ): string {
+  if (locale === 'zh' || !/[\u3400-\u9fff]/u.test(name)) return name;
+  const uniqueIds = [...new Set(orderedIds)];
+  const position = uniqueIds.indexOf(id);
+  return `Character ${position >= 0 ? position + 1 : uniqueIds.length + 1}`;
+}
+
+export function narrativeTargetPresentation(
+  narrative: Pick<AdvisorNarrative, 'sections'> | undefined,
+  targetKey: string,
+  locale: PresentationLocale
+): NarrativeTargetPresentation {
+  const section = narrative?.sections.find((candidate) => candidate.targetKey === targetKey);
+  if (!section) {
+    return locale === 'en'
+      ? {
+          status: 'unavailable',
+          title: 'Guidance unavailable',
+          body: 'No localized guidance was saved for this target.'
+        }
+      : {
+          status: 'unavailable',
+          title: '指引不可用',
+          body: '这个目标没有保存可验证的本地化指引。'
+        };
+  }
+  const key = locale === 'en' ? 'en-US' : 'zh-CN';
+  return {
+    status: 'localized',
+    title: section.title[key],
+    body: section.body[key]
+  };
+}
+
+export function enemyDisplayName(enemy: EnemyInstance, locale: PresentationLocale = 'zh'): string {
   return localizedEntityName(enemy.enemy.names, locale, {
     zh: '未命名敌人',
     en: 'Unnamed enemy'
@@ -129,7 +166,10 @@ export function mechanicLabels(
 }
 
 function englishDamageType(value: string): string {
-  const normalized = value.trim().toLowerCase().replace(/(?:-damage| damage)$/u, '');
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/(?:-damage| damage)$/u, '');
   if (normalized === 'physical') return 'Physical';
   return EN_ELEMENT_LABELS[normalized] ?? 'Other damage';
 }
@@ -152,10 +192,7 @@ export function progressStepLabel(
   return locale === 'en' ? EN_PROGRESS_LABELS[step] : PROGRESS_LABELS[step];
 }
 
-export function characterElementLabel(
-  element: string,
-  locale: PresentationLocale = 'zh'
-): string {
+export function characterElementLabel(element: string, locale: PresentationLocale = 'zh'): string {
   if (locale === 'en') return EN_ELEMENT_LABELS[element.toLowerCase()] ?? 'Unknown';
   const label = abyssElementLabel(element);
   return label === '其他' ? '未知' : label;

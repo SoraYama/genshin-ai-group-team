@@ -13,7 +13,13 @@ import { EmptyState } from '../../components/ui/EmptyState';
 import { GtaButton } from '../../components/ui/GtaButton';
 import { useI18n } from '../../i18n';
 import { api } from '../../ipc';
-import { localizedResultText, type PresentationLocale } from './abyss-presentation';
+import {
+  localizedEntityName,
+  localizedPlanText,
+  localizedProfileName,
+  narrativeTargetPresentation,
+  type PresentationLocale
+} from './abyss-presentation';
 import {
   eligibilityReasonLabel,
   elementLabel,
@@ -764,11 +770,10 @@ function TheaterResult({
         </ul>
         {result.eligibility.constructionAdvice.map((advice, index) => (
           <p key={index}>
-            {localizedResultText(
-              advice.note,
-              locale,
-              'Adjust the selected cast to satisfy the published eligibility rules.'
-            )}
+            {localizedPlanText(advice.note, locale) ??
+              (isEnglish
+                ? 'Saved eligibility advice is unavailable in English.'
+                : '没有保存可显示的资格调整建议。')}
           </p>
         ))}
       </section>
@@ -779,13 +784,6 @@ function TheaterResult({
       .flat()
       .map((entity) => [entity.id, entity])
   );
-  const actorName = (id: string) =>
-    byId.get(id)?.name ??
-    (poolById.get(id)
-      ? theaterEntityName(poolById.get(id)!, locale)
-      : isEnglish
-        ? 'Unnamed actor'
-        : '未命名演员');
   const castEntries = [
     ...result.plan.cast.selectedCharacterIds.map((id) => ({ id, source: 'owned' as const })),
     ...result.plan.cast.openingCharacterIds.map((id) => ({ id, source: 'opening' as const })),
@@ -796,6 +794,25 @@ function TheaterResult({
     })),
     ...result.plan.cast.supportCharacterIds.map((id) => ({ id, source: 'support' as const }))
   ];
+  const orderedActorIds = castEntries.map(({ id }) => id);
+  const actorName = (id: string) => {
+    const owned = byId.get(id);
+    if (owned) return localizedProfileName(owned.name, id, orderedActorIds, locale);
+    const poolActor = poolById.get(id);
+    return poolActor
+      ? theaterEntityName(poolActor, locale)
+      : isEnglish
+        ? `Actor ${Math.max(orderedActorIds.indexOf(id), 0) + 1}`
+        : '未命名演员';
+  };
+  const localizedDetails = (items: string[]) =>
+    items.flatMap((item) => {
+      const localized = localizedPlanText(item, locale);
+      return localized ? [localized] : [];
+    });
+  const castNarrative = narrativeTargetPresentation(result.narrative, 'theater-cast', locale);
+  const arcanaById = new Map((scenario.arcanaNodes ?? []).map((node) => [node.id, node]));
+  const orderedArcanaIds = result.routeGuidance.arcanaPriorities.map(({ nodeId }) => nodeId);
   return (
     <section className="gta-theater-result" aria-labelledby="theater-result-title">
       <header>
@@ -818,6 +835,7 @@ function TheaterResult({
       <p>{isEnglish ? result.narrative.summary['en-US'] : result.narrative.summary['zh-CN']}</p>
       <section className="gta-theater-result-cast">
         <h5>{isEnglish ? 'Selected cast' : '入场演员池'}</h5>
+        <p>{castNarrative.body}</p>
         <div>
           {castEntries.map(({ id, source }) => (
             <span key={`${source}:${id}`} data-theater-actor-id={id}>
@@ -857,6 +875,18 @@ function TheaterResult({
         {result.plan.acts.map((act) => {
           const scenarioAct = scenario.acts.find((item) => item.act === act.act);
           const presentation = scenarioAct ? theaterActPresentation(scenarioAct, locale) : null;
+          const actNarrative = narrativeTargetPresentation(
+            result.narrative,
+            `theater-act:${act.act}`,
+            locale
+          );
+          const localizedPathNote = localizedPlanText(act.pathChoice.note, locale);
+          const rationale =
+            actNarrative.status === 'localized'
+              ? actNarrative.body
+              : localizedPathNote
+                ? pathChoiceLabel(act.pathChoice, locale)
+                : actNarrative.body;
           return (
             <article key={act.act}>
               <div className="gta-theater-route-node">
@@ -892,7 +922,7 @@ function TheaterResult({
                 )}
                 <div className="gta-theater-act-rationale">
                   <strong>{isEnglish ? 'Why this arrangement' : '为什么这样安排'}</strong>
-                  <p>{pathChoiceLabel(act.pathChoice, locale)}</p>
+                  <p>{rationale}</p>
                 </div>
                 <small>
                   {isEnglish ? 'Planned Vigor: ' : '预计活力：'}
@@ -913,35 +943,47 @@ function TheaterResult({
             {result.routeGuidance.preserveCharacterIds.map(actorName).join(isEnglish ? ', ' : '、')}
           </p>
         )}
-        {result.routeGuidance.notes.map((note) => (
-          <p key={note}>
-            {localizedResultText(
-              note,
-              locale,
-              'Preserve scarce capabilities for later route branches.'
-            )}
-          </p>
+        {(localizedDetails(result.routeGuidance.notes).length > 0
+          ? localizedDetails(result.routeGuidance.notes)
+          : [
+              isEnglish
+                ? 'Saved route notes are unavailable in English.'
+                : '没有保存可显示的路线说明。'
+            ]
+        ).map((note) => (
+          <p key={note}>{note}</p>
         ))}
         {result.routeGuidance.arcanaPriorities.length > 0 && (
           <ol className="gta-theater-arcana">
             {result.routeGuidance.arcanaPriorities.map((priority) => {
               const budget = result.nodeBudget.find(({ nodeId }) => nodeId === priority.nodeId);
+              const arcana = arcanaById.get(priority.nodeId);
+              const arcanaPosition = orderedArcanaIds.indexOf(priority.nodeId);
+              const arcanaName = arcana
+                ? localizedEntityName(arcana.name.names, locale, {
+                    zh: `已保存秘法 ${Math.max(arcanaPosition, 0) + 1}`,
+                    en: `Arcana ${Math.max(arcanaPosition, 0) + 1}`
+                  })
+                : (localizedPlanText(priority.name, locale) ??
+                  (isEnglish
+                    ? `Arcana ${Math.max(arcanaPosition, 0) + 1}`
+                    : `已保存秘法 ${Math.max(arcanaPosition, 0) + 1}`));
               return (
                 <li key={priority.nodeId}>
-                  <strong>
-                    {localizedResultText(priority.name, locale, 'Saved Arcana priority')}
-                  </strong>
+                  <strong>{arcanaName}</strong>
                   <span>
                     {isEnglish ? 'Trigger: ' : '触发条件：'}
-                    {isEnglish && /[\u3400-\u9fff]/u.test(priority.condition)
-                      ? 'Condition saved with the plan'
-                      : priority.condition}
+                    {localizedPlanText(priority.condition, locale) ??
+                      (isEnglish
+                        ? 'Saved trigger details are unavailable in English.'
+                        : '没有保存可显示的触发条件。')}
                   </span>
                   <span>
                     {isEnglish ? 'Reason: ' : '选择依据：'}
-                    {isEnglish && /[\u3400-\u9fff]/u.test(priority.reason)
-                      ? 'Reason saved with the plan'
-                      : priority.reason}
+                    {localizedPlanText(priority.reason, locale) ??
+                      (isEnglish
+                        ? 'Saved rationale is unavailable in English.'
+                        : '没有保存可显示的选择依据。')}
                   </span>
                   <small>
                     {isEnglish ? 'Node cost: ' : '节点资源消耗：'}
@@ -958,29 +1000,15 @@ function TheaterResult({
           {result.warnings.length > 0 && (
             <p>
               <strong>{isEnglish ? 'Watch for: ' : '需要留意：'}</strong>
-              {result.warnings
-                .map((text) =>
-                  localizedResultText(
-                    text,
-                    locale,
-                    'Verify route assumptions against the current run.'
-                  )
-                )
-                .join(isEnglish ? '; ' : '；')}
+              {localizedDetails(result.warnings).join(isEnglish ? '; ' : '；') ||
+                (isEnglish ? 'Saved warnings are unavailable in English.' : '暂无额外提醒')}
             </p>
           )}
           {result.assumptions.length > 0 && (
             <p>
               <strong>{isEnglish ? 'This recommendation assumes: ' : '本次建议基于：'}</strong>
-              {result.assumptions
-                .map((text) =>
-                  localizedResultText(
-                    text,
-                    locale,
-                    'Only verified eligibility and route facts are treated as confirmed.'
-                  )
-                )
-                .join(isEnglish ? '; ' : '；')}
+              {localizedDetails(result.assumptions).join(isEnglish ? '; ' : '；') ||
+                (isEnglish ? 'Saved assumptions are unavailable in English.' : '暂无额外前提')}
             </p>
           )}
         </footer>

@@ -18,6 +18,8 @@ const rendererExternalRequests: string[] = [];
 const observedPages = new WeakSet<Page>();
 const FORBIDDEN_PLAYER_TERMS =
   /LLM|Enka|API Key|Base URL|\bpartial\b|\bfallback\b|\bstage\b|team-composer|abyss-mage|ruin-guard|development\.|下一阶段接入|开发中/iu;
+const GENERIC_SEMANTIC_PLACEHOLDERS =
+  /Covers the selected|Adjust the rotation|Use a conservative rotation|Saved first-half team purpose|Saved second-half team purpose|Details saved with this plan|Team for phase \d|Condition saved with the plan|Reason saved with the plan|Route note saved with this plan/iu;
 const REQUIRED_VIEWPORTS = [
   { width: 1024, height: 768 },
   { width: 1280, height: 800 },
@@ -34,6 +36,11 @@ async function expectNoForbiddenPlayerTerms(): Promise<void> {
   expect(content).not.toMatch(FORBIDDEN_PLAYER_TERMS);
 }
 
+async function expectNoGenericSemanticPlaceholders(): Promise<void> {
+  const content = (await page.locator('main').textContent()) ?? '';
+  expect(content).not.toMatch(GENERIC_SEMANTIC_PLACEHOLDERS);
+}
+
 async function switchToEnglish(): Promise<void> {
   await page.getByRole('button', { name: '账号与设置' }).click();
   await page.getByRole('menuitem', { name: '切换语言，当前：中文' }).click();
@@ -42,6 +49,12 @@ async function switchToEnglish(): Promise<void> {
 async function switchToChinese(): Promise<void> {
   await page.getByRole('button', { name: 'Account and settings' }).click();
   await page.getByRole('menuitem', { name: 'Switch language, current: English' }).click();
+}
+
+async function resetLocaleToChinese(): Promise<void> {
+  const englishAccount = page.getByRole('button', { name: 'Account and settings' });
+  if (await englishAccount.isVisible().catch(() => false)) await switchToChinese();
+  await expect(page.getByRole('button', { name: '账号与设置' })).toBeVisible();
 }
 
 async function expectNoChineseChrome(terms: RegExp): Promise<void> {
@@ -217,6 +230,10 @@ function observeRenderer(rendererPage: Page): void {
 test.beforeAll(async () => {
   userDataDir = await mkdtemp(path.join(tmpdir(), 'genshin-team-advisor-e2e-'));
   await launchApp();
+});
+
+test.beforeEach(async () => {
+  await resetLocaleToChinese();
 });
 
 test.afterAll(async () => {
@@ -1056,9 +1073,7 @@ test('runs the abyss-specific development-sample flow with accessible interventi
   await expect(page.getByRole('heading', { name: 'Spiral Abyss planner' })).toBeVisible();
   await expect(page.getByRole('searchbox', { name: 'Search available characters' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Generate both teams' })).toBeVisible();
-  await expectNoChineseChrome(
-    /选择挑战|深境螺旋战线|搜索可用角色|生成上下半方案|配队进度/u
-  );
+  await expectNoChineseChrome(/选择挑战|深境螺旋战线|搜索可用角色|生成上下半方案|配队进度/u);
   await switchToChinese();
   await expect(page.getByRole('heading', { name: '深境螺旋战线' })).toBeVisible();
 
@@ -1103,6 +1118,9 @@ test('runs the abyss-specific development-sample flow with accessible interventi
 
   await page.getByRole('button', { name: '生成上下半方案' }).click();
   await expect(page.getByText('本地规则', { exact: true })).toBeVisible();
+  await expect(
+    page.getByText('已按本地规则核对上下半队伍与逐间敌情。', { exact: true })
+  ).toBeVisible();
   await expect(page.getByRole('heading', { name: '上半队伍' })).toBeVisible();
   await expect(page.getByRole('heading', { name: '下半队伍' })).toBeVisible();
   const resultCharacters = await page
@@ -1123,9 +1141,24 @@ test('runs the abyss-specific development-sample flow with accessible interventi
   await expect(page.getByRole('heading', { name: 'First-half team' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Second-half team' })).toBeVisible();
   await expect(page.getByLabel('Team planning progress')).toBeVisible();
-  await expectNoChineseChrome(
-    /深境螺旋战线|生成上下半方案|上半队伍|下半队伍|配队进度/u
+  await expect(
+    page.getByText('The two teams and chamber matchups were checked with local rules.', {
+      exact: true
+    })
+  ).toBeVisible();
+  await expectNoGenericSemanticPlaceholders();
+  await expectNoChineseChrome(/深境螺旋战线|生成上下半方案|上半队伍|下半队伍|配队进度/u);
+  await page.getByRole('button', { name: 'Simple rotations' }).click();
+  await page.getByRole('button', { name: 'Recalculate both teams' }).click();
+  await expect(
+    page.getByText('The two teams and chamber matchups were checked with local rules.', {
+      exact: true
+    })
+  ).toBeVisible();
+  const abyssRequestLocales = await page.evaluate<Array<'zh-CN' | 'en-US' | null>>(
+    "window.api.history.listAbyss({ uid: '123456789' }).then((entries) => entries.map((entry) => entry.interventions.locale ?? null))"
   );
+  expect(abyssRequestLocales).toContain('en-US');
   await switchToChinese();
   await expect(page.getByRole('heading', { name: '上下半零重复' })).toBeVisible();
 
@@ -1170,13 +1203,18 @@ test('runs the abyss-specific development-sample flow with accessible interventi
   await expect(page.getByRole('button', { name: '删除这份方案' })).toBeVisible();
   await switchToEnglish();
   await expect(page.getByRole('heading', { name: 'Recommendation history' })).toBeVisible();
-  await expect(page.getByRole('button', { name: /Spiral Abyss · Floor 12/ }).first()).toHaveAttribute(
-    'aria-expanded',
-    'true'
-  );
+  await expect(
+    page.getByRole('button', { name: /Spiral Abyss · Floor 12/ }).first()
+  ).toHaveAttribute('aria-expanded', 'true');
   await expect(page.getByText('Rotation').first()).toBeVisible();
   await expect(page.getByText('First-half tactics').first()).toBeVisible();
   await expect(page.getByRole('button', { name: 'Delete this plan' })).toBeVisible();
+  await expect(
+    page.getByText('The two teams and chamber matchups were checked with local rules.', {
+      exact: true
+    })
+  ).toBeVisible();
+  await expectNoGenericSemanticPlaceholders();
   await expectNoChineseChrome(/推荐记录|深境螺旋 12 层|循环手法|上半打法|替换建议|删除这份方案/u);
   await switchToChinese();
   await expect(page.getByText('循环手法').first()).toBeVisible();
@@ -1326,6 +1364,9 @@ test('plans three Stygian phases from the development scenario without leaking r
   await page.getByRole('button', { name: '冲高难奖励' }).click();
   await page.getByRole('button', { name: '生成三阶段方案' }).click();
   await expect(page.getByRole('heading', { name: '三队已按当期规则分配' })).toBeVisible();
+  await expect(
+    page.getByText('已按本地规则核对三阶段队伍、复用限制与机制覆盖。', { exact: true })
+  ).toBeVisible();
   await page.getByRole('button', { name: '改选演示难度 5' }).click();
   await expect(page.getByRole('button', { name: '冲高难奖励' })).toHaveAttribute(
     'aria-pressed',
@@ -1377,9 +1418,26 @@ test('plans three Stygian phases from the development scenario without leaking r
     page.getByRole('heading', { name: 'Three teams allocated under current rules' })
   ).toBeVisible();
   await expect(page.getByLabel('Team planning progress')).toBeVisible();
+  await expect(
+    page.getByText('All three teams, reuse limits, and mechanic coverage were checked locally.', {
+      exact: true
+    })
+  ).toBeVisible();
+  await expectNoGenericSemanticPlaceholders();
   await expectNoChineseChrome(
     /幽境危战作战台|选择六档难度|选择奖励目标|生成三阶段方案|三队已按当期规则分配|配队进度/u
   );
+  await page.getByRole('button', { name: 'Simple rotations' }).click();
+  await page.getByRole('button', { name: 'Generate three-phase plan' }).click();
+  await expect(
+    page.getByText('All three teams, reuse limits, and mechanic coverage were checked locally.', {
+      exact: true
+    })
+  ).toBeVisible();
+  const stygianRequestLocales = await page.evaluate<Array<'zh-CN' | 'en-US' | null>>(
+    "window.api.history.listStygian({ uid: '987654321' }).then((entries) => entries.map((entry) => entry.interventions.locale ?? null))"
+  );
+  expect(stygianRequestLocales).toContain('en-US');
   await switchToChinese();
   await expect(page.getByRole('heading', { name: '三队已按当期规则分配' })).toBeVisible();
   await expectPageFitsEveryViewport('Stygian input and result');
@@ -1405,15 +1463,19 @@ test('plans three Stygian phases from the development scenario without leaking r
   await switchToEnglish();
   await expect(page.getByRole('heading', { name: 'Recommendation history' })).toBeVisible();
   await expect(
-    page.getByRole('button', { name: /Stygian Onslaught · Difficulty 6/ }).first()
+    page.getByRole('button', { name: /Stygian Onslaught · Demo Difficulty 6/ }).first()
   ).toHaveAttribute('aria-expanded', 'true');
   await expect(page.getByText('Phase 1', { exact: true })).toBeVisible();
   await expect(page.getByText('Rotation').first()).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Saved phase guidance' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Delete this plan' })).toBeVisible();
-  await expectNoChineseChrome(
-    /推荐记录|幽境危战|循环手法|当时的阶段依据|删除这份方案/u
-  );
+  await expect(
+    page.getByText('All three teams, reuse limits, and mechanic coverage were checked locally.', {
+      exact: true
+    })
+  ).toBeVisible();
+  await expectNoGenericSemanticPlaceholders();
+  await expectNoChineseChrome(/推荐记录|幽境危战|循环手法|当时的阶段依据|删除这份方案/u);
   await switchToChinese();
   await expect(page.getByText('第 1 阶段', { exact: true })).toBeVisible();
 });
@@ -1618,6 +1680,9 @@ test('checks Theater eligibility and renders a cast-vigor route instead of team 
   await expect(page.getByRole('button', { name: /演示试用角色/ })).toBeDisabled();
   await expect(page.getByRole('button', { name: /剧诗角色1.*优先纳入/ })).toBeDisabled();
   await expect(page.getByRole('heading', { name: '演员池与活力已排成幕次路线' })).toBeVisible();
+  await expect(
+    page.getByText('已按本地规则核对演员池、活力预算与逐幕路线。', { exact: true })
+  ).toBeVisible();
   await expect(page.getByRole('heading', { name: '入场演员池' })).toBeVisible();
   await expect(page.getByRole('heading', { name: '逐幕活力预算' })).toBeVisible();
   await expect(page.getByRole('heading', { name: '保留与分支优先级' })).toBeVisible();
@@ -1648,9 +1713,26 @@ test('checks Theater eligibility and renders a cast-vigor route instead of team 
   await expect(page.getByRole('heading', { name: 'Selected cast' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Vigor budget by act' })).toBeVisible();
   await expect(page.getByLabel('Route generation progress')).toBeVisible();
+  await expect(
+    page.getByText('The cast, Vigor budget, and act route were checked with local rules.', {
+      exact: true
+    })
+  ).toBeVisible();
+  await expectNoGenericSemanticPlaceholders();
   await expectNoChineseChrome(
     /幻想真境剧诗手册|元素、等级与人数|选择规划幕次|生成剧诗路线|演员池与活力已排成幕次路线|路线生成进度/u
   );
+  await page.getByRole('button', { name: 'Simple rotations' }).click();
+  await page.getByRole('button', { name: 'Generate Theater route' }).click();
+  await expect(
+    page.getByText('The cast, Vigor budget, and act route were checked with local rules.', {
+      exact: true
+    })
+  ).toBeVisible();
+  const theaterRequestLocales = await page.evaluate<Array<'zh-CN' | 'en-US' | null>>(
+    "window.api.history.listTheater({ uid: '246813579' }).then((entries) => entries.map((entry) => entry.interventions.locale ?? null))"
+  );
+  expect(theaterRequestLocales).toContain('en-US');
   await switchToChinese();
   await expect(page.getByRole('heading', { name: '演员池与活力已排成幕次路线' })).toBeVisible();
   await expectPageFitsEveryViewport('Theater route');
@@ -1698,6 +1780,12 @@ test('checks Theater eligibility and renders a cast-vigor route instead of team 
   await expect(page.getByRole('heading', { name: 'Saved route guidance' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Arcana node budget' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Delete this plan' })).toBeVisible();
+  await expect(
+    page.getByText('The cast, Vigor budget, and act route were checked with local rules.', {
+      exact: true
+    })
+  ).toBeVisible();
+  await expectNoGenericSemanticPlaceholders();
   await expectNoChineseChrome(
     /推荐记录|幻想真境剧诗|第 1 幕|计划活力|当时的路线指引|秘法节点预算|删除这份方案/u
   );

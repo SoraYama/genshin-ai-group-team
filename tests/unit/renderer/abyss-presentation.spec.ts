@@ -10,6 +10,94 @@ import {
 import { abyssScenario } from '../services/abyss-test-fixtures.js';
 
 describe('abyss presentation', () => {
+  it('reads structured bilingual semantics only from the exact stable target key', async () => {
+    const presentation =
+      (await import('../../../src/renderer/pages/Advisor/abyss-presentation.js')) as Record<
+        string,
+        unknown
+      >;
+    expect(presentation.narrativeTargetPresentation).toBeTypeOf('function');
+    const narrativeTargetPresentation = presentation.narrativeTargetPresentation as (
+      narrative: {
+        sections: Array<{
+          targetKey: string;
+          title: { 'zh-CN': string; 'en-US': string };
+          body: { 'zh-CN': string; 'en-US': string };
+        }>;
+      },
+      targetKey: string,
+      locale: 'zh' | 'en'
+    ) => { status: string; title: string; body: string };
+    const narrative = {
+      sections: [
+        {
+          targetKey: 'abyss-team:first',
+          title: { 'zh-CN': '上半队伍', 'en-US': 'First-half team' },
+          body: {
+            'zh-CN': '先完成辅助布置再进入主要输出。',
+            'en-US': 'Set up support effects before committing to the main damage window.'
+          }
+        },
+        {
+          targetKey: 'abyss-team:first-extra',
+          title: { 'zh-CN': '错误目标', 'en-US': 'Wrong target' },
+          body: { 'zh-CN': '不能命中。', 'en-US': 'Must not match.' }
+        }
+      ]
+    };
+
+    expect(narrativeTargetPresentation(narrative, 'abyss-team:first', 'en')).toEqual({
+      status: 'localized',
+      title: 'First-half team',
+      body: 'Set up support effects before committing to the main damage window.'
+    });
+    expect(narrativeTargetPresentation(narrative, 'abyss-team:second', 'en')).toEqual({
+      status: 'unavailable',
+      title: 'Guidance unavailable',
+      body: 'No localized guidance was saved for this target.'
+    });
+  });
+
+  it('does not turn foreign-language saved prose into a generic semantic placeholder', async () => {
+    const presentation =
+      (await import('../../../src/renderer/pages/Advisor/abyss-presentation.js')) as Record<
+        string,
+        unknown
+      >;
+    expect(presentation.localizedPlanText).toBeTypeOf('function');
+    const localizedPlanText = presentation.localizedPlanText as (
+      value: string,
+      locale: 'zh' | 'en'
+    ) => string | null;
+
+    expect(localizedPlanText('先布置辅助技能。', 'en')).toBeNull();
+    expect(localizedPlanText('Set up support skills first.', 'en')).toBe(
+      'Set up support skills first.'
+    );
+    expect(localizedPlanText('先布置辅助技能。', 'zh')).toBe('先布置辅助技能。');
+  });
+
+  it('uses stable neutral character labels when a profile name has no English snapshot', async () => {
+    const presentation =
+      (await import('../../../src/renderer/pages/Advisor/abyss-presentation.js')) as Record<
+        string,
+        unknown
+      >;
+    expect(presentation.localizedProfileName).toBeTypeOf('function');
+    const localizedProfileName = presentation.localizedProfileName as (
+      name: string,
+      id: string,
+      orderedIds: string[],
+      locale: 'zh' | 'en'
+    ) => string;
+
+    expect(localizedProfileName('中文角色', '1002', ['1001', '1002'], 'en')).toBe('Character 2');
+    expect(localizedProfileName('Raiden Shogun', '1002', ['1001', '1002'], 'en')).toBe(
+      'Raiden Shogun'
+    );
+    expect(localizedProfileName('中文角色', '1002', ['1001', '1002'], 'zh')).toBe('中文角色');
+  });
+
   it('uses a localized Chinese enemy name and never falls back to the English slug', () => {
     const enemy = abyssScenario().floors[0]!.chambers[0]!.firstHalf.waves[0]!.enemies[0]!;
     expect(enemyDisplayName(enemy)).toBe('训练水兽');

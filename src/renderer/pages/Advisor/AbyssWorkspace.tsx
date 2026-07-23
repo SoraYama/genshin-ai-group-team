@@ -15,8 +15,10 @@ import {
   characterElementLabel,
   cycleCharacterIntervention,
   enemyDisplayName,
-  localizedResultText,
+  localizedPlanText,
+  localizedProfileName,
   mechanicLabels,
+  narrativeTargetPresentation,
   progressStepLabel,
   type CharacterInterventionState,
   type PresentationLocale
@@ -846,6 +848,21 @@ function AbyssResult({
   const characterById = new Map(
     profile.characters.map((character) => [String(character.id), character])
   );
+  const selectedCharacterIds = [
+    ...result.plan.firstHalfTeam.characterIds,
+    ...result.plan.secondHalfTeam.characterIds
+  ];
+  const targetGuidance = (targetKey: string, rawText: string) => {
+    const presentation = narrativeTargetPresentation(result.narrative, targetKey, locale);
+    return presentation.status === 'localized'
+      ? presentation.body
+      : (localizedPlanText(rawText, locale) ?? presentation.body);
+  };
+  const localizedDetails = (items: string[]) =>
+    items.flatMap((item) => {
+      const localized = localizedPlanText(item, locale);
+      return localized ? [localized] : [];
+    });
   return (
     <section className="gta-abyss-result" aria-labelledby="abyss-result-title">
       <header>
@@ -877,29 +894,19 @@ function AbyssResult({
         <ResultTeam
           title={isEnglish ? 'First-half team' : '上半队伍'}
           ids={result.plan.firstHalfTeam.characterIds}
-          purpose={localizedResultText(
-            result.plan.firstHalfTeam.purpose,
-            locale,
-            'Covers the selected first-half encounters.'
-          )}
-          rotationNotes={result.plan.firstHalfTeam.rotationNotes.map((text) =>
-            localizedResultText(text, locale, 'Adjust the rotation to energy and wave transitions.')
-          )}
+          purpose={targetGuidance('abyss-team:first', result.plan.firstHalfTeam.purpose)}
+          rotationNotes={localizedDetails(result.plan.firstHalfTeam.rotationNotes)}
           characters={characterById}
+          orderedCharacterIds={selectedCharacterIds}
           locale={locale}
         />
         <ResultTeam
           title={isEnglish ? 'Second-half team' : '下半队伍'}
           ids={result.plan.secondHalfTeam.characterIds}
-          purpose={localizedResultText(
-            result.plan.secondHalfTeam.purpose,
-            locale,
-            'Covers the selected second-half encounters.'
-          )}
-          rotationNotes={result.plan.secondHalfTeam.rotationNotes.map((text) =>
-            localizedResultText(text, locale, 'Adjust the rotation to energy and wave transitions.')
-          )}
+          purpose={targetGuidance('abyss-team:second', result.plan.secondHalfTeam.purpose)}
+          rotationNotes={localizedDetails(result.plan.secondHalfTeam.rotationNotes)}
           characters={characterById}
+          orderedCharacterIds={selectedCharacterIds}
           locale={locale}
         />
       </div>
@@ -922,95 +929,75 @@ function AbyssResult({
         </div>
       )}
       <div className="gta-abyss-tactics">
-        {result.plan.chambers.map((chamber) => (
-          <article key={`${chamber.floor}-${chamber.chamber}`}>
-            <h5>
-              {isEnglish
-                ? `Floor ${chamber.floor} · Chamber ${chamber.chamber}`
-                : `${chamber.floor} 层 · 第 ${chamber.chamber} 间`}
-            </h5>
-            <div>
-              <strong>{isEnglish ? 'First-half tactics' : '上半怎么打'}</strong>
-              {chamber.firstHalf.tactics.map((text) => (
-                <p key={text}>
-                  {localizedResultText(
-                    text,
-                    locale,
-                    'Use a conservative rotation and verify enemy behavior in combat.'
-                  )}
-                </p>
-              ))}
-              <small>
-                {isEnglish ? 'Time risk: ' : '超时风险：'}
-                {chamber.firstHalf.risks
-                  .map((text) =>
-                    localizedResultText(
-                      text,
-                      locale,
-                      'Combat timing requires in-game verification.'
-                    )
-                  )
-                  .join(isEnglish ? '; ' : '；') ||
-                  (isEnglish ? 'No additional notes' : '暂无额外提示')}
-              </small>
-              <small>
-                {isEnglish ? 'Substitutions: ' : '替换建议：'}
-                {chamber.firstHalf.substitutionNotes
-                  .map((text) =>
-                    localizedResultText(
-                      text,
-                      locale,
-                      'Regenerate both teams after changing characters.'
-                    )
-                  )
-                  .join(isEnglish ? '; ' : '；') ||
-                  (isEnglish
-                    ? 'Adjust characters, then regenerate both teams'
-                    : '调整角色后重新生成完整双队')}
-              </small>
-            </div>
-            <div>
-              <strong>{isEnglish ? 'Second-half tactics' : '下半怎么打'}</strong>
-              {chamber.secondHalf.tactics.map((text) => (
-                <p key={text}>
-                  {localizedResultText(
-                    text,
-                    locale,
-                    'Use a conservative rotation and verify enemy behavior in combat.'
-                  )}
-                </p>
-              ))}
-              <small>
-                {isEnglish ? 'Time risk: ' : '超时风险：'}
-                {chamber.secondHalf.risks
-                  .map((text) =>
-                    localizedResultText(
-                      text,
-                      locale,
-                      'Combat timing requires in-game verification.'
-                    )
-                  )
-                  .join(isEnglish ? '; ' : '；') ||
-                  (isEnglish ? 'No additional notes' : '暂无额外提示')}
-              </small>
-              <small>
-                {isEnglish ? 'Substitutions: ' : '替换建议：'}
-                {chamber.secondHalf.substitutionNotes
-                  .map((text) =>
-                    localizedResultText(
-                      text,
-                      locale,
-                      'Regenerate both teams after changing characters.'
-                    )
-                  )
-                  .join(isEnglish ? '; ' : '；') ||
-                  (isEnglish
-                    ? 'Adjust characters, then regenerate both teams'
-                    : '调整角色后重新生成完整双队')}
-              </small>
-            </div>
-          </article>
-        ))}
+        {result.plan.chambers.map((chamber) => {
+          const firstTarget = narrativeTargetPresentation(
+            result.narrative,
+            `abyss-chamber:${chamber.floor}:${chamber.chamber}:first`,
+            locale
+          );
+          const secondTarget = narrativeTargetPresentation(
+            result.narrative,
+            `abyss-chamber:${chamber.floor}:${chamber.chamber}:second`,
+            locale
+          );
+          const firstTactics =
+            firstTarget.status === 'localized'
+              ? [firstTarget.body]
+              : localizedDetails(chamber.firstHalf.tactics);
+          const secondTactics =
+            secondTarget.status === 'localized'
+              ? [secondTarget.body]
+              : localizedDetails(chamber.secondHalf.tactics);
+          return (
+            <article key={`${chamber.floor}-${chamber.chamber}`}>
+              <h5>
+                {isEnglish
+                  ? `Floor ${chamber.floor} · Chamber ${chamber.chamber}`
+                  : `${chamber.floor} 层 · 第 ${chamber.chamber} 间`}
+              </h5>
+              <div>
+                <strong>{isEnglish ? 'First-half tactics' : '上半怎么打'}</strong>
+                {(firstTactics.length > 0 ? firstTactics : [firstTarget.body]).map((text) => (
+                  <p key={text}>{text}</p>
+                ))}
+                <small>
+                  {isEnglish ? 'Time risk: ' : '超时风险：'}
+                  {localizedDetails(chamber.firstHalf.risks).join(isEnglish ? '; ' : '；') ||
+                    (isEnglish ? 'Saved risk details are unavailable in English.' : '暂无额外提示')}
+                </small>
+                <small>
+                  {isEnglish ? 'Substitutions: ' : '替换建议：'}
+                  {localizedDetails(chamber.firstHalf.substitutionNotes).join(
+                    isEnglish ? '; ' : '；'
+                  ) ||
+                    (isEnglish
+                      ? 'Saved substitution details are unavailable in English.'
+                      : '调整角色后重新生成完整双队')}
+                </small>
+              </div>
+              <div>
+                <strong>{isEnglish ? 'Second-half tactics' : '下半怎么打'}</strong>
+                {(secondTactics.length > 0 ? secondTactics : [secondTarget.body]).map((text) => (
+                  <p key={text}>{text}</p>
+                ))}
+                <small>
+                  {isEnglish ? 'Time risk: ' : '超时风险：'}
+                  {localizedDetails(chamber.secondHalf.risks).join(isEnglish ? '; ' : '；') ||
+                    (isEnglish ? 'Saved risk details are unavailable in English.' : '暂无额外提示')}
+                </small>
+                <small>
+                  {isEnglish ? 'Substitutions: ' : '替换建议：'}
+                  {localizedDetails(chamber.secondHalf.substitutionNotes).join(
+                    isEnglish ? '; ' : '；'
+                  ) ||
+                    (isEnglish
+                      ? 'Saved substitution details are unavailable in English.'
+                      : '调整角色后重新生成完整双队')}
+                </small>
+              </div>
+            </article>
+          );
+        })}
       </div>
       <div className="gta-abyss-result-notes">
         <div>
@@ -1033,15 +1020,8 @@ function AbyssResult({
           <div>
             <strong>{isEnglish ? 'Watch for' : '需要留意'}</strong>
             <span>
-              {result.warnings
-                .map((text) =>
-                  localizedResultText(
-                    text,
-                    locale,
-                    'Verify this recommendation against the current roster and combat conditions.'
-                  )
-                )
-                .join(isEnglish ? '; ' : '；')}
+              {localizedDetails(result.warnings).join(isEnglish ? '; ' : '；') ||
+                (isEnglish ? 'Saved warnings are unavailable in English.' : '暂无额外提醒')}
             </span>
           </div>
         )}
@@ -1049,15 +1029,8 @@ function AbyssResult({
           <div>
             <strong>{isEnglish ? 'This recommendation assumes' : '本次建议基于'}</strong>
             <span>
-              {result.assumptions
-                .map((text) =>
-                  localizedResultText(
-                    text,
-                    locale,
-                    'Only verified roster and challenge facts are treated as confirmed.'
-                  )
-                )
-                .join(isEnglish ? '; ' : '；')}
+              {localizedDetails(result.assumptions).join(isEnglish ? '; ' : '；') ||
+                (isEnglish ? 'Saved assumptions are unavailable in English.' : '暂无额外前提')}
             </span>
           </div>
         )}
@@ -1072,6 +1045,7 @@ function ResultTeam({
   purpose,
   rotationNotes,
   characters,
+  orderedCharacterIds,
   locale
 }: {
   title: string;
@@ -1079,6 +1053,7 @@ function ResultTeam({
   purpose: string;
   rotationNotes: string[];
   characters: Map<string, CharacterProfile>;
+  orderedCharacterIds: string[];
   locale: PresentationLocale;
 }) {
   const isEnglish = locale === 'en';
@@ -1097,7 +1072,13 @@ function ResultTeam({
           const character = characters.get(id);
           return (
             <span key={id} data-result-character-id={id}>
-              <strong>{character?.name ?? (isEnglish ? 'Unknown character' : '未知角色')}</strong>
+              <strong>
+                {character
+                  ? localizedProfileName(character.name, id, orderedCharacterIds, locale)
+                  : isEnglish
+                    ? 'Unknown character'
+                    : '未知角色'}
+              </strong>
               <small>
                 {character
                   ? isEnglish

@@ -19,7 +19,9 @@ import { useI18n } from '../../i18n';
 import { api } from '../../ipc';
 import {
   characterElementLabel,
-  localizedResultText,
+  localizedPlanText,
+  localizedProfileName,
+  narrativeTargetPresentation,
   type PresentationLocale
 } from './abyss-presentation';
 import {
@@ -762,6 +764,12 @@ function StygianResult({
     );
   }
   const byId = new Map(profile.characters.map((character) => [String(character.id), character]));
+  const selectedCharacterIds = result.plan.phases.flatMap((phase) => phase.team.characterIds);
+  const localizedDetails = (items: string[]) =>
+    items.flatMap((item) => {
+      const localized = localizedPlanText(item, locale);
+      return localized ? [localized] : [];
+    });
   return (
     <section className="gta-stygian-result" aria-labelledby="stygian-result-title">
       <header>
@@ -797,14 +805,15 @@ function StygianResult({
                 ? 'A cautious attempt is reasonable, but success cannot be predicted'
                 : '可谨慎尝试，但不能判定能否通过'}
           </strong>
-          {result.difficultyAssessment.evidence.map((text) => (
-            <p key={text}>
-              {localizedResultText(
-                text,
-                locale,
-                'The saved roster evidence does not establish a guaranteed clear.'
-              )}
-            </p>
+          {(localizedDetails(result.difficultyAssessment.evidence).length > 0
+            ? localizedDetails(result.difficultyAssessment.evidence)
+            : [
+                isEnglish
+                  ? 'Saved difficulty evidence is unavailable in English.'
+                  : '没有保存可显示的难度判断依据。'
+              ]
+          ).map((text) => (
+            <p key={text}>{text}</p>
           ))}
           {result.difficultyAssessment.suggestedDifficultyId && (
             <GtaButton
@@ -826,11 +835,22 @@ function StygianResult({
           .sort((left, right) => left.phase - right.phase)
           .map((phase) => {
             const guidance = result.phaseGuidance.find((item) => item.phase === phase.phase);
+            const narrative = narrativeTargetPresentation(
+              result.narrative,
+              `stygian-phase:${phase.phase}`,
+              locale
+            );
+            const localizedPurpose = localizedPlanText(phase.team.purpose, locale);
+            const rotationNotes = localizedDetails(phase.team.rotationNotes);
+            const mechanismBasis = localizedDetails(guidance?.mechanismBasis ?? []);
+            const risks = localizedDetails(guidance?.risks ?? []);
             return (
               <article key={phase.phase}>
                 <span>{isEnglish ? `Phase ${phase.phase}` : `第 ${phase.phase} 阶段`}</span>
                 <h5>
-                  {localizedResultText(phase.team.purpose, locale, `Team for phase ${phase.phase}`)}
+                  {narrative.status === 'localized'
+                    ? narrative.body
+                    : (localizedPurpose ?? narrative.body)}
                 </h5>
                 <div className="gta-stygian-result-roster">
                   {phase.team.characterIds.map((id) => {
@@ -838,7 +858,11 @@ function StygianResult({
                     return (
                       <span key={id} data-stygian-result-character-id={id}>
                         <strong>
-                          {character?.name ?? (isEnglish ? 'Unknown character' : '未知角色')}
+                          {character
+                            ? localizedProfileName(character.name, id, selectedCharacterIds, locale)
+                            : isEnglish
+                              ? 'Unknown character'
+                              : '未知角色'}
                         </strong>
                         <small>
                           {character
@@ -855,38 +879,41 @@ function StygianResult({
                 </div>
                 <section>
                   <strong>{isEnglish ? 'Opening rotation' : '开局循环'}</strong>
-                  {phase.team.rotationNotes.map((text) => (
-                    <p key={text}>
-                      {localizedResultText(
-                        text,
-                        locale,
-                        'Set up support effects before the main damage window.'
-                      )}
-                    </p>
+                  {(rotationNotes.length > 0
+                    ? rotationNotes
+                    : [
+                        isEnglish
+                          ? 'Saved rotation details are unavailable in English.'
+                          : '没有保存可显示的循环细节。'
+                      ]
+                  ).map((text) => (
+                    <p key={text}>{text}</p>
                   ))}
                 </section>
                 <section>
                   <strong>{isEnglish ? 'Mechanic basis' : '机制依据'}</strong>
-                  {guidance?.mechanismBasis.map((text) => (
-                    <p key={text}>
-                      {localizedResultText(
-                        text,
-                        locale,
-                        'No additional verified boss mechanics are listed.'
-                      )}
-                    </p>
+                  {(mechanismBasis.length > 0
+                    ? mechanismBasis
+                    : [
+                        isEnglish
+                          ? 'Saved mechanic details are unavailable in English.'
+                          : '没有保存可显示的机制依据。'
+                      ]
+                  ).map((text) => (
+                    <p key={text}>{text}</p>
                   ))}
                 </section>
                 <section>
                   <strong>{isEnglish ? 'Watch for' : '需要留意'}</strong>
-                  {guidance?.risks.map((text) => (
-                    <p key={text}>
-                      {localizedResultText(
-                        text,
-                        locale,
-                        'Timing and energy requirements need in-game verification.'
-                      )}
-                    </p>
+                  {(risks.length > 0
+                    ? risks
+                    : [
+                        isEnglish
+                          ? 'Saved risk details are unavailable in English.'
+                          : '没有保存可显示的风险细节。'
+                      ]
+                  ).map((text) => (
+                    <p key={text}>{text}</p>
                   ))}
                 </section>
               </article>
@@ -898,29 +925,15 @@ function StygianResult({
           {result.warnings.length > 0 && (
             <p>
               <strong>{isEnglish ? 'Watch for: ' : '需要留意：'}</strong>
-              {result.warnings
-                .map((text) =>
-                  localizedResultText(
-                    text,
-                    locale,
-                    'Roster evidence is limited; treat the target as a cautious attempt.'
-                  )
-                )
-                .join(isEnglish ? '; ' : '；')}
+              {localizedDetails(result.warnings).join(isEnglish ? '; ' : '；') ||
+                (isEnglish ? 'Saved warnings are unavailable in English.' : '暂无额外提醒')}
             </p>
           )}
           {result.assumptions.length > 0 && (
             <p>
               <strong>{isEnglish ? 'This recommendation assumes: ' : '本次建议基于：'}</strong>
-              {result.assumptions
-                .map((text) =>
-                  localizedResultText(
-                    text,
-                    locale,
-                    'Only verified roster and boss facts are treated as confirmed.'
-                  )
-                )
-                .join(isEnglish ? '; ' : '；')}
+              {localizedDetails(result.assumptions).join(isEnglish ? '; ' : '；') ||
+                (isEnglish ? 'Saved assumptions are unavailable in English.' : '暂无额外前提')}
             </p>
           )}
         </footer>

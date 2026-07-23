@@ -59,19 +59,21 @@ export function poolSourceLabel(
   source: 'opening' | 'trial' | 'special-guest' | 'support',
   locale: PresentationLocale = 'zh'
 ): string {
-  return (locale === 'en'
-    ? {
-        opening: 'Opening Character',
-        trial: 'Trial Actor',
-        'special-guest': 'Special Guest',
-        support: 'Support Actor'
-      }
-    : {
-        opening: '开幕演员',
-        trial: '试用演员',
-        'special-guest': '特邀演员',
-        support: '支援演员'
-      })[source];
+  return (
+    locale === 'en'
+      ? {
+          opening: 'Opening Character',
+          trial: 'Trial Actor',
+          'special-guest': 'Special Guest',
+          support: 'Support Actor'
+        }
+      : {
+          opening: '开幕演员',
+          trial: '试用演员',
+          'special-guest': '特邀演员',
+          support: '支援演员'
+        }
+  )[source];
 }
 
 export function progressStepLabel(
@@ -104,7 +106,7 @@ export function pathChoiceLabel(
 ): string {
   if (locale === 'en') {
     const note = /[\u3400-\u9fff]/u.test(choice.note)
-      ? 'Route note saved with this plan'
+      ? 'Saved route note is unavailable in English.'
       : choice.note;
     return choice.kind === 'fixed'
       ? `Confirmed route: ${note}`
@@ -163,10 +165,7 @@ export function theaterActPresentation(
   };
 }
 
-function theaterMechanicLabels(
-  mechanics: EnemyMechanics,
-  locale: PresentationLocale
-): string[] {
+function theaterMechanicLabels(mechanics: EnemyMechanics, locale: PresentationLocale): string[] {
   if (locale === 'en') return mechanicLabels(mechanics, locale);
   return [
     ...mechanics.shields.map(
