@@ -37,9 +37,9 @@ export interface BuildV2PipelineContextOptions {
 
 export function buildUnknownKnowledgeContext(
   knowledgeVersion: string,
-  unknownSubjectIds: string[]
+  requestedSubjectIds: string[]
 ): KnowledgeContextPacket {
-  const subjectIds = uniqueBoundedIds(unknownSubjectIds);
+  const subjectIds = uniqueBoundedIds(requestedSubjectIds);
   return knowledgeContextPacketSchema.parse({
     knowledgeVersion,
     buildInterpretations: [],

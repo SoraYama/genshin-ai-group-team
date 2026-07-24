@@ -5,7 +5,9 @@ import {
   characterStrategyBundleSchema,
   enemyMechanicStrategyBundleSchema,
   knowledgeContextPacketSchema,
+  signalPredicateSchema,
   sourceCitationSchema,
+  sourceRegistryEntrySchema,
   sourceRegistrySchema
 } from '../../../src/shared/advisor-knowledge.js';
 
@@ -72,6 +74,33 @@ function characterStrategyBundle() {
 }
 
 describe('advisor knowledge contracts', () => {
+  it('returns validation failures instead of throwing for malformed URLs', () => {
+    const malformedUrl = 'https://[';
+    const homepageAttempt = () =>
+      sourceRegistryEntrySchema.safeParse({
+        id: 'malformed-homepage',
+        name: 'Malformed homepage',
+        hosts: ['example.com'],
+        trust: 'trusted-local',
+        homepageUrl: malformedUrl
+      });
+    const citationAttempt = () =>
+      sourceCitationSchema.safeParse({
+        ...sourceRegistry().citations[0],
+        url: malformedUrl
+      });
+    const registry = sourceRegistry();
+    registry.citations[0]!.url = malformedUrl;
+    const registryAttempt = () => sourceRegistrySchema.safeParse(registry);
+
+    expect(homepageAttempt).not.toThrow();
+    expect(citationAttempt).not.toThrow();
+    expect(registryAttempt).not.toThrow();
+    expect(homepageAttempt().success).toBe(false);
+    expect(citationAttempt().success).toBe(false);
+    expect(registryAttempt().success).toBe(false);
+  });
+
   it('bounds canonical character IDs', () => {
     expect(canonicalCharacterIdSchema.safeParse('9'.repeat(20)).success).toBe(true);
     expect(canonicalCharacterIdSchema.safeParse('9'.repeat(21)).success).toBe(false);
@@ -189,7 +218,15 @@ describe('advisor knowledge contracts', () => {
     duplicateArchetypes.characters[0]!.archetypes.push(
       structuredClone(duplicateArchetypes.characters[0]!.archetypes[0]!)
     );
-    expect(characterStrategyBundleSchema.safeParse(duplicateArchetypes).success).toBe(false);
+    const duplicateArchetypeResult = characterStrategyBundleSchema.safeParse(duplicateArchetypes);
+    expect(duplicateArchetypeResult.success).toBe(false);
+    expect(duplicateArchetypeResult.error?.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: ['characters', 0, 'archetypes', 1, 'id']
+        })
+      ])
+    );
 
     const duplicateCitations = characterStrategyBundle();
     duplicateCitations.sourceRegistry.citations.push(
@@ -219,6 +256,129 @@ describe('advisor knowledge contracts', () => {
     };
     mechanic.mechanics.push(structuredClone(mechanic.mechanics[0]!));
     expect(enemyMechanicStrategyBundleSchema.safeParse(mechanic).success).toBe(false);
+  });
+
+  it('requires facts and trusted citations', () => {
+    const characterBundle = characterStrategyBundle();
+    characterBundle.characters[0]!.archetypes[0]!.facts = [];
+    expect(characterStrategyBundleSchema.safeParse(characterBundle).success).toBe(false);
+
+    const mechanicBundle = {
+      schemaVersion: 1 as const,
+      knowledgeVersion: '2026.07.reviewed-1',
+      trust: 'trusted-local' as const,
+      sourceRegistry: sourceRegistry(),
+      mechanics: [
+        {
+          id: 'abyss-elemental-shield',
+          name: '元素护盾',
+          matchTags: ['elemental-shield'],
+          facts: []
+        }
+      ]
+    };
+    expect(enemyMechanicStrategyBundleSchema.safeParse(mechanicBundle).success).toBe(false);
+
+    expect(
+      knowledgeContextPacketSchema.safeParse({
+        knowledgeVersion: '2026.07.reviewed-1',
+        buildInterpretations: [],
+        trustedMatches: [
+          {
+            id: 'trusted-without-citation',
+            characterId: '10000052',
+            summary: 'This must be cited.',
+            citationIds: []
+          }
+        ],
+        ephemeralMatches: [],
+        unknowns: [],
+        coverage: { requested: 1, trusted: 1, ephemeral: 0, unknown: 0 },
+        citations: []
+      }).success
+    ).toBe(false);
+  });
+
+  it('rejects impossible signal field, operator, and value combinations', () => {
+    const common = { id: 'signal', description: 'Invalid signal' };
+
+    expect(
+      signalPredicateSchema.safeParse({
+        ...common,
+        field: 'weapon',
+        operator: 'gte',
+        value: 100
+      }).success
+    ).toBe(false);
+    expect(
+      signalPredicateSchema.safeParse({
+        ...common,
+        field: 'hp',
+        operator: 'includes',
+        value: 'foo'
+      }).success
+    ).toBe(false);
+  });
+
+  it('reports duplicate knowledge IDs at real nested paths', () => {
+    const trustedCitation = sourceRegistry().citations[0]!;
+    const duplicateTrusted = {
+      knowledgeVersion: '2026.07.reviewed-1',
+      buildInterpretations: [],
+      trustedMatches: [
+        {
+          id: 'duplicate-id',
+          characterId: '10000052',
+          summary: 'First match.',
+          citationIds: [trustedCitation.id]
+        },
+        {
+          id: 'duplicate-id',
+          characterId: '10000089',
+          summary: 'Second match.',
+          citationIds: [trustedCitation.id]
+        }
+      ],
+      ephemeralMatches: [],
+      unknowns: [],
+      coverage: { requested: 2, trusted: 2, ephemeral: 0, unknown: 0 },
+      citations: [trustedCitation]
+    };
+    const trustedResult = knowledgeContextPacketSchema.safeParse(duplicateTrusted);
+    expect(trustedResult.success).toBe(false);
+    expect(trustedResult.error?.issues).toEqual(
+      expect.arrayContaining([expect.objectContaining({ path: ['trustedMatches', 1, 'id'] })])
+    );
+
+    const crossArrayDuplicate = {
+      ...duplicateTrusted,
+      trustedMatches: duplicateTrusted.trustedMatches.slice(0, 1),
+      ephemeralMatches: [
+        {
+          id: 'duplicate-id',
+          subjectId: '10000089',
+          summary: 'Ephemeral match.',
+          citationIds: ['ephemeral-citation']
+        }
+      ],
+      coverage: { requested: 2, trusted: 1, ephemeral: 1, unknown: 0 },
+      citations: [
+        trustedCitation,
+        {
+          id: 'ephemeral-citation',
+          sourceId: 'ephemeral-source',
+          url: 'https://guide.example.org/character',
+          title: 'Ephemeral guide',
+          reviewedAt,
+          trust: 'ephemeral-web' as const
+        }
+      ]
+    };
+    const crossArrayResult = knowledgeContextPacketSchema.safeParse(crossArrayDuplicate);
+    expect(crossArrayResult.success).toBe(false);
+    expect(crossArrayResult.error?.issues).toEqual(
+      expect.arrayContaining([expect.objectContaining({ path: ['ephemeralMatches', 0, 'id'] })])
+    );
   });
 
   it('rejects ephemeral citations in trusted local strategy bundles', () => {

@@ -19,10 +19,7 @@ import {
 import { evaluateTheaterEligibility } from './theater-eligibility.js';
 import { buildLocalTheaterPlan } from './theater-local-planner.js';
 import { TheaterPlanAgent, type TheaterPlanAgentRunner } from './theater-plan-agent.js';
-import {
-  buildUnknownKnowledgeContext,
-  buildV2PipelineContext
-} from './v2-agent-context.js';
+import { buildUnknownKnowledgeContext, buildV2PipelineContext } from './v2-agent-context.js';
 import type { V2AgentStage } from './v2-agent-pipeline.js';
 import { renderV2Narrative } from './v2-narrative.js';
 
@@ -326,8 +323,7 @@ export class TheaterAdvisorService {
             },
             knowledge: buildUnknownKnowledgeContext(
               this.options.knowledge?.version ?? 'unavailable',
-              this.options.knowledge?.coverageFor(eligibleCharacterIds).unknownCharacterIds ??
-                eligibleCharacterIds
+              eligibleCharacterIds
             )
           });
           const sdkOptionsForStage = (stage: V2AgentStage) => {

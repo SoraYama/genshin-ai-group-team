@@ -18,10 +18,7 @@ import { CRITIQUE_PROMPT_V2 } from '../agents/critique/prompt.js';
 import { EXPLAIN_PROMPT_V2 } from '../agents/explain/prompt.js';
 import { ROTATION_COACH_PROMPT_V2 } from '../agents/rotation-coach/prompt.js';
 import type { RecommendationPlan } from '../../shared/scenario-v2.js';
-import type {
-  AdvisorFactRef,
-  AdvisorNarrativeReasonCode
-} from '../../shared/advisor-narrative.js';
+import type { AdvisorFactRef, AdvisorNarrativeReasonCode } from '../../shared/advisor-narrative.js';
 import type { AgentSdkRunOptions } from './agent-sdk-adapter.js';
 import {
   addAgentUsage,
@@ -30,10 +27,7 @@ import {
   type AuditedAgentRunner,
   type ToolAudit
 } from './agent-turn-audit.js';
-import {
-  AgentPayloadTooLargeError,
-  stringifyAgentPayload
-} from './agent-payload-budget.js';
+import { AgentPayloadTooLargeError, stringifyAgentPayload } from './agent-payload-budget.js';
 
 export type { V2PipelineContext } from '../agents/contracts.js';
 
@@ -251,10 +245,7 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
         usage
       };
     }
-    const rotationFactError = firstGroundingError(
-      rotationResult.value.rotations,
-      context
-    );
+    const rotationFactError = firstGroundingError(rotationResult.value.rotations, context);
     if (rotationFactError) {
       return {
         ok: false,
@@ -300,10 +291,7 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
         usage
       };
     }
-    const explainFactError = firstGroundingError(
-      explainResult.value.explanations,
-      context
-    );
+    const explainFactError = firstGroundingError(explainResult.value.explanations, context);
     if (explainFactError) {
       return {
         ok: false,
@@ -333,6 +321,26 @@ function firstGroundingError(
 ): string | undefined {
   const eligibleIds = new Set(context.candidate.eligibleCharacterIds);
   const unknownKnowledgeIds = new Set(context.knowledge.unknowns.map(({ subjectId }) => subjectId));
+  const citationsById = new Map(
+    context.knowledge.citations.map((citation) => [citation.id, citation])
+  );
+  const positivelyGroundedKnowledgeIds = new Set([
+    ...context.knowledge.trustedMatches.flatMap((match) =>
+      match.characterId !== undefined &&
+      match.citationIds.some(
+        (citationId) => citationsById.get(citationId)?.trust === 'trusted-local'
+      )
+        ? [match.characterId]
+        : []
+    ),
+    ...context.knowledge.ephemeralMatches.flatMap((match) =>
+      match.citationIds.some(
+        (citationId) => citationsById.get(citationId)?.trust === 'ephemeral-web'
+      )
+        ? [match.subjectId]
+        : []
+    )
+  ]);
   const detailedProfiles = new Map(
     context.profile.detailedProfiles.map((profile) => [String(profile.id), profile])
   );
@@ -354,6 +362,9 @@ function firstGroundingError(
         }
         if (unknownKnowledgeIds.has(ref.characterId)) {
           return `Stage knowledge is explicitly unknown: ${ref.characterId}`;
+        }
+        if (!positivelyGroundedKnowledgeIds.has(ref.characterId)) {
+          return `Stage knowledge does not resolve to a positive cited match: ${ref.characterId}`;
         }
       }
       if (ref.kind === 'mechanic') {

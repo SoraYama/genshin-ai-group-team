@@ -26,8 +26,8 @@ const httpsUrlSchema = z
   .url({ protocol: /^https$/ })
   .max(2_048)
   .refine((value) => {
-    const url = new URL(value);
-    return url.username.length === 0 && url.password.length === 0;
+    const url = parseUrl(value);
+    return url !== undefined && url.username.length === 0 && url.password.length === 0;
   }, 'URL credentials are not allowed');
 const reviewedAtSchema = z.iso.datetime({ offset: true }).max(40);
 
@@ -55,7 +55,11 @@ export const sourceRegistryEntrySchema = z
   })
   .strict()
   .superRefine(({ hosts, homepageUrl }, context) => {
-    if (homepageUrl !== undefined && !hosts.includes(new URL(homepageUrl).hostname.toLowerCase())) {
+    const homepage = homepageUrl === undefined ? undefined : parseUrl(homepageUrl);
+    if (
+      homepageUrl !== undefined &&
+      (homepage === undefined || !hosts.includes(homepage.hostname.toLowerCase()))
+    ) {
       context.addIssue({
         code: 'custom',
         path: ['homepageUrl'],
@@ -96,7 +100,8 @@ export const sourceRegistrySchema = z
         });
         return;
       }
-      if (!source.hosts.includes(new URL(citation.url).hostname.toLowerCase())) {
+      const citationUrl = parseUrl(citation.url);
+      if (citationUrl === undefined || !source.hosts.includes(citationUrl.hostname.toLowerCase())) {
         context.addIssue({
           code: 'custom',
           path: ['citations', index, 'url'],
@@ -138,15 +143,24 @@ export const characterCatalogSchema = z
     addDuplicateIdIssues(characters, ['characters'], context);
   });
 
-export const signalPredicateSchema = z
+const signalPredicateCommonShape = {
+  id: boundedIdSchema,
+  description: z.string().trim().min(1).max(240)
+};
+
+const categoricalSignalPredicateSchema = z
   .object({
-    id: boundedIdSchema,
+    ...signalPredicateCommonShape,
+    field: z.enum(['weapon', 'artifactSet', 'sandsMainStat', 'gobletMainStat', 'circletMainStat']),
+    operator: z.enum(['eq', 'includes']),
+    value: z.string().trim().min(1).max(160)
+  })
+  .strict();
+
+const numericSignalPredicateSchema = z
+  .object({
+    ...signalPredicateCommonShape,
     field: z.enum([
-      'weapon',
-      'artifactSet',
-      'sandsMainStat',
-      'gobletMainStat',
-      'circletMainStat',
       'hp',
       'atk',
       'def',
@@ -155,20 +169,15 @@ export const signalPredicateSchema = z
       'energyRecharge',
       'elementalMastery'
     ]),
-    operator: z.enum(['eq', 'includes', 'gte', 'lte']),
-    value: z.union([z.string().trim().min(1).max(160), z.number().finite()]),
-    description: z.string().trim().min(1).max(240)
+    operator: z.enum(['eq', 'gte', 'lte']),
+    value: z.number().finite()
   })
-  .strict()
-  .superRefine(({ operator, value }, context) => {
-    if ((operator === 'gte' || operator === 'lte') && typeof value !== 'number') {
-      context.addIssue({
-        code: 'custom',
-        path: ['value'],
-        message: `${operator} predicates require a numeric value`
-      });
-    }
-  });
+  .strict();
+
+export const signalPredicateSchema = z.discriminatedUnion('field', [
+  categoricalSignalPredicateSchema,
+  numericSignalPredicateSchema
+]);
 
 export const strategyFactSchema = z
   .object({
@@ -183,7 +192,7 @@ export const buildArchetypeSchema = z
     id: boundedIdSchema,
     name: boundedNameSchema,
     signals: z.array(signalPredicateSchema).max(24),
-    facts: z.array(strategyFactSchema).max(32)
+    facts: z.array(strategyFactSchema).min(1).max(32)
   })
   .strict()
   .superRefine(({ signals, facts }, context) => {
@@ -210,8 +219,7 @@ export const characterStrategyBundleSchema = z
   .strict()
   .superRefine(({ sourceRegistry, characters }, context) => {
     addDuplicateIdIssues(characters, ['characters'], context);
-    const archetypes = characters.flatMap(({ archetypes }) => archetypes);
-    addDuplicateIdIssues(archetypes, ['characters'], context, 'Archetype IDs must be unique');
+    addDuplicateArchetypeIdIssues(characters, context);
     ensureTrustedRegistry(sourceRegistry, ['sourceRegistry'], context);
     ensureFactCitationsResolve(
       characters.flatMap(({ archetypes }, characterIndex) =>
@@ -236,7 +244,7 @@ export const enemyMechanicStrategySchema = z
       .min(1)
       .max(24)
       .refine((tags) => new Set(tags).size === tags.length, 'Match tags must be unique'),
-    facts: z.array(strategyFactSchema).max(32)
+    facts: z.array(strategyFactSchema).min(1).max(32)
   })
   .strict()
   .superRefine(({ facts }, context) => {
@@ -287,7 +295,7 @@ export const trustedKnowledgeMatchSchema = z
     mechanicId: boundedIdSchema.optional(),
     archetypeId: z.string().trim().min(1).max(80).nullable().optional(),
     summary: boundedSummarySchema,
-    citationIds: uniqueBoundedIdsSchema
+    citationIds: uniqueBoundedIdsSchema.min(1)
   })
   .strict()
   .refine(
@@ -346,12 +354,10 @@ export const knowledgeContextPacketSchema = z
         'Build interpretations must have unique character IDs'
       );
       addDuplicateIdIssues(citations, ['citations'], context);
-      addDuplicateIdIssues(
-        [...trustedMatches, ...ephemeralMatches, ...unknowns],
-        ['matches'],
-        context,
-        'Knowledge match and gap IDs must be unique'
-      );
+      addDuplicateIdIssues(trustedMatches, ['trustedMatches'], context);
+      addDuplicateIdIssues(ephemeralMatches, ['ephemeralMatches'], context);
+      addDuplicateIdIssues(unknowns, ['unknowns'], context);
+      addCrossKnowledgeIdIssues({ trustedMatches, ephemeralMatches, unknowns }, context);
 
       if (coverage.requested !== coverage.trusted + coverage.ephemeral + coverage.unknown) {
         context.addIssue({
@@ -402,6 +408,56 @@ function addDuplicateIdIssues(
       context.addIssue({ code: 'custom', path: [...path, index, 'id'], message });
     }
     seen.add(id);
+  });
+}
+
+function addDuplicateArchetypeIdIssues(
+  characters: ReadonlyArray<z.infer<typeof characterStrategySchema>>,
+  context: z.RefinementCtx
+): void {
+  const seen = new Set<string>();
+  characters.forEach(({ archetypes }, characterIndex) => {
+    archetypes.forEach(({ id }, archetypeIndex) => {
+      if (seen.has(id)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['characters', characterIndex, 'archetypes', archetypeIndex, 'id'],
+          message: 'Archetype IDs must be unique'
+        });
+      }
+      seen.add(id);
+    });
+  });
+}
+
+function addCrossKnowledgeIdIssues(
+  groups: {
+    trustedMatches: ReadonlyArray<{ id: string }>;
+    ephemeralMatches: ReadonlyArray<{ id: string }>;
+    unknowns: ReadonlyArray<{ id: string }>;
+  },
+  context: z.RefinementCtx
+): void {
+  const firstGroupById = new Map<string, keyof typeof groups>();
+  (
+    [
+      ['trustedMatches', groups.trustedMatches],
+      ['ephemeralMatches', groups.ephemeralMatches],
+      ['unknowns', groups.unknowns]
+    ] as const
+  ).forEach(([groupName, entries]) => {
+    entries.forEach(({ id }, index) => {
+      const firstGroup = firstGroupById.get(id);
+      if (firstGroup !== undefined && firstGroup !== groupName) {
+        context.addIssue({
+          code: 'custom',
+          path: [groupName, index, 'id'],
+          message: 'Knowledge match and gap IDs must be unique across arrays'
+        });
+      } else if (firstGroup === undefined) {
+        firstGroupById.set(id, groupName);
+      }
+    });
   });
 }
 
@@ -465,6 +521,14 @@ function ensureContextMatchCitations(
       }
     });
   });
+}
+
+function parseUrl(value: string): URL | undefined {
+  try {
+    return new URL(value);
+  } catch {
+    return undefined;
+  }
 }
 
 export type KnowledgeTrust = z.infer<typeof knowledgeTrustSchema>;

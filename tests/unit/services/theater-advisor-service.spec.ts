@@ -70,9 +70,11 @@ class HangingAfterComposeRunner implements TheaterPlanAgentRunner {
 
 class SuccessfulStageRunner implements TheaterPlanAgentRunner {
   readonly calls: AgentSdkRunOptions[] = [];
+  readonly prompts: string[] = [];
 
   async *run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown> {
     this.calls.push(options);
+    this.prompts.push(prompt);
     if (options.systemPrompt.includes('CritiqueAgent v2')) {
       yield {
         type: 'result',
@@ -305,6 +307,15 @@ describe('TheaterAdvisorService', () => {
     expect(history).toHaveBeenCalledTimes(1);
     expect(recordUsage).toHaveBeenCalledTimes(1);
     expect(recordUsage).toHaveBeenCalledWith(10, 5, 0.01);
+    const composePayload = JSON.parse(runner.prompts[0]!) as {
+      context: {
+        candidate: { eligibleCharacterIds: string[] };
+        knowledge: { unknowns: Array<{ subjectId: string }> };
+      };
+    };
+    expect(composePayload.context.knowledge.unknowns.map(({ subjectId }) => subjectId)).toEqual(
+      composePayload.context.candidate.eligibleCharacterIds
+    );
   });
 
   it('persists the source actually selected in the plan even for external actors', async () => {

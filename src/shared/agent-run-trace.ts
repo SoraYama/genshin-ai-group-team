@@ -162,6 +162,10 @@ export const agentRunTraceSchema = z.discriminatedUnion('status', [
 ]);
 
 export const DEFAULT_TRACE_TEXT_MAX_BYTES = 16_384;
+export const MAX_TRACE_TEXT_MAX_BYTES = 65_536;
+export const MAX_TRACE_TEXT_INPUT_CHARS = 32_768;
+export const MAX_TRACE_CUSTOM_HEADER_VALUES = 32;
+export const MAX_TRACE_CUSTOM_HEADER_VALUE_LENGTH = 512;
 
 export interface SanitizeTraceTextOptions {
   maxBytes?: number;
@@ -178,27 +182,19 @@ export function sanitizeTraceText(
   options: SanitizeTraceTextOptions = {}
 ): SanitizedTraceText {
   const maxBytes = normalizeByteBudget(options.maxBytes);
-  let redacted = value;
+  const customHeaderValues = normalizeCustomHeaderValues(options.customHeaderValues);
+  const inputTruncated = value.length > MAX_TRACE_TEXT_INPUT_CHARS;
+  let redacted = redactRecognizedSecrets(value.slice(0, MAX_TRACE_TEXT_INPUT_CHARS));
 
-  for (const customValue of options.customHeaderValues ?? []) {
+  for (const customValue of customHeaderValues) {
     if (customValue.length > 0) {
       redacted = redacted.replace(new RegExp(escapeRegExp(customValue), 'gi'), '[REDACTED]');
     }
   }
 
-  redacted = redacted
-    .replace(/("(?:apiKey|ANTHROPIC_AUTH_TOKEN)"\s*:\s*)"(?:\\.|[^"\\])*"/gi, '$1"[REDACTED]"')
-    .replace(/("(?:Authorization|Cookie)"\s*:\s*)"(?:\\.|[^"\\])*"/gi, '$1"[REDACTED]"')
-    .replace(/((?<!")\b(?:Authorization|Cookie)\b\s*[:=]\s*)[^\r\n]*/gi, '$1[REDACTED]')
-    .replace(
-      /((?<!")\b(?:apiKey|ANTHROPIC_AUTH_TOKEN)\b\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;}]+)/gi,
-      '$1[REDACTED]'
-    )
-    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [REDACTED]');
-
   const encoded = new TextEncoder().encode(redacted);
   if (encoded.byteLength <= maxBytes) {
-    return { text: redacted, truncated: false };
+    return { text: redacted, truncated: inputTruncated };
   }
 
   let bytes = 0;
@@ -214,10 +210,44 @@ export function sanitizeTraceText(
 
 function normalizeByteBudget(value: number | undefined): number {
   if (value === undefined) return DEFAULT_TRACE_TEXT_MAX_BYTES;
-  if (!Number.isSafeInteger(value) || value < 0) {
-    throw new RangeError('maxBytes must be a nonnegative safe integer');
+  if (!Number.isSafeInteger(value) || value < 0 || value > MAX_TRACE_TEXT_MAX_BYTES) {
+    throw new RangeError(
+      `maxBytes must be a nonnegative safe integer no greater than ${MAX_TRACE_TEXT_MAX_BYTES}`
+    );
   }
   return value;
+}
+
+function normalizeCustomHeaderValues(values: readonly string[] | undefined): readonly string[] {
+  if (values === undefined) return [];
+  if (values.length > MAX_TRACE_CUSTOM_HEADER_VALUES) {
+    throw new RangeError(
+      `customHeaderValues may contain at most ${MAX_TRACE_CUSTOM_HEADER_VALUES} values`
+    );
+  }
+  values.forEach((value) => {
+    if (value.length > MAX_TRACE_CUSTOM_HEADER_VALUE_LENGTH) {
+      throw new RangeError(
+        `custom header values may contain at most ${MAX_TRACE_CUSTOM_HEADER_VALUE_LENGTH} characters`
+      );
+    }
+  });
+  return values;
+}
+
+function redactRecognizedSecrets(value: string): string {
+  return value
+    .replace(
+      /("(?:apiKey|ANTHROPIC_AUTH_TOKEN)"\s*:\s*)"(?:\\.|[^"\\])*(?:"|$)/gi,
+      '$1"[REDACTED]"'
+    )
+    .replace(/("(?:Authorization|Cookie)"\s*:\s*)"(?:\\.|[^"\\])*(?:"|$)/gi, '$1"[REDACTED]"')
+    .replace(/((?<!")\b(?:Authorization|Cookie)\b\s*[:=]\s*)[^\r\n]*/gi, '$1[REDACTED]')
+    .replace(
+      /((?<!")\b(?:apiKey|ANTHROPIC_AUTH_TOKEN)\b\s*[:=]\s*)(?:"(?:\\.|[^"\\])*(?:"|$)|'(?:\\.|[^'\\])*(?:'|$)|[^\s,;}]+)/gi,
+      '$1[REDACTED]'
+    )
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [REDACTED]');
 }
 
 function escapeRegExp(value: string): string {

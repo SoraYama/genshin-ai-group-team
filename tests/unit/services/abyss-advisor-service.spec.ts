@@ -22,9 +22,11 @@ function directive<T>(target: T) {
 
 class FixtureRunner {
   calls = 0;
+  readonly prompts: string[] = [];
   constructor(private readonly outputs: unknown[]) {}
   async *run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown> {
     this.calls += 1;
+    this.prompts.push(prompt);
     if (options.systemPrompt.includes('CritiqueAgent v2')) {
       yield {
         type: 'result',
@@ -340,8 +342,9 @@ describe('AbyssAdvisorService', () => {
         }
       ]
     });
+    const runner = new FixtureRunner([validAbyssPlan({ confidence: 'high' })]);
     const result = await service({
-      runner: new FixtureRunner([validAbyssPlan({ confidence: 'high' })]),
+      runner,
       apiKey: 'secret',
       knowledge
     }).recommend(abyssInput());
@@ -352,7 +355,19 @@ describe('AbyssAdvisorService', () => {
       expect(result.plan.confidence).toBe('low');
       expect(result.assumptions.join(' ')).toContain('角色知识仅覆盖 1 / 8');
       expect(result.plan.assumptions.join(' ')).toContain('partial-knowledge-v1');
+      expect(result.knowledgeSummary).toEqual({
+        trusted: 0,
+        ephemeral: 0,
+        unknown: ABYSS_CHARACTERS.length,
+        searched: false
+      });
     }
+    const composePayload = JSON.parse(runner.prompts[0]!) as {
+      context: { knowledge: { unknowns: Array<{ subjectId: string }> } };
+    };
+    expect(composePayload.context.knowledge.unknowns.map(({ subjectId }) => subjectId)).toEqual(
+      ABYSS_CHARACTERS.map(({ id }) => String(id))
+    );
   });
 
   it('uses local rules without invoking the agent when the smart service is not configured', async () => {

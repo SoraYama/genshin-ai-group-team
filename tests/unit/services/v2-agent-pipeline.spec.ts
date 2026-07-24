@@ -7,10 +7,7 @@ import {
 } from '../../../src/main/services/v2-agent-pipeline.js';
 import type { ToolAudit } from '../../../src/main/services/agent-turn-audit.js';
 import type { RecommendationPlan } from '../../../src/shared/scenario-v2.js';
-import type {
-  V2ExplainOutput,
-  V2RotationOutput
-} from '../../../src/main/agents/contracts.js';
+import type { V2ExplainOutput, V2RotationOutput } from '../../../src/main/agents/contracts.js';
 import { buildUnknownKnowledgeContext } from '../../../src/main/services/v2-agent-context.js';
 import { validAbyssPlan } from './abyss-test-fixtures.js';
 import { validStygianPlan } from './stygian-test-fixtures.js';
@@ -628,7 +625,9 @@ describe('V2 agent pipeline repair and grounding', () => {
         issues: [
           expect.objectContaining({
             path: ['explain'],
-            message: expect.stringContaining(`profile field is unavailable: ${characterId}:${field}`)
+            message: expect.stringContaining(
+              `profile field is unavailable: ${characterId}:${field}`
+            )
           })
         ]
       });
@@ -675,6 +674,101 @@ describe('V2 agent pipeline repair and grounding', () => {
         })
       ]
     });
+  });
+
+  it('rejects a knowledge reference omitted from the knowledge packet', async () => {
+    const baseline = validAbyssPlan();
+    const pipelineContext = structuredClone(context(baseline));
+    const characterId = String(pipelineContext.profile.detailedProfiles[0]!.id);
+    const explanation = explainOutput(baseline);
+    explanation.explanations = explanation.explanations.map((item, index) =>
+      index === 0
+        ? {
+            ...item,
+            reasonCodes: ['reaction-chain'],
+            factRefs: [{ kind: 'knowledge', characterId }]
+          }
+        : item
+    );
+    const runner = new StageRunner([
+      baseline,
+      { decision: 'accept', issues: [] },
+      rotationOutput(baseline),
+      explanation
+    ]);
+
+    const result = await run(
+      runner,
+      baseline,
+      (text) => ({ ok: true, plan: JSON.parse(text) as RecommendationPlan }),
+      pipelineContext
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      issues: [
+        expect.objectContaining({
+          path: ['explain'],
+          message: expect.stringContaining('positive cited match')
+        })
+      ]
+    });
+  });
+
+  it('accepts a knowledge reference backed by a positive trusted cited match', async () => {
+    const baseline = validAbyssPlan();
+    const pipelineContext = structuredClone(context(baseline));
+    const characterId = String(pipelineContext.profile.detailedProfiles[0]!.id);
+    pipelineContext.knowledge = {
+      knowledgeVersion: 'trusted-test',
+      buildInterpretations: [],
+      trustedMatches: [
+        {
+          id: 'trusted-character',
+          characterId,
+          summary: 'Trusted character facts are available.',
+          citationIds: ['trusted-citation']
+        }
+      ],
+      ephemeralMatches: [],
+      unknowns: [],
+      coverage: { requested: 1, trusted: 1, ephemeral: 0, unknown: 0 },
+      citations: [
+        {
+          id: 'trusted-citation',
+          sourceId: 'trusted-source',
+          url: 'https://example.com/trusted-character',
+          title: 'Trusted character review',
+          reviewedAt: '2026-07-24T10:00:00+08:00',
+          trust: 'trusted-local'
+        }
+      ]
+    };
+    const explanation = explainOutput(baseline);
+    explanation.explanations = explanation.explanations.map((item, index) =>
+      index === 0
+        ? {
+            ...item,
+            reasonCodes: ['reaction-chain'],
+            factRefs: [{ kind: 'knowledge', characterId }]
+          }
+        : item
+    );
+    const runner = new StageRunner([
+      baseline,
+      { decision: 'accept', issues: [] },
+      rotationOutput(baseline),
+      explanation
+    ]);
+
+    const result = await run(
+      runner,
+      baseline,
+      (text) => ({ ok: true, plan: JSON.parse(text) as RecommendationPlan }),
+      pipelineContext
+    );
+
+    expect(result).toMatchObject({ ok: true });
   });
 
   it('rejects a reason code that has no compatible supporting fact reference', async () => {

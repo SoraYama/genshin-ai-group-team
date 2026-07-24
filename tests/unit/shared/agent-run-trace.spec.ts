@@ -51,6 +51,46 @@ describe('agent run trace contracts', () => {
     expect(sanitized.text).toContain('apiKey=[REDACTED]');
   });
 
+  it('redacts recognized fields before colliding custom values', () => {
+    const sanitized = sanitizeTraceText('apiKey="collision-secret"', {
+      customHeaderValues: ['apiKey']
+    });
+
+    expect(sanitized.text).not.toContain('collision-secret');
+  });
+
+  it('caps input work and marks input-prefix truncation', () => {
+    const sanitized = sanitizeTraceText('x'.repeat(100_000), { maxBytes: 65_536 });
+
+    expect(sanitized.truncated).toBe(true);
+    expect(sanitized.text.length).toBeLessThanOrEqual(32_768);
+  });
+
+  it('rejects output budgets above the production maximum', () => {
+    expect(() => sanitizeTraceText('safe', { maxBytes: 65_537 })).toThrow(RangeError);
+  });
+
+  it('bounds custom header value count and length before regex construction', () => {
+    expect(() =>
+      sanitizeTraceText('safe', {
+        customHeaderValues: Array.from({ length: 33 }, (_, index) => `secret-${index}`)
+      })
+    ).toThrow(RangeError);
+    expect(() =>
+      sanitizeTraceText('safe', {
+        customHeaderValues: ['x'.repeat(513)]
+      })
+    ).toThrow(RangeError);
+  });
+
+  it('redacts an unterminated quoted secret cut by the input boundary', () => {
+    const input = `${'x'.repeat(32_736)}\napiKey="${'boundary-secret '.repeat(20)}`;
+    const sanitized = sanitizeTraceText(input, { maxBytes: 65_536 });
+
+    expect(sanitized.truncated).toBe(true);
+    expect(sanitized.text).not.toContain('boundary-secret');
+  });
+
   it('truncates by UTF-8 bytes without splitting characters and marks truncation', () => {
     const sanitized = sanitizeTraceText('甲乙丙丁', { maxBytes: 7 });
 

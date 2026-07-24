@@ -20,10 +20,7 @@ import {
 } from './abyss-business-tools.js';
 import { buildLocalAbyssPlan } from './abyss-local-optimizer.js';
 import { AbyssPlanAgent, type AbyssPlanAgentRunner } from './abyss-plan-agent.js';
-import {
-  buildUnknownKnowledgeContext,
-  buildV2PipelineContext
-} from './v2-agent-context.js';
+import { buildUnknownKnowledgeContext, buildV2PipelineContext } from './v2-agent-context.js';
 import type { V2AgentStage } from './v2-agent-pipeline.js';
 import { renderAbyssTeamRisks, renderV2Narrative } from './v2-narrative.js';
 
@@ -242,8 +239,7 @@ export class AbyssAdvisorService {
             },
             knowledge: buildUnknownKnowledgeContext(
               this.options.knowledge?.version ?? 'unavailable',
-              this.options.knowledge?.coverageFor(eligibleCharacterIds).unknownCharacterIds ??
-                eligibleCharacterIds
+              eligibleCharacterIds
             )
           });
           const baseSdkOptions = {

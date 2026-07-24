@@ -22,10 +22,7 @@ import {
 } from './stygian-local-optimizer.js';
 import { StygianPlanAgent, type StygianPlanAgentRunner } from './stygian-plan-agent.js';
 import type { V2CritiqueOutput, V2ExplainOutput, V2RotationOutput } from '../agents/contracts.js';
-import {
-  buildUnknownKnowledgeContext,
-  buildV2PipelineContext
-} from './v2-agent-context.js';
+import { buildUnknownKnowledgeContext, buildV2PipelineContext } from './v2-agent-context.js';
 import type { V2AgentStage } from './v2-agent-pipeline.js';
 import { renderV2Narrative } from './v2-narrative.js';
 
@@ -269,8 +266,7 @@ export class StygianAdvisorService {
             },
             knowledge: buildUnknownKnowledgeContext(
               this.options.knowledge?.version ?? 'unavailable',
-              this.options.knowledge?.coverageFor(eligibleCharacterIds).unknownCharacterIds ??
-                eligibleCharacterIds
+              eligibleCharacterIds
             )
           });
           const sdkOptionsForStage = (stage: V2AgentStage) => {
@@ -365,8 +361,7 @@ export class StygianAdvisorService {
       );
       if (!difficulty) return;
       const zhDifficultyName = difficulty.name.names['zh-CN'];
-      const enDifficultyName =
-        difficulty.name.names['en-US'] ?? difficulty.name.names['en'];
+      const enDifficultyName = difficulty.name.names['en-US'] ?? difficulty.name.names['en'];
       if (!zhDifficultyName || !enDifficultyName) {
         throw new Error('Stygian difficulty snapshot is missing a bilingual display name.');
       }
