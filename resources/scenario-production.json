@@ -1,4 +1,8 @@
 {
   "version": 1,
-  "enabled": false
+  "enabled": true,
+  "manifestUrl": "https://sorayama.me/genshin-team-advisor-data/manifest.json",
+  "publicKeys": {
+    "scenario-production-2026-01": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAp4Xbfz+USsMS8PeA4coS03jyVVl2V2bvKfHilJk+9dw=\n-----END PUBLIC KEY-----\n"
+  }
 }
