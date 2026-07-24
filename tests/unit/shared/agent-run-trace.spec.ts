@@ -73,6 +73,46 @@ describe('agent run trace contracts', () => {
     expect(sanitized.text).toContain('apiKey=[REDACTED]');
   });
 
+  it.each([
+    {
+      name: 'apiKey multi-token value before an ASCII comma',
+      raw: 'apiKey=first-secret second-secret, safe=keep-comma',
+      expected: 'apiKey=[REDACTED], safe=keep-comma'
+    },
+    {
+      name: 'auth token multi-token value before a Chinese comma',
+      raw: 'ANTHROPIC_AUTH_TOKEN=first-secret second-secret，safe=keep-comma',
+      expected: 'ANTHROPIC_AUTH_TOKEN=[REDACTED]，safe=keep-comma'
+    },
+    {
+      name: 'apiKey value before a semicolon',
+      raw: 'apiKey=first-secret second-secret; safe=keep-semicolon',
+      expected: 'apiKey=[REDACTED]; safe=keep-semicolon'
+    },
+    {
+      name: 'auth token value before an object close',
+      raw: '{ANTHROPIC_AUTH_TOKEN=first-secret second-secret} safe=keep-object',
+      expected: '{ANTHROPIC_AUTH_TOKEN=[REDACTED]} safe=keep-object'
+    },
+    {
+      name: 'apiKey value before a newline',
+      raw: 'apiKey=first-secret second-secret\nsafe=keep-newline',
+      expected: 'apiKey=[REDACTED]\nsafe=keep-newline'
+    },
+    {
+      name: 'quoted JSON credential',
+      raw: '{"apiKey":"first secret","safe":"keep-json"}',
+      expected: '{"apiKey":"[REDACTED]","safe":"keep-json"}'
+    },
+    {
+      name: 'multiple credentials on one line',
+      raw: 'apiKey=first one, ANTHROPIC_AUTH_TOKEN=second two, safe=keep-multiple',
+      expected: 'apiKey=[REDACTED], ANTHROPIC_AUTH_TOKEN=[REDACTED], safe=keep-multiple'
+    }
+  ])('preserves shared sanitizer boundaries for $name', ({ raw, expected }) => {
+    expect(sanitizeTraceText(raw).text).toBe(expected);
+  });
+
   it('redacts recognized fields before colliding custom values', () => {
     const sanitized = sanitizeTraceText('apiKey="collision-secret"', {
       customHeaderValues: ['apiKey']
