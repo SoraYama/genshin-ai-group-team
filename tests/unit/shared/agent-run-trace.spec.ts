@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { agentRunTraceSchema, sanitizeTraceText } from '../../../src/shared/agent-run-trace.js';
+import {
+  agentRunTraceSchema,
+  agentStageTraceSchema,
+  MAX_TRACE_TEXT_INPUT_CHARS,
+  MAX_TRACE_TEXT_MAX_BYTES,
+  sanitizeTraceText
+} from '../../../src/shared/agent-run-trace.js';
 
 const startedAt = '2026-07-24T10:00:00+08:00';
 const finishedAt = '2026-07-24T10:00:01+08:00';
@@ -15,6 +21,22 @@ function runningTrace() {
     knowledge: { trusted: 2, ephemeral: 1, unknown: 1, searched: true },
     usage: { inputTokens: 20, outputTokens: 5 }
   };
+}
+
+function containsLoneSurrogate(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = value.charCodeAt(index);
+    if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        index += 1;
+        continue;
+      }
+      return true;
+    }
+    if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) return true;
+  }
+  return false;
 }
 
 describe('agent run trace contracts', () => {
@@ -60,14 +82,18 @@ describe('agent run trace contracts', () => {
   });
 
   it('caps input work and marks input-prefix truncation', () => {
-    const sanitized = sanitizeTraceText('x'.repeat(100_000), { maxBytes: 65_536 });
+    const sanitized = sanitizeTraceText('x'.repeat(100_000), {
+      maxBytes: MAX_TRACE_TEXT_MAX_BYTES
+    });
 
     expect(sanitized.truncated).toBe(true);
-    expect(sanitized.text.length).toBeLessThanOrEqual(32_768);
+    expect(sanitized.text.length).toBeLessThanOrEqual(MAX_TRACE_TEXT_INPUT_CHARS);
   });
 
   it('rejects output budgets above the production maximum', () => {
-    expect(() => sanitizeTraceText('safe', { maxBytes: 65_537 })).toThrow(RangeError);
+    expect(() => sanitizeTraceText('safe', { maxBytes: MAX_TRACE_TEXT_MAX_BYTES + 1 })).toThrow(
+      RangeError
+    );
   });
 
   it('bounds custom header value count and length before regex construction', () => {
@@ -85,10 +111,80 @@ describe('agent run trace contracts', () => {
 
   it('redacts an unterminated quoted secret cut by the input boundary', () => {
     const input = `${'x'.repeat(32_736)}\napiKey="${'boundary-secret '.repeat(20)}`;
-    const sanitized = sanitizeTraceText(input, { maxBytes: 65_536 });
+    const sanitized = sanitizeTraceText(input, { maxBytes: MAX_TRACE_TEXT_MAX_BYTES });
 
     expect(sanitized.truncated).toBe(true);
     expect(sanitized.text).not.toContain('boundary-secret');
+  });
+
+  it('redacts repeated and overlapping custom values in one non-amplifying pass', () => {
+    const sanitized = sanitizeTraceText('E RE DACT E', {
+      maxBytes: MAX_TRACE_TEXT_MAX_BYTES,
+      customHeaderValues: ['E', 'e', 'RE', 'DACT', 'E']
+    });
+
+    expect(sanitized).toEqual({
+      text: '[REDACTED] [REDACTED] [REDACTED] [REDACTED]',
+      truncated: false
+    });
+  });
+
+  it('redacts a maximum-length custom secret that crosses the bounded scan edge', () => {
+    const customSecret = `cust${'x'.repeat(508)}`;
+    const input = `${'a'.repeat(MAX_TRACE_TEXT_INPUT_CHARS - 4)}${customSecret}tail`;
+    const sanitized = sanitizeTraceText(input, {
+      maxBytes: MAX_TRACE_TEXT_MAX_BYTES,
+      customHeaderValues: [customSecret]
+    });
+
+    expect(sanitized.truncated).toBe(true);
+    expect(sanitized.text).not.toContain('cust');
+    expect(sanitized.text.length).toBeLessThanOrEqual(32_768);
+  });
+
+  it('redacts a trailing custom-secret prefix cut by the overlap scan edge', () => {
+    const customSecret = `cust${'x'.repeat(508)}`;
+    const scanLimit = MAX_TRACE_TEXT_INPUT_CHARS + customSecret.length - 1;
+    const compressiblePrefix = `apiKey="${'q'.repeat(4_096)}"\n`;
+    const input = `${compressiblePrefix}${'a'.repeat(
+      scanLimit - compressiblePrefix.length - 4
+    )}${customSecret}tail`;
+    const sanitized = sanitizeTraceText(input, {
+      maxBytes: MAX_TRACE_TEXT_MAX_BYTES,
+      customHeaderValues: [customSecret]
+    });
+
+    expect(sanitized.truncated).toBe(true);
+    expect(sanitized.text).not.toContain('cust');
+    expect(sanitized.text).toContain('[REDACTED]');
+  });
+
+  it('does not split Unicode surrogate pairs at bounded prefixes or final output', () => {
+    const input = `${'x'.repeat(MAX_TRACE_TEXT_INPUT_CHARS - 1)}😀tail`;
+    const sanitized = sanitizeTraceText(input, { maxBytes: MAX_TRACE_TEXT_MAX_BYTES });
+
+    expect(sanitized.truncated).toBe(true);
+    expect(containsLoneSurrogate(sanitized.text)).toBe(false);
+  });
+
+  it('always produces raw output accepted by the stage trace schema', () => {
+    const sanitized = sanitizeTraceText('E'.repeat(MAX_TRACE_TEXT_INPUT_CHARS), {
+      maxBytes: MAX_TRACE_TEXT_MAX_BYTES,
+      customHeaderValues: ['E']
+    });
+
+    expect(sanitized.text.length).toBeLessThanOrEqual(32_768);
+    expect(
+      agentStageTraceSchema.safeParse({
+        stage: 'compose',
+        status: 'completed',
+        rawOutput: sanitized.text,
+        tools: [],
+        citationIds: [],
+        usage: { inputTokens: 0, outputTokens: 0 },
+        truncated: sanitized.truncated
+      }).success
+    ).toBe(true);
   });
 
   it('truncates by UTF-8 bytes without splitting characters and marks truncation', () => {

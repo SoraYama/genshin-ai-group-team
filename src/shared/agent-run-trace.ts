@@ -1,6 +1,14 @@
 import { z } from 'zod';
 
-const boundedTextSchema = z.string().max(32_768);
+export const MAX_TRACE_TEXT_OUTPUT_CODE_UNITS = 32_768;
+export const DEFAULT_TRACE_TEXT_MAX_BYTES = 16_384;
+export const MAX_TRACE_TEXT_MAX_BYTES = 32_768;
+export const MAX_TRACE_TEXT_INPUT_CHARS = 32_768;
+export const MAX_TRACE_CUSTOM_HEADER_VALUES = 32;
+export const MAX_TRACE_CUSTOM_HEADER_VALUE_LENGTH = 512;
+
+const REDACTION_MARKER = '[REDACTED]';
+const boundedTextSchema = z.string().max(MAX_TRACE_TEXT_OUTPUT_CODE_UNITS);
 const boundedIdSchema = z.string().trim().min(1).max(128);
 const nonnegativeIntSchema = z.number().int().nonnegative();
 const traceTimestampSchema = z.iso.datetime({ offset: true }).max(40);
@@ -161,12 +169,6 @@ export const agentRunTraceSchema = z.discriminatedUnion('status', [
   failedAgentRunTraceSchema
 ]);
 
-export const DEFAULT_TRACE_TEXT_MAX_BYTES = 16_384;
-export const MAX_TRACE_TEXT_MAX_BYTES = 65_536;
-export const MAX_TRACE_TEXT_INPUT_CHARS = 32_768;
-export const MAX_TRACE_CUSTOM_HEADER_VALUES = 32;
-export const MAX_TRACE_CUSTOM_HEADER_VALUE_LENGTH = 512;
-
 export interface SanitizeTraceTextOptions {
   maxBytes?: number;
   customHeaderValues?: readonly string[];
@@ -183,29 +185,31 @@ export function sanitizeTraceText(
 ): SanitizedTraceText {
   const maxBytes = normalizeByteBudget(options.maxBytes);
   const customHeaderValues = normalizeCustomHeaderValues(options.customHeaderValues);
-  const inputTruncated = value.length > MAX_TRACE_TEXT_INPUT_CHARS;
-  let redacted = redactRecognizedSecrets(value.slice(0, MAX_TRACE_TEXT_INPUT_CHARS));
+  const maximumCustomValueLength = customHeaderValues.reduce(
+    (maximum, customValue) => Math.max(maximum, customValue.length),
+    0
+  );
+  // The overlap exposes any custom secret that starts before the output boundary.
+  const scanLimit = MAX_TRACE_TEXT_INPUT_CHARS + Math.max(0, maximumCustomValueLength - 1);
+  const sourceWasCapped = value.length > MAX_TRACE_TEXT_INPUT_CHARS;
+  const scanPrefix = takeCodePointSafePrefix(value, scanLimit);
+  const trailingCustomPrefixLength = scanPrefix.truncated
+    ? findTrailingCustomPrefixLength(scanPrefix.text, customHeaderValues)
+    : 0;
+  const completeScanText =
+    trailingCustomPrefixLength === 0
+      ? scanPrefix.text
+      : scanPrefix.text.slice(0, -trailingCustomPrefixLength);
 
-  for (const customValue of customHeaderValues) {
-    if (customValue.length > 0) {
-      redacted = redacted.replace(new RegExp(escapeRegExp(customValue), 'gi'), '[REDACTED]');
-    }
-  }
+  let redacted = redactRecognizedSecrets(completeScanText);
+  redacted = redactCustomSecrets(redacted, customHeaderValues);
+  if (trailingCustomPrefixLength > 0) redacted += REDACTION_MARKER;
 
-  const encoded = new TextEncoder().encode(redacted);
-  if (encoded.byteLength <= maxBytes) {
-    return { text: redacted, truncated: inputTruncated };
-  }
-
-  let bytes = 0;
-  let text = '';
-  for (const character of redacted) {
-    const characterBytes = new TextEncoder().encode(character).byteLength;
-    if (bytes + characterBytes > maxBytes) break;
-    text += character;
-    bytes += characterBytes;
-  }
-  return { text, truncated: true };
+  const output = truncateSanitizedText(redacted, maxBytes);
+  return {
+    text: output.text,
+    truncated: sourceWasCapped || trailingCustomPrefixLength > 0 || output.truncated
+  };
 }
 
 function normalizeByteBudget(value: number | undefined): number {
@@ -225,14 +229,22 @@ function normalizeCustomHeaderValues(values: readonly string[] | undefined): rea
       `customHeaderValues may contain at most ${MAX_TRACE_CUSTOM_HEADER_VALUES} values`
     );
   }
+  const uniqueValues = new Map<string, string>();
   values.forEach((value) => {
     if (value.length > MAX_TRACE_CUSTOM_HEADER_VALUE_LENGTH) {
       throw new RangeError(
         `custom header values may contain at most ${MAX_TRACE_CUSTOM_HEADER_VALUE_LENGTH} characters`
       );
     }
+    const wellFormedValue = makeWellFormed(value);
+    if (wellFormedValue.length > 0) {
+      const key = wellFormedValue.toLowerCase();
+      if (!uniqueValues.has(key)) uniqueValues.set(key, wellFormedValue);
+    }
   });
-  return values;
+  return [...uniqueValues.values()].sort(
+    (left, right) => right.length - left.length || left.localeCompare(right)
+  );
 }
 
 function redactRecognizedSecrets(value: string): string {
@@ -248,6 +260,109 @@ function redactRecognizedSecrets(value: string): string {
       '$1[REDACTED]'
     )
     .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [REDACTED]');
+}
+
+function redactCustomSecrets(value: string, customValues: readonly string[]): string {
+  if (customValues.length === 0) return value;
+  const combinedPattern = customValues.map(escapeRegExp).join('|');
+  return value.replace(new RegExp(combinedPattern, 'giu'), REDACTION_MARKER);
+}
+
+function findTrailingCustomPrefixLength(value: string, customValues: readonly string[]): number {
+  const maximumPrefixLength = customValues.reduce(
+    (maximum, customValue) => Math.max(maximum, customValue.length - 1),
+    0
+  );
+  if (maximumPrefixLength === 0) return 0;
+  const tail = value.slice(-maximumPrefixLength).toLowerCase();
+  let longestMatch = 0;
+
+  for (const customValue of customValues) {
+    let prefixLength = 0;
+    for (const character of customValue) {
+      prefixLength += character.length;
+      if (prefixLength >= customValue.length) break;
+      if (
+        prefixLength > longestMatch &&
+        tail.endsWith(customValue.slice(0, prefixLength).toLowerCase())
+      ) {
+        longestMatch = prefixLength;
+      }
+    }
+  }
+  return longestMatch;
+}
+
+function takeCodePointSafePrefix(
+  value: string,
+  maximumCodeUnits: number
+): { text: string; truncated: boolean } {
+  let end = Math.min(value.length, maximumCodeUnits);
+  if (
+    end < value.length &&
+    end > 0 &&
+    isHighSurrogate(value.charCodeAt(end - 1)) &&
+    isLowSurrogate(value.charCodeAt(end))
+  ) {
+    end -= 1;
+  }
+  return {
+    text: makeWellFormed(value.slice(0, end)),
+    truncated: end < value.length
+  };
+}
+
+function truncateSanitizedText(
+  value: string,
+  maxBytes: number
+): { text: string; truncated: boolean } {
+  const characters: string[] = [];
+  const encoder = new TextEncoder();
+  let bytes = 0;
+  let codeUnits = 0;
+
+  for (const character of value) {
+    const characterBytes = encoder.encode(character).byteLength;
+    if (
+      bytes + characterBytes > maxBytes ||
+      codeUnits + character.length > MAX_TRACE_TEXT_OUTPUT_CODE_UNITS
+    ) {
+      return { text: characters.join(''), truncated: true };
+    }
+    characters.push(character);
+    bytes += characterBytes;
+    codeUnits += character.length;
+  }
+  return { text: characters.join(''), truncated: false };
+}
+
+function makeWellFormed(value: string): string {
+  const characters: string[] = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = value.charCodeAt(index);
+    if (isHighSurrogate(codeUnit)) {
+      const next = value.charCodeAt(index + 1);
+      if (isLowSurrogate(next)) {
+        characters.push(value[index]!, value[index + 1]!);
+        index += 1;
+      } else {
+        characters.push('\uFFFD');
+      }
+    } else if (isLowSurrogate(codeUnit)) {
+      characters.push('\uFFFD');
+    } else {
+      characters.push(value[index]!);
+    }
+  }
+  return characters.join('');
+}
+
+function isHighSurrogate(codeUnit: number): boolean {
+  return codeUnit >= 0xd800 && codeUnit <= 0xdbff;
+}
+
+function isLowSurrogate(codeUnit: number): boolean {
+  return codeUnit >= 0xdc00 && codeUnit <= 0xdfff;
 }
 
 function escapeRegExp(value: string): string {
