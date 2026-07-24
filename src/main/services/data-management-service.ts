@@ -10,6 +10,12 @@ interface Snapshot {
   fingerprint: string;
 }
 
+interface RelatedClearTransaction {
+  removed: number;
+  commit(): Promise<void>;
+  rollback(): Promise<void>;
+}
+
 interface ScenarioClearSnapshot extends Snapshot {
   scenario: Snapshot;
   guideResearch: { clearableCount: number; fingerprint: string };
@@ -35,7 +41,7 @@ interface ScenarioDataManager {
   }>;
   clearDownloadedCacheWithRelated(
     expected: { count: number; fingerprint: string },
-    relatedClear: () => Promise<number>
+    relatedClear: () => Promise<RelatedClearTransaction>
   ): Promise<{ scenarioRemoved: number; relatedRemoved: number }>;
 }
 
@@ -63,11 +69,15 @@ interface GuideResearchDataManager {
   getDataManagementSnapshot(): Promise<{
     count: number;
     clearableCount: number;
+    physicalFilePresent: boolean;
     sizeBytes?: number;
     updatedAt?: string;
     fingerprint: string;
   }>;
-  clearAll(expected: { clearableCount: number; fingerprint: string }): Promise<number>;
+  beginClear(expected: {
+    clearableCount: number;
+    fingerprint: string;
+  }): Promise<RelatedClearTransaction>;
 }
 
 export interface DataManagementDeps {
@@ -82,6 +92,7 @@ export type DataManagementErrorCode =
   | 'DATA_CONFIRMATION_EXPIRED'
   | 'DATA_SELECTION_CHANGED'
   | 'DATA_FILE_INSPECTION_FAILED'
+  | 'DATA_CLEAR_INCOMPLETE'
   | 'DATA_NOTHING_TO_CLEAR';
 
 export class DataManagementError extends Error {
@@ -115,7 +126,7 @@ export class DataManagementService {
       profiles: withoutFingerprint(profiles),
       scenarios: withoutFingerprint(scenarios),
       history,
-      guideResearch: publicDataArea(guideResearch),
+      guideResearch: publicGuideDataArea(guideResearch),
       serviceKey: { count: this.deps.config.getPublicView().hasApiKey ? 1 : 0 }
     };
   }
@@ -164,7 +175,7 @@ export class DataManagementService {
       try {
         const result = await this.deps.scenarios.clearDownloadedCacheWithRelated(
           snapshot.scenario,
-          () => this.deps.guideResearch.clearAll(snapshot.guideResearch)
+          () => this.deps.guideResearch.beginClear(snapshot.guideResearch)
         );
         removed = result.scenarioRemoved + result.relatedRemoved;
       } catch (error) {
@@ -188,6 +199,12 @@ export class DataManagementService {
           throw new DataManagementError(
             'DATA_SELECTION_CHANGED',
             'Temporary guide cache changed; confirm again'
+          );
+        }
+        if (code === 'SCENARIO_CLEAR_INCOMPLETE' || code === 'GUIDE_RESEARCH_CLEAR_INCOMPLETE') {
+          throw new DataManagementError(
+            'DATA_CLEAR_INCOMPLETE',
+            'Challenge cache clear is incomplete; managed data can be retried'
           );
         }
         throw error;
@@ -278,14 +295,21 @@ function isScenarioClearSnapshot(snapshot: Snapshot): snapshot is ScenarioClearS
   return 'scenario' in snapshot && 'guideResearch' in snapshot;
 }
 
-function publicDataArea(value: { count: number; sizeBytes?: number; updatedAt?: string }): {
+function publicGuideDataArea(value: {
+  count: number;
+  physicalFilePresent: boolean;
+  sizeBytes?: number;
+  updatedAt?: string;
+}): {
   count: number;
   sizeBytes?: number;
   updatedAt?: string;
 } {
   return {
     count: value.count,
-    ...(value.sizeBytes === undefined ? {} : { sizeBytes: value.sizeBytes }),
+    ...(!value.physicalFilePresent || value.sizeBytes === undefined
+      ? {}
+      : { sizeBytes: value.sizeBytes }),
     ...(value.updatedAt === undefined ? {} : { updatedAt: value.updatedAt })
   };
 }

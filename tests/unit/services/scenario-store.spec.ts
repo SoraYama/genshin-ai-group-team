@@ -90,16 +90,36 @@ async function putGuide(cache: GuideResearchCache, key = 'guide-task') {
 async function clearWithRelated(
   store: ScenarioStore,
   expected: { count: number; fingerprint: string },
-  relatedClear: () => Promise<number>
+  relatedClear: () => Promise<RelatedClearTransaction>
 ): Promise<{ scenarioRemoved: number; relatedRemoved: number }> {
   return (
     store as ScenarioStore & {
       clearDownloadedCacheWithRelated(
         expected: { count: number; fingerprint: string },
-        relatedClear: () => Promise<number>
+        relatedClear: () => Promise<RelatedClearTransaction>
       ): Promise<{ scenarioRemoved: number; relatedRemoved: number }>;
     }
   ).clearDownloadedCacheWithRelated(expected, relatedClear);
+}
+
+interface RelatedClearTransaction {
+  removed: number;
+  commit(): Promise<void>;
+  rollback(): Promise<void>;
+}
+
+function beginGuideClear(
+  cache: GuideResearchCache,
+  expected: { clearableCount: number; fingerprint: string }
+): Promise<RelatedClearTransaction> {
+  return (
+    cache as GuideResearchCache & {
+      beginClear(expected: {
+        clearableCount: number;
+        fingerprint: string;
+      }): Promise<RelatedClearTransaction>;
+    }
+  ).beginClear(expected);
 }
 
 let tempRoot: string | undefined;
@@ -158,6 +178,41 @@ describe('ScenarioStore', () => {
     await expect(
       fs.stat(path.join(publicationCache, 'production', 'spiral-abyss.json'))
     ).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('includes exact managed tombstones in snapshots and clears them on retry', async () => {
+    const { root, bundled, cache } = await makeTempDirs();
+    tempRoot = root;
+    await writeBundled(bundled);
+    const managedTombstone = path.join(
+      cache,
+      '.spiral-abyss.json.123e4567-e89b-42d3-a456-426614174000.clear-tombstone'
+    );
+    const unrelatedHiddenFile = path.join(cache, '.spiral-abyss.json.not-a-uuid.clear-tombstone');
+    await fs.writeFile(managedTombstone, 'managed pending clear', 'utf8');
+    await fs.writeFile(unrelatedHiddenFile, 'unrelated hidden data', 'utf8');
+    const { ScenarioStore } = await import('../../../src/main/services/scenario-store.js');
+    const store = new ScenarioStore({ bundledDir: bundled, cacheDir: cache });
+    await store.init();
+
+    const snapshot = await store.getDataManagementSnapshot();
+    expect(snapshot).toMatchObject({
+      clearableCount: 1,
+      sizeBytes: Buffer.byteLength('managed pending clear'),
+      fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/)
+    });
+    await expect(
+      store.clearDownloadedCache({
+        count: snapshot.clearableCount,
+        fingerprint: snapshot.fingerprint
+      })
+    ).resolves.toBe(1);
+    await expect(fs.stat(managedTombstone)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(fs.readFile(unrelatedHiddenFile, 'utf8')).resolves.toBe('unrelated hidden data');
+    await expect(store.getDataManagementSnapshot()).resolves.toMatchObject({
+      clearableCount: 0,
+      sizeBytes: 0
+    });
   });
 
   it('reports unknown size on read errors and uses the newest managed file mtime', async () => {
@@ -266,7 +321,7 @@ describe('ScenarioStore', () => {
           fingerprint: scenarioSnapshot.fingerprint
         },
         () =>
-          guides.clearAll({
+          beginGuideClear(guides, {
             clearableCount: guideSnapshot.clearableCount,
             fingerprint: guideSnapshot.fingerprint
           })
@@ -278,7 +333,7 @@ describe('ScenarioStore', () => {
     expect((await fs.readdir(cache)).some((name) => name.includes('clear-tombstone'))).toBe(false);
   });
 
-  it('rolls staged scenario files back when guide unlink fails', async () => {
+  it('reports an incomplete commit and manages the guide tombstone when guide unlink fails', async () => {
     const { root, bundled, cache } = await makeTempDirs();
     tempRoot = root;
     await writeBundled(bundled);
@@ -298,12 +353,13 @@ describe('ScenarioStore', () => {
       writeFile: fs.writeFile,
       rename: fs.rename,
       unlink: async (target) => {
-        if (target === writer.filePath)
+        if (target.endsWith('.clear-tombstone'))
           throw Object.assign(new Error('unlink failed'), { code: 'EACCES' });
         await fs.unlink(target);
       },
       lstat: fs.lstat,
-      realpath: fs.realpath
+      realpath: fs.realpath,
+      readdir: fs.readdir
     };
     const failingGuides = new GuideResearchCache({
       userDataDirectory,
@@ -323,14 +379,181 @@ describe('ScenarioStore', () => {
           fingerprint: scenarioSnapshot.fingerprint
         },
         () =>
-          failingGuides.clearAll({
+          beginGuideClear(failingGuides, {
             clearableCount: guideSnapshot.clearableCount,
             fingerprint: guideSnapshot.fingerprint
           })
       )
-    ).rejects.toMatchObject({ code: 'GUIDE_RESEARCH_WRITE_FAILED' });
+    ).rejects.toMatchObject({ code: 'SCENARIO_CLEAR_INCOMPLETE' });
+    await expect(fs.stat(scenarioFile)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(store.getScenario('spiral-abyss').meta.sourceVersion).toBe('bundled-spiral-abyss');
+    await expect(fs.stat(writer.filePath)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(failingGuides.getDataManagementSnapshot()).resolves.toMatchObject({
+      count: 0,
+      clearableCount: 1,
+      sizeBytes: expect.any(Number)
+    });
+  });
+
+  it('reports scenario tombstone cleanup failure, restores both live sides, and retries', async () => {
+    const { root, bundled, cache } = await makeTempDirs();
+    tempRoot = root;
+    await writeBundled(bundled);
+    const scenarioFile = path.join(cache, 'spiral-abyss.json');
+    await fs.writeFile(scenarioFile, JSON.stringify(abyssEnvelope('cached-newer')));
+    const userDataDirectory = path.join(root, 'user-data');
+    await fs.mkdir(userDataDirectory, { recursive: true });
+    const guides = new GuideResearchCache({
+      userDataDirectory,
+      now: () => Date.parse('2026-07-25T00:00:00.000Z')
+    });
+    await putGuide(guides);
+    let failScenarioTombstoneUnlink = true;
+    const dataManagementFileSystem = {
+      rename: fs.rename,
+      unlink: async (target: string) => {
+        if (failScenarioTombstoneUnlink && target.endsWith('.clear-tombstone')) {
+          throw Object.assign(new Error('injected scenario tombstone EACCES'), { code: 'EACCES' });
+        }
+        await fs.unlink(target);
+      },
+      writeFile: fs.writeFile,
+      readdir: fs.readdir
+    };
+    const { ScenarioStore } = await import('../../../src/main/services/scenario-store.js');
+    const store = new ScenarioStore({
+      bundledDir: bundled,
+      cacheDir: cache,
+      dataManagementFileSystem
+    } as never);
+    await store.init();
+    const scenarioSnapshot = await store.getDataManagementSnapshot();
+    const guideSnapshot = await guides.getDataManagementSnapshot();
+
+    await expect(
+      clearWithRelated(
+        store,
+        {
+          count: scenarioSnapshot.clearableCount,
+          fingerprint: scenarioSnapshot.fingerprint
+        },
+        () =>
+          beginGuideClear(guides, {
+            clearableCount: guideSnapshot.clearableCount,
+            fingerprint: guideSnapshot.fingerprint
+          })
+      )
+    ).rejects.toMatchObject({ code: 'SCENARIO_CLEAR_INCOMPLETE' });
     await expect(fs.readFile(scenarioFile, 'utf8')).resolves.toContain('cached-newer');
-    await expect(fs.stat(writer.filePath)).resolves.toBeDefined();
+    await expect(fs.stat(guides.filePath)).resolves.toBeDefined();
+    expect((await fs.readdir(cache)).filter((name) => name.includes('clear-tombstone'))).toEqual(
+      []
+    );
+    await expect(store.getDataManagementSnapshot()).resolves.toMatchObject({
+      clearableCount: 1
+    });
+    await expect(guides.getDataManagementSnapshot()).resolves.toMatchObject({
+      count: 1,
+      clearableCount: 1
+    });
+
+    failScenarioTombstoneUnlink = false;
+    const retryScenario = await store.getDataManagementSnapshot();
+    const retryGuide = await guides.getDataManagementSnapshot();
+    await expect(
+      clearWithRelated(
+        store,
+        {
+          count: retryScenario.clearableCount,
+          fingerprint: retryScenario.fingerprint
+        },
+        () =>
+          beginGuideClear(guides, {
+            clearableCount: retryGuide.clearableCount,
+            fingerprint: retryGuide.fingerprint
+          })
+      )
+    ).resolves.toEqual({ scenarioRemoved: 1, relatedRemoved: 1 });
+    await expect(fs.stat(scenarioFile)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(fs.stat(guides.filePath)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('keeps a failed directory preflight sentinel managed and retryable', async () => {
+    const { root, bundled, cache } = await makeTempDirs();
+    tempRoot = root;
+    await writeBundled(bundled);
+    const scenarioFile = path.join(cache, 'spiral-abyss.json');
+    await fs.writeFile(scenarioFile, JSON.stringify(abyssEnvelope('cached-newer')));
+    const userDataDirectory = path.join(root, 'user-data');
+    await fs.mkdir(userDataDirectory, { recursive: true });
+    const guides = new GuideResearchCache({
+      userDataDirectory,
+      now: () => Date.parse('2026-07-25T00:00:00.000Z')
+    });
+    await putGuide(guides);
+    let failPreflightUnlink = true;
+    const dataManagementFileSystem = {
+      rename: fs.rename,
+      unlink: async (target: string) => {
+        if (failPreflightUnlink && target.includes('clear-probe')) {
+          throw Object.assign(new Error('injected directory EACCES'), { code: 'EACCES' });
+        }
+        await fs.unlink(target);
+      },
+      writeFile: fs.writeFile,
+      readdir: fs.readdir
+    };
+    const { ScenarioStore } = await import('../../../src/main/services/scenario-store.js');
+    const store = new ScenarioStore({
+      bundledDir: bundled,
+      cacheDir: cache,
+      dataManagementFileSystem
+    } as never);
+    await store.init();
+    const scenarioSnapshot = await store.getDataManagementSnapshot();
+    const guideSnapshot = await guides.getDataManagementSnapshot();
+
+    await expect(
+      clearWithRelated(
+        store,
+        {
+          count: scenarioSnapshot.clearableCount,
+          fingerprint: scenarioSnapshot.fingerprint
+        },
+        () =>
+          beginGuideClear(guides, {
+            clearableCount: guideSnapshot.clearableCount,
+            fingerprint: guideSnapshot.fingerprint
+          })
+      )
+    ).rejects.toMatchObject({ code: 'SCENARIO_CLEAR_INCOMPLETE' });
+    await expect(fs.stat(scenarioFile)).resolves.toBeDefined();
+    await expect(fs.stat(guides.filePath)).resolves.toBeDefined();
+    await expect(store.getDataManagementSnapshot()).resolves.toMatchObject({
+      clearableCount: 2
+    });
+    expect((await fs.readdir(cache)).filter((name) => name.startsWith('.'))).toEqual([
+      expect.stringMatching(/^\.spiral-abyss\.json\.[a-f0-9-]+\.clear-probe$/)
+    ]);
+
+    failPreflightUnlink = false;
+    const retryScenario = await store.getDataManagementSnapshot();
+    const retryGuide = await guides.getDataManagementSnapshot();
+    await expect(
+      clearWithRelated(
+        store,
+        {
+          count: retryScenario.clearableCount,
+          fingerprint: retryScenario.fingerprint
+        },
+        () =>
+          beginGuideClear(guides, {
+            clearableCount: retryGuide.clearableCount,
+            fingerprint: retryGuide.fingerprint
+          })
+      )
+    ).resolves.toEqual({ scenarioRemoved: 2, relatedRemoved: 1 });
+    await expect(fs.readdir(cache)).resolves.toEqual([]);
   });
 
   it('keeps the guide cache when scenario staging fails and removes neither live scenario', async () => {
@@ -358,7 +581,9 @@ describe('ScenarioStore', () => {
         }
         await fs.rename(from, to);
       }),
-      unlink: fs.unlink
+      unlink: fs.unlink,
+      writeFile: fs.writeFile,
+      readdir: fs.readdir
     };
     const { ScenarioStore } = await import('../../../src/main/services/scenario-store.js');
     const store = new ScenarioStore({
@@ -369,7 +594,7 @@ describe('ScenarioStore', () => {
     await store.init();
     const scenarioSnapshot = await store.getDataManagementSnapshot();
     const relatedClear = vi.fn(() =>
-      guides.clearAll({
+      beginGuideClear(guides, {
         clearableCount: guideSnapshot.clearableCount,
         fingerprint: guideSnapshot.fingerprint
       })
@@ -418,7 +643,7 @@ describe('ScenarioStore', () => {
           fingerprint: scenarioSnapshot.fingerprint
         },
         () =>
-          guides.clearAll({
+          beginGuideClear(guides, {
             clearableCount: guideSnapshot.clearableCount,
             fingerprint: guideSnapshot.fingerprint
           })

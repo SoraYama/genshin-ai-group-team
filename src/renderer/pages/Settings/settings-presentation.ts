@@ -22,10 +22,7 @@ export function formatStorageSize(value: number | undefined, locale: 'zh' | 'en'
 export function hasClearableChallengeCache(
   summary: Pick<DataManagementSummary, 'scenarios' | 'guideResearch'>
 ): boolean {
-  return (
-    summary.scenarios.clearableCount > 0 ||
-    (summary.guideResearch.sizeBytes !== undefined && summary.guideResearch.sizeBytes > 0)
-  );
+  return summary.scenarios.clearableCount > 0 || summary.guideResearch.sizeBytes !== undefined;
 }
 
 export function dataClearCopy(

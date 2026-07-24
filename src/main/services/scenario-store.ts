@@ -28,6 +28,12 @@ export interface ScenarioStoreOptions {
 export interface ScenarioDataManagementFileSystem {
   rename(from: string, to: string): Promise<void>;
   unlink(filePath: string): Promise<void>;
+  writeFile(
+    filePath: string,
+    contents: string,
+    options: { encoding: 'utf8'; flag: 'wx' }
+  ): Promise<void>;
+  readdir(directoryPath: string): Promise<string[]>;
 }
 
 interface RemoteManifest {
@@ -39,13 +45,38 @@ type ManagedScenarioFileInspection =
   | {
       key: string;
       filePath: string;
+      role: 'live' | 'tombstone';
       state: 'present';
       size: number;
       modifiedAt: string;
       hash: string;
     }
-  | { key: string; filePath: string; state: 'missing'; hash: 'missing' }
-  | { key: string; filePath: string; state: 'unknown'; hash: 'unknown' };
+  | {
+      key: string;
+      filePath: string;
+      role: 'live' | 'tombstone';
+      state: 'missing';
+      hash: 'missing';
+    }
+  | {
+      key: string;
+      filePath: string;
+      role: 'live' | 'tombstone';
+      state: 'unknown';
+      hash: 'unknown';
+    };
+
+interface ManagedScenarioFile {
+  key: string;
+  filePath: string;
+  role: 'live' | 'tombstone';
+}
+
+export interface RelatedClearTransaction {
+  removed: number;
+  commit(): Promise<void>;
+  rollback(): Promise<void>;
+}
 
 interface ScenarioDataManagementSnapshot {
   count: number;
@@ -57,7 +88,8 @@ interface ScenarioDataManagementSnapshot {
 
 export type ScenarioDataManagementErrorCode =
   | 'SCENARIO_FILE_INSPECTION_FAILED'
-  | 'SCENARIO_SELECTION_CHANGED';
+  | 'SCENARIO_SELECTION_CHANGED'
+  | 'SCENARIO_CLEAR_INCOMPLETE';
 
 export class ScenarioDataManagementError extends Error {
   override readonly name = 'ScenarioDataManagementError';
@@ -68,6 +100,13 @@ export class ScenarioDataManagementError extends Error {
   ) {
     super(message);
   }
+}
+
+function scenarioClearIncompleteError(): ScenarioDataManagementError {
+  return new ScenarioDataManagementError(
+    'SCENARIO_CLEAR_INCOMPLETE',
+    'Scenario cache clear is incomplete; managed remnants can be retried'
+  );
 }
 
 const STALE_GRACE_MS = 24 * 60 * 60 * 1000;
@@ -85,6 +124,14 @@ function isScenarioEnvelope(value: unknown): value is ScenarioEnvelope<ScenarioP
 
 function sha256(buffer: Buffer): string {
   return createHash('sha256').update(buffer).digest('hex');
+}
+
+function scenarioTombstonePattern(fileName: string): RegExp {
+  const escapedFileName = fileName.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+  return new RegExp(
+    `^\\.${escapedFileName}\\.[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\\.clear-(?:tombstone|probe)$`,
+    'iu'
+  );
 }
 
 function scenarioFileFingerprint(files: Array<{ key: string; hash: string }>): string {
@@ -120,7 +167,9 @@ export class ScenarioStore {
     this.fetchImpl = options.fetchImpl ?? request;
     this.dataManagementFileSystem = options.dataManagementFileSystem ?? {
       rename: fs.rename,
-      unlink: fs.unlink
+      unlink: fs.unlink,
+      writeFile: fs.writeFile,
+      readdir: fs.readdir
     };
   }
 
@@ -255,14 +304,16 @@ export class ScenarioStore {
   }
 
   private async inspectDataManagementFiles(): Promise<ManagedScenarioFileInspection[]> {
-    return Promise.all(
-      this.dataManagementCacheFiles().map(async ({ key, filePath }) => {
+    const { files, discoveryFailures } = await this.dataManagementCacheFiles();
+    const inspected = await Promise.all(
+      files.map(async ({ key, filePath, role }) => {
         try {
           const stat = await fs.stat(filePath);
           const bytes = await fs.readFile(filePath);
           return {
             key,
             filePath,
+            role,
             state: 'present' as const,
             size: stat.size,
             modifiedAt: stat.mtime.toISOString(),
@@ -270,11 +321,21 @@ export class ScenarioStore {
           };
         } catch (error) {
           return (error as NodeJS.ErrnoException).code === 'ENOENT'
-            ? { key, filePath, state: 'missing' as const, hash: 'missing' as const }
-            : { key, filePath, state: 'unknown' as const, hash: 'unknown' as const };
+            ? { key, filePath, role, state: 'missing' as const, hash: 'missing' as const }
+            : { key, filePath, role, state: 'unknown' as const, hash: 'unknown' as const };
         }
       })
     );
+    return [
+      ...inspected,
+      ...discoveryFailures.map(({ key, filePath }) => ({
+        key,
+        filePath,
+        role: 'tombstone' as const,
+        state: 'unknown' as const,
+        hash: 'unknown' as const
+      }))
+    ];
   }
 
   private summarizeDataManagementFiles(
@@ -298,13 +359,17 @@ export class ScenarioStore {
   }
 
   async clearDownloadedCache(expected: { count: number; fingerprint: string }): Promise<number> {
-    const result = await this.clearDownloadedCacheWithRelated(expected, async () => 0);
+    const result = await this.clearDownloadedCacheWithRelated(expected, async () => ({
+      removed: 0,
+      commit: async () => undefined,
+      rollback: async () => undefined
+    }));
     return result.scenarioRemoved;
   }
 
   async clearDownloadedCacheWithRelated(
     expected: { count: number; fingerprint: string },
-    relatedClear: () => Promise<number>
+    relatedClear: () => Promise<RelatedClearTransaction>
   ): Promise<{ scenarioRemoved: number; relatedRemoved: number }> {
     return this.runScenarioFilesExclusive(async () => {
       const files = await this.inspectDataManagementFiles();
@@ -325,11 +390,16 @@ export class ScenarioStore {
         );
       }
 
+      const presentFiles = files.filter(
+        (file): file is Extract<(typeof files)[number], { state: 'present' }> =>
+          file.state === 'present'
+      );
+      await this.preflightClearDirectories(presentFiles);
       const staged: Array<{ livePath: string; tombstonePath: string }> = [];
       let clearedScenarioCache: Map<ScenarioMode, ScenarioEnvelope<ScenarioPayload>>;
       try {
-        for (const file of files) {
-          if (file.state !== 'present') continue;
+        for (const file of presentFiles) {
+          if (file.role !== 'live') continue;
           const tombstonePath = path.join(
             path.dirname(file.filePath),
             `.${path.basename(file.filePath)}.${randomUUID()}.clear-tombstone`
@@ -339,50 +409,147 @@ export class ScenarioStore {
         }
         clearedScenarioCache = await this.loadScenarioCacheFromDisk();
       } catch (error) {
-        await this.rollbackStagedScenarioFiles(staged);
+        const rolledBack = await this.rollbackStagedScenarioFiles(staged);
+        if (!rolledBack) throw scenarioClearIncompleteError();
         throw error;
       }
 
-      let relatedRemoved: number;
+      let relatedTransaction: RelatedClearTransaction;
       try {
-        relatedRemoved = await relatedClear();
+        relatedTransaction = await relatedClear();
       } catch (error) {
-        await this.rollbackStagedScenarioFiles(staged);
+        const rolledBack = await this.rollbackStagedScenarioFiles(staged);
+        if (!rolledBack) throw scenarioClearIncompleteError();
         throw error;
+      }
+
+      const tombstonePaths = [
+        ...presentFiles.filter(({ role }) => role === 'tombstone').map(({ filePath }) => filePath),
+        ...staged.map(({ tombstonePath }) => tombstonePath)
+      ];
+      try {
+        for (const tombstonePath of tombstonePaths) {
+          await this.dataManagementFileSystem.unlink(tombstonePath);
+        }
+      } catch {
+        try {
+          await relatedTransaction.rollback();
+        } catch {
+          // The stable incomplete error below covers both sides; managed remnants remain retryable.
+        }
+        await this.rollbackStagedScenarioFiles(staged);
+        const actualCache = await this.loadScenarioCacheFromDisk();
+        this.cache.clear();
+        actualCache.forEach((envelope, mode) => this.cache.set(mode, envelope));
+        throw scenarioClearIncompleteError();
       }
 
       this.cache.clear();
       clearedScenarioCache.forEach((envelope, mode) => this.cache.set(mode, envelope));
-      await Promise.all(
-        staged.map(async ({ tombstonePath }) => {
-          try {
-            await this.dataManagementFileSystem.unlink(tombstonePath);
-          } catch {
-            // Both live selections are already committed as cleared. Tombstone cleanup is best-effort.
-          }
-        })
-      );
-      return { scenarioRemoved: staged.length, relatedRemoved };
+      try {
+        await relatedTransaction.commit();
+      } catch {
+        throw scenarioClearIncompleteError();
+      }
+      return {
+        scenarioRemoved: current.clearableCount,
+        relatedRemoved: relatedTransaction.removed
+      };
     });
   }
 
   private async rollbackStagedScenarioFiles(
     staged: Array<{ livePath: string; tombstonePath: string }>
-  ): Promise<void> {
+  ): Promise<boolean> {
+    let complete = true;
     for (const { livePath, tombstonePath } of [...staged].reverse()) {
-      await this.dataManagementFileSystem.rename(tombstonePath, livePath);
+      try {
+        await this.dataManagementFileSystem.rename(tombstonePath, livePath);
+      } catch {
+        complete = false;
+      }
+    }
+    return complete;
+  }
+
+  private async preflightClearDirectories(files: Array<{ filePath: string }>): Promise<void> {
+    const directories = [...new Set(files.map(({ filePath }) => path.dirname(filePath)))];
+    const liveFiles = this.liveDataManagementCacheFiles();
+    for (const directory of directories) {
+      const representative = liveFiles.find(
+        ({ filePath }) => path.dirname(filePath) === directory
+      )?.filePath;
+      if (representative === undefined) throw scenarioClearIncompleteError();
+      const sentinelPath = path.join(
+        directory,
+        `.${path.basename(representative)}.${randomUUID()}.clear-probe`
+      );
+      try {
+        await this.dataManagementFileSystem.writeFile(sentinelPath, '', {
+          encoding: 'utf8',
+          flag: 'wx'
+        });
+        await this.dataManagementFileSystem.unlink(sentinelPath);
+      } catch {
+        try {
+          await this.dataManagementFileSystem.unlink(sentinelPath);
+        } catch {
+          // The sentinel is uniquely named and contains no user data; cleanup remains best-effort.
+        }
+        throw scenarioClearIncompleteError();
+      }
     }
   }
 
-  private dataManagementCacheFiles(): Array<{ key: string; filePath: string }> {
+  private async dataManagementCacheFiles(): Promise<{
+    files: ManagedScenarioFile[];
+    discoveryFailures: Array<{ key: string; filePath: string }>;
+  }> {
+    const liveFiles = this.liveDataManagementCacheFiles();
+    const files: ManagedScenarioFile[] = [...liveFiles];
+    const discoveryFailures: Array<{ key: string; filePath: string }> = [];
+    const filesByDirectory = new Map<string, ManagedScenarioFile[]>();
+    for (const file of liveFiles) {
+      const directory = path.dirname(file.filePath);
+      filesByDirectory.set(directory, [...(filesByDirectory.get(directory) ?? []), file]);
+    }
+    for (const [directory, directoryFiles] of filesByDirectory) {
+      let names: string[];
+      try {
+        names = await this.dataManagementFileSystem.readdir(directory);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        discoveryFailures.push({
+          key: `tombstone-discovery:${directory}`,
+          filePath: directory
+        });
+        continue;
+      }
+      for (const liveFile of directoryFiles) {
+        const tombstonePattern = scenarioTombstonePattern(path.basename(liveFile.filePath));
+        for (const name of names.filter((candidate) => tombstonePattern.test(candidate)).sort()) {
+          files.push({
+            key: `${liveFile.key}:tombstone:${name}`,
+            filePath: path.join(directory, name),
+            role: 'tombstone'
+          });
+        }
+      }
+    }
+    return { files, discoveryFailures };
+  }
+
+  private liveDataManagementCacheFiles(): ManagedScenarioFile[] {
     const legacy = ALL_SCENARIO_MODES.map((mode) => ({
       key: `legacy:${mode}`,
-      filePath: path.join(this.cacheDir, `${mode}.json`)
+      filePath: path.join(this.cacheDir, `${mode}.json`),
+      role: 'live' as const
     }));
     const production = this.productionCacheDir
       ? ALL_SCENARIO_MODES.map((mode) => ({
           key: `production:${mode}`,
-          filePath: path.join(this.productionCacheDir!, 'production', `${mode}.json`)
+          filePath: path.join(this.productionCacheDir!, 'production', `${mode}.json`),
+          role: 'live' as const
         }))
       : [];
     return [...legacy, ...production];

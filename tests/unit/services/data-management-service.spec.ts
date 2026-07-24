@@ -40,6 +40,7 @@ function createDeps() {
     guideResearch: {
       count: 2,
       clearableCount: 2,
+      physicalFilePresent: true,
       sizeBytes: 768,
       updatedAt: '2026-07-24T00:00:00.000Z',
       fingerprint: 'g1'
@@ -75,7 +76,9 @@ function createDeps() {
           sizeBytes: 0,
           fingerprint: 's0'
         };
-        return { scenarioRemoved, relatedRemoved: await relatedClear() };
+        const relatedTransaction = await relatedClear();
+        await relatedTransaction.commit();
+        return { scenarioRemoved, relatedRemoved: relatedTransaction.removed };
       })
     },
     history: {
@@ -96,15 +99,21 @@ function createDeps() {
     },
     guideResearch: {
       getDataManagementSnapshot: vi.fn(async () => state.guideResearch),
-      clearAll: vi.fn(async () => {
+      beginClear: vi.fn(async () => {
         const removed = state.guideResearch.count;
-        state.guideResearch = {
-          count: 0,
-          clearableCount: 0,
-          sizeBytes: 0,
-          fingerprint: 'g0'
-        } as typeof state.guideResearch;
-        return removed;
+        return {
+          removed,
+          commit: vi.fn(async () => {
+            state.guideResearch = {
+              count: 0,
+              clearableCount: 0,
+              physicalFilePresent: false,
+              sizeBytes: 0,
+              fingerprint: 'g0'
+            } as typeof state.guideResearch;
+          }),
+          rollback: vi.fn(async () => undefined)
+        };
       })
     },
     config: {
@@ -205,7 +214,7 @@ describe('DataManagementService', () => {
       { count: 2, fingerprint: 's1' },
       expect.any(Function)
     );
-    expect(deps.guideResearch.clearAll).toHaveBeenCalledWith({
+    expect(deps.guideResearch.beginClear).toHaveBeenCalledWith({
       clearableCount: 2,
       fingerprint: 'g1'
     });
@@ -232,7 +241,7 @@ describe('DataManagementService', () => {
       })
     ).resolves.toMatchObject({
       removed: 4,
-      summary: { guideResearch: { count: 0, sizeBytes: 0 } }
+      summary: { guideResearch: { count: 0 } }
     });
   });
 
@@ -241,6 +250,7 @@ describe('DataManagementService', () => {
     deps.state.guideResearch = {
       count: 0,
       clearableCount: 0,
+      physicalFilePresent: false,
       sizeBytes: 0,
       fingerprint: 'guide-cache-missing'
     } as typeof deps.state.guideResearch;
@@ -255,10 +265,55 @@ describe('DataManagementService', () => {
         confirmationToken: confirmation.confirmationToken
       })
     ).resolves.toMatchObject({ removed: 2 });
-    expect(deps.guideResearch.clearAll).toHaveBeenCalledWith({
+    expect(deps.guideResearch.beginClear).toHaveBeenCalledWith({
       clearableCount: 0,
       fingerprint: 'guide-cache-missing'
     });
+  });
+
+  it('publishes missing and present-empty guide caches differently without internal fields', async () => {
+    const userDataDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'gta-guide-presence-'));
+    temporaryDirectories.push(userDataDirectory);
+    const filePath = resolveGuideResearchCachePath(userDataDirectory);
+    const guideResearch = new GuideResearchCache({
+      userDataDirectory,
+      now: () => Date.parse('2026-07-25T00:00:00.000Z')
+    });
+    const deps = createDeps();
+    deps.state.scenarios = {
+      ...deps.state.scenarios,
+      clearableCount: 0,
+      sizeBytes: 0,
+      fingerprint: 'scenario-empty'
+    };
+    const service = new DataManagementService({ ...deps, guideResearch });
+
+    const missing = await service.getSummary();
+    expect(missing.guideResearch).toEqual({ count: 0 });
+    await expect(service.prepareClear('scenarios')).rejects.toMatchObject({
+      code: 'DATA_NOTHING_TO_CLEAR'
+    });
+
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, '', 'utf8');
+    const presentEmpty = await service.getSummary();
+    expect(presentEmpty.guideResearch).toEqual({ count: 0, sizeBytes: 0 });
+    expect(presentEmpty.guideResearch).not.toHaveProperty('clearableCount');
+    expect(presentEmpty.guideResearch).not.toHaveProperty('physicalFilePresent');
+    expect(presentEmpty.guideResearch).not.toHaveProperty('fingerprint');
+    const confirmation = await service.prepareClear('scenarios');
+    expect(confirmation.count).toBe(1);
+    await expect(
+      service.clear({
+        scope: 'scenarios',
+        expectedCount: confirmation.count,
+        confirmationToken: confirmation.confirmationToken
+      })
+    ).resolves.toMatchObject({
+      removed: 1,
+      summary: { guideResearch: { count: 0 } }
+    });
+    await expect(fs.stat(filePath)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it.each(['invalid', 'oversize', 'expired'] as const)(
@@ -328,7 +383,7 @@ describe('DataManagementService', () => {
         })
       ).resolves.toMatchObject({
         removed: 1,
-        summary: { guideResearch: { count: 0, sizeBytes: 0 } }
+        summary: { guideResearch: { count: 0 } }
       });
       await expect(fs.stat(filePath)).rejects.toMatchObject({ code: 'ENOENT' });
     }
@@ -362,5 +417,26 @@ describe('DataManagementService', () => {
         confirmationToken: confirmation.confirmationToken
       })
     ).rejects.toMatchObject({ code: 'DATA_SELECTION_CHANGED' });
+  });
+
+  it('turns a partial cache commit into a stable retryable incomplete error', async () => {
+    const deps = createDeps();
+    const service = new DataManagementService(deps);
+    const confirmation = await service.prepareClear('scenarios');
+    deps.scenarios.clearDownloadedCacheWithRelated.mockRejectedValueOnce(
+      Object.assign(new Error('EACCES at /private/cache/hidden-tombstone'), {
+        code: 'SCENARIO_CLEAR_INCOMPLETE'
+      })
+    );
+
+    const failure = await service
+      .clear({
+        scope: 'scenarios',
+        expectedCount: confirmation.count,
+        confirmationToken: confirmation.confirmationToken
+      })
+      .catch((error: unknown) => error);
+    expect(failure).toMatchObject({ code: 'DATA_CLEAR_INCOMPLETE' });
+    expect(String((failure as Error).message)).not.toContain('/private/cache');
   });
 });

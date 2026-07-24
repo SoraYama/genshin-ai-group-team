@@ -102,6 +102,48 @@ function value(seed = '1'): EphemeralGuideCacheValue {
   };
 }
 
+function withFreeTextAt(
+  candidate: EphemeralGuideCacheValue,
+  field:
+    | 'match.summary'
+    | 'citation.title'
+    | 'applicability.characterNames'
+    | 'applicability.scenarioTags'
+    | 'applicability.buildSignals'
+    | 'conflicts',
+  text: string
+): EphemeralGuideCacheValue {
+  switch (field) {
+    case 'match.summary':
+      return {
+        ...candidate,
+        matches: [{ ...candidate.matches[0]!, summary: text }]
+      };
+    case 'citation.title':
+      return {
+        ...candidate,
+        citations: [{ ...candidate.citations[0]!, title: text }]
+      };
+    case 'applicability.characterNames':
+      return {
+        ...candidate,
+        applicability: { ...candidate.applicability, characterNames: [text] }
+      };
+    case 'applicability.scenarioTags':
+      return {
+        ...candidate,
+        applicability: { ...candidate.applicability, scenarioTags: [text] }
+      };
+    case 'applicability.buildSignals':
+      return {
+        ...candidate,
+        applicability: { ...candidate.applicability, buildSignals: [text] }
+      };
+    case 'conflicts':
+      return { ...candidate, conflicts: [text] };
+  }
+}
+
 function largeValue(seed: number, size = 180): EphemeralGuideCacheValue {
   const citations = Array.from({ length: size }, (_, index) => {
     const id = `citation-${seed}-${index}-${'i'.repeat(72)}`;
@@ -382,6 +424,64 @@ describe('GuideResearchCache', () => {
     }
   });
 
+  it('rejects real SDK payload and full-panel shapes across every free-text field', async () => {
+    const filePath = await makeCachePath();
+    const cache = createCacheAt(filePath, { now: () => START });
+    const sensitivePayloads = [
+      'fullstats: HP 25000 ATK 2000',
+      'HP:25000 ATK:2000 DEF:1000 CRIT RATE:70% CRIT DMG:140%',
+      'SDK raw message: hidden',
+      'raw message: hidden',
+      'tool call payload: hidden',
+      '{tool_use: search, arguments: {uid: 123}}',
+      '{function_call: lookup, input: private, tool_result: hidden}',
+      'credentials: secret',
+      '原始消息：hidden',
+      '工具载荷：hidden',
+      '完整属性：生命:25000 攻击:2000 防御:1000'
+    ];
+    const freeTextFields = [
+      'match.summary',
+      'citation.title',
+      'applicability.characterNames',
+      'applicability.scenarioTags',
+      'applicability.buildSignals',
+      'conflicts'
+    ] as const;
+
+    for (const [payloadIndex, payload] of sensitivePayloads.entries()) {
+      for (const [fieldIndex, field] of freeTextFields.entries()) {
+        const seed = `sensitive-shape-${payloadIndex}-${fieldIndex}`;
+        await expect(
+          cache.put({
+            task: task({ key: seed }),
+            knowledgeVersion: 'knowledge-v4',
+            value: withFreeTextAt(value(seed), field, payload)
+          }),
+          `${field} accepted ${payload}`
+        ).rejects.toThrow();
+      }
+    }
+    await expect(fs.stat(filePath)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('keeps public article numbers and individual build thresholds persistable', async () => {
+    const filePath = await makeCachePath();
+    const cache = createCacheAt(filePath, { now: () => START });
+    const publicSummary = value('public-shapes');
+    publicSummary.matches[0]!.summary =
+      '公开攻略文章 123456789：HP:25000 与生命值:25000 是同一阈值；CRIT RATE:70% 与 CRITICAL RATE:70% 也是同一阈值。';
+    publicSummary.citations[0]!.url = 'https://example.test/articles/123456789';
+
+    await expect(
+      cache.put({
+        task: task({ key: 'public-shapes' }),
+        knowledgeVersion: 'knowledge-v4',
+        value: publicSummary
+      })
+    ).resolves.toBeDefined();
+  });
+
   it('rejects credential-bearing and user-identity URL components without blocking article IDs', async () => {
     const filePath = await makeCachePath();
     const cache = createCacheAt(filePath, { now: () => START });
@@ -504,6 +604,8 @@ describe('GuideResearchCache', () => {
 
   it('does not expose secret-bearing filesystem errors through diagnostics', async () => {
     const filePath = await makeCachePath();
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, 'physical cache whose read fails', 'utf8');
     const diagnostics: unknown[] = [];
     const fileSystem: GuideResearchCacheFileSystem = {
       readFile: vi.fn(async () => {
@@ -514,7 +616,8 @@ describe('GuideResearchCache', () => {
       rename: fs.rename,
       unlink: fs.unlink,
       lstat: fs.lstat,
-      realpath: fs.realpath
+      realpath: fs.realpath,
+      readdir: fs.readdir
     };
     const cache = createCacheAt(filePath, {
       fileSystem,
@@ -546,7 +649,8 @@ describe('GuideResearchCache', () => {
       },
       unlink: fs.unlink,
       lstat: fs.lstat,
-      realpath: fs.realpath
+      realpath: fs.realpath,
+      readdir: fs.readdir
     };
     const cache = createCacheAt(filePath, { fileSystem, now: () => START });
     await cache.put({ task: task(), knowledgeVersion: 'knowledge-v4', value: value() });
@@ -574,7 +678,8 @@ describe('GuideResearchCache', () => {
       }),
       unlink: fs.unlink,
       lstat: fs.lstat,
-      realpath: fs.realpath
+      realpath: fs.realpath,
+      readdir: fs.readdir
     };
     const failing = createCacheAt(filePath, { fileSystem, now: () => START + 1 });
 
@@ -798,7 +903,13 @@ describe('GuideResearchCache', () => {
     const filePath = await makeCachePath();
     const cache = createCacheAt(filePath, { now: () => START });
     const missing = await cache.getDataManagementSnapshot();
-    expect(missing).toMatchObject({ count: 0, clearableCount: 0, sizeBytes: 0 });
+    expect(missing).toMatchObject({
+      count: 0,
+      clearableCount: 0,
+      sizeBytes: 0,
+      physicalFilePresent: false
+    });
+    await expect(cache.getSummary()).resolves.toEqual({ count: 0 });
     await expect(
       cache.clearAll({
         clearableCount: missing.clearableCount,
@@ -826,12 +937,143 @@ describe('GuideResearchCache', () => {
     ).resolves.toBe(1);
     await expect(fs.stat(filePath)).rejects.toMatchObject({ code: 'ENOENT' });
     const empty = await cache.getDataManagementSnapshot();
-    expect(empty).toMatchObject({ count: 0, clearableCount: 0, sizeBytes: 0 });
+    expect(empty).toMatchObject({
+      count: 0,
+      clearableCount: 0,
+      sizeBytes: 0,
+      physicalFilePresent: false
+    });
     await expect(
       cache.clearAll({
         clearableCount: empty.clearableCount,
         fingerprint: empty.fingerprint
       })
     ).resolves.toBe(0);
+  });
+
+  it('distinguishes a present zero-byte file from a missing cache without public internals', async () => {
+    const filePath = await makeCachePath();
+    const cache = createCacheAt(filePath, { now: () => START });
+    const missingSummary = await cache.getSummary();
+    expect(missingSummary).toEqual({ count: 0 });
+
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, '', 'utf8');
+    const physical = await cache.getDataManagementSnapshot();
+    expect(physical).toMatchObject({
+      count: 0,
+      clearableCount: 1,
+      sizeBytes: 0,
+      physicalFilePresent: true,
+      fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/)
+    });
+    expect(await cache.getSummary()).toEqual({ count: 0, sizeBytes: 0 });
+
+    await expect(
+      cache.clearAll({
+        clearableCount: physical.clearableCount,
+        fingerprint: physical.fingerprint
+      })
+    ).resolves.toBe(1);
+    await expect(fs.stat(filePath)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('keeps a failed staged-clear tombstone managed and retries it', async () => {
+    const filePath = await makeCachePath();
+    const writer = createCacheAt(filePath, { now: () => START });
+    await writer.put({ task: task(), knowledgeVersion: 'knowledge-v4', value: value() });
+    let failTombstoneUnlink = true;
+    const fileSystem = {
+      readFile: fs.readFile,
+      mkdir: fs.mkdir,
+      writeFile: fs.writeFile,
+      rename: fs.rename,
+      unlink: async (target: string) => {
+        if (failTombstoneUnlink && target.endsWith('.clear-tombstone')) {
+          throw Object.assign(new Error('injected tombstone EACCES'), { code: 'EACCES' });
+        }
+        await fs.unlink(target);
+      },
+      lstat: fs.lstat,
+      realpath: fs.realpath,
+      readdir: fs.readdir
+    };
+    const cache = createCacheAt(filePath, { fileSystem: fileSystem as never, now: () => START });
+    const initial = await cache.getDataManagementSnapshot();
+    const beginClear = (
+      cache as GuideResearchCache & {
+        beginClear(expected: { clearableCount: number; fingerprint: string }): Promise<{
+          removed: number;
+          commit(): Promise<void>;
+          rollback(): Promise<void>;
+        }>;
+      }
+    ).beginClear.bind(cache);
+
+    const failedTransaction = await beginClear({
+      clearableCount: initial.clearableCount,
+      fingerprint: initial.fingerprint
+    });
+    await expect(failedTransaction.commit()).rejects.toMatchObject({
+      code: 'GUIDE_RESEARCH_CLEAR_INCOMPLETE'
+    });
+    await expect(fs.stat(filePath)).rejects.toMatchObject({ code: 'ENOENT' });
+    const pending = await cache.getDataManagementSnapshot();
+    expect(pending).toMatchObject({
+      count: 0,
+      clearableCount: 1,
+      sizeBytes: expect.any(Number),
+      fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/)
+    });
+    expect(
+      (await fs.readdir(path.dirname(filePath))).filter((name) => name.startsWith('.'))
+    ).toEqual([expect.stringMatching(/^\.guide-research\.json\.[a-f0-9-]+\.clear-tombstone$/)]);
+
+    failTombstoneUnlink = false;
+    const retry = await beginClear({
+      clearableCount: pending.clearableCount,
+      fingerprint: pending.fingerprint
+    });
+    await expect(retry.commit()).resolves.toBeUndefined();
+    await expect(cache.getDataManagementSnapshot()).resolves.toMatchObject({
+      count: 0,
+      clearableCount: 0
+    });
+    await expect(fs.readdir(path.dirname(filePath))).resolves.toEqual([]);
+  });
+
+  it('restores the live guide file when staging validation fails after rename', async () => {
+    const filePath = await makeCachePath();
+    const writer = createCacheAt(filePath, { now: () => START });
+    await writer.put({ task: task(), knowledgeVersion: 'knowledge-v4', value: value() });
+    const previous = await fs.readFile(filePath, 'utf8');
+    const fileSystem: GuideResearchCacheFileSystem = {
+      readFile: fs.readFile,
+      mkdir: fs.mkdir,
+      writeFile: fs.writeFile,
+      rename: fs.rename,
+      unlink: fs.unlink,
+      lstat: fs.lstat,
+      realpath: async (target) => {
+        if (target.endsWith('.clear-tombstone')) {
+          throw Object.assign(new Error('injected tombstone realpath failure'), { code: 'EACCES' });
+        }
+        return fs.realpath(target);
+      },
+      readdir: fs.readdir
+    };
+    const cache = createCacheAt(filePath, { fileSystem, now: () => START });
+    const snapshot = await cache.getDataManagementSnapshot();
+
+    await expect(
+      cache.beginClear({
+        clearableCount: snapshot.clearableCount,
+        fingerprint: snapshot.fingerprint
+      })
+    ).rejects.toMatchObject({ code: 'GUIDE_RESEARCH_PATH_UNSAFE' });
+    await expect(fs.readFile(filePath, 'utf8')).resolves.toBe(previous);
+    expect(
+      (await fs.readdir(path.dirname(filePath))).filter((name) => name.startsWith('.'))
+    ).toEqual([]);
   });
 });

@@ -62,7 +62,8 @@ describe('data management IPC', () => {
       guideResearch: {
         count: 3,
         clearableCount: 3,
-        sizeBytes: 96,
+        sizeBytes: 0,
+        physicalFilePresent: true,
         fingerprint: 'private-guide-fingerprint',
         privateContents: 'https://secret.example/raw-guide'
       },
@@ -81,7 +82,7 @@ describe('data management IPC', () => {
       profiles: { count: 0 },
       scenarios: { count: 2, clearableCount: 1, sizeBytes: 128 },
       history: { count: 0 },
-      guideResearch: { count: 3, sizeBytes: 96 },
+      guideResearch: { count: 3, sizeBytes: 0 },
       serviceKey: { count: 1 }
     });
     await expect(
@@ -99,7 +100,7 @@ describe('data management IPC', () => {
         profiles: { count: 0 },
         scenarios: { count: 2, clearableCount: 1, sizeBytes: 128 },
         history: { count: 0 },
-        guideResearch: { count: 3, sizeBytes: 96 },
+        guideResearch: { count: 3, sizeBytes: 0 },
         serviceKey: { count: 1 }
       }
     });

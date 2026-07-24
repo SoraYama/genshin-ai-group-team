@@ -13,6 +13,8 @@ export const GUIDE_RESEARCH_CACHE_TTL_MS = 24 * 60 * 60 * 1_000;
 export const GUIDE_RESEARCH_CACHE_MAX_ENTRIES = 100;
 export const GUIDE_RESEARCH_CACHE_MAX_BYTES = 2 * 1024 * 1024;
 
+const GUIDE_RESEARCH_TOMBSTONE_PATTERN =
+  /^\.guide-research\.json\.[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.clear-tombstone$/iu;
 const cacheKeySchema = z.string().regex(/^[0-9a-f]{64}$/);
 const knowledgeVersionSchema = z.string().trim().min(1).max(128);
 const timestampSchema = z.iso.datetime({ offset: true }).max(40);
@@ -125,6 +127,7 @@ export interface GuideResearchCacheFileSystem {
     isFile(): boolean;
   }>;
   realpath(filePath: string): Promise<string>;
+  readdir(directoryPath: string): Promise<string[]>;
 }
 
 export type GuideResearchCacheDiagnosticCode =
@@ -139,6 +142,7 @@ export interface GuideResearchCacheDiagnostic {
 export type GuideResearchCacheErrorCode =
   | 'GUIDE_RESEARCH_CLOCK_INVALID'
   | 'GUIDE_RESEARCH_ENTRY_TOO_LARGE'
+  | 'GUIDE_RESEARCH_CLEAR_INCOMPLETE'
   | 'GUIDE_RESEARCH_PATH_UNSAFE'
   | 'GUIDE_RESEARCH_SELECTION_CHANGED'
   | 'GUIDE_RESEARCH_WRITE_FAILED';
@@ -173,9 +177,16 @@ export interface GuideResearchCachePut extends GuideResearchCacheLookup {
 export interface GuideResearchCacheSnapshot {
   count: number;
   clearableCount: number;
+  physicalFilePresent: boolean;
   sizeBytes?: number;
   updatedAt?: string;
   fingerprint: string;
+}
+
+export interface GuideResearchClearTransaction {
+  removed: number;
+  commit(): Promise<void>;
+  rollback(): Promise<void>;
 }
 
 interface LoadedCache {
@@ -183,13 +194,19 @@ interface LoadedCache {
   selectionCount: number;
   sizeBytes?: number;
   fingerprint: string;
+  liveFilePresent: boolean;
+  tombstonePaths: string[];
+}
+
+interface ActiveClearTransaction {
+  id: string;
+  removed: number;
+  tombstonePaths: string[];
+  newlyStagedPath?: string;
 }
 
 const MISSING_FINGERPRINT = createHash('sha256')
   .update('guide-research-cache:missing')
-  .digest('hex');
-const UNREADABLE_FINGERPRINT = createHash('sha256')
-  .update('guide-research-cache:unreadable')
   .digest('hex');
 
 export function resolveGuideResearchCachePath(userDataDirectory: string): string {
@@ -219,6 +236,7 @@ export class GuideResearchCache {
   private readonly now: () => number;
   private readonly onDiagnostic?: (diagnostic: GuideResearchCacheDiagnostic) => void;
   private writeQueue: Promise<void> = Promise.resolve();
+  private activeClear?: ActiveClearTransaction;
 
   constructor(options: GuideResearchCacheOptions) {
     if ('filePath' in options) {
@@ -245,6 +263,7 @@ export class GuideResearchCache {
     const lookup = parseLookup(input);
     const value = ephemeralGuideCacheValueSchema.parse(input.value);
     return this.enqueueWrite(async () => {
+      this.assertNoActiveClear();
       const now = this.currentTime();
       const createdAt = new Date(now).toISOString();
       const key = computeGuideResearchCacheKey(lookup.task, lookup.knowledgeVersion);
@@ -283,7 +302,9 @@ export class GuideResearchCache {
     const snapshot = await this.getDataManagementSnapshot();
     return {
       count: snapshot.count,
-      ...(snapshot.sizeBytes === undefined ? {} : { sizeBytes: snapshot.sizeBytes }),
+      ...(!snapshot.physicalFilePresent || snapshot.sizeBytes === undefined
+        ? {}
+        : { sizeBytes: snapshot.sizeBytes }),
       ...(snapshot.updatedAt === undefined ? {} : { updatedAt: snapshot.updatedAt })
     };
   }
@@ -296,6 +317,7 @@ export class GuideResearchCache {
     return {
       count: loaded.document.entries.length,
       clearableCount: loaded.selectionCount,
+      physicalFilePresent: loaded.liveFilePresent || loaded.tombstonePaths.length > 0,
       ...(loaded.sizeBytes === undefined ? {} : { sizeBytes: loaded.sizeBytes }),
       ...(updatedAt === undefined ? {} : { updatedAt }),
       fingerprint: loaded.fingerprint
@@ -303,7 +325,17 @@ export class GuideResearchCache {
   }
 
   async clearAll(expected: { clearableCount: number; fingerprint: string }): Promise<number> {
-    return this.enqueueWrite(async () => {
+    const transaction = await this.beginClear(expected);
+    await transaction.commit();
+    return transaction.removed;
+  }
+
+  async beginClear(expected: {
+    clearableCount: number;
+    fingerprint: string;
+  }): Promise<GuideResearchClearTransaction> {
+    const staged = await this.enqueueWrite(async () => {
+      this.assertNoActiveClear();
       const now = this.currentTime();
       const loaded = await this.load(now);
       if (
@@ -315,19 +347,122 @@ export class GuideResearchCache {
           'Ephemeral guide research cache changed; confirm again'
         );
       }
-      await this.assertSafePath();
-      try {
-        await this.fileSystem.unlink(this.filePath);
-      } catch (error) {
-        if (!hasErrorCode(error, 'ENOENT')) {
+      let newlyStagedPath: string | undefined;
+      if (loaded.liveFilePresent) {
+        newlyStagedPath = path.join(
+          path.dirname(this.filePath),
+          `.${GUIDE_RESEARCH_CACHE_FILENAME}.${randomUUID()}.clear-tombstone`
+        );
+        let renamed = false;
+        try {
+          await this.assertSafePath();
+          await this.fileSystem.rename(this.filePath, newlyStagedPath);
+          renamed = true;
+          await this.assertSafeManagedFile(newlyStagedPath);
+        } catch (error) {
+          if (renamed) {
+            try {
+              await this.fileSystem.rename(newlyStagedPath, this.filePath);
+              await this.assertSafePath();
+            } catch {
+              throw new GuideResearchCacheError(
+                'GUIDE_RESEARCH_CLEAR_INCOMPLETE',
+                'Ephemeral guide research cache staging rollback is incomplete and can be retried'
+              );
+            }
+          }
+          if (
+            error instanceof GuideResearchCacheError &&
+            error.code === 'GUIDE_RESEARCH_PATH_UNSAFE'
+          ) {
+            throw error;
+          }
           throw new GuideResearchCacheError(
             'GUIDE_RESEARCH_WRITE_FAILED',
-            'Ephemeral guide research cache could not be cleared'
+            'Ephemeral guide research cache could not be staged for clearing'
           );
         }
       }
-      return loaded.selectionCount;
+      const id = randomUUID();
+      const transaction: ActiveClearTransaction = {
+        id,
+        removed: loaded.selectionCount,
+        tombstonePaths: [
+          ...loaded.tombstonePaths,
+          ...(newlyStagedPath === undefined ? [] : [newlyStagedPath])
+        ],
+        ...(newlyStagedPath === undefined ? {} : { newlyStagedPath })
+      };
+      this.activeClear = transaction;
+      return transaction;
     });
+    return {
+      removed: staged.removed,
+      commit: () => this.commitClear(staged.id),
+      rollback: () => this.rollbackClear(staged.id)
+    };
+  }
+
+  private async commitClear(id: string): Promise<void> {
+    return this.enqueueWrite(async () => {
+      const transaction = this.requireActiveClear(id);
+      try {
+        for (const tombstonePath of transaction.tombstonePaths) {
+          await this.assertSafeManagedFile(tombstonePath);
+          try {
+            await this.fileSystem.unlink(tombstonePath);
+          } catch (error) {
+            if (!hasErrorCode(error, 'ENOENT')) throw error;
+          }
+        }
+      } catch {
+        this.activeClear = undefined;
+        throw new GuideResearchCacheError(
+          'GUIDE_RESEARCH_CLEAR_INCOMPLETE',
+          'Ephemeral guide research cache clear is incomplete and can be retried'
+        );
+      }
+      this.activeClear = undefined;
+    });
+  }
+
+  private async rollbackClear(id: string): Promise<void> {
+    return this.enqueueWrite(async () => {
+      const transaction = this.requireActiveClear(id);
+      try {
+        if (transaction.newlyStagedPath !== undefined) {
+          await this.assertSafeManagedFile(transaction.newlyStagedPath);
+          await this.fileSystem.rename(transaction.newlyStagedPath, this.filePath);
+          await this.assertSafePath();
+        }
+      } catch {
+        this.activeClear = undefined;
+        throw new GuideResearchCacheError(
+          'GUIDE_RESEARCH_CLEAR_INCOMPLETE',
+          'Ephemeral guide research cache rollback is incomplete and can be retried'
+        );
+      }
+      this.activeClear = undefined;
+    });
+  }
+
+  private requireActiveClear(id: string): ActiveClearTransaction {
+    if (this.activeClear?.id !== id) {
+      throw new GuideResearchCacheError(
+        'GUIDE_RESEARCH_SELECTION_CHANGED',
+        'Ephemeral guide research clear transaction is no longer active'
+      );
+    }
+    return this.activeClear;
+  }
+
+  private assertNoActiveClear(): void {
+    if (this.activeClear !== undefined) {
+      throw new GuideResearchCacheError(
+        'GUIDE_RESEARCH_WRITE_FAILED',
+        'Ephemeral guide research cache is already being cleared'
+      );
+    }
   }
 
   private currentTime(): number {
@@ -347,45 +482,126 @@ export class GuideResearchCache {
 
   private async load(now: number): Promise<LoadedCache> {
     await this.assertSafePath();
-    let raw: string;
-    try {
-      raw = await this.fileSystem.readFile(this.filePath, 'utf8');
-    } catch (error) {
-      if (hasErrorCode(error, 'ENOENT')) {
-        return {
-          document: documentWith([]),
-          selectionCount: 0,
-          sizeBytes: 0,
-          fingerprint: MISSING_FINGERPRINT
-        };
-      }
-      this.diagnostic('GUIDE_RESEARCH_CACHE_UNREADABLE');
+    const tombstonePaths = await this.discoverTombstones();
+    const liveStat = await this.safeLstat(this.filePath);
+    const liveFilePresent = liveStat !== undefined;
+    const physicalPaths = [...(liveFilePresent ? [this.filePath] : []), ...tombstonePaths];
+    if (physicalPaths.length === 0) {
       return {
         document: documentWith([]),
-        selectionCount: 1,
-        fingerprint: UNREADABLE_FINGERPRINT
+        selectionCount: 0,
+        sizeBytes: 0,
+        fingerprint: MISSING_FINGERPRINT,
+        liveFilePresent: false,
+        tombstonePaths
       };
     }
 
-    const sizeBytes = Buffer.byteLength(raw, 'utf8');
-    const fingerprint = createHash('sha256').update(raw).digest('hex');
-    if (sizeBytes > GUIDE_RESEARCH_CACHE_MAX_BYTES) {
+    const physicalFiles = await Promise.all(
+      physicalPaths.map(async (filePath) => {
+        try {
+          const raw = await this.fileSystem.readFile(filePath, 'utf8');
+          return {
+            filePath,
+            raw,
+            size: Buffer.byteLength(raw, 'utf8'),
+            hash: createHash('sha256').update(raw).digest('hex')
+          };
+        } catch {
+          return { filePath, hash: 'unreadable' as const };
+        }
+      })
+    );
+    const unreadable = physicalFiles.some(({ hash }) => hash === 'unreadable');
+    const fingerprint = createHash('sha256')
+      .update(
+        JSON.stringify(
+          physicalFiles.map(({ filePath, hash }) => ({
+            name: path.basename(filePath),
+            hash
+          }))
+        )
+      )
+      .digest('hex');
+    const sizeBytes = unreadable
+      ? undefined
+      : physicalFiles.reduce((total, file) => total + (file.size ?? 0), 0);
+    if (unreadable) {
+      this.diagnostic('GUIDE_RESEARCH_CACHE_UNREADABLE');
+      return {
+        document: documentWith([]),
+        selectionCount: physicalPaths.length,
+        fingerprint,
+        liveFilePresent,
+        tombstonePaths
+      };
+    }
+
+    const liveFile = physicalFiles.find(({ filePath }) => filePath === this.filePath);
+    if (
+      liveFile === undefined ||
+      typeof liveFile.raw !== 'string' ||
+      typeof liveFile.size !== 'number'
+    ) {
+      return {
+        document: documentWith([]),
+        selectionCount: tombstonePaths.length,
+        sizeBytes,
+        fingerprint,
+        liveFilePresent: false,
+        tombstonePaths
+      };
+    }
+    if (liveFile.size > GUIDE_RESEARCH_CACHE_MAX_BYTES) {
       this.diagnostic('GUIDE_RESEARCH_CACHE_INVALID');
-      return { document: documentWith([]), selectionCount: 1, sizeBytes, fingerprint };
+      return {
+        document: documentWith([]),
+        selectionCount: 1 + tombstonePaths.length,
+        sizeBytes,
+        fingerprint,
+        liveFilePresent: true,
+        tombstonePaths
+      };
     }
     try {
-      const parsed = cacheDocumentSchema.parse(JSON.parse(raw));
+      const parsed = cacheDocumentSchema.parse(JSON.parse(liveFile.raw));
       const entries = parsed.entries.filter((entry) => isEntryCurrent(entry, now));
       return {
         document: documentWith(entries),
-        selectionCount: Math.max(1, parsed.entries.length),
+        selectionCount: Math.max(1, parsed.entries.length) + tombstonePaths.length,
         sizeBytes,
-        fingerprint
+        fingerprint,
+        liveFilePresent: true,
+        tombstonePaths
       };
     } catch {
       this.diagnostic('GUIDE_RESEARCH_CACHE_INVALID');
-      return { document: documentWith([]), selectionCount: 1, sizeBytes, fingerprint };
+      return {
+        document: documentWith([]),
+        selectionCount: 1 + tombstonePaths.length,
+        sizeBytes,
+        fingerprint,
+        liveFilePresent: true,
+        tombstonePaths
+      };
     }
+  }
+
+  private async discoverTombstones(): Promise<string[]> {
+    const directory = path.dirname(this.filePath);
+    let names: string[];
+    try {
+      names = await this.fileSystem.readdir(directory);
+    } catch (error) {
+      if (hasErrorCode(error, 'ENOENT')) return [];
+      throw unsafePathError();
+    }
+    const tombstonePaths = names
+      .filter((name) => GUIDE_RESEARCH_TOMBSTONE_PATTERN.test(name))
+      .sort()
+      .map((name) => path.join(directory, name));
+    await Promise.all(tombstonePaths.map((filePath) => this.assertSafeManagedFile(filePath)));
+    return tombstonePaths;
   }
 
   private async atomicWrite(document: CacheDocument): Promise<void> {
@@ -478,6 +694,35 @@ export class GuideResearchCache {
     if (
       path.dirname(path.normalize(realTemporaryPath)) !==
       path.join(path.normalize(realRoot), 'cache')
+    ) {
+      throw unsafePathError();
+    }
+  }
+
+  private async assertSafeManagedFile(managedPath: string): Promise<void> {
+    if (
+      path.dirname(managedPath) !== path.dirname(this.filePath) ||
+      !GUIDE_RESEARCH_TOMBSTONE_PATTERN.test(path.basename(managedPath))
+    ) {
+      throw unsafePathError();
+    }
+    const managedStat = await this.safeLstat(managedPath);
+    if (managedStat === undefined || managedStat.isSymbolicLink() || !managedStat.isFile()) {
+      throw unsafePathError();
+    }
+    let realManagedPath: string;
+    let realRoot: string;
+    try {
+      [realManagedPath, realRoot] = await Promise.all([
+        this.fileSystem.realpath(managedPath),
+        this.fileSystem.realpath(this.userDataDirectory)
+      ]);
+    } catch {
+      throw unsafePathError();
+    }
+    if (
+      path.normalize(realManagedPath) !==
+      path.join(path.normalize(realRoot), 'cache', path.basename(managedPath))
     ) {
       throw unsafePathError();
     }
@@ -660,19 +905,50 @@ function containsForbiddenSensitiveText(value: EphemeralGuideCacheValue): boolea
 }
 
 function isSensitiveFreeText(text: string): boolean {
-  return [
-    /private[-_ ]nickname/iu,
-    /(?:玩家|用户)\s*uid/iu,
-    /(?:^|[^\p{L}\p{N}_])uid(?:[^\p{L}\p{N}_]|$)/iu,
-    /(?:^|[^\p{L}\p{N}_])nickname(?:[^\p{L}\p{N}_]|$)/iu,
-    /昵称|玩家名/iu,
-    /(?:^|[^\p{L}\p{N}_])cookie(?:[^\p{L}\p{N}_]|$)|ltoken(?:_v\d+)?|ltuid(?:_v\d+)?/iu,
-    /(?:^|[^\p{L}\p{N}_])authorization(?:[^\p{L}\p{N}_]|$)|(?:^|[^\p{L}\p{N}_])bearer(?:[^\p{L}\p{N}_]|$)/iu,
-    /(?:^|[^\p{L}\p{N}_])api[-_ ]?key(?:[^\p{L}\p{N}_]|$)|(?:^|[^\p{L}\p{N}_])token(?:[^\p{L}\p{N}_]|$)/iu,
-    /(?:^|[^\p{L}\p{N}_])prompt(?:[^\p{L}\p{N}_]|$)|system[-_ ]prompt/iu,
-    /raw[-_ ]sdk[-_ ]message|sdk[-_ ]message|tool[-_ ]payload/iu,
-    /full[-_ ]stats|完整面板/iu
-  ].some((pattern) => pattern.test(text));
+  if (
+    [
+      /private[-_ ]nickname/iu,
+      /(?:玩家|用户)\s*uid/iu,
+      /(?:^|[^\p{L}\p{N}_])uid(?:[^\p{L}\p{N}_]|$)/iu,
+      /(?:^|[^\p{L}\p{N}_])nickname(?:[^\p{L}\p{N}_]|$)/iu,
+      /昵称|玩家名/iu,
+      /(?:^|[^\p{L}\p{N}_])cookie(?:[^\p{L}\p{N}_]|$)|ltoken(?:_v\d+)?|ltuid(?:_v\d+)?/iu,
+      /(?:^|[^\p{L}\p{N}_])authorization(?:[^\p{L}\p{N}_]|$)|(?:^|[^\p{L}\p{N}_])bearer(?:[^\p{L}\p{N}_]|$)/iu,
+      /(?:^|[^\p{L}\p{N}_])api[-_ ]?key(?:[^\p{L}\p{N}_]|$)|(?:^|[^\p{L}\p{N}_])token(?:[^\p{L}\p{N}_]|$)/iu,
+      /(?:^|[^\p{L}\p{N}_])credentials?(?:[^\p{L}\p{N}_]|$)/iu,
+      /(?:^|[^\p{L}\p{N}_])prompt(?:[^\p{L}\p{N}_]|$)|system[-_ ]prompt/iu,
+      /(?:sdk[-_ ]+)?raw[-_ ]+(?:sdk[-_ ]+)?message|原始消息/iu,
+      /tool[-_ ]+(?:call[-_ ]+)?payload|tool[-_ ]+载荷|工具载荷/iu,
+      /(?:tool_use|function_call|tool_result|arguments|input)\s*[:=：]/iu,
+      /full[-_ ]?stats|full[-_ ]?panel|完整面板|完整属性/iu
+    ].some((pattern) => pattern.test(text))
+  ) {
+    return true;
+  }
+  return hasFullPanelStatShape(text);
+}
+
+function hasFullPanelStatShape(text: string): boolean {
+  const labels = new Set<string>();
+  const statPattern =
+    /(?:^|[^\p{L}\p{N}_])(?<label>hp|atk|def|crit(?:ical)?[\s_-]*rate|crit(?:ical)?[\s_-]*(?:dmg|damage)|er|em|生命(?:值)?|攻击(?:力)?|防御(?:力)?|暴击率|暴击伤害|元素充能效率|元素精通)\s*[:：=]\s*[+-]?\d+(?:\.\d+)?%?/giu;
+  for (const match of text.matchAll(statPattern)) {
+    const label = match.groups?.label;
+    if (label !== undefined) labels.add(canonicalStatLabel(label));
+  }
+  return labels.size >= 3;
+}
+
+function canonicalStatLabel(label: string): string {
+  const normalized = label.toLocaleLowerCase('en').replace(/[\s_-]/gu, '');
+  if (/^(?:生命|生命值)$/u.test(normalized)) return 'hp';
+  if (/^(?:攻击|攻击力)$/u.test(normalized)) return 'atk';
+  if (/^(?:防御|防御力)$/u.test(normalized)) return 'def';
+  if (normalized === '暴击率') return 'critrate';
+  if (normalized === '暴击伤害') return 'critdmg';
+  if (normalized === '元素充能效率') return 'er';
+  if (normalized === '元素精通') return 'em';
+  return normalized.replace(/^critical/u, 'crit').replace(/damage$/u, 'dmg');
 }
 
 function safelyDecode(value: string): string {

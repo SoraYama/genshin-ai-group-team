@@ -24,6 +24,12 @@ describe('settings presentation', () => {
         scenarios: { count: 3, clearableCount: 0, sizeBytes: 0 },
         guideResearch: { count: 0, sizeBytes: 0 }
       })
+    ).toBe(true);
+    expect(
+      hasClearableChallengeCache({
+        scenarios: { count: 3, clearableCount: 0, sizeBytes: 0 },
+        guideResearch: { count: 0 }
+      })
     ).toBe(false);
   });
 
