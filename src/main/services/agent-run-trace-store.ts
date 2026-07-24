@@ -467,7 +467,7 @@ function redactPrivateTraceText(value: string, sensitiveValues: readonly string[
       /("(?:apiKey|ANTHROPIC_AUTH_TOKEN|Authorization|Cookie)"\s*:\s*)"(?:\\.|[^"\\])*(?:"|$)/giu,
       '$1"[REDACTED]"'
     )
-    .replace(/((?<!")\b(?:Authorization|Cookie)\b\s*[:=：]\s*)[^\r\n]*/giu, '$1[REDACTED]')
+    .replace(/((?<!")\b(?:Authorization|Cookie)\b\s*[:=：]\s*)[^\r\n,}，]*/giu, '$1[REDACTED]')
     .replace(
       /((?<!")\b(?:apiKey|ANTHROPIC_AUTH_TOKEN)\b\s*[:=：]\s*)(?:"(?:\\.|[^"\\])*(?:"|$)|'(?:\\.|[^'\\])*(?:'|$)|[^\r\n,;}；，]+)/giu,
       '$1[REDACTED]'

@@ -264,7 +264,7 @@ function redactRecognizedSecrets(value: string): string {
       '$1"[REDACTED]"'
     )
     .replace(/("(?:Authorization|Cookie)"\s*:\s*)"(?:\\.|[^"\\])*(?:"|$)/gi, '$1"[REDACTED]"')
-    .replace(/((?<!")\b(?:Authorization|Cookie)\b\s*[:=]\s*)[^\r\n]*/gi, '$1[REDACTED]')
+    .replace(/((?<!")\b(?:Authorization|Cookie)\b\s*[:=]\s*)[^\r\n,}，]*/gi, '$1[REDACTED]')
     .replace(
       /((?<!")\b(?:apiKey|ANTHROPIC_AUTH_TOKEN)\b\s*[:=]\s*)(?:"(?:\\.|[^"\\])*(?:"|$)|'(?:\\.|[^'\\])*(?:'|$)|[^\s,;}]+)/gi,
       '$1[REDACTED]'

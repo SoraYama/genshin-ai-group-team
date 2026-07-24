@@ -466,6 +466,51 @@ describe('AgentRunTraceStore privacy boundary', () => {
     );
   });
 
+  it.each([
+    {
+      name: 'plain Cookie comma boundary',
+      raw: 'Cookie: first-secret, safe=keep-comma',
+      expected: 'Cookie: [REDACTED], safe=keep-comma'
+    },
+    {
+      name: 'plain Authorization comma boundary',
+      raw: 'Authorization: Bearer first-secret, safe=keep-comma',
+      expected: 'Authorization: [REDACTED], safe=keep-comma'
+    },
+    {
+      name: 'Cookie semicolon chain before a comma',
+      raw: 'Cookie: first=one; second=two, safe=keep-comma',
+      expected: 'Cookie: [REDACTED], safe=keep-comma'
+    },
+    {
+      name: 'multiple credentials and a safe field on one line',
+      raw: 'Cookie: first=one; second=two, Authorization: Bearer auth-secret, safe=keep',
+      expected: 'Cookie: [REDACTED], Authorization: [REDACTED], safe=keep'
+    },
+    {
+      name: 'newline boundary',
+      raw: 'Authorization: Bearer auth-secret\nsafe=keep-newline',
+      expected: 'Authorization: [REDACTED]\nsafe=keep-newline'
+    },
+    {
+      name: 'object closing boundary',
+      raw: '{Cookie: first=one; second=two} safe=keep-object',
+      expected: '{Cookie: [REDACTED]} safe=keep-object'
+    },
+    {
+      name: 'quoted JSON fields',
+      raw: '{"Cookie":"json-secret","Authorization":"Bearer auth-secret","safe":"keep-json"}',
+      expected: '{"Cookie":"[REDACTED]","Authorization":"[REDACTED]","safe":"keep-json"}'
+    }
+  ])('preserves safe fields at $name', ({ raw, expected }) => {
+    const store = new AgentRunTraceStore();
+    const lease = store.start(run('plain-credential-boundary'));
+    store.startStage(lease, { stage: 'compose' });
+    store.completeStage(lease, completedStage('compose', { rawOutput: raw }));
+
+    expect(store.latest()?.stages[0]?.rawOutput).toBe(expected);
+  });
+
   it('redacts more than 32 production-sized secrets without exposing the registry', () => {
     const secrets = Array.from(
       { length: 40 },
