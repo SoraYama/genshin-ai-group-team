@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { AbyssAdvisorService } from '../../../src/main/services/abyss-advisor-service.js';
 import { CharacterKnowledgeStore } from '../../../src/main/services/character-knowledge-store.js';
+import type { AdvisorKnowledgeReader } from '../../../src/shared/advisor-knowledge.js';
 import type { AgentSdkRunOptions } from '../../../src/main/services/agent-sdk-adapter.js';
 import type { AbyssScenarioView } from '../../../src/shared/abyss-advisor.js';
 import {
@@ -199,6 +200,11 @@ function service(options: {
   toolLog?: ReturnType<typeof vi.fn>;
   auditLog?: ReturnType<typeof vi.fn>;
 }) {
+  const strategyKnowledge = new Proxy({} as AdvisorKnowledgeReader, {
+    get() {
+      throw new Error('strategy knowledge must remain unused until the knowledge pipeline lands');
+    }
+  });
   return new AbyssAdvisorService({
     runner: options.runner,
     scenarioService: options.scenarioService ?? {
@@ -216,6 +222,7 @@ function service(options: {
     sdkEnvironment: { cwd: '/tmp/gta-test', clientVersion: 'test' },
     agentTimeoutMs: options.agentTimeoutMs,
     knowledge: options.knowledge,
+    strategyKnowledge,
     toolLog: options.toolLog,
     auditLog: options.auditLog
   });

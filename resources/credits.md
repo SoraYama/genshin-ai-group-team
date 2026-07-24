@@ -25,14 +25,14 @@ Catalog provenance, retrieved 2026-07-24:
 
 Reproducible review evidence:
 
-- `resources/knowledge/review-evidence.v1.json` contains only short upstream section labels and this project's own Chinese paraphrased review conclusions, with each fact ID bound to the SHA-256 of its committed fact statement. It does not copy guide paragraphs.
+- `resources/knowledge/review-evidence.v1.json` contains only short upstream section labels and this project's own Chinese paraphrased review conclusions, with each fact ID bound to the SHA-256 of its committed fact statement. Each reviewed archetype is also bound to the SHA-256 of its complete canonical policy object, including roles, environments, teammate requirements, signals, thresholds, facts, and explicit unknowns. It does not copy guide paragraphs.
 - Citation `reviewEvidenceSha256` is the SHA-256 of one committed evidence entry serialized as UTF-8 canonical JSON: object keys are recursively sorted lexicographically, array order is preserved, and no insignificant whitespace is emitted.
-- These digests cover the committed paraphrased evidence, **not upstream page HTML**. Third-party pages are mutable and their response bytes are not claimed to be reproducible.
-- Raiden Shogun review evidence — `0e1db7c9634195298fdc5546c06a92736833d7092a15fa7731f450383a23b54f`.
-- Kuki Shinobu review evidence — `f5877817b09b2a6ed71ef69b45cda4c49c2b43a64b858dd1de4856e61a9637e6`.
-- Nahida review evidence — `2403e61bb06ee047da4b001423f440b9ce70f2e4be171fda112ba05e734174b1`.
-- Kokomi review evidence — `011180fd1dbdbfceb8378b224bec582d7b4de682d2f9e1b0084b897c528c922c`.
-- Furina review evidence — `13bd0777e88a0bd6ce8984b136bf8ac83c481d5a0b74aa7628858b139ea7a26a`.
+- These digests make the bundled reviewed snapshot locally tamper-evident across the files loaded together; they are not an external signature or independent trust root. They cover the committed evidence and archetype policy, **not upstream page HTML** or future upstream changes.
+- Raiden Shogun review evidence — `db0744793ccdb9ed0e65a97fc6022d307a0c79fbda2456db55447bff12f666b0`.
+- Kuki Shinobu review evidence — `12588b41142ee5ba89b47495f36eec1aa29b3e27e74e8e0e66df5fcf7b23a495`.
+- Nahida review evidence — `3fb6001e9722b6f4aa27463d69cbde8d8b4b0b51005984347059e9eb2ee68847`.
+- Kokomi review evidence — `03068357cf5f0cffae7f12bb84ee0d25a21693758d5eca2c6c309efcc4f89d43`.
+- Furina review evidence — `30e7fc76ca220490d524e32406ac659e75113a7e9b6d4c2c8fed319b28162077`.
 
 Accepted source registry entries, reviewed 2026-07-24:
 

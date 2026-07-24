@@ -30,6 +30,12 @@ function evidenceDigest(entry: (typeof evidence.entries)[number]): string {
   return createHash('sha256').update(canonicalJsonStringify(entry), 'utf8').digest('hex');
 }
 
+function policyDigest(
+  archetype: (typeof strategies.characters)[number]['archetypes'][number]
+): string {
+  return createHash('sha256').update(canonicalJsonStringify(archetype), 'utf8').digest('hex');
+}
+
 function knowledgeSet() {
   return { sources, catalog, strategies, evidence };
 }
@@ -56,6 +62,28 @@ describe('committed paraphrased review evidence', () => {
     }
 
     expect(() => committedAdvisorKnowledgeSetSchema.parse(knowledgeSet())).not.toThrow();
+  });
+
+  it('binds every reviewed archetype policy exactly once and never binds a gap archetype', () => {
+    const bindings = evidence.entries.flatMap(({ archetypeBindings }) => archetypeBindings);
+    const reviewedArchetypes = strategies.characters
+      .filter(({ reviewState }) => reviewState === 'reviewed')
+      .flatMap(({ archetypes }) => archetypes);
+    const gapIds = new Set(
+      strategies.characters
+        .filter(({ reviewState }) => reviewState === 'unreviewed')
+        .flatMap(({ archetypes }) => archetypes.map(({ id }) => id))
+    );
+
+    expect(bindings).toHaveLength(10);
+    expect(new Set(bindings.map(({ archetypeId }) => archetypeId)).size).toBe(10);
+    expect(bindings.every(({ archetypeId }) => !gapIds.has(archetypeId))).toBe(true);
+    for (const archetype of reviewedArchetypes) {
+      expect(bindings).toContainEqual({
+        archetypeId: archetype.id,
+        policySha256: policyDigest(archetype)
+      });
+    }
   });
 
   it('rejects missing, swapped, and tampered evidence', () => {
@@ -112,6 +140,50 @@ describe('committed paraphrased review evidence', () => {
       committedAdvisorKnowledgeSetSchema.safeParse({
         ...knowledgeSet(),
         strategies: tamperedStrategies
+      }).success
+    ).toBe(false);
+  });
+
+  it('rejects unreviewed changes to classification thresholds, weights, and team policy', () => {
+    const thresholdTamper = structuredClone(strategies);
+    const raidenOnField = thresholdTamper.characters
+      .find(({ id }) => id === '10000052')!
+      .archetypes.find(({ id }) => id === 'raiden-emblem-on-field')!;
+    if (raidenOnField.coverage !== 'reviewed') throw new Error('reviewed fixture is required');
+    const erSignal = raidenOnField.signals.find(({ id }) => id === 'raiden-onfield-er')!;
+    erSignal.value = 131;
+    expect(
+      committedAdvisorKnowledgeSetSchema.safeParse({
+        ...knowledgeSet(),
+        strategies: thresholdTamper
+      }).success
+    ).toBe(false);
+
+    const weightTamper = structuredClone(strategies);
+    const shinobuHyperbloom = weightTamper.characters
+      .find(({ id }) => id === '10000065')!
+      .archetypes.find(({ id }) => id === 'shinobu-em-hyperbloom')!;
+    if (shinobuHyperbloom.coverage !== 'reviewed') {
+      throw new Error('reviewed fixture is required');
+    }
+    shinobuHyperbloom.signals[0]!.weight = 4;
+    expect(
+      committedAdvisorKnowledgeSetSchema.safeParse({
+        ...knowledgeSet(),
+        strategies: weightTamper
+      }).success
+    ).toBe(false);
+
+    const teamPolicyTamper = structuredClone(strategies);
+    const furina = teamPolicyTamper.characters
+      .find(({ id }) => id === '10000089')!
+      .archetypes.find(({ id }) => id === 'furina-off-field-fanfare')!;
+    if (furina.coverage !== 'reviewed') throw new Error('reviewed fixture is required');
+    furina.teammateSlots[0]!.requirements[0] += '（未经重新审核）';
+    expect(
+      committedAdvisorKnowledgeSetSchema.safeParse({
+        ...knowledgeSet(),
+        strategies: teamPolicyTamper
       }).success
     ).toBe(false);
   });

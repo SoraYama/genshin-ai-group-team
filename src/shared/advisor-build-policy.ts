@@ -22,7 +22,7 @@ export interface ReviewedArchetypePolicyMatch {
 
 export interface ReviewedArchetypePolicyResult {
   matches: ReviewedArchetypePolicyMatch[];
-  ambiguous: boolean;
+  overlappingCandidates: boolean;
 }
 
 type ReviewedArchetype = Extract<CommittedBuildArchetypeV2, { coverage: 'reviewed' }>;
@@ -35,7 +35,7 @@ export function evaluateReviewedArchetypes(
     .filter((archetype): archetype is ReviewedArchetype => archetype.coverage === 'reviewed')
     .map((archetype) => evaluateReviewedArchetype(archetype, build))
     .filter((result): result is ReviewedArchetypePolicyMatch => result !== undefined);
-  return { matches, ambiguous: matches.length > 1 };
+  return { matches, overlappingCandidates: matches.length > 1 };
 }
 
 function evaluateReviewedArchetype(

@@ -13,6 +13,7 @@ import {
 import type { AbyssPlanHistoryEntry } from '../../shared/domain.js';
 import { createPlayerCycleSnapshot } from '../../shared/history-snapshot.js';
 import type { CharacterKnowledgeReader } from '../../shared/character-knowledge.js';
+import type { AdvisorKnowledgeReader } from '../../shared/advisor-knowledge.js';
 import {
   ABYSS_MCP_TOOL_NAMES,
   createAbyssBusinessMcpServer,
@@ -45,6 +46,7 @@ export interface AbyssAdvisorServiceOptions {
   toolLog?: (event: AbyssBusinessToolLog) => void;
   auditLog?: (event: AbyssAdvisorAuditLog) => void;
   knowledge?: CharacterKnowledgeReader;
+  strategyKnowledge: AdvisorKnowledgeReader;
 }
 
 export interface AbyssAdvisorAuditLog {

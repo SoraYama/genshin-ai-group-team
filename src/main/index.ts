@@ -58,6 +58,7 @@ import { TheaterScenarioService } from './services/theater-scenario-service.js';
 import { TheaterAdvisorService } from './services/theater-advisor-service.js';
 import { createProductionScenarioPublicationSource } from './scenario-publication/production-composition.js';
 import { CharacterKnowledgeStore } from './services/character-knowledge-store.js';
+import { KnowledgeBundleStore } from './services/knowledge-bundle-store.js';
 import { DataManagementService } from './services/data-management-service.js';
 import { registerDataManagementIpc } from './ipc/data-management.ipc.js';
 
@@ -83,10 +84,10 @@ function resolveBundledScenarioDir(): string {
   return path.resolve(__dirname, '../../resources/scenarios');
 }
 
-function resolveBundledKnowledgePath(): string {
+function resolveBundledKnowledgeDir(): string {
   return app.isPackaged
-    ? path.join(process.resourcesPath, 'knowledge', 'characters.v1.json')
-    : path.resolve(__dirname, '../../resources/knowledge/characters.v1.json');
+    ? path.join(process.resourcesPath, 'knowledge')
+    : path.resolve(__dirname, '../../resources/knowledge');
 }
 
 async function bootstrapServices(): Promise<void> {
@@ -121,7 +122,11 @@ async function bootstrapServices(): Promise<void> {
   const profiles = new ProfileStore();
   const history = new HistoryStore();
   const advisor = new AdvisorAgent(config, profiles, history);
-  const characterKnowledge = await CharacterKnowledgeStore.load(resolveBundledKnowledgePath());
+  const knowledgeDir = resolveBundledKnowledgeDir();
+  const characterKnowledge = await CharacterKnowledgeStore.load(
+    path.join(knowledgeDir, 'characters.v1.json')
+  );
+  const strategyKnowledge = await KnowledgeBundleStore.load(knowledgeDir);
   const productionScenarios = await createProductionScenarioPublicationSource({
     userDataDir: app.getPath('userData'),
     packagedConfigPath: app.isPackaged
@@ -148,6 +153,7 @@ async function bootstrapServices(): Promise<void> {
     history,
     config,
     knowledge: characterKnowledge,
+    strategyKnowledge,
     toolLog: (event) => console.info('[abyss-business-tool]', event),
     auditLog: (event) => console.info('[abyss-advisor]', event),
     sdkEnvironment: { cwd: app.getPath('userData'), clientVersion: app.getVersion() }

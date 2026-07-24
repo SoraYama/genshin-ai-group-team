@@ -67,6 +67,6 @@ describe('reviewed build signal policy', () => {
     expect(result.matches.map(({ archetypeId }) => archetypeId).sort()).toEqual(
       ['nahida-off-field-dendro', 'nahida-on-field-driver'].sort()
     );
-    expect(result.ambiguous).toBe(true);
+    expect(result.overlappingCandidates).toBe(true);
   });
 });

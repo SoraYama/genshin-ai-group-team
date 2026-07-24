@@ -49,7 +49,7 @@
       "subjectCharacterIds": ["10000052"],
       "retrievedAt": "2026-07-24T15:48:09Z",
       "reviewEvidenceVersion": "paraphrased-evidence-v1",
-      "reviewEvidenceSha256": "0e1db7c9634195298fdc5546c06a92736833d7092a15fa7731f450383a23b54f"
+      "reviewEvidenceSha256": "db0744793ccdb9ed0e65a97fc6022d307a0c79fbda2456db55447bff12f666b0"
     },
     {
       "id": "kqm-shinobu-quickguide",
@@ -61,7 +61,7 @@
       "subjectCharacterIds": ["10000065"],
       "retrievedAt": "2026-07-24T15:48:09Z",
       "reviewEvidenceVersion": "paraphrased-evidence-v1",
-      "reviewEvidenceSha256": "f5877817b09b2a6ed71ef69b45cda4c49c2b43a64b858dd1de4856e61a9637e6"
+      "reviewEvidenceSha256": "12588b41142ee5ba89b47495f36eec1aa29b3e27e74e8e0e66df5fcf7b23a495"
     },
     {
       "id": "kqm-nahida-quickguide",
@@ -73,7 +73,7 @@
       "subjectCharacterIds": ["10000073"],
       "retrievedAt": "2026-07-24T15:48:09Z",
       "reviewEvidenceVersion": "paraphrased-evidence-v1",
-      "reviewEvidenceSha256": "2403e61bb06ee047da4b001423f440b9ce70f2e4be171fda112ba05e734174b1"
+      "reviewEvidenceSha256": "3fb6001e9722b6f4aa27463d69cbde8d8b4b0b51005984347059e9eb2ee68847"
     },
     {
       "id": "kqm-kokomi-quickguide",
@@ -85,7 +85,7 @@
       "subjectCharacterIds": ["10000054"],
       "retrievedAt": "2026-07-24T15:48:09Z",
       "reviewEvidenceVersion": "paraphrased-evidence-v1",
-      "reviewEvidenceSha256": "011180fd1dbdbfceb8378b224bec582d7b4de682d2f9e1b0084b897c528c922c"
+      "reviewEvidenceSha256": "03068357cf5f0cffae7f12bb84ee0d25a21693758d5eca2c6c309efcc4f89d43"
     },
     {
       "id": "kqm-furina-quickguide",
@@ -97,7 +97,7 @@
       "subjectCharacterIds": ["10000089"],
       "retrievedAt": "2026-07-24T15:48:09Z",
       "reviewEvidenceVersion": "paraphrased-evidence-v1",
-      "reviewEvidenceSha256": "13bd0777e88a0bd6ce8984b136bf8ac83c481d5a0b74aa7628858b139ea7a26a"
+      "reviewEvidenceSha256": "30e7fc76ca220490d524e32406ac659e75113a7e9b6d4c2c8fed319b28162077"
     }
   ]
 }

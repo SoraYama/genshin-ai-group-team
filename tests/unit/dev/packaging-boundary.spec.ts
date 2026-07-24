@@ -40,4 +40,12 @@ describe('scenario publisher packaging boundary', () => {
       : scenarioPublisherConfig;
     expect(config?.outDir).toBe('dist-tools/scenario-data');
   });
+
+  it('fails bootstrap on trusted strategy bundle loading and injects it only into Abyss', async () => {
+    const mainSource = await readFile(path.join(process.cwd(), 'src/main/index.ts'), 'utf8');
+
+    expect(mainSource).toContain('function resolveBundledKnowledgeDir(): string');
+    expect(mainSource).toContain('KnowledgeBundleStore.load(knowledgeDir)');
+    expect(mainSource.match(/strategyKnowledge/g)).toHaveLength(2);
+  });
 });

@@ -640,6 +640,13 @@ const reviewEvidenceItemSchema = z
   })
   .strict();
 
+const reviewEvidenceArchetypeBindingSchema = z
+  .object({
+    archetypeId: boundedIdSchema,
+    policySha256: sha256Schema
+  })
+  .strict();
+
 export const reviewEvidenceEntrySchema = z
   .object({
     citationId: boundedIdSchema,
@@ -655,6 +662,15 @@ export const reviewEvidenceEntrySchema = z
       .min(1)
       .max(16)
       .refine((labels) => new Set(labels).size === labels.length, 'Section labels must be unique'),
+    archetypeBindings: z
+      .array(reviewEvidenceArchetypeBindingSchema)
+      .min(1)
+      .max(16)
+      .refine(
+        (bindings) =>
+          new Set(bindings.map(({ archetypeId }) => archetypeId)).size === bindings.length,
+        'Evidence archetype bindings must use unique archetype IDs'
+      ),
     paraphrasedEvidence: z.array(reviewEvidenceItemSchema).min(1).max(32)
   })
   .strict()
@@ -947,6 +963,8 @@ export const buildInterpretationSchema = z
     characterId: canonicalCharacterIdSchema,
     archetypeId: z.string().trim().min(1).max(80).nullable(),
     confidence: z.enum(['high', 'medium', 'low']),
+    candidateArchetypeIds: z.array(z.string().trim().min(1).max(80)).max(16).default([]),
+    contextRequired: z.boolean().default(false),
     matchedSignals: z.array(z.string().trim().min(1).max(160)).max(12),
     conflictingSignals: z.array(z.string().trim().min(1).max(160)).max(12),
     currentBuildUsable: z.boolean(),
@@ -1231,6 +1249,40 @@ export type CommittedCharacterStrategyBundleV2 = z.infer<
 export type CommittedAdvisorKnowledgeSet = z.infer<
   typeof committedAdvisorKnowledgeSetStructureSchema
 >;
+export type CharacterStrategyResult =
+  | {
+      status: 'reviewed';
+      characterId: string;
+      knowledgeVersion: string;
+      strategy: CommittedCharacterStrategyV2;
+    }
+  | {
+      status: 'gap';
+      characterId: string;
+      knowledgeVersion: string;
+      strategy: CommittedCharacterStrategyV2;
+    }
+  | {
+      status: 'unknown';
+      characterId: string;
+      knowledgeVersion: string;
+    };
+export interface AdvisorKnowledgeCoverage {
+  knowledgeVersion: string;
+  catalogVersion: string;
+  requestedCharacterIds: string[];
+  trustedCharacterIds: string[];
+  unknownCharacterIds: string[];
+}
+export interface AdvisorKnowledgeReader {
+  readonly version: string;
+  readonly catalogVersion: string;
+  getCatalogEntry(characterId: string): CommittedCharacterCatalogEntry | undefined;
+  getCharacterStrategy(characterId: string): CharacterStrategyResult;
+  getArchetype(characterId: string, archetypeId: string): CommittedBuildArchetypeV2 | undefined;
+  citations(ids: readonly string[]): CommittedSourceRegistry['citations'][number][];
+  coverageFor(input: { characterIds: readonly string[]; now: Date }): AdvisorKnowledgeCoverage;
+}
 export type EnemyMechanicStrategy = z.infer<typeof enemyMechanicStrategySchema>;
 export type EnemyMechanicStrategyBundle = z.infer<typeof enemyMechanicStrategyBundleSchema>;
 export type BuildInterpretation = z.infer<typeof buildInterpretationSchema>;
