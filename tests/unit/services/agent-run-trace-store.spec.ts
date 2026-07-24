@@ -378,6 +378,94 @@ describe('AgentRunTraceStore privacy boundary', () => {
     );
   });
 
+  it.each([
+    {
+      name: 'fullwidth UID marker followed by digits',
+      raw: 'ＵＩＤ：[REDACTED] 345678901'
+    },
+    {
+      name: 'fullwidth apiKey marker followed by text',
+      raw: 'ａｐｉＫｅｙ：[REDACTED] second-secret'
+    },
+    {
+      name: 'fullwidth nickname marker followed by text',
+      raw: 'Ｎｉｃｋｎａｍｅ：[REDACTED] private-tail'
+    },
+    {
+      name: 'fullwidth Authorization marker followed by text',
+      raw: 'Ａｕｔｈｏｒｉｚａｔｉｏｎ：[REDACTED] bearer-tail'
+    },
+    {
+      name: 'fullwidth Cookie marker followed by text',
+      raw: 'Ｃｏｏｋｉｅ：[REDACTED] session-tail'
+    },
+    {
+      name: 'percent-encoded marker followed by digits',
+      raw: 'UID%3A%20%5BREDACTED%5D%20345678901'
+    },
+    {
+      name: 'zero-width UID marker followed by digits',
+      raw: 'U\u200bID:[REDACTED] 345678901'
+    },
+    {
+      name: 'mixed ASCII UID and hidden marker tail',
+      raw: 'UID: 234567890\nＵＩＤ：[REDACTED] 345678901'
+    },
+    {
+      name: 'marker followed by a second marker',
+      raw: 'ＵＩＤ：[REDACTED] [REDACTED]'
+    }
+  ])('rejects canonical sensitive marker prefixes for $name', ({ raw }) => {
+    const store = new AgentRunTraceStore();
+    const lease = store.start(run('marker-prefix'));
+    store.startStage(lease, { stage: 'compose' });
+    store.completeStage(lease, completedStage('compose', { rawOutput: raw }));
+
+    expect(store.latest()?.stages[0]?.rawOutput).toBe('[REDACTED]');
+  });
+
+  it('redacts the full unquoted credential value instead of leaving a second token', () => {
+    const store = new AgentRunTraceStore();
+    const lease = store.start(run('credential-tail'));
+    store.startStage(lease, { stage: 'compose' });
+    store.completeStage(
+      lease,
+      completedStage('compose', {
+        rawOutput: 'apiKey=first-secret second-secret'
+      })
+    );
+
+    expect(store.latest()?.stages[0]?.rawOutput).toBe('apiKey=[REDACTED]');
+  });
+
+  it('keeps JSON, comma, and newline fields outside credential value boundaries', () => {
+    const store = new AgentRunTraceStore();
+    const lease = store.start(run('credential-boundaries'));
+    store.startStage(lease, { stage: 'compose' });
+    store.completeStage(
+      lease,
+      completedStage('compose', {
+        rawOutput: [
+          '{"apiKey":"json secret","safe":"keep-json"}',
+          'apiKey=first second, safe=keep-comma',
+          'Cookie=session secret',
+          'safe-line=keep-newline',
+          'UID:[REDACTED]'
+        ].join('\n')
+      })
+    );
+
+    expect(store.latest()?.stages[0]?.rawOutput).toBe(
+      [
+        '{"apiKey":"[REDACTED]","safe":"keep-json"}',
+        'apiKey=[REDACTED], safe=keep-comma',
+        'Cookie=[REDACTED]',
+        'safe-line=keep-newline',
+        'UID:[REDACTED]'
+      ].join('\n')
+    );
+  });
+
   it('redacts more than 32 production-sized secrets without exposing the registry', () => {
     const secrets = Array.from(
       { length: 40 },

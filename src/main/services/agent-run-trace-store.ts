@@ -469,7 +469,7 @@ function redactPrivateTraceText(value: string, sensitiveValues: readonly string[
     )
     .replace(/((?<!")\b(?:Authorization|Cookie)\b\s*[:=：]\s*)[^\r\n]*/giu, '$1[REDACTED]')
     .replace(
-      /((?<!")\b(?:apiKey|ANTHROPIC_AUTH_TOKEN)\b\s*[:=：]\s*)(?:"(?:\\.|[^"\\])*(?:"|$)|'(?:\\.|[^'\\])*(?:'|$)|[^\s,;}]+)/giu,
+      /((?<!")\b(?:apiKey|ANTHROPIC_AUTH_TOKEN)\b\s*[:=：]\s*)(?:"(?:\\.|[^"\\])*(?:"|$)|'(?:\\.|[^'\\])*(?:'|$)|[^\r\n,;}；，]+)/giu,
       '$1[REDACTED]'
     )
     .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/giu, 'Bearer [REDACTED]');
@@ -517,16 +517,27 @@ function decodePercentRuns(value: string): string {
 }
 
 function containsCanonicalPrivacyLeak(value: string): boolean {
-  return (
-    /(?:^|[^\p{L}\p{N}_])(?:uid|game_uid)\s*(?:[:=：]|-)\s*\p{Decimal_Number}{9,}/imu.test(value) ||
-    /(?:^|[^\p{L}\p{N}_])(?:nickname|private[-_ ]?profile)\s*[:=：](?!\s*\[REDACTED\](?:$|[\s,;}；，]))\s*[^\r\n,;}；，]+/imu.test(
-      value
-    ) ||
-    /(?:^|[^\p{L}\p{N}_])(?:apiKey|ANTHROPIC_AUTH_TOKEN|Authorization|Cookie)\s*[:=：](?!\s*(?:Bearer\s+)?\[REDACTED\](?:$|[\s,;}；，]))\s*[^\r\n,;}；，]+/imu.test(
-      value
-    ) ||
-    /\bBearer\s+(?!\[REDACTED\](?:$|\s))[A-Za-z0-9._~+/=-]+/imu.test(value)
-  );
+  const label =
+    '(?:uid|game_uid|nickname|private[-_ ]?profile|apiKey|ANTHROPIC_AUTH_TOKEN|Authorization|Cookie)';
+  const valuePattern = '([^\\r\\n,;}；，]+)';
+  const labeledValues = [
+    ...value.matchAll(new RegExp(`["']${label}["']\\s*[:=：]\\s*${valuePattern}`, 'gimu')),
+    ...value.matchAll(
+      new RegExp(`(?:^|[^\\p{L}\\p{N}_])${label}\\s*(?:[:=：]|-)\\s*${valuePattern}`, 'gimu')
+    ),
+    ...value.matchAll(new RegExp(`\\bBearer\\s+${valuePattern}`, 'gimu'))
+  ];
+  return labeledValues.some((match) => !isExactRedactionMarker(match[1] ?? ''));
+}
+
+function isExactRedactionMarker(value: string): boolean {
+  let normalized = value.trim();
+  const first = normalized[0];
+  const last = normalized[normalized.length - 1];
+  if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+    normalized = normalized.slice(1, -1).trim();
+  }
+  return normalized === REDACTION_MARKER;
 }
 
 function sanitizeUsage(usage: AgentUsage | undefined): AgentUsage {
