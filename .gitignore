@@ -13,3 +13,4 @@ playwright-report/
 .cache/
 .tmp/
 .worktrees/
+.superpowers/
