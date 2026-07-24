@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 1,
+  "sourceVersion": "2026-07-24",
+  "sources": [
+    {
+      "id": "official-genshin",
+      "displayName": "Genshin Impact Official Site",
+      "host": "genshin.hoyoverse.com",
+      "trust": "trusted-local",
+      "reviewCadenceDays": 90
+    },
+    {
+      "id": "hoyolab-wiki",
+      "displayName": "HoYoLAB",
+      "host": "hoyolab.com",
+      "trust": "trusted-local",
+      "reviewCadenceDays": 90
+    },
+    {
+      "id": "kqm-guides",
+      "displayName": "KeqingMains Guides",
+      "host": "keqingmains.com",
+      "trust": "trusted-local",
+      "reviewCadenceDays": 90
+    },
+    {
+      "id": "kqm-shortlink",
+      "displayName": "KQM Guide Directory",
+      "host": "kqm.gg",
+      "trust": "trusted-local",
+      "reviewCadenceDays": 90
+    },
+    {
+      "id": "kqm-library",
+      "displayName": "KQM Theorycrafting Library",
+      "host": "library.keqingmains.com",
+      "trust": "trusted-local",
+      "reviewCadenceDays": 180
+    }
+  ],
+  "citations": [
+    {
+      "id": "official-genshin-home",
+      "sourceId": "official-genshin",
+      "url": "https://genshin.hoyoverse.com/en/",
+      "title": "Genshin Impact Official Site",
+      "reviewedAt": "2026-07-24T23:08:06+08:00",
+      "trust": "trusted-local"
+    },
+    {
+      "id": "hoyolab-home",
+      "sourceId": "hoyolab-wiki",
+      "url": "https://hoyolab.com/",
+      "title": "HoYoLAB Official Community",
+      "reviewedAt": "2026-07-24T23:08:06+08:00",
+      "trust": "trusted-local"
+    },
+    {
+      "id": "kqm-guide-directory",
+      "sourceId": "kqm-shortlink",
+      "url": "https://kqm.gg/",
+      "title": "KQM Genshin Impact Guide Directory",
+      "reviewedAt": "2026-07-24T23:08:06+08:00",
+      "trust": "trusted-local"
+    },
+    {
+      "id": "kqm-library-home",
+      "sourceId": "kqm-library",
+      "url": "https://library.keqingmains.com/",
+      "title": "KQM Theorycrafting Library",
+      "reviewedAt": "2026-07-24T23:08:06+08:00",
+      "trust": "trusted-local"
+    },
+    {
+      "id": "kqm-raiden-quickguide",
+      "sourceId": "kqm-guides",
+      "url": "https://keqingmains.com/q/raiden-quickguide/",
+      "title": "Raiden Shogun Quick Guide",
+      "reviewedAt": "2026-07-24T23:08:06+08:00",
+      "trust": "trusted-local"
+    },
+    {
+      "id": "kqm-shinobu-quickguide",
+      "sourceId": "kqm-guides",
+      "url": "https://keqingmains.com/q/shinobu-quickguide/",
+      "title": "Kuki Shinobu Quick Guide",
+      "reviewedAt": "2026-07-24T23:08:06+08:00",
+      "trust": "trusted-local"
+    },
+    {
+      "id": "kqm-nahida-quickguide",
+      "sourceId": "kqm-guides",
+      "url": "https://keqingmains.com/q/nahida-quickguide/",
+      "title": "Nahida Quick Guide",
+      "reviewedAt": "2026-07-24T23:08:06+08:00",
+      "trust": "trusted-local"
+    },
+    {
+      "id": "kqm-kokomi-quickguide",
+      "sourceId": "kqm-guides",
+      "url": "https://keqingmains.com/q/kokomi-quickguide/",
+      "title": "Kokomi Quick Guide",
+      "reviewedAt": "2026-07-24T23:08:06+08:00",
+      "trust": "trusted-local"
+    },
+    {
+      "id": "kqm-furina-quickguide",
+      "sourceId": "kqm-guides",
+      "url": "https://keqingmains.com/q/furina-quickguide/",
+      "title": "Furina Quick Guide",
+      "reviewedAt": "2026-07-24T23:08:06+08:00",
+      "trust": "trusted-local"
+    }
+  ]
+}

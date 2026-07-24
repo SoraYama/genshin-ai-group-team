@@ -1,0 +1,830 @@
+{
+  "schemaVersion": 1,
+  "catalogVersion": "enka-2026-07-24",
+  "retrievedAt": "2026-07-24T23:08:06+08:00",
+  "provenance": [
+    {
+      "id": "enka-characters",
+      "url": "https://raw.githubusercontent.com/EnkaNetwork/API-docs/master/store/characters.json",
+      "retrievedAt": "2026-07-24T23:08:06+08:00",
+      "sha256": "51dbaef256968a41dab3429d60f88f77f29645c4b79bf606fc93d4fbf3be33e4"
+    },
+    {
+      "id": "enka-localization",
+      "url": "https://raw.githubusercontent.com/EnkaNetwork/API-docs/master/store/loc.json",
+      "retrievedAt": "2026-07-24T23:08:06+08:00",
+      "sha256": "ee8a58105be0595b386d035377711d7aa0859d09550241b291459372bbd38976"
+    }
+  ],
+  "exclusions": [
+    {
+      "id": "10000901",
+      "name": "玛薇卡(试用)",
+      "kind": "trial-variant",
+      "reason": "试用角色使用替代 ID，不属于玩家可绑定名册的 canonical 角色。"
+    },
+    {
+      "id": "10000902",
+      "name": "胡桃(试用)",
+      "kind": "trial-variant",
+      "reason": "试用角色使用替代 ID，不属于玩家可绑定名册的 canonical 角色。"
+    },
+    {
+      "id": "10000903",
+      "name": "伊涅芙",
+      "kind": "alternate-variant",
+      "reason": "该替代 ID 与 canonical 伊涅芙 10000116 重复，不作为独立角色收录。"
+    },
+    {
+      "id": "10000904",
+      "name": "哥伦比娅",
+      "kind": "alternate-variant",
+      "reason": "100009xx 替代范围不是玩家名册 canonical ID，保留为审计排除项。"
+    },
+    {
+      "id": "11000046",
+      "name": "火神(测试)",
+      "kind": "test-variant",
+      "reason": "本地化名称明确标注为测试角色，不属于玩家可绑定名册。"
+    }
+  ],
+  "characters": [
+    {
+      "id": "10000002",
+      "name": "神里绫华",
+      "aliases": [],
+      "element": "cryo",
+      "weaponType": "sword"
+    },
+    {
+      "id": "10000003",
+      "name": "琴",
+      "aliases": [],
+      "element": "anemo",
+      "weaponType": "sword"
+    },
+    {
+      "id": "10000005",
+      "name": "旅行者",
+      "aliases": [
+        "火元素形态",
+        "水元素形态",
+        "风元素形态",
+        "岩元素形态",
+        "雷元素形态",
+        "草元素形态"
+      ],
+      "element": "anemo",
+      "weaponType": "sword"
+    },
+    {
+      "id": "10000006",
+      "name": "丽莎",
+      "aliases": [],
+      "element": "electro",
+      "weaponType": "catalyst"
+    },
+    {
+      "id": "10000007",
+      "name": "旅行者",
+      "aliases": [
+        "火元素形态",
+        "水元素形态",
+        "风元素形态",
+        "岩元素形态",
+        "雷元素形态",
+        "草元素形态"
+      ],
+      "element": "anemo",
+      "weaponType": "sword"
+    },
+    {
+      "id": "10000014",
+      "name": "芭芭拉",
+      "aliases": [],
+      "element": "hydro",
+      "weaponType": "catalyst"
+    },
+    {
+      "id": "10000015",
+      "name": "凯亚",
+      "aliases": [],
+      "element": "cryo",
+      "weaponType": "sword"
+    },
+    {
+      "id": "10000016",
+      "name": "迪卢克",
+      "aliases": [],
+      "element": "pyro",
+      "weaponType": "claymore"
+    },
+    {
+      "id": "10000020",
+      "name": "雷泽",
+      "aliases": [],
+      "element": "electro",
+      "weaponType": "claymore"
+    },
+    {
+      "id": "10000021",
+      "name": "安柏",
+      "aliases": [],
+      "element": "pyro",
+      "weaponType": "bow"
+    },
+    {
+      "id": "10000022",
+      "name": "温迪",
+      "aliases": [],
+      "element": "anemo",
+      "weaponType": "bow"
+    },
+    {
+      "id": "10000023",
+      "name": "香菱",
+      "aliases": [],
+      "element": "pyro",
+      "weaponType": "polearm"
+    },
+    {
+      "id": "10000024",
+      "name": "北斗",
+      "aliases": [],
+      "element": "electro",
+      "weaponType": "claymore"
+    },
+    {
+      "id": "10000025",
+      "name": "行秋",
+      "aliases": [],
+      "element": "hydro",
+      "weaponType": "sword"
+    },
+    {
+      "id": "10000026",
+      "name": "魈",
+      "aliases": [],
+      "element": "anemo",
+      "weaponType": "polearm"
+    },
+    {
+      "id": "10000027",
+      "name": "凝光",
+      "aliases": [],
+      "element": "geo",
+      "weaponType": "catalyst"
+    },
+    {
+      "id": "10000029",
+      "name": "可莉",
+      "aliases": [],
+      "element": "pyro",
+      "weaponType": "catalyst"
+    },
+    {
+      "id": "10000030",
+      "name": "钟离",
+      "aliases": [],
+      "element": "geo",
+      "weaponType": "polearm"
+    },
+    {
+      "id": "10000031",
+      "name": "菲谢尔",
+      "aliases": [],
+      "element": "electro",
+      "weaponType": "bow"
+    },
+    {
+      "id": "10000032",
+      "name": "班尼特",
+      "aliases": [],
+      "element": "pyro",
+      "weaponType": "sword"
+    },
+    {
+      "id": "10000033",
+      "name": "达达利亚",
+      "aliases": [],
+      "element": "hydro",
+      "weaponType": "bow"
+    },
+    {
+      "id": "10000034",
+      "name": "诺艾尔",
+      "aliases": [],
+      "element": "geo",
+      "weaponType": "claymore"
+    },
+    {
+      "id": "10000035",
+      "name": "七七",
+      "aliases": [],
+      "element": "cryo",
+      "weaponType": "sword"
+    },
+    {
+      "id": "10000036",
+      "name": "重云",
+      "aliases": [],
+      "element": "cryo",
+      "weaponType": "claymore"
+    },
+    {
+      "id": "10000037",
+      "name": "甘雨",
+      "aliases": [],
+      "element": "cryo",
+      "weaponType": "bow"
+    },
+    {
+      "id": "10000038",
+      "name": "阿贝多",
+      "aliases": [],
+      "element": "geo",
+      "weaponType": "sword"
+    },
+    {
+      "id": "10000039",
+      "name": "迪奥娜",
+      "aliases": [],
+      "element": "cryo",
+      "weaponType": "bow"
+    },
+    {
+      "id": "10000041",
+      "name": "莫娜",
+      "aliases": [],
+      "element": "hydro",
+      "weaponType": "catalyst"
+    },
+    {
+      "id": "10000042",
+      "name": "刻晴",
+      "aliases": [],
+      "element": "electro",
+      "weaponType": "sword"
+    },
+    {
+      "id": "10000043",
+      "name": "砂糖",
+      "aliases": [],
+      "element": "anemo",
+      "weaponType": "catalyst"
+    },
+    {
+      "id": "10000044",
+      "name": "辛焱",
+      "aliases": [],
+      "element": "pyro",
+      "weaponType": "claymore"
+    },
+    {
+      "id": "10000045",
+      "name": "罗莎莉亚",
+      "aliases": [],
+      "element": "cryo",
+      "weaponType": "polearm"
+    },
+    {
+      "id": "10000046",
+      "name": "胡桃",
+      "aliases": [],
+      "element": "pyro",
+      "weaponType": "polearm"
+    },
+    {
+      "id": "10000047",
+      "name": "枫原万叶",
+      "aliases": [],
+      "element": "anemo",
+      "weaponType": "sword"
+    },
+    {
+      "id": "10000048",
+      "name": "烟绯",
+      "aliases": [],
+      "element": "pyro",
+      "weaponType": "catalyst"
+    },
+    {
+      "id": "10000049",
+      "name": "宵宫",
+      "aliases": [],
+      "element": "pyro",
+      "weaponType": "bow"
+    },
+    {
+      "id": "10000050",
+      "name": "托马",
+      "aliases": [],
+      "element": "pyro",
+      "weaponType": "polearm"
+    },
+    {
+      "id": "10000051",
+      "name": "优菈",
+      "aliases": [],
+      "element": "cryo",
+      "weaponType": "claymore"
+    },
+    {
+      "id": "10000052",
+      "name": "雷电将军",
+      "aliases": [],
+      "element": "electro",
+      "weaponType": "polearm"
+    },
+    {
+      "id": "10000053",
+      "name": "早柚",
+      "aliases": [],
+      "element": "anemo",
+      "weaponType": "claymore"
+    },
+    {
+      "id": "10000054",
+      "name": "珊瑚宫心海",
+      "aliases": [],
+      "element": "hydro",
+      "weaponType": "catalyst"
+    },
+    {
+      "id": "10000055",
+      "name": "五郎",
+      "aliases": [],
+      "element": "geo",
+      "weaponType": "bow"
+    },
+    {
+      "id": "10000056",
+      "name": "九条裟罗",
+      "aliases": [],
+      "element": "electro",
+      "weaponType": "bow"
+    },
+    {
+      "id": "10000057",
+      "name": "荒泷一斗",
+      "aliases": [],
+      "element": "geo",
+      "weaponType": "claymore"
+    },
+    {
+      "id": "10000058",
+      "name": "八重神子",
+      "aliases": [],
+      "element": "electro",
+      "weaponType": "catalyst"
+    },
+    {
+      "id": "10000059",
+      "name": "鹿野院平藏",
+      "aliases": [],
+      "element": "anemo",
+      "weaponType": "catalyst"
+    },
+    {
+      "id": "10000060",
+      "name": "夜兰",
+      "aliases": [],
+      "element": "hydro",
+      "weaponType": "bow"
+    },
+    {
+      "id": "10000061",
+      "name": "绮良良",
+      "aliases": [],
+      "element": "dendro",
+      "weaponType": "sword"
+    },
+    {
+      "id": "10000062",
+      "name": "埃洛伊",
+      "aliases": [],
+      "element": "cryo",
+      "weaponType": "bow"
+    },
+    {
+      "id": "10000063",
+      "name": "申鹤",
+      "aliases": [],
+      "element": "cryo",
+      "weaponType": "polearm"
+    },
+    {
+      "id": "10000064",
+      "name": "云堇",
+      "aliases": [],
+      "element": "geo",
+      "weaponType": "polearm"
+    },
+    {
+      "id": "10000065",
+      "name": "久岐忍",
+      "aliases": [],
+      "element": "electro",
+      "weaponType": "sword"
+    },
+    {
+      "id": "10000066",
+      "name": "神里绫人",
+      "aliases": [],
+      "element": "hydro",
+      "weaponType": "sword"
+    },
+    {
+      "id": "10000067",
+      "name": "柯莱",
+      "aliases": [],
+      "element": "dendro",
+      "weaponType": "bow"
+    },
+    {
+      "id": "10000068",
+      "name": "多莉",
+      "aliases": [],
+      "element": "electro",
+      "weaponType": "claymore"
+    },
+    {
+      "id": "10000069",
+      "name": "提纳里",
+      "aliases": [],
+      "element": "dendro",
+      "weaponType": "bow"
+    },
+    {
+      "id": "10000070",
+      "name": "妮露",
+      "aliases": [],
+      "element": "hydro",
+      "weaponType": "sword"
+    },
+    {
+      "id": "10000071",
+      "name": "赛诺",
+      "aliases": [],
+      "element": "electro",
+      "weaponType": "polearm"
+    },
+    {
+      "id": "10000072",
+      "name": "坎蒂丝",
+      "aliases": [],
+      "element": "hydro",
+      "weaponType": "polearm"
+    },
+    {
+      "id": "10000073",
+      "name": "纳西妲",
+      "aliases": [],
+      "element": "dendro",
+      "weaponType": "catalyst"
+    },
+    {
+      "id": "10000074",
+      "name": "莱依拉",
+      "aliases": [],
+      "element": "cryo",
+      "weaponType": "sword"
+    },
+    {
+      "id": "10000075",
+      "name": "流浪者",
+      "aliases": [],
+      "element": "anemo",
+      "weaponType": "catalyst"
+    },
+    {
+      "id": "10000076",
+      "name": "珐露珊",
+      "aliases": [],
+      "element": "anemo",
+      "weaponType": "bow"
+    },
+    {
+      "id": "10000077",
+      "name": "瑶瑶",
+      "aliases": [],
+      "element": "dendro",
+      "weaponType": "polearm"
+    },
+    {
+      "id": "10000078",
+      "name": "艾尔海森",
+      "aliases": [],
+      "element": "dendro",
+      "weaponType": "sword"
+    },
+    {
+      "id": "10000079",
+      "name": "迪希雅",
+      "aliases": [],
+      "element": "pyro",
+      "weaponType": "claymore"
+    },
+    {
+      "id": "10000080",
+      "name": "米卡",
+      "aliases": [],
+      "element": "cryo",
+      "weaponType": "polearm"
+    },
+    {
+      "id": "10000081",
+      "name": "卡维",
+      "aliases": [],
+      "element": "dendro",
+      "weaponType": "claymore"
+    },
+    {
+      "id": "10000082",
+      "name": "白术",
+      "aliases": [],
+      "element": "dendro",
+      "weaponType": "catalyst"
+    },
+    {
+      "id": "10000083",
+      "name": "琳妮特",
+      "aliases": [],
+      "element": "anemo",
+      "weaponType": "sword"
+    },
+    {
+      "id": "10000084",
+      "name": "林尼",
+      "aliases": [],
+      "element": "pyro",
+      "weaponType": "bow"
+    },
+    {
+      "id": "10000085",
+      "name": "菲米尼",
+      "aliases": [],
+      "element": "cryo",
+      "weaponType": "claymore"
+    },
+    {
+      "id": "10000086",
+      "name": "莱欧斯利",
+      "aliases": [],
+      "element": "cryo",
+      "weaponType": "catalyst"
+    },
+    {
+      "id": "10000087",
+      "name": "那维莱特",
+      "aliases": [],
+      "element": "hydro",
+      "weaponType": "catalyst"
+    },
+    {
+      "id": "10000088",
+      "name": "夏洛蒂",
+      "aliases": [],
+      "element": "cryo",
+      "weaponType": "catalyst"
+    },
+    {
+      "id": "10000089",
+      "name": "芙宁娜",
+      "aliases": [],
+      "element": "hydro",
+      "weaponType": "sword"
+    },
+    {
+      "id": "10000090",
+      "name": "夏沃蕾",
+      "aliases": [],
+      "element": "pyro",
+      "weaponType": "polearm"
+    },
+    {
+      "id": "10000091",
+      "name": "娜维娅",
+      "aliases": [],
+      "element": "geo",
+      "weaponType": "claymore"
+    },
+    {
+      "id": "10000092",
+      "name": "嘉明",
+      "aliases": [],
+      "element": "pyro",
+      "weaponType": "claymore"
+    },
+    {
+      "id": "10000093",
+      "name": "闲云",
+      "aliases": [],
+      "element": "anemo",
+      "weaponType": "catalyst"
+    },
+    {
+      "id": "10000094",
+      "name": "千织",
+      "aliases": [],
+      "element": "geo",
+      "weaponType": "sword"
+    },
+    {
+      "id": "10000095",
+      "name": "希格雯",
+      "aliases": [],
+      "element": "hydro",
+      "weaponType": "bow"
+    },
+    {
+      "id": "10000096",
+      "name": "阿蕾奇诺",
+      "aliases": [],
+      "element": "pyro",
+      "weaponType": "polearm"
+    },
+    {
+      "id": "10000097",
+      "name": "赛索斯",
+      "aliases": [],
+      "element": "electro",
+      "weaponType": "bow"
+    },
+    {
+      "id": "10000098",
+      "name": "克洛琳德",
+      "aliases": [],
+      "element": "electro",
+      "weaponType": "sword"
+    },
+    {
+      "id": "10000099",
+      "name": "艾梅莉埃",
+      "aliases": [],
+      "element": "dendro",
+      "weaponType": "polearm"
+    },
+    {
+      "id": "10000100",
+      "name": "卡齐娜",
+      "aliases": [],
+      "element": "geo",
+      "weaponType": "polearm"
+    },
+    {
+      "id": "10000101",
+      "name": "基尼奇",
+      "aliases": [],
+      "element": "dendro",
+      "weaponType": "claymore"
+    },
+    {
+      "id": "10000102",
+      "name": "玛拉妮",
+      "aliases": [],
+      "element": "hydro",
+      "weaponType": "catalyst"
+    },
+    {
+      "id": "10000103",
+      "name": "希诺宁",
+      "aliases": [],
+      "element": "geo",
+      "weaponType": "sword"
+    },
+    {
+      "id": "10000104",
+      "name": "恰斯卡",
+      "aliases": [],
+      "element": "anemo",
+      "weaponType": "bow"
+    },
+    {
+      "id": "10000105",
+      "name": "欧洛伦",
+      "aliases": [],
+      "element": "electro",
+      "weaponType": "bow"
+    },
+    {
+      "id": "10000106",
+      "name": "玛薇卡",
+      "aliases": [],
+      "element": "pyro",
+      "weaponType": "claymore"
+    },
+    {
+      "id": "10000107",
+      "name": "茜特菈莉",
+      "aliases": [],
+      "element": "cryo",
+      "weaponType": "catalyst"
+    },
+    {
+      "id": "10000108",
+      "name": "蓝砚",
+      "aliases": [],
+      "element": "anemo",
+      "weaponType": "catalyst"
+    },
+    {
+      "id": "10000109",
+      "name": "梦见月瑞希",
+      "aliases": [],
+      "element": "anemo",
+      "weaponType": "catalyst"
+    },
+    {
+      "id": "10000110",
+      "name": "伊安珊",
+      "aliases": [],
+      "element": "electro",
+      "weaponType": "polearm"
+    },
+    {
+      "id": "10000111",
+      "name": "瓦雷莎",
+      "aliases": [],
+      "element": "electro",
+      "weaponType": "catalyst"
+    },
+    {
+      "id": "10000112",
+      "name": "爱可菲",
+      "aliases": [],
+      "element": "cryo",
+      "weaponType": "polearm"
+    },
+    {
+      "id": "10000113",
+      "name": "伊法",
+      "aliases": [],
+      "element": "anemo",
+      "weaponType": "catalyst"
+    },
+    {
+      "id": "10000114",
+      "name": "丝柯克",
+      "aliases": [],
+      "element": "cryo",
+      "weaponType": "sword"
+    },
+    {
+      "id": "10000115",
+      "name": "塔利雅",
+      "aliases": [],
+      "element": "hydro",
+      "weaponType": "sword"
+    },
+    {
+      "id": "10000116",
+      "name": "伊涅芙",
+      "aliases": [],
+      "element": "electro",
+      "weaponType": "polearm"
+    },
+    {
+      "id": "10000119",
+      "name": "菈乌玛",
+      "aliases": [],
+      "element": "dendro",
+      "weaponType": "catalyst"
+    },
+    {
+      "id": "10000120",
+      "name": "菲林斯",
+      "aliases": [],
+      "element": "electro",
+      "weaponType": "polearm"
+    },
+    {
+      "id": "10000121",
+      "name": "爱诺",
+      "aliases": [],
+      "element": "hydro",
+      "weaponType": "claymore"
+    },
+    {
+      "id": "10000122",
+      "name": "奈芙尔",
+      "aliases": [],
+      "element": "dendro",
+      "weaponType": "catalyst"
+    },
+    {
+      "id": "10000123",
+      "name": "杜林",
+      "aliases": [],
+      "element": "pyro",
+      "weaponType": "sword"
+    },
+    {
+      "id": "10000124",
+      "name": "雅珂达",
+      "aliases": [],
+      "element": "anemo",
+      "weaponType": "bow"
+    }
+  ]
+}

@@ -30,6 +30,10 @@ const httpsUrlSchema = z
     return url !== undefined && url.username.length === 0 && url.password.length === 0;
   }, 'URL credentials are not allowed');
 const reviewedAtSchema = z.iso.datetime({ offset: true }).max(40);
+const sha256Schema = z
+  .string()
+  .length(64)
+  .regex(/^[0-9a-f]{64}$/, 'SHA-256 must be 64 lowercase hexadecimal characters');
 
 const declaredHostSchema = z
   .string()
@@ -118,6 +122,69 @@ export const sourceRegistrySchema = z
     });
   });
 
+export const committedSourceRegistryEntrySchema = z
+  .object({
+    id: boundedIdSchema,
+    displayName: boundedNameSchema,
+    host: declaredHostSchema,
+    trust: z.literal('trusted-local'),
+    reviewCadenceDays: z.number().int().min(1).max(3_650)
+  })
+  .strict();
+
+export const committedSourceRegistrySchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    sourceVersion: z.string().trim().min(1).max(128),
+    sources: z.array(committedSourceRegistryEntrySchema).min(1).max(128),
+    citations: z.array(sourceCitationSchema).min(1).max(512)
+  })
+  .strict()
+  .superRefine(({ sources, citations }, context) => {
+    addDuplicateIdIssues(sources, ['sources'], context);
+    addDuplicateIdIssues(citations, ['citations'], context);
+
+    const sourcesById = new Map(sources.map((source) => [source.id, source]));
+    const hosts = new Set<string>();
+    sources.forEach(({ host }, index) => {
+      if (hosts.has(host)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['sources', index, 'host'],
+          message: 'Source hosts must be unique'
+        });
+      }
+      hosts.add(host);
+    });
+
+    citations.forEach((citation, index) => {
+      const source = sourcesById.get(citation.sourceId);
+      if (source === undefined) {
+        context.addIssue({
+          code: 'custom',
+          path: ['citations', index, 'sourceId'],
+          message: 'Citation sourceId must resolve in the committed source registry'
+        });
+        return;
+      }
+      const citationUrl = parseUrl(citation.url);
+      if (citationUrl === undefined || citationUrl.hostname.toLowerCase() !== source.host) {
+        context.addIssue({
+          code: 'custom',
+          path: ['citations', index, 'url'],
+          message: 'Citation URL must use the exact registered source host'
+        });
+      }
+      if (citation.trust !== source.trust) {
+        context.addIssue({
+          code: 'custom',
+          path: ['citations', index, 'trust'],
+          message: 'Citation trust must match its committed source'
+        });
+      }
+    });
+  });
+
 export const characterCatalogEntrySchema = z
   .object({
     id: canonicalCharacterIdSchema,
@@ -141,6 +208,64 @@ export const characterCatalogSchema = z
   .strict()
   .superRefine(({ characters }, context) => {
     addDuplicateIdIssues(characters, ['characters'], context);
+  });
+
+export const characterCatalogProvenanceSchema = z
+  .object({
+    id: boundedIdSchema,
+    url: httpsUrlSchema,
+    retrievedAt: reviewedAtSchema,
+    sha256: sha256Schema
+  })
+  .strict();
+
+export const committedCharacterCatalogEntrySchema = z
+  .object({
+    id: canonicalCharacterIdSchema,
+    name: boundedNameSchema,
+    aliases: z
+      .array(z.string().trim().min(1).max(120))
+      .max(16)
+      .refine((aliases) => new Set(aliases).size === aliases.length, 'Aliases must be unique'),
+    element: z.enum(['anemo', 'geo', 'electro', 'dendro', 'hydro', 'pyro', 'cryo', 'unknown']),
+    weaponType: z.enum(['sword', 'claymore', 'polearm', 'bow', 'catalyst', 'unknown'])
+  })
+  .strict();
+
+export const characterCatalogExclusionSchema = z
+  .object({
+    id: canonicalCharacterIdSchema,
+    name: boundedNameSchema,
+    kind: z.enum(['trial-variant', 'alternate-variant', 'test-variant']),
+    reason: z.string().trim().min(1).max(500)
+  })
+  .strict();
+
+export const committedCharacterCatalogSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    catalogVersion: z.string().trim().min(1).max(128),
+    retrievedAt: reviewedAtSchema,
+    provenance: z.array(characterCatalogProvenanceSchema).length(2),
+    exclusions: z.array(characterCatalogExclusionSchema).max(64),
+    characters: z.array(committedCharacterCatalogEntrySchema).min(1).max(256)
+  })
+  .strict()
+  .superRefine(({ provenance, exclusions, characters }, context) => {
+    addDuplicateIdIssues(provenance, ['provenance'], context);
+    addDuplicateIdIssues(exclusions, ['exclusions'], context);
+    addDuplicateIdIssues(characters, ['characters'], context);
+
+    const characterIds = new Set(characters.map(({ id }) => id));
+    exclusions.forEach(({ id }, index) => {
+      if (characterIds.has(id)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['exclusions', index, 'id'],
+          message: 'Excluded upstream IDs cannot also appear in the canonical catalog'
+        });
+      }
+    });
   });
 
 const signalPredicateCommonShape = {
@@ -233,6 +358,227 @@ export const characterStrategyBundleSchema = z
       sourceRegistry,
       context
     );
+  });
+
+const committedUnknownSchema = z
+  .object({
+    id: boundedIdSchema,
+    description: z.string().trim().min(1).max(500)
+  })
+  .strict();
+
+const committedTeammateSlotSchema = z
+  .object({
+    id: boundedIdSchema,
+    label: boundedNameSchema,
+    requirements: z
+      .array(z.string().trim().min(1).max(240))
+      .min(1)
+      .max(12)
+      .refine((requirements) => new Set(requirements).size === requirements.length),
+    optional: z.boolean()
+  })
+  .strict();
+
+const committedRoleSchema = z.enum([
+  'on-field',
+  'off-field',
+  'driver',
+  'trigger',
+  'support',
+  'sustain',
+  'healer',
+  'unclassified'
+]);
+
+const committedReviewedRoleSchema = z.enum([
+  'on-field',
+  'off-field',
+  'driver',
+  'trigger',
+  'support',
+  'sustain',
+  'healer'
+]);
+
+const committedReviewedArchetypeV2Schema = z
+  .object({
+    id: boundedIdSchema,
+    name: boundedNameSchema,
+    role: committedReviewedRoleSchema,
+    coverage: z.literal('reviewed'),
+    environments: z
+      .array(z.enum(['general', 'overworld', 'spiral-abyss', 'imaginarium-theater']))
+      .min(1)
+      .max(4)
+      .refine((environments) => new Set(environments).size === environments.length),
+    teammateSlots: z.array(committedTeammateSlotSchema).min(1).max(4),
+    signals: z.array(signalPredicateSchema).min(1).max(24),
+    facts: z.array(strategyFactSchema).min(1).max(32),
+    unknowns: z.array(committedUnknownSchema).max(16)
+  })
+  .strict();
+
+const committedGapArchetypeV2Schema = z
+  .object({
+    id: boundedIdSchema,
+    name: boundedNameSchema,
+    role: z.literal('unclassified'),
+    coverage: z.literal('gap'),
+    environments: z.array(z.never()).length(0),
+    teammateSlots: z.array(z.never()).length(0),
+    signals: z.array(z.never()).length(0),
+    facts: z.array(z.never()).length(0),
+    unknowns: z.array(committedUnknownSchema).min(1).max(16)
+  })
+  .strict();
+
+export const committedBuildArchetypeV2Schema = z
+  .discriminatedUnion('coverage', [
+    committedReviewedArchetypeV2Schema,
+    committedGapArchetypeV2Schema
+  ])
+  .superRefine(({ teammateSlots, signals, facts, unknowns }, context) => {
+    addDuplicateIdIssues(teammateSlots, ['teammateSlots'], context);
+    addDuplicateIdIssues(signals, ['signals'], context);
+    addDuplicateIdIssues(facts, ['facts'], context);
+    addDuplicateIdIssues(unknowns, ['unknowns'], context);
+  });
+
+export const committedCharacterStrategyV2Schema = z
+  .object({
+    id: canonicalCharacterIdSchema,
+    name: boundedNameSchema,
+    reviewState: z.enum(['reviewed', 'unreviewed']),
+    baseRoles: z
+      .array(committedRoleSchema)
+      .min(1)
+      .max(8)
+      .refine((roles) => new Set(roles).size === roles.length, 'Base roles must be unique'),
+    archetypes: z.array(committedBuildArchetypeV2Schema).min(1).max(16),
+    unknowns: z.array(committedUnknownSchema).max(16)
+  })
+  .strict()
+  .superRefine(({ reviewState, baseRoles, archetypes, unknowns }, context) => {
+    addDuplicateIdIssues(archetypes, ['archetypes'], context);
+    addDuplicateIdIssues(unknowns, ['unknowns'], context);
+
+    if (
+      reviewState === 'unreviewed' &&
+      (baseRoles.length !== 1 || baseRoles[0] !== 'unclassified')
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['baseRoles'],
+        message: 'Unreviewed characters must remain unclassified'
+      });
+    }
+    if (reviewState === 'reviewed' && baseRoles.includes('unclassified')) {
+      context.addIssue({
+        code: 'custom',
+        path: ['baseRoles'],
+        message: 'Reviewed characters must declare concrete base roles'
+      });
+    }
+    if (
+      (reviewState === 'reviewed' && archetypes.some(({ coverage }) => coverage !== 'reviewed')) ||
+      (reviewState === 'unreviewed' && archetypes.some(({ coverage }) => coverage !== 'gap'))
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['archetypes'],
+        message: 'Archetype coverage must match character review state'
+      });
+    }
+  });
+
+export const committedCharacterStrategyBundleV2Schema = z
+  .object({
+    schemaVersion: z.literal(2),
+    knowledgeVersion: z.string().trim().min(1).max(128),
+    sourceVersion: z.string().trim().min(1).max(128),
+    reviewedAt: reviewedAtSchema,
+    trust: z.literal('trusted-local'),
+    characters: z.array(committedCharacterStrategyV2Schema).min(1).max(256)
+  })
+  .strict()
+  .superRefine(({ characters }, context) => {
+    addDuplicateIdIssues(characters, ['characters'], context);
+    addDuplicateArchetypeIdIssues(characters, context);
+  });
+
+export const committedAdvisorKnowledgeSetSchema = z
+  .object({
+    sources: committedSourceRegistrySchema,
+    catalog: committedCharacterCatalogSchema,
+    strategies: committedCharacterStrategyBundleV2Schema
+  })
+  .strict()
+  .superRefine(({ sources, catalog, strategies }, context) => {
+    if (strategies.sourceVersion !== sources.sourceVersion) {
+      context.addIssue({
+        code: 'custom',
+        path: ['strategies', 'sourceVersion'],
+        message: 'Strategy sourceVersion must match the committed source registry'
+      });
+    }
+
+    const catalogById = new Map(catalog.characters.map((character) => [character.id, character]));
+    const strategiesById = new Map(
+      strategies.characters.map((character) => [character.id, character])
+    );
+    catalog.characters.forEach(({ id }, index) => {
+      if (!strategiesById.has(id)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['catalog', 'characters', index, 'id'],
+          message: 'Every catalog character must have one strategy index entry'
+        });
+      }
+    });
+    strategies.characters.forEach(({ id, name }, characterIndex) => {
+      const catalogCharacter = catalogById.get(id);
+      if (catalogCharacter === undefined) {
+        context.addIssue({
+          code: 'custom',
+          path: ['strategies', 'characters', characterIndex, 'id'],
+          message: 'Every strategy index entry must resolve to the catalog'
+        });
+      } else if (catalogCharacter.name !== name) {
+        context.addIssue({
+          code: 'custom',
+          path: ['strategies', 'characters', characterIndex, 'name'],
+          message: 'Strategy character names must match the canonical catalog'
+        });
+      }
+    });
+
+    const citationIds = new Set(sources.citations.map(({ id }) => id));
+    strategies.characters.forEach(({ archetypes }, characterIndex) => {
+      archetypes.forEach(({ facts }, archetypeIndex) => {
+        facts.forEach(({ citationIds: factCitationIds }, factIndex) => {
+          factCitationIds.forEach((citationId, citationIndex) => {
+            if (!citationIds.has(citationId)) {
+              context.addIssue({
+                code: 'custom',
+                path: [
+                  'strategies',
+                  'characters',
+                  characterIndex,
+                  'archetypes',
+                  archetypeIndex,
+                  'facts',
+                  factIndex,
+                  'citationIds',
+                  citationIndex
+                ],
+                message: 'Trusted strategy fact citation must resolve in the committed registry'
+              });
+            }
+          });
+        });
+      });
+    });
   });
 
 export const enemyMechanicStrategySchema = z
@@ -535,13 +881,25 @@ export type KnowledgeTrust = z.infer<typeof knowledgeTrustSchema>;
 export type SourceRegistryEntry = z.infer<typeof sourceRegistryEntrySchema>;
 export type SourceCitation = z.infer<typeof sourceCitationSchema>;
 export type SourceRegistry = z.infer<typeof sourceRegistrySchema>;
+export type CommittedSourceRegistryEntry = z.infer<typeof committedSourceRegistryEntrySchema>;
+export type CommittedSourceRegistry = z.infer<typeof committedSourceRegistrySchema>;
 export type CharacterCatalogEntry = z.infer<typeof characterCatalogEntrySchema>;
 export type CharacterCatalog = z.infer<typeof characterCatalogSchema>;
+export type CharacterCatalogProvenance = z.infer<typeof characterCatalogProvenanceSchema>;
+export type CharacterCatalogExclusion = z.infer<typeof characterCatalogExclusionSchema>;
+export type CommittedCharacterCatalogEntry = z.infer<typeof committedCharacterCatalogEntrySchema>;
+export type CommittedCharacterCatalog = z.infer<typeof committedCharacterCatalogSchema>;
 export type SignalPredicate = z.infer<typeof signalPredicateSchema>;
 export type StrategyFact = z.infer<typeof strategyFactSchema>;
 export type BuildArchetype = z.infer<typeof buildArchetypeSchema>;
 export type CharacterStrategy = z.infer<typeof characterStrategySchema>;
 export type CharacterStrategyBundle = z.infer<typeof characterStrategyBundleSchema>;
+export type CommittedBuildArchetypeV2 = z.infer<typeof committedBuildArchetypeV2Schema>;
+export type CommittedCharacterStrategyV2 = z.infer<typeof committedCharacterStrategyV2Schema>;
+export type CommittedCharacterStrategyBundleV2 = z.infer<
+  typeof committedCharacterStrategyBundleV2Schema
+>;
+export type CommittedAdvisorKnowledgeSet = z.infer<typeof committedAdvisorKnowledgeSetSchema>;
 export type EnemyMechanicStrategy = z.infer<typeof enemyMechanicStrategySchema>;
 export type EnemyMechanicStrategyBundle = z.infer<typeof enemyMechanicStrategyBundleSchema>;
 export type BuildInterpretation = z.infer<typeof buildInterpretationSchema>;

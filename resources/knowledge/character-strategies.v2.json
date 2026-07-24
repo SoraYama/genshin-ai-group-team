@@ -1,0 +1,3815 @@
+{
+  "schemaVersion": 2,
+  "knowledgeVersion": "2026-07-24.reviewed-1",
+  "sourceVersion": "2026-07-24",
+  "reviewedAt": "2026-07-24T23:08:06+08:00",
+  "trust": "trusted-local",
+  "characters": [
+    {
+      "id": "10000002",
+      "name": "神里绫华",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000002",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000002",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000002",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000003",
+      "name": "琴",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000003",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000003",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000003",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000005",
+      "name": "旅行者",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000005",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000005",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000005",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000006",
+      "name": "丽莎",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000006",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000006",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000006",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000007",
+      "name": "旅行者",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000007",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000007",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000007",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000014",
+      "name": "芭芭拉",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000014",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000014",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000014",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000015",
+      "name": "凯亚",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000015",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000015",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000015",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000016",
+      "name": "迪卢克",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000016",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000016",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000016",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000020",
+      "name": "雷泽",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000020",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000020",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000020",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000021",
+      "name": "安柏",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000021",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000021",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000021",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000022",
+      "name": "温迪",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000022",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000022",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000022",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000023",
+      "name": "香菱",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000023",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000023",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000023",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000024",
+      "name": "北斗",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000024",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000024",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000024",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000025",
+      "name": "行秋",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000025",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000025",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000025",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000026",
+      "name": "魈",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000026",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000026",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000026",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000027",
+      "name": "凝光",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000027",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000027",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000027",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000029",
+      "name": "可莉",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000029",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000029",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000029",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000030",
+      "name": "钟离",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000030",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000030",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000030",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000031",
+      "name": "菲谢尔",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000031",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000031",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000031",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000032",
+      "name": "班尼特",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000032",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000032",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000032",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000033",
+      "name": "达达利亚",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000033",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000033",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000033",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000034",
+      "name": "诺艾尔",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000034",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000034",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000034",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000035",
+      "name": "七七",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000035",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000035",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000035",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000036",
+      "name": "重云",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000036",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000036",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000036",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000037",
+      "name": "甘雨",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000037",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000037",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000037",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000038",
+      "name": "阿贝多",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000038",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000038",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000038",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000039",
+      "name": "迪奥娜",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000039",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000039",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000039",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000041",
+      "name": "莫娜",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000041",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000041",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000041",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000042",
+      "name": "刻晴",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000042",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000042",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000042",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000043",
+      "name": "砂糖",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000043",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000043",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000043",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000044",
+      "name": "辛焱",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000044",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000044",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000044",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000045",
+      "name": "罗莎莉亚",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000045",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000045",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000045",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000046",
+      "name": "胡桃",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000046",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000046",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000046",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000047",
+      "name": "枫原万叶",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000047",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000047",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000047",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000048",
+      "name": "烟绯",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000048",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000048",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000048",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000049",
+      "name": "宵宫",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000049",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000049",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000049",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000050",
+      "name": "托马",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000050",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000050",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000050",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000051",
+      "name": "优菈",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000051",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000051",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000051",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000052",
+      "name": "雷电将军",
+      "reviewState": "reviewed",
+      "baseRoles": ["on-field", "off-field", "trigger", "support"],
+      "archetypes": [
+        {
+          "id": "raiden-em-hyperbloom",
+          "name": "精通超绽放触发",
+          "role": "trigger",
+          "coverage": "reviewed",
+          "environments": ["general", "spiral-abyss"],
+          "teammateSlots": [
+            {
+              "id": "dendro-applier",
+              "label": "草元素施加位",
+              "requirements": ["能稳定生成草元素附着"],
+              "optional": false
+            },
+            {
+              "id": "hydro-applier",
+              "label": "水元素施加位",
+              "requirements": ["能与草元素持续生成草原核"],
+              "optional": false
+            },
+            {
+              "id": "defensive-flex",
+              "label": "生存或功能位",
+              "requirements": ["不大量抢夺超绽放触发权"],
+              "optional": true
+            }
+          ],
+          "signals": [
+            {
+              "id": "raiden-hb-sands-em",
+              "field": "sandsMainStat",
+              "operator": "eq",
+              "value": "Elemental Mastery",
+              "description": "时之沙主词条为元素精通"
+            },
+            {
+              "id": "raiden-hb-goblet-em",
+              "field": "gobletMainStat",
+              "operator": "eq",
+              "value": "Elemental Mastery",
+              "description": "空之杯主词条为元素精通"
+            },
+            {
+              "id": "raiden-hb-circlet-em",
+              "field": "circletMainStat",
+              "operator": "eq",
+              "value": "Elemental Mastery",
+              "description": "理之冠主词条为元素精通"
+            },
+            {
+              "id": "raiden-hb-reaction-set",
+              "field": "artifactSet",
+              "operator": "includes",
+              "value": "Flower of Paradise Lost",
+              "description": "圣遗物包含乐园遗落之花套装"
+            }
+          ],
+          "facts": [
+            {
+              "id": "raiden-hb-role",
+              "statement": "元素战技可在后台持续触发超绽放；此方向以元素精通为主要配装线索，通常不依赖元素爆发站场。",
+              "citationIds": ["kqm-raiden-quickguide"]
+            }
+          ],
+          "unknowns": [
+            {
+              "id": "raiden-hb-ownership",
+              "description": "仍需结合队伍施加频率确认超绽放触发权是否主要归雷电将军。"
+            }
+          ]
+        },
+        {
+          "id": "raiden-emblem-on-field",
+          "name": "绝缘站场爆发",
+          "role": "on-field",
+          "coverage": "reviewed",
+          "environments": ["general", "spiral-abyss"],
+          "teammateSlots": [
+            {
+              "id": "buffer-or-shred",
+              "label": "增益或减抗位",
+              "requirements": ["能强化雷元素或元素爆发输出"],
+              "optional": false
+            },
+            {
+              "id": "off-field-damage",
+              "label": "后台输出位",
+              "requirements": ["能配合轮转并从充能辅助获益"],
+              "optional": true
+            },
+            {
+              "id": "sustain",
+              "label": "生存位",
+              "requirements": ["提供治疗或其他可靠生存手段"],
+              "optional": false
+            }
+          ],
+          "signals": [
+            {
+              "id": "raiden-onfield-emblem",
+              "field": "artifactSet",
+              "operator": "includes",
+              "value": "Emblem of Severed Fate",
+              "description": "圣遗物包含绝缘之旗印套装"
+            },
+            {
+              "id": "raiden-onfield-er",
+              "field": "energyRecharge",
+              "operator": "gte",
+              "value": 130,
+              "description": "充能效率达到攻略列出的双雷队最低区间线索"
+            },
+            {
+              "id": "raiden-onfield-er-sands",
+              "field": "sandsMainStat",
+              "operator": "includes",
+              "value": "Energy Recharge",
+              "description": "时之沙使用充能效率主词条"
+            }
+          ],
+          "facts": [
+            {
+              "id": "raiden-onfield-role",
+              "statement": "该方向围绕元素爆发安排站场窗口，并在攻击期间为队友回复能量；绝缘套与满足循环所需的充能是关键线索。",
+              "citationIds": ["kqm-raiden-quickguide"]
+            }
+          ],
+          "unknowns": [
+            {
+              "id": "raiden-onfield-er-team",
+              "description": "实际充能需求会随双雷、队友产球和循环长度变化，不能仅凭固定阈值定论。"
+            }
+          ]
+        }
+      ],
+      "unknowns": []
+    },
+    {
+      "id": "10000053",
+      "name": "早柚",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000053",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000053",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000053",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000054",
+      "name": "珊瑚宫心海",
+      "reviewState": "reviewed",
+      "baseRoles": ["on-field", "off-field", "driver", "trigger", "healer", "sustain", "support"],
+      "archetypes": [
+        {
+          "id": "kokomi-bloom-trigger",
+          "name": "妮绽放触发",
+          "role": "trigger",
+          "coverage": "reviewed",
+          "environments": ["general", "spiral-abyss"],
+          "teammateSlots": [
+            {
+              "id": "nilou",
+              "label": "妮露机制位",
+              "requirements": ["队伍满足妮露丰穰之核条件"],
+              "optional": false
+            },
+            {
+              "id": "dendro-application",
+              "label": "草元素施加位",
+              "requirements": ["提供持续草元素附着"],
+              "optional": false
+            },
+            {
+              "id": "dendro-or-hydro-flex",
+              "label": "草或水元素补位",
+              "requirements": ["补足草原核生成并符合队伍元素限制"],
+              "optional": false
+            }
+          ],
+          "signals": [
+            {
+              "id": "kokomi-bloom-sands-em",
+              "field": "sandsMainStat",
+              "operator": "eq",
+              "value": "Elemental Mastery",
+              "description": "时之沙主词条为元素精通"
+            },
+            {
+              "id": "kokomi-bloom-goblet-em",
+              "field": "gobletMainStat",
+              "operator": "eq",
+              "value": "Elemental Mastery",
+              "description": "空之杯主词条为元素精通"
+            },
+            {
+              "id": "kokomi-bloom-set",
+              "field": "artifactSet",
+              "operator": "includes",
+              "value": "Flower of Paradise Lost",
+              "description": "圣遗物包含乐园遗落之花套装"
+            }
+          ],
+          "facts": [
+            {
+              "id": "kokomi-bloom-role",
+              "statement": "在妮露绽放队中，心海可凭持续水附着承担较多绽放触发，同时用治疗应对丰穰之核自伤。",
+              "citationIds": ["kqm-kokomi-quickguide"]
+            }
+          ],
+          "unknowns": [
+            {
+              "id": "kokomi-bloom-ownership",
+              "description": "三水等变体会降低心海的绽放触发占比，需按实际编成复核精通与治疗取舍。"
+            }
+          ]
+        },
+        {
+          "id": "kokomi-off-field-healer",
+          "name": "后台水附着治疗",
+          "role": "off-field",
+          "coverage": "reviewed",
+          "environments": ["general", "spiral-abyss"],
+          "teammateSlots": [
+            {
+              "id": "on-field-carry",
+              "label": "站场输出位",
+              "requirements": ["能利用后台水附着或团队增益"],
+              "optional": false
+            },
+            {
+              "id": "reaction-support",
+              "label": "反应辅助位",
+              "requirements": ["与水元素形成队伍所需反应"],
+              "optional": true
+            }
+          ],
+          "signals": [
+            {
+              "id": "kokomi-offfield-totm",
+              "field": "artifactSet",
+              "operator": "includes",
+              "value": "Tenacity of the Millelith",
+              "description": "圣遗物包含千岩牢固套装"
+            },
+            {
+              "id": "kokomi-offfield-hp-sands",
+              "field": "sandsMainStat",
+              "operator": "eq",
+              "value": "HP%",
+              "description": "时之沙主词条为生命值百分比"
+            },
+            {
+              "id": "kokomi-offfield-healing-circlet",
+              "field": "circletMainStat",
+              "operator": "includes",
+              "value": "Healing Bonus",
+              "description": "理之冠使用治疗加成主词条"
+            }
+          ],
+          "facts": [
+            {
+              "id": "kokomi-offfield-role",
+              "statement": "元素战技可在后台同时提供治疗和水附着；千岩套是能利用水母持续命中的团队辅助线索。",
+              "citationIds": ["kqm-kokomi-quickguide"]
+            }
+          ],
+          "unknowns": [
+            {
+              "id": "kokomi-offfield-positioning",
+              "description": "水母固定位置会受敌人移动影响，环境与聚怪条件需另行确认。"
+            }
+          ]
+        },
+        {
+          "id": "kokomi-on-field-driver",
+          "name": "站场治疗驾驶",
+          "role": "driver",
+          "coverage": "reviewed",
+          "environments": ["general", "spiral-abyss"],
+          "teammateSlots": [
+            {
+              "id": "off-field-damage-one",
+              "label": "后台输出位一",
+              "requirements": ["能由普通攻击动作或水附着驱动"],
+              "optional": false
+            },
+            {
+              "id": "off-field-damage-two",
+              "label": "后台输出位二",
+              "requirements": ["补充反应或后台伤害"],
+              "optional": true
+            }
+          ],
+          "signals": [
+            {
+              "id": "kokomi-onfield-clam",
+              "field": "artifactSet",
+              "operator": "includes",
+              "value": "Ocean-Hued Clam",
+              "description": "圣遗物包含海染砗磲套装"
+            },
+            {
+              "id": "kokomi-onfield-hydro-goblet",
+              "field": "gobletMainStat",
+              "operator": "includes",
+              "value": "Hydro DMG Bonus",
+              "description": "空之杯使用水元素伤害加成主词条"
+            },
+            {
+              "id": "kokomi-onfield-healing-circlet",
+              "field": "circletMainStat",
+              "operator": "includes",
+              "value": "Healing Bonus",
+              "description": "理之冠使用治疗加成主词条"
+            }
+          ],
+          "facts": [
+            {
+              "id": "kokomi-onfield-role",
+              "statement": "元素爆发强化普通攻击，使心海可站场施加水元素并持续治疗；海染套是常见站场构筑线索。",
+              "citationIds": ["kqm-kokomi-quickguide"]
+            }
+          ],
+          "unknowns": [
+            {
+              "id": "kokomi-onfield-energy",
+              "description": "是否能每轮施放元素爆发取决于队伍产球与轮转，需单独核算充能。"
+            }
+          ]
+        }
+      ],
+      "unknowns": []
+    },
+    {
+      "id": "10000055",
+      "name": "五郎",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000055",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000055",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000055",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000056",
+      "name": "九条裟罗",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000056",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000056",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000056",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000057",
+      "name": "荒泷一斗",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000057",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000057",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000057",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000058",
+      "name": "八重神子",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000058",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000058",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000058",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000059",
+      "name": "鹿野院平藏",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000059",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000059",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000059",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000060",
+      "name": "夜兰",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000060",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000060",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000060",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000061",
+      "name": "绮良良",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000061",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000061",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000061",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000062",
+      "name": "埃洛伊",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000062",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000062",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000062",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000063",
+      "name": "申鹤",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000063",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000063",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000063",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000064",
+      "name": "云堇",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000064",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000064",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000064",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000065",
+      "name": "久岐忍",
+      "reviewState": "reviewed",
+      "baseRoles": ["off-field", "trigger", "healer", "sustain", "support"],
+      "archetypes": [
+        {
+          "id": "shinobu-em-hyperbloom",
+          "name": "精通超绽放触发",
+          "role": "trigger",
+          "coverage": "reviewed",
+          "environments": ["general", "spiral-abyss"],
+          "teammateSlots": [
+            {
+              "id": "dendro-applier",
+              "label": "草元素施加位",
+              "requirements": ["稳定提供草元素附着"],
+              "optional": false
+            },
+            {
+              "id": "hydro-applier",
+              "label": "水元素施加位",
+              "requirements": ["稳定生成草原核"],
+              "optional": false
+            },
+            {
+              "id": "flex",
+              "label": "功能补位",
+              "requirements": ["避免大量抢夺超绽放触发权"],
+              "optional": true
+            }
+          ],
+          "signals": [
+            {
+              "id": "shinobu-hb-sands-em",
+              "field": "sandsMainStat",
+              "operator": "eq",
+              "value": "Elemental Mastery",
+              "description": "时之沙主词条为元素精通"
+            },
+            {
+              "id": "shinobu-hb-goblet-em",
+              "field": "gobletMainStat",
+              "operator": "eq",
+              "value": "Elemental Mastery",
+              "description": "空之杯主词条为元素精通"
+            },
+            {
+              "id": "shinobu-hb-circlet-em",
+              "field": "circletMainStat",
+              "operator": "eq",
+              "value": "Elemental Mastery",
+              "description": "理之冠主词条为元素精通"
+            },
+            {
+              "id": "shinobu-hb-set",
+              "field": "artifactSet",
+              "operator": "includes",
+              "value": "Gilded Dreams",
+              "description": "圣遗物包含饰金之梦套装"
+            }
+          ],
+          "facts": [
+            {
+              "id": "shinobu-hb-role",
+              "statement": "元素战技可在后台周期性触发附近草原核并同时治疗；超绽放方向优先元素精通主词条。",
+              "citationIds": ["kqm-shinobu-quickguide"]
+            }
+          ],
+          "unknowns": [
+            {
+              "id": "shinobu-hb-ownership",
+              "description": "若队内另有雷元素触发者，仍需核对草原核触发权。"
+            }
+          ]
+        },
+        {
+          "id": "shinobu-healer-quicken",
+          "name": "激化治疗辅助",
+          "role": "healer",
+          "coverage": "reviewed",
+          "environments": ["general", "spiral-abyss"],
+          "teammateSlots": [
+            {
+              "id": "electro-damage",
+              "label": "雷元素输出位",
+              "requirements": ["能利用激化反应"],
+              "optional": false
+            },
+            {
+              "id": "dendro-applier",
+              "label": "草元素施加位",
+              "requirements": ["维持激化所需草元素附着"],
+              "optional": false
+            },
+            {
+              "id": "anemo-or-flex",
+              "label": "风元素或功能位",
+              "requirements": ["提供减抗、聚怪或额外输出"],
+              "optional": true
+            }
+          ],
+          "signals": [
+            {
+              "id": "shinobu-quicken-totm",
+              "field": "artifactSet",
+              "operator": "includes",
+              "value": "Tenacity of the Millelith",
+              "description": "圣遗物包含千岩牢固套装"
+            },
+            {
+              "id": "shinobu-quicken-healing-circlet",
+              "field": "circletMainStat",
+              "operator": "includes",
+              "value": "Healing Bonus",
+              "description": "理之冠使用治疗加成主词条"
+            },
+            {
+              "id": "shinobu-quicken-hp-sands",
+              "field": "sandsMainStat",
+              "operator": "eq",
+              "value": "HP%",
+              "description": "时之沙主词条为生命值百分比"
+            }
+          ],
+          "facts": [
+            {
+              "id": "shinobu-quicken-role",
+              "statement": "在激化队中，久岐忍可用后台雷元素与治疗合并生存坑位；千岩套或偏生命、治疗的主词条是辅助构筑线索。",
+              "citationIds": ["kqm-shinobu-quickguide"]
+            }
+          ],
+          "unknowns": [
+            {
+              "id": "shinobu-quicken-investment",
+              "description": "个人伤害、团队增益和治疗量之间的取舍需按队伍需求复核。"
+            }
+          ]
+        }
+      ],
+      "unknowns": []
+    },
+    {
+      "id": "10000066",
+      "name": "神里绫人",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000066",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000066",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000066",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000067",
+      "name": "柯莱",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000067",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000067",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000067",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000068",
+      "name": "多莉",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000068",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000068",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000068",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000069",
+      "name": "提纳里",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000069",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000069",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000069",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000070",
+      "name": "妮露",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000070",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000070",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000070",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000071",
+      "name": "赛诺",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000071",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000071",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000071",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000072",
+      "name": "坎蒂丝",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000072",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000072",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000072",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000073",
+      "name": "纳西妲",
+      "reviewState": "reviewed",
+      "baseRoles": ["on-field", "off-field", "driver", "support"],
+      "archetypes": [
+        {
+          "id": "nahida-on-field-driver",
+          "name": "站场草元素驾驶",
+          "role": "driver",
+          "coverage": "reviewed",
+          "environments": ["general", "spiral-abyss"],
+          "teammateSlots": [
+            {
+              "id": "off-field-electro",
+              "label": "后台雷元素位",
+              "requirements": ["能在纳西妲站场时持续协同输出或触发激化"],
+              "optional": false
+            },
+            {
+              "id": "reaction-enabler",
+              "label": "反应补充位",
+              "requirements": ["按激化或绽放路线补足元素施加"],
+              "optional": true
+            },
+            {
+              "id": "sustain",
+              "label": "生存位",
+              "requirements": ["提供治疗、护盾或抗打断"],
+              "optional": false
+            }
+          ],
+          "signals": [
+            {
+              "id": "nahida-onfield-dendro-goblet",
+              "field": "gobletMainStat",
+              "operator": "includes",
+              "value": "Dendro DMG Bonus",
+              "description": "空之杯使用草元素伤害加成主词条"
+            },
+            {
+              "id": "nahida-onfield-crit-circlet",
+              "field": "circletMainStat",
+              "operator": "includes",
+              "value": "CRIT",
+              "description": "理之冠使用暴击相关主词条"
+            }
+          ],
+          "facts": [
+            {
+              "id": "nahida-onfield-role",
+              "statement": "站场纳西妲可用普通与重击补充草附着，并驱动后台单位；相较后台方向，草伤与暴击词条权重更高。",
+              "citationIds": ["kqm-nahida-quickguide"]
+            }
+          ],
+          "unknowns": [
+            {
+              "id": "nahida-onfield-fragility",
+              "description": "站场生存与抗打断能力依赖具体队友，不能由配装信号单独判断。"
+            }
+          ]
+        },
+        {
+          "id": "nahida-off-field-dendro",
+          "name": "后台草附着辅助",
+          "role": "off-field",
+          "coverage": "reviewed",
+          "environments": ["general", "spiral-abyss"],
+          "teammateSlots": [
+            {
+              "id": "on-field-reaction-unit",
+              "label": "站场反应位",
+              "requirements": ["能利用草元素附着与元素精通增益"],
+              "optional": false
+            },
+            {
+              "id": "reaction-partner",
+              "label": "反应元素位",
+              "requirements": ["提供雷、水或火元素以形成目标反应"],
+              "optional": false
+            },
+            {
+              "id": "flex",
+              "label": "功能补位",
+              "requirements": ["补充生存、聚怪或队伍伤害"],
+              "optional": true
+            }
+          ],
+          "signals": [
+            {
+              "id": "nahida-offfield-deepwood",
+              "field": "artifactSet",
+              "operator": "includes",
+              "value": "Deepwood Memories",
+              "description": "圣遗物包含深林的记忆套装"
+            },
+            {
+              "id": "nahida-offfield-em",
+              "field": "elementalMastery",
+              "operator": "gte",
+              "value": 900,
+              "description": "元素精通达到攻略建议的后台共享区间下沿"
+            },
+            {
+              "id": "nahida-offfield-em-sands",
+              "field": "sandsMainStat",
+              "operator": "eq",
+              "value": "Elemental Mastery",
+              "description": "时之沙主词条为元素精通"
+            }
+          ],
+          "facts": [
+            {
+              "id": "nahida-offfield-role",
+              "statement": "后台方向依靠元素战技维持草附着，并可为站场角色提供元素精通增益；深林套与高精通是常见线索。",
+              "citationIds": ["kqm-nahida-quickguide"]
+            }
+          ],
+          "unknowns": [
+            {
+              "id": "nahida-offfield-wave",
+              "description": "多波次环境需要重新标记新敌人，后台覆盖并非无需换人的永久状态。"
+            }
+          ]
+        }
+      ],
+      "unknowns": []
+    },
+    {
+      "id": "10000074",
+      "name": "莱依拉",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000074",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000074",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000074",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000075",
+      "name": "流浪者",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000075",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000075",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000075",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000076",
+      "name": "珐露珊",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000076",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000076",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000076",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000077",
+      "name": "瑶瑶",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000077",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000077",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000077",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000078",
+      "name": "艾尔海森",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000078",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000078",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000078",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000079",
+      "name": "迪希雅",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000079",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000079",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000079",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000080",
+      "name": "米卡",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000080",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000080",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000080",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000081",
+      "name": "卡维",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000081",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000081",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000081",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000082",
+      "name": "白术",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000082",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000082",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000082",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000083",
+      "name": "琳妮特",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000083",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000083",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000083",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000084",
+      "name": "林尼",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000084",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000084",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000084",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000085",
+      "name": "菲米尼",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000085",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000085",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000085",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000086",
+      "name": "莱欧斯利",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000086",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000086",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000086",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000087",
+      "name": "那维莱特",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000087",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000087",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000087",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000088",
+      "name": "夏洛蒂",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000088",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000088",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000088",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000089",
+      "name": "芙宁娜",
+      "reviewState": "reviewed",
+      "baseRoles": ["off-field", "support"],
+      "archetypes": [
+        {
+          "id": "furina-off-field-fanfare",
+          "name": "后台芒荒增伤循环",
+          "role": "support",
+          "coverage": "reviewed",
+          "environments": ["general", "spiral-abyss"],
+          "teammateSlots": [
+            {
+              "id": "healer-or-self-sustain",
+              "label": "治疗或自回复位",
+              "requirements": ["持续制造全队生命值变化以积累气氛值"],
+              "optional": false
+            },
+            {
+              "id": "on-field-damage",
+              "label": "站场输出位",
+              "requirements": ["能利用全队伤害增益与后台水伤"],
+              "optional": false
+            },
+            {
+              "id": "reaction-or-energy-flex",
+              "label": "反应或充能补位",
+              "requirements": ["补足元素反应、产球或第二水元素需求"],
+              "optional": true
+            }
+          ],
+          "signals": [
+            {
+              "id": "furina-golden-troupe",
+              "field": "artifactSet",
+              "operator": "includes",
+              "value": "Golden Troupe",
+              "description": "圣遗物包含黄金剧团套装"
+            },
+            {
+              "id": "furina-er-sands",
+              "field": "sandsMainStat",
+              "operator": "includes",
+              "value": "Energy Recharge",
+              "description": "时之沙使用充能效率主词条"
+            },
+            {
+              "id": "furina-hp-goblet",
+              "field": "gobletMainStat",
+              "operator": "eq",
+              "value": "HP%",
+              "description": "空之杯主词条为生命值百分比"
+            },
+            {
+              "id": "furina-high-er",
+              "field": "energyRecharge",
+              "operator": "gte",
+              "value": 160,
+              "description": "充能效率达到攻略举例的高需求配装区间"
+            }
+          ],
+          "facts": [
+            {
+              "id": "furina-fanfare-role",
+              "statement": "元素爆发按全队生命值升降积累气氛值并提供全队增益；稳定治疗能提高积累效率。",
+              "citationIds": ["kqm-furina-quickguide"]
+            },
+            {
+              "id": "furina-cycle-pressure",
+              "statement": "后台元素战技持续产球且元素爆发通常需要每轮施放，因此单水或短循环会提高充能压力。",
+              "citationIds": ["kqm-furina-quickguide"]
+            }
+          ],
+          "unknowns": [
+            {
+              "id": "furina-healing-model",
+              "description": "全队治疗、单体治疗或自回复的气氛值效率必须结合实际队伍判断。"
+            },
+            {
+              "id": "furina-er-team",
+              "description": "充能需求会随第二水元素、武器产球、轮转长度与命座变化。"
+            }
+          ]
+        }
+      ],
+      "unknowns": []
+    },
+    {
+      "id": "10000090",
+      "name": "夏沃蕾",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000090",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000090",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000090",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000091",
+      "name": "娜维娅",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000091",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000091",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000091",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000092",
+      "name": "嘉明",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000092",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000092",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000092",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000093",
+      "name": "闲云",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000093",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000093",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000093",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000094",
+      "name": "千织",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000094",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000094",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000094",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000095",
+      "name": "希格雯",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000095",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000095",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000095",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000096",
+      "name": "阿蕾奇诺",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000096",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000096",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000096",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000097",
+      "name": "赛索斯",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000097",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000097",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000097",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000098",
+      "name": "克洛琳德",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000098",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000098",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000098",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000099",
+      "name": "艾梅莉埃",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000099",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000099",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000099",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000100",
+      "name": "卡齐娜",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000100",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000100",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000100",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000101",
+      "name": "基尼奇",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000101",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000101",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000101",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000102",
+      "name": "玛拉妮",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000102",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000102",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000102",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000103",
+      "name": "希诺宁",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000103",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000103",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000103",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000104",
+      "name": "恰斯卡",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000104",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000104",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000104",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000105",
+      "name": "欧洛伦",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000105",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000105",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000105",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000106",
+      "name": "玛薇卡",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000106",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000106",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000106",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000107",
+      "name": "茜特菈莉",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000107",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000107",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000107",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000108",
+      "name": "蓝砚",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000108",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000108",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000108",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000109",
+      "name": "梦见月瑞希",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000109",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000109",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000109",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000110",
+      "name": "伊安珊",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000110",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000110",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000110",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000111",
+      "name": "瓦雷莎",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000111",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000111",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000111",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000112",
+      "name": "爱可菲",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000112",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000112",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000112",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000113",
+      "name": "伊法",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000113",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000113",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000113",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000114",
+      "name": "丝柯克",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000114",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000114",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000114",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000115",
+      "name": "塔利雅",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000115",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000115",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000115",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000116",
+      "name": "伊涅芙",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000116",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000116",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000116",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000119",
+      "name": "菈乌玛",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000119",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000119",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000119",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000120",
+      "name": "菲林斯",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000120",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000120",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000120",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000121",
+      "name": "爱诺",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000121",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000121",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000121",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000122",
+      "name": "奈芙尔",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000122",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000122",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000122",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000123",
+      "name": "杜林",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000123",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000123",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000123",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000124",
+      "name": "雅珂达",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000124",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000124",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000124",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    }
+  ]
+}

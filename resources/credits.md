@@ -13,6 +13,24 @@ Bundled visual dependencies:
 - `resources/backgrounds/imaginarium-theater*.webp` — original image generated with OpenAI image generation on 2026-07-22 for the cast-and-route challenge entry. Prompt direction: an original moonlit fantasy stage and branching lantern path; no characters, official locations, UI, text, or logos. Converted to WebP at 1600×1000 and 2560×1600.
 - `resources/backgrounds/stygian-onslaught*.webp` — original image generated with OpenAI image generation on 2026-07-22 for the three-phase boss challenge entry. Prompt direction: an original storm-lit arena with three distant monolith silhouettes; no characters, official locations, UI, text, or logos. Converted to WebP at 1600×1000 and 2560×1600.
 
+## Reviewed advisor knowledge
+
+The versioned files under `resources/knowledge/` are developer-reviewed source assets. Runtime web search results are never written back into these trusted bundles. Strategy facts are concise Chinese **paraphrased summaries, not copied guide text**. Links identify the pages reviewed and do not imply endorsement by their authors.
+
+Catalog provenance, retrieved 2026-07-24:
+
+- EnkaNetwork API Docs `store/characters.json` — `https://raw.githubusercontent.com/EnkaNetwork/API-docs/master/store/characters.json`; used for upstream canonical IDs, element and weapon metadata; SHA-256 `51dbaef256968a41dab3429d60f88f77f29645c4b79bf606fc93d4fbf3be33e4`.
+- EnkaNetwork API Docs `store/loc.json` — `https://raw.githubusercontent.com/EnkaNetwork/API-docs/master/store/loc.json`; used for Simplified Chinese names; SHA-256 `ee8a58105be0595b386d035377711d7aa0859d09550241b291459372bbd38976`.
+- The snapshot exposes 114 populated numeric rows, but five are not canonical player-roster characters: trial IDs `10000901` and `10000902`, alternate IDs `10000903` and `10000904`, and test ID `11000046`. They are recorded in the catalog's bounded `exclusions` audit list, leaving 109 canonical entries. This is a documented upstream discrepancy from the original 112-character acceptance floor.
+
+Accepted source registry entries, reviewed 2026-07-24:
+
+- `official-genshin` — Genshin Impact official site (`genshin.hoyoverse.com`), accepted for official product and character information.
+- `hoyolab-wiki` — HoYoLAB (`hoyolab.com`), accepted for official community and wiki information.
+- `kqm-guides` — KeqingMains character guides (`keqingmains.com`); the five fully reviewed v2 strategies use the linked Raiden Shogun, Kuki Shinobu, Nahida, Kokomi, and Furina Quick Guides.
+- `kqm-shortlink` — KQM guide directory (`kqm.gg`), registered as an accepted discovery host; it does not substantiate this application's internal review status, and gap entries carry no trusted facts.
+- `kqm-library` — KQM Theorycrafting Library (`library.keqingmains.com`), accepted for reviewed mechanics references.
+
 Runtime and development dependencies retain their respective licenses. The application source is licensed under GPL-3.0-or-later; see `LICENSE` and package metadata for dependency notices.
 
 Genshin Impact, HoYoLAB, MiHoYo, and related marks belong to their respective owners. This community project is not affiliated with or endorsed by them.
