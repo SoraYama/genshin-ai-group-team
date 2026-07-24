@@ -356,7 +356,7 @@ describe('advisor knowledge contracts', () => {
     ).toBe(false);
   });
 
-  it('accepts only canonical artifact main stats and complete artifact-set semantics', () => {
+  it('accepts canonical artifact main stats while deferring artifact-set predicates', () => {
     expect(
       signalPredicateSchema.safeParse({
         id: 'display-weapon',
@@ -393,7 +393,7 @@ describe('advisor knowledge contracts', () => {
     expect(
       signalPredicateSchema.safeParse({
         id: 'canonical-artifact-set',
-        description: 'Canonical artifact set',
+        description: 'Unverified cross-source artifact set',
         field: 'artifactSet',
         operator: 'eq',
         setId: 15020,
@@ -401,7 +401,7 @@ describe('advisor knowledge contracts', () => {
         required: false,
         weight: 2
       }).success
-    ).toBe(true);
+    ).toBe(false);
     expect(
       signalPredicateSchema.safeParse({
         id: 'one-piece-artifact-set',

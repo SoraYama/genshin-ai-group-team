@@ -3,10 +3,11 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
+import { committedAdvisorKnowledgeSetSchema } from '../../../src/main/services/committed-advisor-knowledge.js';
 import {
-  committedAdvisorKnowledgeSetSchema,
   committedCharacterCatalogSchema,
   committedCharacterStrategyBundleV2Schema,
+  committedReviewEvidenceBundleSchema,
   committedSourceRegistrySchema
 } from '../../../src/shared/advisor-knowledge.js';
 
@@ -21,6 +22,7 @@ const catalog = committedCharacterCatalogSchema.parse(readJson('character-catalo
 const strategies = committedCharacterStrategyBundleV2Schema.parse(
   readJson('character-strategies.v2.json')
 );
+const evidence = committedReviewEvidenceBundleSchema.parse(readJson('review-evidence.v1.json'));
 
 describe('committed advisor knowledge bundles', () => {
   it('parses every committed bundle with its shared strict schema', () => {
@@ -28,7 +30,7 @@ describe('committed advisor knowledge bundles', () => {
     expect(catalog.schemaVersion).toBe(1);
     expect(strategies.schemaVersion).toBe(2);
     expect(() =>
-      committedAdvisorKnowledgeSetSchema.parse({ sources, catalog, strategies })
+      committedAdvisorKnowledgeSetSchema.parse({ sources, catalog, strategies, evidence })
     ).not.toThrow();
   });
 
@@ -91,7 +93,8 @@ describe('committed advisor knowledge bundles', () => {
                 weight <= 5
             )
           ).toBe(true);
-          expect(archetype.signals.every(({ field }) => field !== 'artifactSet')).toBe(true);
+          const signalFields: string[] = archetype.signals.map(({ field }) => field);
+          expect(signalFields).not.toContain('artifactSet');
         }
       }
     }
@@ -126,6 +129,7 @@ describe('committed advisor knowledge bundles', () => {
       committedAdvisorKnowledgeSetSchema.safeParse({
         sources,
         catalog,
+        evidence,
         strategies: { ...strategies, sourceVersion: 'stale-source-version' }
       }).success
     ).toBe(false);
@@ -141,6 +145,7 @@ describe('committed advisor knowledge bundles', () => {
       committedAdvisorKnowledgeSetSchema.safeParse({
         sources,
         catalog,
+        evidence,
         strategies: unsupportedStrategies
       }).success
     ).toBe(false);
@@ -149,6 +154,7 @@ describe('committed advisor knowledge bundles', () => {
       committedAdvisorKnowledgeSetSchema.safeParse({
         sources,
         catalog,
+        evidence,
         strategies: { ...strategies, catalogVersion: 'stale-catalog-version' }
       }).success
     ).toBe(false);
@@ -166,7 +172,8 @@ describe('committed advisor knowledge bundles', () => {
       committedAdvisorKnowledgeSetSchema.safeParse({
         sources: swappedSources,
         catalog,
-        strategies
+        strategies,
+        evidence
       }).success
     ).toBe(false);
   });

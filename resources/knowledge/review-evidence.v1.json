@@ -1,0 +1,166 @@
+{
+  "schemaVersion": 1,
+  "reviewEvidenceVersion": "paraphrased-evidence-v1",
+  "entries": [
+    {
+      "citationId": "kqm-raiden-quickguide",
+      "subjectCharacterIds": ["10000052"],
+      "url": "https://keqingmains.com/q/raiden-quickguide/",
+      "reviewedAt": "2026-07-24T23:08:06+08:00",
+      "sectionLabels": ["On-Field DPS", "Hyperbloom Trigger", "ER Requirements", "Artifact Stats"],
+      "paraphrasedEvidence": [
+        {
+          "id": "evidence-raiden-hb-role",
+          "summary": "审核结论：后台元素战技可承担超绽放触发，元素精通是该方向的重要配装线索，通常不需要爆发站场。",
+          "factBindings": [
+            {
+              "factId": "raiden-hb-role",
+              "statementSha256": "8b7e1a5277b88ea717c82a5dea458096c0f41c349c759607859a8720bcea2cf3"
+            }
+          ]
+        },
+        {
+          "id": "evidence-raiden-onfield-role",
+          "summary": "审核结论：站场方向围绕元素爆发窗口与全队回能展开，充能需求取决于队伍产球与循环条件。",
+          "factBindings": [
+            {
+              "factId": "raiden-onfield-role",
+              "statementSha256": "39cc8fc527d80fadc15d8250facc48f1d3d5b06563db889ef482876a8a8ae738"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "citationId": "kqm-shinobu-quickguide",
+      "subjectCharacterIds": ["10000065"],
+      "url": "https://keqingmains.com/q/shinobu-quickguide/",
+      "reviewedAt": "2026-07-24T23:08:06+08:00",
+      "sectionLabels": ["Hyperbloom Trigger", "Quicken Support", "Pure Healer", "Artifact Stats"],
+      "paraphrasedEvidence": [
+        {
+          "id": "evidence-shinobu-hb-role",
+          "summary": "审核结论：元素战技能在后台触发附近草原核并提供治疗，超绽放构筑通常重视元素精通。",
+          "factBindings": [
+            {
+              "factId": "shinobu-hb-role",
+              "statementSha256": "eb3ada00da3235ee767e038c1ef1e18c743ebad5b83e37dacc7336a25b5ca075"
+            }
+          ]
+        },
+        {
+          "id": "evidence-shinobu-quicken-role",
+          "summary": "审核结论：激化队可由久岐忍合并后台雷元素与治疗职责，生命和治疗词条只是辅助构筑线索。",
+          "factBindings": [
+            {
+              "factId": "shinobu-quicken-role",
+              "statementSha256": "0a3937a72272be5e6314ffd20bab3d89f350aa9b2d25f5f5aeb85b521e5807bc"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "citationId": "kqm-nahida-quickguide",
+      "subjectCharacterIds": ["10000073"],
+      "url": "https://keqingmains.com/q/nahida-quickguide/",
+      "reviewedAt": "2026-07-24T23:08:06+08:00",
+      "sectionLabels": ["On-Field Focus", "Off-Field Focus", "Stat Priority"],
+      "paraphrasedEvidence": [
+        {
+          "id": "evidence-nahida-onfield-role",
+          "summary": "审核结论：站场纳西妲可补充草附着并驱动后台单位，草伤与暴击词条会比纯后台方向更受重视。",
+          "factBindings": [
+            {
+              "factId": "nahida-onfield-role",
+              "statementSha256": "e45bef608e17664a920f53d7b21fc9a626f836552e7e3a1ce76eef29c35f2a05"
+            }
+          ]
+        },
+        {
+          "id": "evidence-nahida-offfield-role",
+          "summary": "审核结论：后台方向依靠元素战技维持草附着并向站场角色提供精通增益，高精通是线索但不是独立定论。",
+          "factBindings": [
+            {
+              "factId": "nahida-offfield-role",
+              "statementSha256": "3d081fbbf72c730d5ecda257ca5b5dcf25cb8c2a7b265fea2aa6902fdcaeed59"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "citationId": "kqm-kokomi-quickguide",
+      "subjectCharacterIds": ["10000054"],
+      "url": "https://keqingmains.com/q/kokomi-quickguide/",
+      "reviewedAt": "2026-07-24T23:08:06+08:00",
+      "sectionLabels": [
+        "On-Field Healer / Enabler",
+        "Off-Field Support",
+        "Bloom DPS",
+        "Artifact Sets"
+      ],
+      "paraphrasedEvidence": [
+        {
+          "id": "evidence-kokomi-bloom-role",
+          "summary": "审核结论：妮露绽放队中心海可承担持续水附着、部分绽放触发与治疗，但触发占比取决于实际编成。",
+          "factBindings": [
+            {
+              "factId": "kokomi-bloom-role",
+              "statementSha256": "8aedcfca21cfdb546bc15c90c343f071866b77873aeb79249b2193eb9a8a8d4a"
+            }
+          ]
+        },
+        {
+          "id": "evidence-kokomi-offfield-role",
+          "summary": "审核结论：元素战技能在后台同时提供水附着与治疗，固定位置和敌人移动会影响覆盖。",
+          "factBindings": [
+            {
+              "factId": "kokomi-offfield-role",
+              "statementSha256": "85d41b696cfe97882792c530bbead1cc853804dc51eec1d9e5268a4a001f8361"
+            }
+          ]
+        },
+        {
+          "id": "evidence-kokomi-onfield-role",
+          "summary": "审核结论：元素爆发强化普通攻击，使心海能够站场施加水元素并持续治疗，但循环仍受充能条件影响。",
+          "factBindings": [
+            {
+              "factId": "kokomi-onfield-role",
+              "statementSha256": "29e8d2f56febe20bc095027da1393953bf3d9af6becf4e7df6a525e9f30563e2"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "citationId": "kqm-furina-quickguide",
+      "subjectCharacterIds": ["10000089"],
+      "url": "https://keqingmains.com/q/furina-quickguide/",
+      "reviewedAt": "2026-07-24T23:08:06+08:00",
+      "sectionLabels": ["Off-Field DPS + Support", "Talent Overview", "Example Teams"],
+      "paraphrasedEvidence": [
+        {
+          "id": "evidence-furina-fanfare-role",
+          "summary": "审核结论：元素爆发依据全队生命变化积累气氛值并提供团队增益，持续治疗可改善积累效率。",
+          "factBindings": [
+            {
+              "factId": "furina-fanfare-role",
+              "statementSha256": "67e6f557e400b781213eb9b98e247e460bcddc89711da791b4af54e23c654f22"
+            }
+          ]
+        },
+        {
+          "id": "evidence-furina-cycle-pressure",
+          "summary": "审核结论：后台元素战技能产球，而每轮施放爆发会让单水或短循环面临更高充能压力。",
+          "factBindings": [
+            {
+              "factId": "furina-cycle-pressure",
+              "statementSha256": "c526010dda6adf260f3bda7c332d23c84764e094a5e492fa4e802952c652a283"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

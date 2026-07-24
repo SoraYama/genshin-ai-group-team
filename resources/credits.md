@@ -23,14 +23,16 @@ Catalog provenance, retrieved 2026-07-24:
 - EnkaNetwork API Docs revision `2b9d23b334306f5845551ae7571d1165cdf096e5`, `store/loc.json` — `https://raw.githubusercontent.com/EnkaNetwork/API-docs/2b9d23b334306f5845551ae7571d1165cdf096e5/store/loc.json`; used for Simplified Chinese names; SHA-256 `ee8a58105be0595b386d035377711d7aa0859d09550241b291459372bbd38976`.
 - The snapshot exposes 114 populated numeric rows, but five are not canonical player-roster characters: trial IDs `10000901` and `10000902`, alternate ID `10000903` (mapped to canonical `10000116`), provisional ID `10000904`, and test ID `11000046`. They are recorded in the catalog's bounded `exclusions` audit list, leaving 109 canonical entries. This is a documented upstream discrepancy from the original 112-character acceptance floor.
 
-Knowledge page integrity, retrieved 2026-07-24:
+Reproducible review evidence:
 
-- Citation `contentSha256` is the SHA-256 of the final HTTPS response body after redirects and HTTP content decoding, exactly as saved by `curl -fL --compressed` with the project knowledge-review user agent. It is snapshot evidence, not a claim that third-party pages are immutable.
-- Raiden Shogun Quick Guide — `95e6ce3312a53f81d933cd246b50f1b7b94bf3840842e25a2d9facee8df90923`.
-- Kuki Shinobu Quick Guide — `0fd7391528ba84cd91dfc622cb3fc2ce85ca49517b97e0130ee2037b4520290c`.
-- Nahida Quick Guide — `0922afe7918c019227edc392fc424020745ee1bcfcf077c41c7f8a5e3550ab9e`.
-- Kokomi Quick Guide — `656c5eeec552c8c9a08b49dff657989bbf489115a24c013c07921cd642e45353`.
-- Furina Quick Guide — `ba02542cec1daff3357a3f177a533ade8dc564fd08d873d3e6709b9b54647105`.
+- `resources/knowledge/review-evidence.v1.json` contains only short upstream section labels and this project's own Chinese paraphrased review conclusions, with each fact ID bound to the SHA-256 of its committed fact statement. It does not copy guide paragraphs.
+- Citation `reviewEvidenceSha256` is the SHA-256 of one committed evidence entry serialized as UTF-8 canonical JSON: object keys are recursively sorted lexicographically, array order is preserved, and no insignificant whitespace is emitted.
+- These digests cover the committed paraphrased evidence, **not upstream page HTML**. Third-party pages are mutable and their response bytes are not claimed to be reproducible.
+- Raiden Shogun review evidence — `0e1db7c9634195298fdc5546c06a92736833d7092a15fa7731f450383a23b54f`.
+- Kuki Shinobu review evidence — `f5877817b09b2a6ed71ef69b45cda4c49c2b43a64b858dd1de4856e61a9637e6`.
+- Nahida review evidence — `2403e61bb06ee047da4b001423f440b9ce70f2e4be171fda112ba05e734174b1`.
+- Kokomi review evidence — `011180fd1dbdbfceb8378b224bec582d7b4de682d2f9e1b0084b897c528c922c`.
+- Furina review evidence — `13bd0777e88a0bd6ce8984b136bf8ac83c481d5a0b74aa7628858b139ea7a26a`.
 
 Accepted source registry entries, reviewed 2026-07-24:
 

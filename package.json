@@ -42,7 +42,7 @@
     "audit:prod": "npm audit --omit=dev --audit-level=high --registry=https://registry.npmjs.org",
     "audit:all": "npm audit --audit-level=high --registry=https://registry.npmjs.org",
     "gate:miyoushe-detail": "npm run build:main && electron dist/main/miyoushe-detail-gate.mjs",
-    "gate:knowledge-provenance": "node tests/external/knowledge-provenance-gate.mjs",
+    "gate:knowledge-provenance": "npm run build:main && node dist/main/knowledge-provenance-gate.mjs",
     "gate:provider-contract": "node tests/external/provider-gate.mjs",
     "gate:provider-saved": "npm run build:main && electron dist/main/provider-saved-gate.mjs",
     "gate:local": "npm run lint && npm run typecheck && npm run test && npm run build && npm run test:renderer-budget",

@@ -28,6 +28,7 @@ export function createTsupOptions({ devWatch, writeReady }: CreateTsupOptionsInp
     {
       entry: {
         index: 'src/main/index.ts',
+        'knowledge-provenance-gate': 'src/main/gates/knowledge-provenance-gate.ts',
         'miyoushe-detail-gate': 'src/main/gates/miyoushe-detail-gate.ts',
         'provider-saved-gate': 'src/main/gates/provider-saved-gate.ts'
       },

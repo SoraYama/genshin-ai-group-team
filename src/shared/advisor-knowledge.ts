@@ -91,7 +91,8 @@ export const committedSourceCitationSchema = sourceCitationSchema
       .max(16)
       .refine((ids) => new Set(ids).size === ids.length, 'Subject character IDs must be unique'),
     retrievedAt: reviewedAtSchema,
-    contentSha256: sha256Schema
+    reviewEvidenceVersion: z.literal('paraphrased-evidence-v1'),
+    reviewEvidenceSha256: sha256Schema
   })
   .strict();
 
@@ -338,16 +339,6 @@ export const artifactMainStatKeySchema = z.enum([
 
 export type ArtifactMainStatKey = z.infer<typeof artifactMainStatKeySchema>;
 
-const artifactSetSignalPredicateSchema = z
-  .object({
-    ...signalPredicateCommonShape,
-    field: z.literal('artifactSet'),
-    operator: z.literal('eq'),
-    setId: z.number().int().positive().max(999_999),
-    pieceCount: z.union([z.literal(2), z.literal(4)])
-  })
-  .strict();
-
 const artifactMainStatSignalPredicateSchema = z
   .object({
     ...signalPredicateCommonShape,
@@ -375,7 +366,6 @@ const numericSignalPredicateSchema = z
   .strict();
 
 export const signalPredicateSchema = z.discriminatedUnion('field', [
-  artifactSetSignalPredicateSchema,
   artifactMainStatSignalPredicateSchema,
   numericSignalPredicateSchema
 ]);
@@ -603,16 +593,124 @@ export const committedCharacterStrategyBundleV2Schema = z
   .superRefine(({ characters }, context) => {
     addDuplicateIdIssues(characters, ['characters'], context);
     addDuplicateArchetypeIdIssues(characters, context);
+    const factIds = new Set<string>();
+    characters.forEach(({ archetypes }, characterIndex) => {
+      archetypes.forEach(({ facts }, archetypeIndex) => {
+        facts.forEach(({ id }, factIndex) => {
+          if (factIds.has(id)) {
+            context.addIssue({
+              code: 'custom',
+              path: [
+                'characters',
+                characterIndex,
+                'archetypes',
+                archetypeIndex,
+                'facts',
+                factIndex,
+                'id'
+              ],
+              message: 'Committed strategy fact IDs must be globally unique'
+            });
+          }
+          factIds.add(id);
+        });
+      });
+    });
   });
 
-export const committedAdvisorKnowledgeSetSchema = z
+const reviewEvidenceItemSchema = z
+  .object({
+    id: boundedIdSchema,
+    summary: boundedFactSchema,
+    factBindings: z
+      .array(
+        z
+          .object({
+            factId: boundedIdSchema,
+            statementSha256: sha256Schema
+          })
+          .strict()
+      )
+      .min(1)
+      .max(32)
+      .refine(
+        (bindings) => new Set(bindings.map(({ factId }) => factId)).size === bindings.length,
+        'Evidence fact bindings must use unique fact IDs'
+      )
+  })
+  .strict();
+
+export const reviewEvidenceEntrySchema = z
+  .object({
+    citationId: boundedIdSchema,
+    subjectCharacterIds: z
+      .array(canonicalCharacterIdSchema)
+      .min(1)
+      .max(16)
+      .refine((ids) => new Set(ids).size === ids.length, 'Subject character IDs must be unique'),
+    url: httpsUrlSchema,
+    reviewedAt: reviewedAtSchema,
+    sectionLabels: z
+      .array(z.string().trim().min(1).max(100))
+      .min(1)
+      .max(16)
+      .refine((labels) => new Set(labels).size === labels.length, 'Section labels must be unique'),
+    paraphrasedEvidence: z.array(reviewEvidenceItemSchema).min(1).max(32)
+  })
+  .strict()
+  .superRefine(({ paraphrasedEvidence }, context) => {
+    addDuplicateIdIssues(paraphrasedEvidence, ['paraphrasedEvidence'], context);
+  });
+
+export const committedReviewEvidenceBundleSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    reviewEvidenceVersion: z.literal('paraphrased-evidence-v1'),
+    entries: z.array(reviewEvidenceEntrySchema).min(1).max(512)
+  })
+  .strict()
+  .superRefine(({ entries }, context) => {
+    addDuplicateIdIssues(
+      entries.map((entry) => ({ id: entry.citationId })),
+      ['entries'],
+      context,
+      'Evidence citation IDs must be unique'
+    );
+  });
+
+type CanonicalJsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | CanonicalJsonValue[]
+  | { [key: string]: CanonicalJsonValue };
+
+export function canonicalJsonStringify(value: CanonicalJsonValue): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => canonicalJsonStringify(item)).join(',')}]`;
+  }
+  return `{${Object.keys(value)
+    .sort()
+    .map(
+      (key) =>
+        `${JSON.stringify(key)}:${canonicalJsonStringify(
+          (value as Record<string, CanonicalJsonValue>)[key]!
+        )}`
+    )
+    .join(',')}}`;
+}
+
+export const committedAdvisorKnowledgeSetStructureSchema = z
   .object({
     sources: committedSourceRegistrySchema,
     catalog: committedCharacterCatalogSchema,
-    strategies: committedCharacterStrategyBundleV2Schema
+    strategies: committedCharacterStrategyBundleV2Schema,
+    evidence: committedReviewEvidenceBundleSchema
   })
   .strict()
-  .superRefine(({ sources, catalog, strategies }, context) => {
+  .superRefine(({ sources, catalog, strategies, evidence }, context) => {
     if (strategies.sourceVersion !== sources.sourceVersion) {
       context.addIssue({
         code: 'custom',
@@ -659,9 +757,67 @@ export const committedAdvisorKnowledgeSetSchema = z
     });
 
     const citationsById = new Map(sources.citations.map((citation) => [citation.id, citation]));
+    const evidenceByCitationId = new Map(
+      evidence.entries.map((entry) => [entry.citationId, entry])
+    );
+    sources.citations.forEach((citation, citationIndex) => {
+      const entry = evidenceByCitationId.get(citation.id);
+      if (entry === undefined) {
+        context.addIssue({
+          code: 'custom',
+          path: ['evidence', 'entries'],
+          message: `Committed citation ${citation.id} must have one review evidence entry`
+        });
+        return;
+      }
+      if (citation.reviewEvidenceVersion !== evidence.reviewEvidenceVersion) {
+        context.addIssue({
+          code: 'custom',
+          path: ['sources', 'citations', citationIndex, 'reviewEvidenceVersion'],
+          message: 'Citation review evidence version must match the evidence bundle'
+        });
+      }
+      if (
+        entry.url !== citation.url ||
+        entry.reviewedAt !== citation.reviewedAt ||
+        !sameStringSet(entry.subjectCharacterIds, citation.subjectCharacterIds)
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['evidence', 'entries', evidence.entries.indexOf(entry)],
+          message: 'Review evidence identity must match its committed citation'
+        });
+      }
+    });
+    evidence.entries.forEach(({ citationId }, evidenceIndex) => {
+      if (!citationsById.has(citationId)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['evidence', 'entries', evidenceIndex, 'citationId'],
+          message: 'Review evidence citationId must resolve in the committed source registry'
+        });
+      }
+    });
+
+    const factsById = new Map<
+      string,
+      Array<{ characterId: string; citationIds: string[]; factPath: Array<string | number> }>
+    >();
     strategies.characters.forEach(({ id: characterId, archetypes }, characterIndex) => {
       archetypes.forEach(({ facts }, archetypeIndex) => {
-        facts.forEach(({ citationIds: factCitationIds }, factIndex) => {
+        facts.forEach(({ id: factId, citationIds: factCitationIds }, factIndex) => {
+          const factPath = [
+            'strategies',
+            'characters',
+            characterIndex,
+            'archetypes',
+            archetypeIndex,
+            'facts',
+            factIndex
+          ];
+          const owners = factsById.get(factId) ?? [];
+          owners.push({ characterId, citationIds: factCitationIds, factPath });
+          factsById.set(factId, owners);
           factCitationIds.forEach((citationId, citationIndex) => {
             const citation = citationsById.get(citationId);
             if (citation === undefined) {
@@ -697,8 +853,50 @@ export const committedAdvisorKnowledgeSetSchema = z
                 message:
                   'Trusted strategy fact citation must declare the fact character as a subject'
               });
+            } else {
+              const entry = evidenceByCitationId.get(citationId);
+              const evidenceFactIds = new Set(
+                entry?.paraphrasedEvidence.flatMap(({ factBindings }) =>
+                  factBindings.map(({ factId }) => factId)
+                ) ?? []
+              );
+              if (!evidenceFactIds.has(factId)) {
+                context.addIssue({
+                  code: 'custom',
+                  path: [...factPath, 'citationIds', citationIndex],
+                  message: 'Trusted strategy fact must be bound by its citation review evidence'
+                });
+              }
             }
           });
+        });
+      });
+    });
+
+    evidence.entries.forEach((entry, evidenceIndex) => {
+      entry.paraphrasedEvidence.forEach(({ factBindings }, itemIndex) => {
+        factBindings.forEach(({ factId }, factIndex) => {
+          const owners = factsById.get(factId) ?? [];
+          const compatibleOwner = owners.find(
+            ({ characterId, citationIds }) =>
+              entry.subjectCharacterIds.includes(characterId) &&
+              citationIds.includes(entry.citationId)
+          );
+          if (compatibleOwner === undefined) {
+            context.addIssue({
+              code: 'custom',
+              path: [
+                'evidence',
+                'entries',
+                evidenceIndex,
+                'paraphrasedEvidence',
+                itemIndex,
+                'factBindings',
+                factIndex
+              ],
+              message: 'Review evidence fact ID must resolve to its citation subject and fact'
+            });
+          }
         });
       });
     });
@@ -1000,6 +1198,14 @@ function parseUrl(value: string): URL | undefined {
   }
 }
 
+function sameStringSet(left: readonly string[], right: readonly string[]): boolean {
+  return (
+    left.length === right.length &&
+    left.every((value) => right.includes(value)) &&
+    right.every((value) => left.includes(value))
+  );
+}
+
 export type KnowledgeTrust = z.infer<typeof knowledgeTrustSchema>;
 export type SourceRegistryEntry = z.infer<typeof sourceRegistryEntrySchema>;
 export type SourceCitation = z.infer<typeof sourceCitationSchema>;
@@ -1022,7 +1228,9 @@ export type CommittedCharacterStrategyV2 = z.infer<typeof committedCharacterStra
 export type CommittedCharacterStrategyBundleV2 = z.infer<
   typeof committedCharacterStrategyBundleV2Schema
 >;
-export type CommittedAdvisorKnowledgeSet = z.infer<typeof committedAdvisorKnowledgeSetSchema>;
+export type CommittedAdvisorKnowledgeSet = z.infer<
+  typeof committedAdvisorKnowledgeSetStructureSchema
+>;
 export type EnemyMechanicStrategy = z.infer<typeof enemyMechanicStrategySchema>;
 export type EnemyMechanicStrategyBundle = z.infer<typeof enemyMechanicStrategyBundleSchema>;
 export type BuildInterpretation = z.infer<typeof buildInterpretationSchema>;

@@ -50,7 +50,9 @@ describe('committed advisor source policy', () => {
     for (const citation of registry.citations) {
       expect(citation.subjectCharacterIds).toHaveLength(1);
       expect(citation.retrievedAt).toMatch(/^2026-07-2[45]T/);
-      expect(citation.contentSha256).toMatch(/^[0-9a-f]{64}$/);
+      expect(citation.reviewEvidenceVersion).toBe('paraphrased-evidence-v1');
+      expect(citation.reviewEvidenceSha256).toMatch(/^[0-9a-f]{64}$/);
+      expect(citation).not.toHaveProperty('contentSha256');
     }
   });
 
@@ -62,6 +64,9 @@ describe('committed advisor source policy', () => {
     }
     expect(credits).toMatch(/paraphrased summaries/i);
     expect(credits).toMatch(/not copied guide text/i);
+    expect(credits).toContain('reviewEvidenceSha256');
+    expect(credits).toMatch(/not upstream page HTML/i);
+    expect(credits).not.toContain('contentSha256');
   });
 
   it('packages all committed knowledge JSON files through the existing resource glob', () => {
@@ -83,10 +88,13 @@ describe('committed advisor source policy', () => {
     ) as { scripts: Record<string, string> };
 
     expect(packageJson.scripts['gate:knowledge-provenance']).toBe(
-      'node tests/external/knowledge-provenance-gate.mjs'
+      'npm run build:main && node dist/main/knowledge-provenance-gate.mjs'
     );
-    expect(
-      existsSync(resolve(repositoryRoot, 'tests/external/knowledge-provenance-gate.mjs'))
-    ).toBe(true);
+    expect(existsSync(resolve(repositoryRoot, 'src/main/gates/knowledge-provenance.ts'))).toBe(
+      true
+    );
+    expect(existsSync(resolve(repositoryRoot, 'src/main/gates/knowledge-provenance-gate.ts'))).toBe(
+      true
+    );
   });
 });

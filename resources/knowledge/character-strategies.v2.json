@@ -1185,7 +1185,7 @@
               "operator": "eq",
               "value": "elementalMastery",
               "description": "时之沙主词条为元素精通",
-              "required": true,
+              "required": false,
               "weight": 5
             },
             {
@@ -1194,7 +1194,7 @@
               "operator": "eq",
               "value": "elementalMastery",
               "description": "空之杯主词条为元素精通",
-              "required": true,
+              "required": false,
               "weight": 5
             },
             {
@@ -1203,12 +1203,12 @@
               "operator": "eq",
               "value": "elementalMastery",
               "description": "理之冠主词条为元素精通",
-              "required": true,
+              "required": false,
               "weight": 5
             }
           ],
           "requiredMode": "all",
-          "minimumSupportingWeight": 0,
+          "minimumSupportingWeight": 5,
           "facts": [
             {
               "id": "raiden-hb-role",
@@ -1220,6 +1220,10 @@
             {
               "id": "raiden-hb-ownership",
               "description": "仍需结合队伍施加频率确认超绽放触发权是否主要归雷电将军。"
+            },
+            {
+              "id": "raiden-hb-set-unverified",
+              "description": "跨数据源圣遗物套装身份尚未验证，套装名称或 ID 不作为该方向的分类信号。"
             }
           ]
         },
@@ -1256,7 +1260,7 @@
               "operator": "gte",
               "value": 130,
               "description": "充能效率达到攻略列出的双雷队最低区间线索",
-              "required": true,
+              "required": false,
               "weight": 5
             },
             {
@@ -1270,7 +1274,7 @@
             }
           ],
           "requiredMode": "all",
-          "minimumSupportingWeight": 2,
+          "minimumSupportingWeight": 5,
           "facts": [
             {
               "id": "raiden-onfield-role",
@@ -1282,6 +1286,14 @@
             {
               "id": "raiden-onfield-er-team",
               "description": "实际充能需求会随双雷、队友产球和循环长度变化，不能仅凭固定阈值定论。"
+            },
+            {
+              "id": "raiden-onfield-sands-choice",
+              "description": "时之沙可随武器、副词条和队伍充能条件在攻击力与充能效率之间选择，充能沙不是必要条件。"
+            },
+            {
+              "id": "raiden-onfield-set-unverified",
+              "description": "跨数据源圣遗物套装身份尚未验证，绝缘等套装信息仅保留为人工复核项，不参与分类。"
             }
           ]
         }
@@ -1383,6 +1395,10 @@
             {
               "id": "kokomi-bloom-ownership",
               "description": "三水等变体会降低心海的绽放触发占比，需按实际编成复核精通与治疗取舍。"
+            },
+            {
+              "id": "kokomi-bloom-set-unverified",
+              "description": "跨数据源圣遗物套装身份尚未验证，套装信息不作为绽放触发方向的分类信号。"
             }
           ]
         },
@@ -1422,7 +1438,7 @@
               "operator": "eq",
               "value": "healingBonus",
               "description": "理之冠使用治疗加成主词条",
-              "required": true,
+              "required": false,
               "weight": 5
             }
           ],
@@ -1439,6 +1455,10 @@
             {
               "id": "kokomi-offfield-positioning",
               "description": "水母固定位置会受敌人移动影响，环境与聚怪条件需另行确认。"
+            },
+            {
+              "id": "kokomi-offfield-set-unverified",
+              "description": "跨数据源圣遗物套装身份尚未验证，千岩等套装信息仅供人工复核，不参与分类。"
             }
           ]
         },
@@ -1478,7 +1498,7 @@
               "operator": "eq",
               "value": "healingBonus",
               "description": "理之冠使用治疗加成主词条",
-              "required": true,
+              "required": false,
               "weight": 5
             }
           ],
@@ -1495,6 +1515,10 @@
             {
               "id": "kokomi-onfield-energy",
               "description": "是否能每轮施放元素爆发取决于队伍产球与轮转，需单独核算充能。"
+            },
+            {
+              "id": "kokomi-onfield-set-unverified",
+              "description": "跨数据源圣遗物套装身份尚未验证，海染等套装信息仅供人工复核，不参与分类。"
             }
           ]
         }
@@ -1840,7 +1864,7 @@
               "operator": "eq",
               "value": "elementalMastery",
               "description": "时之沙主词条为元素精通",
-              "required": true,
+              "required": false,
               "weight": 5
             },
             {
@@ -1849,7 +1873,7 @@
               "operator": "eq",
               "value": "elementalMastery",
               "description": "空之杯主词条为元素精通",
-              "required": true,
+              "required": false,
               "weight": 5
             },
             {
@@ -1858,12 +1882,12 @@
               "operator": "eq",
               "value": "elementalMastery",
               "description": "理之冠主词条为元素精通",
-              "required": true,
+              "required": false,
               "weight": 5
             }
           ],
           "requiredMode": "all",
-          "minimumSupportingWeight": 0,
+          "minimumSupportingWeight": 5,
           "facts": [
             {
               "id": "shinobu-hb-role",
@@ -1875,6 +1899,10 @@
             {
               "id": "shinobu-hb-ownership",
               "description": "若队内另有雷元素触发者，仍需核对草原核触发权。"
+            },
+            {
+              "id": "shinobu-hb-set-unverified",
+              "description": "跨数据源圣遗物套装身份尚未验证，套装信息不作为超绽放方向的分类信号。"
             }
           ]
         },
@@ -1937,6 +1965,10 @@
             {
               "id": "shinobu-quicken-investment",
               "description": "个人伤害、团队增益和治疗量之间的取舍需按队伍需求复核。"
+            },
+            {
+              "id": "shinobu-quicken-set-unverified",
+              "description": "跨数据源圣遗物套装身份尚未验证，千岩等套装信息仅供人工复核，不参与分类。"
             }
           ]
         }
@@ -2227,6 +2259,10 @@
             {
               "id": "nahida-onfield-fragility",
               "description": "站场生存与抗打断能力依赖具体队友，不能由配装信号单独判断。"
+            },
+            {
+              "id": "nahida-onfield-overlap",
+              "description": "草伤、暴击与高精通线索可能同时出现，仍需结合站场时间与队伍职责判断，装备本身不能强制定类。"
             }
           ]
         },
@@ -2263,7 +2299,7 @@
               "operator": "gte",
               "value": 900,
               "description": "元素精通达到攻略建议的后台共享区间下沿",
-              "required": true,
+              "required": false,
               "weight": 5
             },
             {
@@ -2289,6 +2325,14 @@
             {
               "id": "nahida-offfield-wave",
               "description": "多波次环境需要重新标记新敌人，后台覆盖并非无需换人的永久状态。"
+            },
+            {
+              "id": "nahida-offfield-context",
+              "description": "高精通与精通沙只提供支持性线索；是否后台以及队内最高精通角色是谁，必须结合站场时间和队伍上下文判断。"
+            },
+            {
+              "id": "nahida-offfield-set-unverified",
+              "description": "跨数据源圣遗物套装身份尚未验证，深林等套装信息仅供人工复核，不参与分类。"
             }
           ]
         }
@@ -2828,6 +2872,10 @@
             {
               "id": "furina-er-team",
               "description": "充能需求会随第二水元素、武器产球、轮转长度与命座变化。"
+            },
+            {
+              "id": "furina-set-unverified",
+              "description": "跨数据源圣遗物套装身份尚未验证，黄金剧团等套装信息仅供人工复核，不参与分类。"
             }
           ]
         }
