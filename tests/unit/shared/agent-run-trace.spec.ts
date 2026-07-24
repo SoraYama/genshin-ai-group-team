@@ -192,6 +192,24 @@ describe('agent run trace contracts', () => {
     expect(sanitized.text).not.toContain('alpha-');
   });
 
+  it('prefers a longer genuine secret prefix over a shorter complete suffix', () => {
+    const completeSecret = 'END';
+    const boundaryPrefix = 'prefix-END';
+    const overlappingSecret = `${boundaryPrefix}${'z'.repeat(512 - boundaryPrefix.length)}`;
+    const scanLimit = MAX_TRACE_TEXT_INPUT_CHARS + overlappingSecret.length - 1;
+    const compressiblePrefix = `apiKey="${'q'.repeat(4_096)}"\n`;
+    const input = `${compressiblePrefix}${'a'.repeat(
+      scanLimit - compressiblePrefix.length - boundaryPrefix.length
+    )}${overlappingSecret}tail`;
+    const sanitized = sanitizeTraceText(input, {
+      maxBytes: MAX_TRACE_TEXT_MAX_BYTES,
+      customHeaderValues: [completeSecret, overlappingSecret]
+    });
+
+    expect(sanitized.truncated).toBe(true);
+    expect(sanitized.text).not.toContain('prefix-');
+  });
+
   it('does not split Unicode surrogate pairs at bounded prefixes or final output', () => {
     const input = `${'x'.repeat(MAX_TRACE_TEXT_INPUT_CHARS - 1)}😀tail`;
     const sanitized = sanitizeTraceText(input, { maxBytes: MAX_TRACE_TEXT_MAX_BYTES });

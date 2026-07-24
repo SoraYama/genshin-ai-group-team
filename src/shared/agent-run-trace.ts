@@ -193,22 +193,22 @@ export function sanitizeTraceText(
   const scanLimit = MAX_TRACE_TEXT_INPUT_CHARS + Math.max(0, maximumCustomValueLength - 1);
   const sourceWasCapped = value.length > MAX_TRACE_TEXT_INPUT_CHARS;
   const scanPrefix = takeCodePointSafePrefix(value, scanLimit);
-  const trailingCustomPrefixLength = scanPrefix.truncated
-    ? findTrailingCustomPrefixLength(scanPrefix.text, customHeaderValues)
+  const trailingCustomSpanLength = scanPrefix.truncated
+    ? findTrailingCustomSpanLength(scanPrefix.text, customHeaderValues)
     : 0;
   const completeScanText =
-    trailingCustomPrefixLength === 0
+    trailingCustomSpanLength === 0
       ? scanPrefix.text
-      : scanPrefix.text.slice(0, -trailingCustomPrefixLength);
+      : scanPrefix.text.slice(0, -trailingCustomSpanLength);
 
   let redacted = redactRecognizedSecrets(completeScanText);
   redacted = redactCustomSecrets(redacted, customHeaderValues);
-  if (trailingCustomPrefixLength > 0) redacted += REDACTION_MARKER;
+  if (trailingCustomSpanLength > 0) redacted += REDACTION_MARKER;
 
   const output = truncateSanitizedText(redacted, maxBytes);
   return {
     text: output.text,
-    truncated: sourceWasCapped || trailingCustomPrefixLength > 0 || output.truncated
+    truncated: sourceWasCapped || trailingCustomSpanLength > 0 || output.truncated
   };
 }
 
@@ -268,32 +268,24 @@ function redactCustomSecrets(value: string, customValues: readonly string[]): st
   return value.replace(new RegExp(combinedPattern, 'giu'), REDACTION_MARKER);
 }
 
-function findTrailingCustomPrefixLength(value: string, customValues: readonly string[]): number {
+function findTrailingCustomSpanLength(value: string, customValues: readonly string[]): number {
   if (customValues.length === 0) return 0;
   const maximumValueLength = customValues.reduce(
     (maximum, customValue) => Math.max(maximum, customValue.length),
     0
   );
-  const completeTail = value.slice(-maximumValueLength).toLowerCase();
-  if (customValues.some((customValue) => completeTail.endsWith(customValue.toLowerCase()))) {
-    return 0;
-  }
-
-  const maximumPrefixLength = maximumValueLength - 1;
-  if (maximumPrefixLength === 0) return 0;
-  const tail = value.slice(-maximumPrefixLength).toLowerCase();
+  const tail = value.slice(-maximumValueLength).toLowerCase();
   let longestMatch = 0;
 
   for (const customValue of customValues) {
-    let prefixLength = 0;
+    let spanLength = 0;
     for (const character of customValue) {
-      prefixLength += character.length;
-      if (prefixLength >= customValue.length) break;
+      spanLength += character.length;
       if (
-        prefixLength > longestMatch &&
-        tail.endsWith(customValue.slice(0, prefixLength).toLowerCase())
+        spanLength > longestMatch &&
+        tail.endsWith(customValue.slice(0, spanLength).toLowerCase())
       ) {
-        longestMatch = prefixLength;
+        longestMatch = spanLength;
       }
     }
   }
