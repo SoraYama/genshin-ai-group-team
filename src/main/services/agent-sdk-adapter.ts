@@ -6,6 +6,7 @@ import {
   type Options as SdkOptions,
   type Query
 } from '@anthropic-ai/claude-agent-sdk';
+import { z } from 'zod';
 import { validateCustomHeaders } from '../../shared/custom-headers.js';
 
 const DENIED_NATIVE_TOOLS = [
@@ -37,6 +38,80 @@ function businessToolGate(allowedTools: ReadonlySet<string>): HookCallback {
   };
 }
 
+const nativeToolPolicySchema = z
+  .object({
+    purpose: z.literal('research'),
+    allowed: z.tuple([z.literal('WebSearch')]),
+    maxSearches: z.literal(3)
+  })
+  .strict();
+const researchSearchInputSchema = z
+  .object({
+    query: z.string().trim().min(1).max(300)
+  })
+  .strict()
+  .superRefine(({ query }, context) => {
+    const normalized = query.normalize('NFKC').replace(/\p{Default_Ignorable_Code_Point}/gu, '');
+    if (
+      /(?:\buid\b|\b\d{9,}\b|昵称|cookie|authorization|api[-_ ]?key|bearer\s|ltoken|ltuid|ltmid|sk-[a-z0-9_-]+|crit(?:ical)?[-_ ]?(?:rate|dmg)|暴击(?:率|伤害)?|攻击力|生命值|防御力)/iu.test(
+        normalized
+      )
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['query'],
+        message: 'Research query contains account, credential, or panel material'
+      });
+    }
+  });
+
+export interface ResearchNativeToolPolicy {
+  purpose: 'research';
+  allowed: ['WebSearch'];
+  maxSearches: 3;
+}
+
+export function createResearchToolGate(input: { maxSearches: 3 }): HookCallback {
+  let searches = 0;
+  return async (hookInput) => {
+    if (hookInput.hook_event_name !== 'PreToolUse') return { continue: true };
+    if (hookInput.tool_name !== 'WebSearch') {
+      return {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason: 'RESEARCH_TOOL_NOT_ALLOWED'
+        }
+      };
+    }
+    if (!researchSearchInputSchema.safeParse(hookInput.tool_input).success) {
+      return {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason: 'SEARCH_QUERY_REJECTED'
+        }
+      };
+    }
+    searches += 1;
+    if (searches > input.maxSearches) {
+      return {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason: 'SEARCH_BUDGET_EXCEEDED'
+        }
+      };
+    }
+    return {
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'allow'
+      }
+    };
+  };
+}
+
 export interface AgentSdkRunOptions {
   apiKey: string;
   baseUrl: string;
@@ -51,6 +126,7 @@ export interface AgentSdkRunOptions {
   clientVersion?: string;
   mcpServers?: SdkOptions['mcpServers'];
   allowedBusinessTools?: string[];
+  nativeToolPolicy?: ResearchNativeToolPolicy;
 }
 
 function serializeCustomHeaders(headers: Record<string, string> | undefined): string | undefined {
@@ -87,6 +163,24 @@ export function buildAgentSdkOptions(input: AgentSdkRunOptions): SdkOptions {
   const bundledExecutable = input.pathToClaudeCodeExecutable ?? resolvePackagedClaudeExecutable();
   const customHeaders = serializeCustomHeaders(input.customHeaders);
   const allowedBusinessTools = input.allowedBusinessTools ?? [];
+  const nativeToolPolicy =
+    input.nativeToolPolicy === undefined
+      ? undefined
+      : nativeToolPolicySchema.parse(input.nativeToolPolicy);
+  if (
+    nativeToolPolicy !== undefined &&
+    (allowedBusinessTools.length > 0 || input.mcpServers !== undefined)
+  ) {
+    throw new Error('Native research tools cannot be combined with business MCP tools');
+  }
+  const isResearch = nativeToolPolicy !== undefined;
+  const allowedTools = isResearch ? ['WebSearch'] : allowedBusinessTools;
+  const disallowedTools = isResearch
+    ? DENIED_NATIVE_TOOLS.filter((tool) => tool !== 'WebSearch')
+    : [...DENIED_NATIVE_TOOLS];
+  const toolGate = isResearch
+    ? createResearchToolGate({ maxSearches: nativeToolPolicy.maxSearches })
+    : businessToolGate(new Set(allowedBusinessTools));
   return {
     systemPrompt: input.systemPrompt,
     env: {
@@ -98,12 +192,12 @@ export function buildAgentSdkOptions(input: AgentSdkRunOptions): SdkOptions {
       ...(customHeaders ? { ANTHROPIC_CUSTOM_HEADERS: customHeaders } : {})
     },
     model: input.model,
-    tools: [],
-    allowedTools: allowedBusinessTools,
-    disallowedTools: DENIED_NATIVE_TOOLS,
+    tools: isResearch ? ['WebSearch'] : [],
+    allowedTools,
+    disallowedTools,
     permissionMode: 'dontAsk',
     hooks: {
-      PreToolUse: [{ hooks: [businessToolGate(new Set(allowedBusinessTools))] }]
+      PreToolUse: [{ hooks: [toolGate] }]
     },
     maxTurns: input.maxTurns ?? 1,
     abortController: input.abortController,
