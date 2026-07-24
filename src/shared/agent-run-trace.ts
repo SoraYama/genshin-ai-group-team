@@ -3,6 +3,17 @@ import { z } from 'zod';
 const boundedTextSchema = z.string().max(32_768);
 const boundedIdSchema = z.string().trim().min(1).max(128);
 const nonnegativeIntSchema = z.number().int().nonnegative();
+const traceTimestampSchema = z.iso.datetime({ offset: true }).max(40);
+const agentFailureDetailsSchema = z
+  .record(z.string().trim().min(1).max(80), boundedTextSchema)
+  .superRefine((details, context) => {
+    if (Object.keys(details).length > 32) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Failure details may contain at most 32 keys'
+      });
+    }
+  });
 
 export const agentFailureCodeSchema = z.enum([
   'AGENT_ABORTED',
@@ -33,7 +44,7 @@ export const agentFailureSchema = z
     code: agentFailureCodeSchema,
     message: z.string().trim().min(1).max(1_000),
     retryable: z.boolean(),
-    details: z.record(z.string().trim().min(1).max(80), boundedTextSchema).optional()
+    details: agentFailureDetailsSchema.optional()
   })
   .strict();
 
@@ -107,7 +118,7 @@ export const agentFinalSourceSchema = z.enum(['smart-service', 'local-rules', 'b
 
 const agentRunTraceCommonShape = {
   correlationId: boundedIdSchema,
-  startedAt: z.iso.datetime({ offset: true }),
+  startedAt: traceTimestampSchema,
   model: z.string().trim().min(1).max(256),
   stages: z.array(agentStageTraceSchema).max(16),
   knowledge: agentTraceKnowledgeSummarySchema,
@@ -128,7 +139,7 @@ const completedAgentRunTraceSchema = z
   .object({
     status: z.literal('completed'),
     ...agentRunTraceCommonShape,
-    finishedAt: z.iso.datetime({ offset: true }),
+    finishedAt: traceTimestampSchema,
     finalSource: agentFinalSourceSchema,
     failure: z.never().optional()
   })
@@ -138,7 +149,7 @@ const failedAgentRunTraceSchema = z
   .object({
     status: z.literal('failed'),
     ...agentRunTraceCommonShape,
-    finishedAt: z.iso.datetime({ offset: true }),
+    finishedAt: traceTimestampSchema,
     finalSource: agentFinalSourceSchema,
     failure: agentFailureSchema
   })
@@ -171,20 +182,16 @@ export function sanitizeTraceText(
 
   for (const customValue of options.customHeaderValues ?? []) {
     if (customValue.length > 0) {
-      redacted = redacted.replace(
-        new RegExp(escapeRegExp(customValue), 'gi'),
-        '[REDACTED]'
-      );
+      redacted = redacted.replace(new RegExp(escapeRegExp(customValue), 'gi'), '[REDACTED]');
     }
   }
 
   redacted = redacted
+    .replace(/("(?:apiKey|ANTHROPIC_AUTH_TOKEN)"\s*:\s*)"(?:\\.|[^"\\])*"/gi, '$1"[REDACTED]"')
+    .replace(/("(?:Authorization|Cookie)"\s*:\s*)"(?:\\.|[^"\\])*"/gi, '$1"[REDACTED]"')
+    .replace(/((?<!")\b(?:Authorization|Cookie)\b\s*[:=]\s*)[^\r\n]*/gi, '$1[REDACTED]')
     .replace(
-      /(\b(?:apiKey|ANTHROPIC_AUTH_TOKEN)\b\s*(?:"?\s*[:=]\s*"?))[^"\s,;}]+/gi,
-      '$1[REDACTED]'
-    )
-    .replace(
-      /(\b(?:Authorization|Cookie)\b\s*(?:"?\s*[:=]\s*"?))[^\r\n",}]+/gi,
+      /((?<!")\b(?:apiKey|ANTHROPIC_AUTH_TOKEN)\b\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;}]+)/gi,
       '$1[REDACTED]'
     )
     .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [REDACTED]');

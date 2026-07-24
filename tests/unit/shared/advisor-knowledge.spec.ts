@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  canonicalCharacterIdSchema,
   characterStrategyBundleSchema,
   enemyMechanicStrategyBundleSchema,
   knowledgeContextPacketSchema,
+  sourceCitationSchema,
   sourceRegistrySchema
 } from '../../../src/shared/advisor-knowledge.js';
 
@@ -70,6 +72,21 @@ function characterStrategyBundle() {
 }
 
 describe('advisor knowledge contracts', () => {
+  it('bounds canonical character IDs', () => {
+    expect(canonicalCharacterIdSchema.safeParse('9'.repeat(20)).success).toBe(true);
+    expect(canonicalCharacterIdSchema.safeParse('9'.repeat(21)).success).toBe(false);
+    expect(canonicalCharacterIdSchema.safeParse('9'.repeat(100_000)).success).toBe(false);
+  });
+
+  it('bounds reviewed-at ISO datetimes', () => {
+    const citation = sourceRegistry().citations[0]!;
+    const oversizedDatetime = `2026-07-24T10:00:00.${'1'.repeat(100_000)}+08:00`;
+
+    expect(
+      sourceCitationSchema.safeParse({ ...citation, reviewedAt: oversizedDatetime }).success
+    ).toBe(false);
+  });
+
   it('rejects character strategy facts whose citation IDs do not resolve', () => {
     const bundle = characterStrategyBundle();
     bundle.characters[0]!.archetypes[0]!.facts[0]!.citationIds = ['missing-citation'];

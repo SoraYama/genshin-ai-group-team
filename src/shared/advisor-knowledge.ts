@@ -17,6 +17,7 @@ const uniqueBoundedIdsSchema = z
 export const canonicalCharacterIdSchema = z
   .string()
   .trim()
+  .max(20)
   .regex(/^[1-9]\d*$/, 'Character IDs must be canonical positive decimal strings');
 
 export const knowledgeTrustSchema = z.enum(['trusted-local', 'ephemeral-web']);
@@ -28,6 +29,7 @@ const httpsUrlSchema = z
     const url = new URL(value);
     return url.username.length === 0 && url.password.length === 0;
   }, 'URL credentials are not allowed');
+const reviewedAtSchema = z.iso.datetime({ offset: true }).max(40);
 
 const declaredHostSchema = z
   .string()
@@ -68,7 +70,7 @@ export const sourceCitationSchema = z
     sourceId: boundedIdSchema,
     url: httpsUrlSchema,
     title: z.string().trim().min(1).max(240),
-    reviewedAt: z.iso.datetime({ offset: true }),
+    reviewedAt: reviewedAtSchema,
     trust: knowledgeTrustSchema
   })
   .strict();
@@ -334,14 +336,7 @@ export const knowledgeContextPacketSchema = z
   .strict()
   .superRefine(
     (
-      {
-        buildInterpretations,
-        trustedMatches,
-        ephemeralMatches,
-        unknowns,
-        coverage,
-        citations
-      },
+      { buildInterpretations, trustedMatches, ephemeralMatches, unknowns, coverage, citations },
       context
     ) => {
       addDuplicateIdIssues(

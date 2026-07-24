@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  agentRunTraceSchema,
-  sanitizeTraceText
-} from '../../../src/shared/agent-run-trace.js';
+import { agentRunTraceSchema, sanitizeTraceText } from '../../../src/shared/agent-run-trace.js';
 
 const startedAt = '2026-07-24T10:00:00+08:00';
 const finishedAt = '2026-07-24T10:00:01+08:00';
@@ -44,6 +41,16 @@ describe('agent run trace contracts', () => {
     expect(sanitized.text.match(/\[REDACTED\]/g)?.length).toBeGreaterThanOrEqual(6);
   });
 
+  it('redacts complete quoted Cookie and apiKey values', () => {
+    const sanitized = sanitizeTraceText(
+      ['Cookie: session="cookie-secret"; theme=dark', 'apiKey="api secret, tail"'].join('\n')
+    );
+
+    expect(sanitized.text).not.toMatch(/cookie-secret|theme=dark|api secret, tail/i);
+    expect(sanitized.text).toContain('Cookie: [REDACTED]');
+    expect(sanitized.text).toContain('apiKey=[REDACTED]');
+  });
+
   it('truncates by UTF-8 bytes without splitting characters and marks truncation', () => {
     const sanitized = sanitizeTraceText('甲乙丙丁', { maxBytes: 7 });
 
@@ -55,33 +62,67 @@ describe('agent run trace contracts', () => {
     expect(agentRunTraceSchema.parse(runningTrace())).not.toHaveProperty('finalSource');
   });
 
-  it.each(['completed', 'failed'] as const)(
-    'requires finalSource when status is %s',
-    (status) => {
-      const terminal = {
-        ...runningTrace(),
-        status,
-        finishedAt,
-        ...(status === 'failed'
-          ? {
-              failure: {
-                code: 'PROVIDER_ERROR',
-                message: 'Provider request failed',
-                retryable: true
-              }
-            }
-          : {})
-      };
+  it('bounds run timestamps', () => {
+    const oversizedDatetime = `2026-07-24T10:00:00.${'1'.repeat(100_000)}+08:00`;
 
-      expect(agentRunTraceSchema.safeParse(terminal).success).toBe(false);
-      expect(
-        agentRunTraceSchema.safeParse({
-          ...terminal,
-          finalSource: status === 'completed' ? 'smart-service' : 'blocked'
-        }).success
-      ).toBe(true);
-    }
-  );
+    expect(
+      agentRunTraceSchema.safeParse({ ...runningTrace(), startedAt: oversizedDatetime }).success
+    ).toBe(false);
+    expect(
+      agentRunTraceSchema.safeParse({
+        ...runningTrace(),
+        status: 'completed',
+        finishedAt: oversizedDatetime,
+        finalSource: 'smart-service'
+      }).success
+    ).toBe(false);
+  });
+
+  it('bounds failure detail key cardinality', () => {
+    const details = Object.fromEntries(
+      Array.from({ length: 33 }, (_, index) => [`detail-${index}`, `value-${index}`])
+    );
+
+    expect(
+      agentRunTraceSchema.safeParse({
+        ...runningTrace(),
+        status: 'failed',
+        finishedAt,
+        finalSource: 'blocked',
+        failure: {
+          code: 'PROVIDER_ERROR',
+          message: 'Provider request failed',
+          retryable: true,
+          details
+        }
+      }).success
+    ).toBe(false);
+  });
+
+  it.each(['completed', 'failed'] as const)('requires finalSource when status is %s', (status) => {
+    const terminal = {
+      ...runningTrace(),
+      status,
+      finishedAt,
+      ...(status === 'failed'
+        ? {
+            failure: {
+              code: 'PROVIDER_ERROR',
+              message: 'Provider request failed',
+              retryable: true
+            }
+          }
+        : {})
+    };
+
+    expect(agentRunTraceSchema.safeParse(terminal).success).toBe(false);
+    expect(
+      agentRunTraceSchema.safeParse({
+        ...terminal,
+        finalSource: status === 'completed' ? 'smart-service' : 'blocked'
+      }).success
+    ).toBe(true);
+  });
 
   it('accepts bounded stage details with stable failure codes', () => {
     const trace = agentRunTraceSchema.parse({
