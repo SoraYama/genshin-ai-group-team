@@ -6,6 +6,7 @@ import {
   buildUnknownKnowledgeContext,
   buildV2PipelineContext
 } from '../../../src/main/services/v2-agent-context.js';
+import { AgentRunTraceStore } from '../../../src/main/services/agent-run-trace-store.js';
 import {
   ABYSS_CHARACTERS,
   abyssInput,
@@ -139,6 +140,21 @@ class NoToolRunner {
   }
 }
 
+class RawInvalidRunner {
+  calls = 0;
+
+  async *run(): AsyncIterable<unknown> {
+    this.calls += 1;
+    yield {
+      type: 'result',
+      subtype: 'success',
+      result: this.calls === 1 ? 'model raw text' : `repair raw text ${this.calls - 1}`,
+      usage: { input_tokens: 3, output_tokens: 2 },
+      total_cost_usd: 0.001
+    };
+  }
+}
+
 function sdkOptions(): AgentSdkRunOptions {
   return {
     apiKey: 'test-key',
@@ -188,6 +204,61 @@ function pipelineContext(feasibleBaseline = validAbyssPlan()) {
 }
 
 describe('AbyssPlanAgent', () => {
+  it('injects a trace writer and closes a successful run with complete and skipped stages', async () => {
+    const runner = new FixtureRunner([validAbyssPlan()]);
+    const trace = new AgentRunTraceStore();
+    const result = await new AbyssPlanAgent(runner, trace).compose({
+      input: abyssInput(),
+      scenario: abyssScenario(),
+      characters: ABYSS_CHARACTERS,
+      pipelineContext: pipelineContext(),
+      sdkOptions: sdkOptions()
+    });
+
+    expect(result.ok).toBe(true);
+    expect(trace.latest()).toMatchObject({
+      correlationId: 'abyss-test-request',
+      status: 'completed',
+      finalSource: 'smart-service'
+    });
+    expect(trace.latest()?.stages.map(({ stage, status }) => `${stage}:${status}`)).toEqual([
+      'compose:completed',
+      'critique:completed',
+      'rotation:completed',
+      'explain:completed',
+      'repair-1:skipped',
+      'repair-2:skipped'
+    ]);
+    expect(JSON.stringify(trace.latest())).not.toContain('123456789');
+  });
+
+  it('retains invalid compose model text in a failed latest trace', async () => {
+    const runner = new RawInvalidRunner();
+    const trace = new AgentRunTraceStore();
+    const result = await new AbyssPlanAgent(runner, trace).compose({
+      input: abyssInput(),
+      scenario: abyssScenario(),
+      characters: ABYSS_CHARACTERS,
+      pipelineContext: pipelineContext(),
+      sdkOptions: sdkOptions()
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      issues: [{ code: 'AGENT_OUTPUT_INVALID' }]
+    });
+    expect(trace.latest()).toMatchObject({
+      status: 'failed',
+      finalSource: 'blocked',
+      failure: { code: 'AGENT_OUTPUT_INVALID' }
+    });
+    expect(trace.latest()?.stages.find(({ stage }) => stage === 'compose')).toMatchObject({
+      status: 'failed',
+      rawOutput: 'model raw text',
+      failure: { code: 'AGENT_OUTPUT_INVALID' }
+    });
+  });
+
   it('validates compose output, sends structured issues to one repair turn, then accepts valid JSON', async () => {
     const invalid = validAbyssPlan({
       secondHalfTeam: {

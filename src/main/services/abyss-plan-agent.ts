@@ -20,6 +20,7 @@ import type { AgentUsage, ToolAudit } from './agent-turn-audit.js';
 import { validateAbyssPlan } from './abyss-plan-validator.js';
 import type { CharacterKnowledgeReader } from '../../shared/character-knowledge.js';
 import { runV2AgentPipeline, type V2AgentStage } from './v2-agent-pipeline.js';
+import type { AgentRunTraceWriter } from './agent-run-trace-store.js';
 
 export interface AbyssPlanAgentRunner {
   run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown>;
@@ -50,12 +51,16 @@ export type AbyssPlanAgentResult =
   | { ok: false; issues: AbyssPlanIssue[]; usage: AgentUsage };
 
 export class AbyssPlanAgent {
-  constructor(private readonly runner: AbyssPlanAgentRunner) {}
+  constructor(
+    private readonly runner: AbyssPlanAgentRunner,
+    private readonly trace?: AgentRunTraceWriter
+  ) {}
 
   async compose(context: AbyssPlanAgentInput): Promise<AbyssPlanAgentResult> {
     const result = await runV2AgentPipeline<AbyssPlanOutput, AbyssPlanIssue>({
       runner: this.runner,
       context: context.pipelineContext,
+      trace: this.trace,
       onUsageDelta: context.onUsageDelta,
       sdkOptionsForStage: context.sdkOptionsForStage ?? (() => context.sdkOptions),
       composer: {

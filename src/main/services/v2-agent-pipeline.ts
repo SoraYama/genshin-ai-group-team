@@ -21,13 +21,21 @@ import type { RecommendationPlan } from '../../shared/scenario-v2.js';
 import type { AdvisorFactRef, AdvisorNarrativeReasonCode } from '../../shared/advisor-narrative.js';
 import type { AgentSdkRunOptions } from './agent-sdk-adapter.js';
 import {
+  AgentTurnError,
   addAgentUsage,
   runAuditedAgentTurn,
   type AgentUsage,
+  type AuditedAgentTurn,
   type AuditedAgentRunner,
   type ToolAudit
 } from './agent-turn-audit.js';
 import { AgentPayloadTooLargeError, stringifyAgentPayload } from './agent-payload-budget.js';
+import type { AgentRunTraceWriter, CompleteStageInput } from './agent-run-trace-store.js';
+import type {
+  AgentFailure,
+  AgentFailureCode,
+  AgentToolTrace
+} from '../../shared/agent-run-trace.js';
 
 export type { V2PipelineContext } from '../agents/contracts.js';
 
@@ -53,6 +61,7 @@ type ValidationResult<P extends RecommendationPlan, I extends PipelineIssue> =
 export interface RunV2AgentPipelineOptions<P extends RecommendationPlan, I extends PipelineIssue> {
   runner: AuditedAgentRunner;
   context: V2PipelineContext;
+  trace?: AgentRunTraceWriter;
   onUsageDelta?: (usage: AgentUsage) => void;
   sdkOptionsForStage: (stage: V2AgentStage) => AgentSdkRunOptions;
   composer: {
@@ -84,10 +93,20 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
   let repairs = 0;
   let previousPlan: unknown;
   let pendingIssues: PipelineIssue[] = [];
+  const initialComposerOptions = options.sdkOptionsForStage('compose');
+  const trace = new PipelineTraceObserver(options.trace, context, initialComposerOptions);
 
   while (true) {
     const stage: V2AgentStage = repairs === 0 ? 'compose' : repairs === 1 ? 'repair-1' : 'repair-2';
-    const composerOptions = options.sdkOptionsForStage(stage);
+    const composerOptions =
+      stage === 'compose' ? initialComposerOptions : options.sdkOptionsForStage(stage);
+    trace.startStage(
+      stage,
+      stage === 'compose'
+        ? `mode=${context.mode}; candidates=${context.candidate.eligibleCharacterIds.length}`
+        : `repair=${repairs}; issues=${pendingIssues.map(({ code }) => code).join(',') || 'none'}`,
+      composerOptions
+    );
     let composerPrompt: string;
     try {
       composerPrompt =
@@ -110,6 +129,9 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
             );
     } catch (error) {
       if (error instanceof AgentPayloadTooLargeError) {
+        const failure = agentFailure('VALIDATION_FAILED', error.message, false);
+        trace.failStage(stage, failure);
+        trace.fail(failure);
         return {
           ok: false,
           repairs,
@@ -119,24 +141,54 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
       }
       throw error;
     }
-    const composerTurn = await runAuditedAgentTurn({
-      runner: options.runner,
-      prompt: composerPrompt,
-      sdkOptions: composerOptions,
-      systemPrompt:
-        stage === 'compose'
-          ? options.composer.systemPrompt
-          : `${options.composer.systemPrompt}\n\n${options.composer.repairPrompt}`,
-      auditContext: {
-        correlationId: context.correlationId,
-        round: stage === 'compose' ? 'compose' : 'repair'
-      },
-      onUsageDelta: options.onUsageDelta
-    });
+    let composerTurn: AuditedAgentTurn;
+    try {
+      composerTurn = await runAuditedAgentTurn({
+        runner: options.runner,
+        prompt: composerPrompt,
+        sdkOptions: composerOptions,
+        systemPrompt:
+          stage === 'compose'
+            ? options.composer.systemPrompt
+            : `${options.composer.systemPrompt}\n\n${options.composer.repairPrompt}`,
+        auditContext: {
+          correlationId: context.correlationId,
+          round: stage === 'compose' ? 'compose' : 'repair'
+        },
+        onUsageDelta: options.onUsageDelta
+      });
+    } catch (error) {
+      const turnFailure = agentTurnFailure(error);
+      usage = addAgentUsage(usage, agentTurnErrorUsage(error));
+      trace.failStage(stage, turnFailure, undefined, agentTurnErrorUsage(error));
+      trace.fail(turnFailure);
+      throw error;
+    }
     usage = addAgentUsage(usage, composerTurn.usage);
-    const validated = options.composer.validate(composerTurn.text, composerTurn.tools);
+    let validated: ValidationResult<P, I>;
+    try {
+      validated = options.composer.validate(composerTurn.text, composerTurn.tools);
+    } catch (error) {
+      const failure = agentFailure(
+        'VALIDATION_FAILED',
+        'Composer validation raised an error.',
+        false
+      );
+      trace.failStage(stage, failure, composerTurn);
+      trace.fail(failure);
+      throw error;
+    }
     if (!validated.ok) {
-      if (repairs >= 2) return { ok: false, repairs, issues: validated.issues, usage };
+      const failure = agentFailure(
+        composerValidationFailureCode(validated.issues),
+        validated.issues[0]?.message ?? 'Composer output validation failed.',
+        false
+      );
+      trace.failStage(stage, failure, composerTurn);
+      if (repairs >= 2) {
+        trace.fail(failure);
+        return { ok: false, repairs, issues: validated.issues, usage };
+      }
       repairs += 1;
       pendingIssues = validated.issues;
       previousPlan = parseJsonOrRaw(composerTurn.text);
@@ -145,16 +197,28 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
     const candidateViolation = candidatePoolViolation(validated.plan, context);
     if (candidateViolation) {
       const issue = options.invalidIssue(stage, candidateViolation);
-      if (repairs >= 2) return { ok: false, repairs, issues: [issue], usage };
+      const failure = agentFailure('VALIDATION_FAILED', candidateViolation, false);
+      trace.failStage(stage, failure, composerTurn);
+      if (repairs >= 2) {
+        trace.fail(failure);
+        return { ok: false, repairs, issues: [issue], usage };
+      }
       repairs += 1;
       pendingIssues = [issue];
       previousPlan = validated.plan;
       continue;
     }
+    trace.completeStage(stage, composerTurn);
 
+    const critiqueOptions = toolFreeOptions(options.sdkOptionsForStage('critique'));
+    trace.startStage(
+      'critique',
+      `plan=${validated.plan.mode}; repairs=${repairs}`,
+      critiqueOptions
+    );
     const critiqueResult = await runStrictStage({
       runner: options.runner,
-      sdkOptions: toolFreeOptions(options.sdkOptionsForStage('critique')),
+      sdkOptions: critiqueOptions,
       prompt: v2CritiqueInputSchema.parse({
         stage: 'critique',
         context,
@@ -167,6 +231,9 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
     });
     usage = addAgentUsage(usage, critiqueResult.usage);
     if (!critiqueResult.ok) {
+      trace.failStage('critique', critiqueResult.failure, critiqueResult.turn);
+      trace.fail(critiqueResult.failure);
+      if (critiqueResult.error !== undefined) throw critiqueResult.error;
       return {
         ok: false,
         repairs,
@@ -179,6 +246,9 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
       critiqueResult.value.issues.map(({ target }) => target)
     );
     if (critiqueTargetError) {
+      const failure = agentFailure('VALIDATION_FAILED', critiqueTargetError, false);
+      trace.failStage('critique', failure, critiqueResult.turn);
+      trace.fail(failure);
       return {
         ok: false,
         repairs,
@@ -186,17 +256,17 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
         usage
       };
     }
+    trace.completeStage('critique', critiqueResult.turn);
     if (critiqueResult.value.decision === 'repair') {
       if (repairs >= 2) {
+        const message =
+          'Critique still requires repair after the two-round repair budget was exhausted.';
+        const failure = agentFailure('VALIDATION_FAILED', message, false);
+        trace.fail(failure);
         return {
           ok: false,
           repairs,
-          issues: [
-            options.invalidIssue(
-              'critique',
-              'Critique still requires repair after the two-round repair budget was exhausted.'
-            )
-          ],
+          issues: [options.invalidIssue('critique', message)],
           usage
         };
       }
@@ -210,9 +280,11 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
       continue;
     }
 
+    const rotationOptions = toolFreeOptions(options.sdkOptionsForStage('rotation'));
+    trace.startStage('rotation', `plan=${validated.plan.mode}; critique=accepted`, rotationOptions);
     const rotationResult = await runStrictStage({
       runner: options.runner,
-      sdkOptions: toolFreeOptions(options.sdkOptionsForStage('rotation')),
+      sdkOptions: rotationOptions,
       prompt: v2RotationInputSchema.parse({
         stage: 'rotation',
         context,
@@ -226,6 +298,9 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
     });
     usage = addAgentUsage(usage, rotationResult.usage);
     if (!rotationResult.ok) {
+      trace.failStage('rotation', rotationResult.failure, rotationResult.turn);
+      trace.fail(rotationResult.failure);
+      if (rotationResult.error !== undefined) throw rotationResult.error;
       return {
         ok: false,
         repairs,
@@ -238,6 +313,9 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
       rotationResult.value.rotations.map(({ target }) => target)
     );
     if (rotationTargetError) {
+      const failure = agentFailure('VALIDATION_FAILED', rotationTargetError, false);
+      trace.failStage('rotation', failure, rotationResult.turn);
+      trace.fail(failure);
       return {
         ok: false,
         repairs,
@@ -247,6 +325,9 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
     }
     const rotationFactError = firstGroundingError(rotationResult.value.rotations, context);
     if (rotationFactError) {
+      const failure = agentFailure('VALIDATION_FAILED', rotationFactError, false);
+      trace.failStage('rotation', failure, rotationResult.turn);
+      trace.fail(failure);
       return {
         ok: false,
         repairs,
@@ -254,10 +335,13 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
         usage
       };
     }
+    trace.completeStage('rotation', rotationResult.turn);
 
+    const explainOptions = toolFreeOptions(options.sdkOptionsForStage('explain'));
+    trace.startStage('explain', `plan=${validated.plan.mode}; rotation=validated`, explainOptions);
     const explainResult = await runStrictStage({
       runner: options.runner,
-      sdkOptions: toolFreeOptions(options.sdkOptionsForStage('explain')),
+      sdkOptions: explainOptions,
       prompt: v2ExplainInputSchema.parse({
         stage: 'explain',
         context,
@@ -272,6 +356,9 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
     });
     usage = addAgentUsage(usage, explainResult.usage);
     if (!explainResult.ok) {
+      trace.failStage('explain', explainResult.failure, explainResult.turn);
+      trace.fail(explainResult.failure);
+      if (explainResult.error !== undefined) throw explainResult.error;
       return {
         ok: false,
         repairs,
@@ -284,6 +371,9 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
       explainResult.value.explanations.map(({ target }) => target)
     );
     if (explainTargetError) {
+      const failure = agentFailure('VALIDATION_FAILED', explainTargetError, false);
+      trace.failStage('explain', failure, explainResult.turn);
+      trace.fail(failure);
       return {
         ok: false,
         repairs,
@@ -293,6 +383,9 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
     }
     const explainFactError = firstGroundingError(explainResult.value.explanations, context);
     if (explainFactError) {
+      const failure = agentFailure('VALIDATION_FAILED', explainFactError, false);
+      trace.failStage('explain', failure, explainResult.turn);
+      trace.fail(failure);
       return {
         ok: false,
         repairs,
@@ -300,6 +393,8 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
         usage
       };
     }
+    trace.completeStage('explain', explainResult.turn);
+    trace.complete();
     return {
       ok: true,
       plan: validated.plan,
@@ -442,38 +537,76 @@ async function runStrictStage<T>(options: {
   correlationId: string;
   onUsageDelta?: (usage: AgentUsage) => void;
 }): Promise<
-  { ok: true; value: T; usage: AgentUsage } | { ok: false; message: string; usage: AgentUsage }
+  | { ok: true; value: T; usage: AgentUsage; turn: AuditedAgentTurn }
+  | {
+      ok: false;
+      message: string;
+      usage: AgentUsage;
+      failure: AgentFailure;
+      turn?: AuditedAgentTurn;
+      error?: unknown;
+    }
 > {
   let prompt: string;
   try {
     prompt = stringifyAgentPayload(options.prompt, 'strict-stage-prompt');
   } catch (error) {
     if (error instanceof AgentPayloadTooLargeError) {
-      return { ok: false, message: error.message, usage: zeroUsage() };
+      return {
+        ok: false,
+        message: error.message,
+        usage: zeroUsage(),
+        failure: agentFailure('VALIDATION_FAILED', error.message, false)
+      };
     }
     throw error;
   }
-  const turn = await runAuditedAgentTurn({
-    runner: options.runner,
-    prompt,
-    sdkOptions: options.sdkOptions,
-    systemPrompt: options.systemPrompt,
-    auditContext: { correlationId: options.correlationId, round: 'single' },
-    onUsageDelta: options.onUsageDelta
-  });
+  let turn: AuditedAgentTurn;
+  try {
+    turn = await runAuditedAgentTurn({
+      runner: options.runner,
+      prompt,
+      sdkOptions: options.sdkOptions,
+      systemPrompt: options.systemPrompt,
+      auditContext: { correlationId: options.correlationId, round: 'single' },
+      onUsageDelta: options.onUsageDelta
+    });
+  } catch (error) {
+    const failure = agentTurnFailure(error);
+    return {
+      ok: false,
+      message: failure.message,
+      usage: agentTurnErrorUsage(error),
+      failure,
+      error
+    };
+  }
   let parsed: unknown;
   try {
     parsed = JSON.parse(turn.text);
   } catch {
-    return { ok: false, message: 'Stage did not return strict JSON.', usage: turn.usage };
+    const message = 'Stage did not return strict JSON.';
+    return {
+      ok: false,
+      message,
+      usage: turn.usage,
+      failure: agentFailure('AGENT_OUTPUT_INVALID', message, false),
+      turn
+    };
   }
   const result = options.schema.safeParse(parsed);
   return result.success
-    ? { ok: true, value: result.data, usage: turn.usage }
+    ? { ok: true, value: result.data, usage: turn.usage, turn }
     : {
         ok: false,
         message: `Stage output failed schema validation at ${result.error.issues[0]?.path.join('.') || 'root'}.`,
-        usage: turn.usage
+        usage: turn.usage,
+        failure: agentFailure(
+          'AGENT_OUTPUT_INVALID',
+          `Stage output failed schema validation at ${result.error.issues[0]?.path.join('.') || 'root'}.`,
+          false
+        ),
+        turn
       };
 }
 
@@ -618,6 +751,176 @@ function targetPath(target: V2AgentTarget): Array<string | number> {
     case 'theater-cast':
       return ['cast'];
   }
+}
+
+const TRACE_PIPELINE_STAGES = [
+  'compose',
+  'repair-1',
+  'repair-2',
+  'critique',
+  'rotation',
+  'explain'
+] as const;
+
+class PipelineTraceObserver {
+  private readonly attempted = new Set<V2AgentStage>();
+
+  constructor(
+    private readonly writer: AgentRunTraceWriter | undefined,
+    private readonly context: V2PipelineContext,
+    initialOptions: AgentSdkRunOptions
+  ) {
+    this.writer?.start({
+      correlationId: context.correlationId,
+      model: initialOptions.model,
+      knowledge: {
+        trusted: context.knowledge.coverage.trusted,
+        ephemeral: context.knowledge.coverage.ephemeral,
+        unknown: context.knowledge.coverage.unknown,
+        searched: context.knowledge.ephemeralMatches.length > 0
+      },
+      sensitiveValues: [initialOptions.apiKey, ...Object.values(initialOptions.customHeaders ?? {})]
+    });
+  }
+
+  startStage(stage: V2AgentStage, inputSummary: string, stageOptions: AgentSdkRunOptions): void {
+    this.attempted.add(stage);
+    this.writer?.startStage(this.context.correlationId, {
+      stage,
+      inputSummary,
+      sensitiveValues: [stageOptions.apiKey, ...Object.values(stageOptions.customHeaders ?? {})]
+    });
+  }
+
+  completeStage(stage: V2AgentStage, turn: AuditedAgentTurn): void {
+    this.writer?.completeStage(this.context.correlationId, traceStageTerminalInput(stage, turn));
+  }
+
+  failStage(
+    stage: V2AgentStage,
+    failure: AgentFailure,
+    turn?: AuditedAgentTurn,
+    usage: AgentUsage = zeroUsage()
+  ): void {
+    this.writer?.failStage(this.context.correlationId, {
+      ...traceStageTerminalInput(stage, turn, usage),
+      failure
+    });
+  }
+
+  complete(): void {
+    this.skipUnattempted();
+    this.writer?.finish(this.context.correlationId, { finalSource: 'smart-service' });
+  }
+
+  fail(failure: AgentFailure): void {
+    this.skipUnattempted();
+    this.writer?.finish(this.context.correlationId, {
+      finalSource: 'blocked',
+      failure
+    });
+  }
+
+  private skipUnattempted(): void {
+    for (const stage of TRACE_PIPELINE_STAGES) {
+      if (this.attempted.has(stage)) continue;
+      this.writer?.skipStage(this.context.correlationId, {
+        stage,
+        inputSummary: 'Stage was not executed.'
+      });
+    }
+  }
+}
+
+function traceStageTerminalInput(
+  stage: V2AgentStage,
+  turn: AuditedAgentTurn | undefined,
+  fallbackUsage: AgentUsage = zeroUsage()
+): CompleteStageInput {
+  return {
+    stage,
+    ...(turn === undefined ? {} : { rawOutput: turn.finalRawText }),
+    tools: turn?.tools.map(traceTool) ?? [],
+    citationIds: [],
+    usage: traceUsage(turn?.usage ?? fallbackUsage)
+  };
+}
+
+function traceTool(tool: ToolAudit): AgentToolTrace {
+  const inputSummary = stringifyToolInput(tool.input);
+  return tool.succeeded
+    ? {
+        name: tool.name,
+        status: 'completed',
+        inputSummary
+      }
+    : {
+        name: tool.name,
+        status: 'failed',
+        inputSummary,
+        failure: agentFailure(
+          'TOOL_REQUIREMENT_FAILED',
+          'Tool call did not complete successfully.',
+          false
+        )
+      };
+}
+
+function stringifyToolInput(input: Record<string, unknown>): string {
+  try {
+    return JSON.stringify(input);
+  } catch {
+    return '[unserializable tool input]';
+  }
+}
+
+function traceUsage(usage: AgentUsage): {
+  inputTokens: number;
+  outputTokens: number;
+} {
+  return {
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens
+  };
+}
+
+function composerValidationFailureCode(issues: PipelineIssue[]): AgentFailureCode {
+  if (issues.some(({ path }) => path[0] === 'tools')) return 'TOOL_REQUIREMENT_FAILED';
+  if (
+    issues.some(
+      ({ code }) =>
+        code === 'AGENT_OUTPUT_INVALID' ||
+        code.includes('SCHEMA') ||
+        code.includes('OUTPUT_INVALID')
+    )
+  ) {
+    return 'AGENT_OUTPUT_INVALID';
+  }
+  return 'VALIDATION_FAILED';
+}
+
+function agentTurnFailure(error: unknown): AgentFailure {
+  if (!(error instanceof AgentTurnError)) {
+    return agentFailure('PROVIDER_ERROR', 'Agent turn failed.', true);
+  }
+  switch (error.code) {
+    case 'AGENT_TURN_CANCELLED':
+      return agentFailure('AGENT_ABORTED', 'Agent turn was cancelled.', true);
+    case 'AGENT_TURN_STREAM_FAILED':
+    case 'AGENT_TURN_RESULT_ERROR':
+      return agentFailure('PROVIDER_ERROR', 'Agent provider request failed.', true);
+    case 'AGENT_TURN_INCOMPLETE':
+    case 'AGENT_TURN_OUTPUT_TOO_LARGE':
+      return agentFailure('AGENT_OUTPUT_INVALID', 'Agent turn returned invalid output.', false);
+  }
+}
+
+function agentTurnErrorUsage(error: unknown): AgentUsage {
+  return error instanceof AgentTurnError && error.usage !== undefined ? error.usage : zeroUsage();
+}
+
+function agentFailure(code: AgentFailureCode, message: string, retryable: boolean): AgentFailure {
+  return { code, message, retryable };
 }
 
 function parseJsonOrRaw(raw: string): unknown {

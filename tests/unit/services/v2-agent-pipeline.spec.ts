@@ -6,6 +6,7 @@ import {
   type V2PipelineContext
 } from '../../../src/main/services/v2-agent-pipeline.js';
 import type { ToolAudit } from '../../../src/main/services/agent-turn-audit.js';
+import { AgentRunTraceStore } from '../../../src/main/services/agent-run-trace-store.js';
 import type { RecommendationPlan } from '../../../src/shared/scenario-v2.js';
 import type { V2ExplainOutput, V2RotationOutput } from '../../../src/main/agents/contracts.js';
 import { buildUnknownKnowledgeContext } from '../../../src/main/services/v2-agent-context.js';
@@ -242,11 +243,13 @@ function run(
   ) =>
     | { ok: true; plan: RecommendationPlan }
     | { ok: false; issues: Array<{ code: string; path: Array<string | number>; message: string }> },
-  pipelineContext: V2PipelineContext = context(baseline)
+  pipelineContext: V2PipelineContext = context(baseline),
+  trace?: AgentRunTraceStore
 ) {
   return runV2AgentPipeline({
     runner,
     context: pipelineContext,
+    trace,
     sdkOptionsForStage: () => sdkOptions(),
     composer: {
       initialPrompt: JSON.stringify({ request: 'compose' }),
@@ -260,6 +263,10 @@ function run(
       message
     })
   });
+}
+
+function traceStageStatuses(store: AgentRunTraceStore) {
+  return store.latest()?.stages.map(({ stage, status }) => `${stage}:${status}`);
 }
 
 describe.each([
@@ -803,6 +810,331 @@ describe('V2 agent pipeline repair and grounding', () => {
           message: expect.stringContaining('reason lacks a compatible fact reference')
         })
       ]
+    });
+  });
+});
+
+describe('V2 agent pipeline trace observer', () => {
+  it('records safe raw outputs, true stage usage, skipped repairs, and a completed terminal run', async () => {
+    const baseline = validAbyssPlan();
+    const runner = new StageRunner([
+      baseline,
+      { decision: 'accept', issues: [] },
+      rotationOutput(baseline),
+      explainOutput(baseline)
+    ]);
+    const trace = new AgentRunTraceStore();
+
+    const result = await run(
+      runner,
+      baseline,
+      (text) => ({ ok: true, plan: JSON.parse(text) as RecommendationPlan }),
+      context(baseline),
+      trace
+    );
+
+    expect(result.ok).toBe(true);
+    expect(trace.latest()).toMatchObject({
+      correlationId: 'pipeline-correlation',
+      model: 'test-model',
+      status: 'completed',
+      finalSource: 'smart-service',
+      knowledge: { trusted: 0, ephemeral: 0, unknown: 1, searched: false },
+      usage: { inputTokens: 40, outputTokens: 20 }
+    });
+    expect(traceStageStatuses(trace)).toEqual([
+      'compose:completed',
+      'critique:completed',
+      'rotation:completed',
+      'explain:completed',
+      'repair-1:skipped',
+      'repair-2:skipped'
+    ]);
+    expect(trace.latest()?.stages.find(({ stage }) => stage === 'compose')).toMatchObject({
+      rawOutput: JSON.stringify(baseline),
+      usage: { inputTokens: 10, outputTokens: 5 }
+    });
+  });
+
+  it('distinguishes repair and repeated critique attempts in chronological order', async () => {
+    const baseline = validAbyssPlan();
+    const target = targets(baseline);
+    const runner = new StageRunner([
+      baseline,
+      {
+        decision: 'repair',
+        issues: [
+          {
+            code: 'fragile',
+            severity: 'soft',
+            target: target.critique,
+            message: '需要修复'
+          }
+        ]
+      },
+      baseline,
+      { decision: 'accept', issues: [] },
+      rotationOutput(baseline),
+      explainOutput(baseline)
+    ]);
+    const trace = new AgentRunTraceStore();
+
+    const result = await run(
+      runner,
+      baseline,
+      (text) => ({ ok: true, plan: JSON.parse(text) as RecommendationPlan }),
+      context(baseline),
+      trace
+    );
+
+    expect(result).toMatchObject({ ok: true, repairs: 1 });
+    expect(traceStageStatuses(trace)).toEqual([
+      'compose:completed',
+      'critique:completed',
+      'repair-1:completed',
+      'critique:completed',
+      'rotation:completed',
+      'explain:completed',
+      'repair-2:skipped'
+    ]);
+  });
+
+  it('records every invalid composer raw output and closes exhausted repairs as failed', async () => {
+    const baseline = validAbyssPlan();
+    const runner = new StageRunner(['model raw text', 'repair raw one', 'repair raw two']);
+    const trace = new AgentRunTraceStore();
+
+    const result = await run(
+      runner,
+      baseline,
+      () => ({
+        ok: false,
+        issues: [{ code: 'PLAN_SCHEMA_INVALID', path: [], message: 'invalid plan schema' }]
+      }),
+      context(baseline),
+      trace
+    );
+
+    expect(result).toMatchObject({ ok: false, repairs: 2 });
+    expect(trace.latest()).toMatchObject({
+      status: 'failed',
+      finalSource: 'blocked',
+      failure: { code: 'AGENT_OUTPUT_INVALID' }
+    });
+    expect(trace.latest()?.stages.slice(0, 3)).toMatchObject([
+      { stage: 'compose', status: 'failed', rawOutput: '"model raw text"' },
+      { stage: 'repair-1', status: 'failed', rawOutput: '"repair raw one"' },
+      { stage: 'repair-2', status: 'failed', rawOutput: '"repair raw two"' }
+    ]);
+    expect(traceStageStatuses(trace)?.slice(3)).toEqual([
+      'critique:skipped',
+      'rotation:skipped',
+      'explain:skipped'
+    ]);
+  });
+
+  it('uses a distinct tool-requirement failure code for composer tool validation', async () => {
+    const baseline = validAbyssPlan();
+    const runner = new StageRunner([baseline, baseline, baseline]);
+    const trace = new AgentRunTraceStore();
+
+    await run(
+      runner,
+      baseline,
+      () => ({
+        ok: false,
+        issues: [
+          {
+            code: 'AGENT_OUTPUT_INVALID',
+            path: ['tools'],
+            message: 'required tools missing'
+          }
+        ]
+      }),
+      context(baseline),
+      trace
+    );
+
+    expect(trace.latest()?.stages.slice(0, 3)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          status: 'failed',
+          failure: expect.objectContaining({ code: 'TOOL_REQUIREMENT_FAILED' })
+        })
+      ])
+    );
+    expect(trace.latest()).toMatchObject({
+      status: 'failed',
+      failure: { code: 'TOOL_REQUIREMENT_FAILED' }
+    });
+  });
+
+  it('preserves validator exception semantics while closing a redacted failed trace', async () => {
+    const baseline = validAbyssPlan();
+    const runner = new StageRunner([baseline]);
+    const trace = new AgentRunTraceStore();
+
+    await expect(
+      runV2AgentPipeline({
+        runner,
+        context: context(baseline),
+        trace,
+        sdkOptionsForStage: () => sdkOptions(),
+        composer: {
+          initialPrompt: '{}',
+          systemPrompt: 'composer',
+          repairPrompt: 'repair',
+          validate: () => {
+            throw new Error('validator cause apiKey=must-not-leak');
+          }
+        },
+        invalidIssue: (stage, message) => ({
+          code: 'AGENT_OUTPUT_INVALID',
+          path: [stage],
+          message
+        })
+      })
+    ).rejects.toThrow('validator cause');
+    expect(trace.latest()).toMatchObject({
+      status: 'failed',
+      failure: { code: 'VALIDATION_FAILED' }
+    });
+    expect(trace.latest()?.stages[0]).toMatchObject({
+      stage: 'compose',
+      status: 'failed',
+      failure: { code: 'VALIDATION_FAILED' }
+    });
+    expect(JSON.stringify(trace.latest())).not.toContain('must-not-leak');
+  });
+
+  it('records strict JSON/schema failure raw text and marks later stages skipped', async () => {
+    const baseline = validAbyssPlan();
+    const runner = new StageRunner([baseline, 'not-json']);
+    const trace = new AgentRunTraceStore();
+
+    const result = await run(
+      runner,
+      baseline,
+      (text) => ({ ok: true, plan: JSON.parse(text) as RecommendationPlan }),
+      context(baseline),
+      trace
+    );
+
+    expect(result).toMatchObject({ ok: false });
+    expect(trace.latest()?.stages.find(({ stage }) => stage === 'critique')).toMatchObject({
+      status: 'failed',
+      rawOutput: '"not-json"',
+      failure: { code: 'AGENT_OUTPUT_INVALID' }
+    });
+    expect(traceStageStatuses(trace)?.slice(-2)).toEqual(['rotation:skipped', 'explain:skipped']);
+    expect(trace.latest()).toMatchObject({
+      status: 'failed',
+      finalSource: 'blocked',
+      failure: { code: 'AGENT_OUTPUT_INVALID' }
+    });
+  });
+
+  it('redacts credentials supplied by a later stage instead of only the compose stage', async () => {
+    const baseline = validAbyssPlan();
+    const runner = new StageRunner([baseline, 'strict-stage-secret']);
+    const trace = new AgentRunTraceStore();
+
+    await runV2AgentPipeline({
+      runner,
+      context: context(baseline),
+      trace,
+      sdkOptionsForStage: (stage) => ({
+        ...sdkOptions(),
+        apiKey: stage === 'critique' ? 'strict-stage-secret' : 'compose-stage-secret'
+      }),
+      composer: {
+        initialPrompt: '{}',
+        systemPrompt: 'composer',
+        repairPrompt: 'repair',
+        validate: (text) => ({ ok: true, plan: JSON.parse(text) as RecommendationPlan })
+      },
+      invalidIssue: (stage, message) => ({
+        code: 'AGENT_OUTPUT_INVALID',
+        path: [stage],
+        message
+      })
+    });
+
+    const serialized = JSON.stringify(trace.latest());
+    expect(serialized).not.toContain('strict-stage-secret');
+    expect(serialized).not.toContain('compose-stage-secret');
+    expect(serialized).toContain('[REDACTED]');
+  });
+
+  it('maps SDK stream errors and cancellation to stable terminal trace failures', async () => {
+    const baseline = validAbyssPlan();
+    const streamTrace = new AgentRunTraceStore();
+    const streamRunner = {
+      async *run(): AsyncIterable<unknown> {
+        yield await Promise.reject(new Error('provider cause with apiKey=must-not-leak'));
+      }
+    };
+
+    await expect(
+      runV2AgentPipeline({
+        runner: streamRunner,
+        context: context(baseline),
+        trace: streamTrace,
+        sdkOptionsForStage: () => sdkOptions(),
+        composer: {
+          initialPrompt: '{}',
+          systemPrompt: 'composer',
+          repairPrompt: 'repair',
+          validate: (text) => ({ ok: true, plan: JSON.parse(text) as RecommendationPlan })
+        },
+        invalidIssue: (stage, message) => ({
+          code: 'AGENT_OUTPUT_INVALID',
+          path: [stage],
+          message
+        })
+      })
+    ).rejects.toMatchObject({ code: 'AGENT_TURN_STREAM_FAILED' });
+    expect(streamTrace.latest()).toMatchObject({
+      status: 'failed',
+      failure: { code: 'PROVIDER_ERROR' }
+    });
+    expect(streamTrace.latest()?.stages[0]).toMatchObject({
+      stage: 'compose',
+      status: 'failed',
+      failure: { code: 'PROVIDER_ERROR' }
+    });
+    expect(JSON.stringify(streamTrace.latest())).not.toContain('must-not-leak');
+
+    const cancelledTrace = new AgentRunTraceStore();
+    const cancelledOptions = sdkOptions();
+    cancelledOptions.abortController.abort();
+    await expect(
+      runV2AgentPipeline({
+        runner: new StageRunner([]),
+        context: context(baseline),
+        trace: cancelledTrace,
+        sdkOptionsForStage: () => cancelledOptions,
+        composer: {
+          initialPrompt: '{}',
+          systemPrompt: 'composer',
+          repairPrompt: 'repair',
+          validate: (text) => ({ ok: true, plan: JSON.parse(text) as RecommendationPlan })
+        },
+        invalidIssue: (stage, message) => ({
+          code: 'AGENT_OUTPUT_INVALID',
+          path: [stage],
+          message
+        })
+      })
+    ).rejects.toMatchObject({ code: 'AGENT_TURN_CANCELLED' });
+    expect(cancelledTrace.latest()).toMatchObject({
+      status: 'failed',
+      failure: { code: 'AGENT_ABORTED' }
+    });
+    expect(cancelledTrace.latest()?.stages[0]).toMatchObject({
+      stage: 'compose',
+      status: 'failed',
+      failure: { code: 'AGENT_ABORTED' }
     });
   });
 });
