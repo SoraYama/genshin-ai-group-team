@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { AgentSdkRunOptions } from '../../../src/main/services/agent-sdk-adapter.js';
 import {
   runV2AgentPipeline,
+  type V2AgentStage,
   type V2PipelineContext
 } from '../../../src/main/services/v2-agent-pipeline.js';
 import type { ToolAudit } from '../../../src/main/services/agent-turn-audit.js';
@@ -1137,4 +1138,109 @@ describe('V2 agent pipeline trace observer', () => {
       failure: { code: 'AGENT_ABORTED' }
     });
   });
+
+  it.each([
+    {
+      stage: 'compose',
+      outputs: [],
+      validate: () => {
+        throw new Error('compose validator should not run');
+      }
+    },
+    {
+      stage: 'repair-1',
+      outputs: [validAbyssPlan()],
+      validate: () => ({
+        ok: false as const,
+        issues: [{ code: 'PLAN_SCHEMA_INVALID', path: [], message: 'repair required' }]
+      })
+    },
+    {
+      stage: 'critique',
+      outputs: [validAbyssPlan()],
+      validate: (text: string) => ({
+        ok: true as const,
+        plan: JSON.parse(text) as RecommendationPlan
+      })
+    },
+    {
+      stage: 'rotation',
+      outputs: [validAbyssPlan(), { decision: 'accept', issues: [] }],
+      validate: (text: string) => ({
+        ok: true as const,
+        plan: JSON.parse(text) as RecommendationPlan
+      })
+    },
+    {
+      stage: 'explain',
+      outputs: [
+        validAbyssPlan(),
+        { decision: 'accept', issues: [] },
+        rotationOutput(validAbyssPlan())
+      ],
+      validate: (text: string) => ({
+        ok: true as const,
+        plan: JSON.parse(text) as RecommendationPlan
+      })
+    }
+  ] satisfies Array<{
+    stage: V2AgentStage;
+    outputs: unknown[];
+    validate: (text: string) =>
+      | { ok: true; plan: RecommendationPlan }
+      | {
+          ok: false;
+          issues: Array<{ code: string; path: Array<string | number>; message: string }>;
+        };
+  }>)(
+    'closes the trace when $stage SDK option preparation throws',
+    async ({ stage: failingStage, outputs, validate }) => {
+      const baseline = validAbyssPlan();
+      const trace = new AgentRunTraceStore();
+      const failure = new Error(`sdk-options-${failingStage}-must-not-leak`);
+
+      await expect(
+        runV2AgentPipeline({
+          runner: new StageRunner(outputs),
+          context: context(baseline),
+          trace,
+          sdkOptionsForStage: (stage) => {
+            if (stage === failingStage) throw failure;
+            return sdkOptions();
+          },
+          composer: {
+            initialPrompt: '{}',
+            systemPrompt: 'composer',
+            repairPrompt: 'repair',
+            validate
+          },
+          invalidIssue: (stage, message) => ({
+            code: 'AGENT_OUTPUT_INVALID',
+            path: [stage],
+            message
+          })
+        })
+      ).rejects.toBe(failure);
+
+      const latest = trace.latest();
+      expect(latest).toMatchObject({
+        status: 'failed',
+        finalSource: 'blocked',
+        failure: { code: 'SDK_START_FAILED' }
+      });
+      expect(latest?.stages.find(({ stage }) => stage === failingStage)).toMatchObject({
+        stage: failingStage,
+        status: 'failed',
+        failure: { code: 'SDK_START_FAILED' }
+      });
+      const failedIndex = latest?.stages.findIndex(({ stage }) => stage === failingStage) ?? -1;
+      expect(
+        latest?.stages
+          .slice(failedIndex + 1)
+          .filter(({ stage: candidate }) => candidate !== failingStage)
+          .every(({ status }) => status === 'skipped')
+      ).toBe(true);
+      expect(JSON.stringify(latest)).not.toContain('must-not-leak');
+    }
+  );
 });

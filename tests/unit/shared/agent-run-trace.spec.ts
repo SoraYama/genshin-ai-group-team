@@ -96,15 +96,31 @@ describe('agent run trace contracts', () => {
     );
   });
 
-  it('bounds custom header value count and length before regex construction', () => {
+  it('supports production-sized custom secrets and bounds unsafe registry growth', () => {
+    const mediumSecret = `secret-${'m'.repeat(593)}`;
+    const maximumSecret = `secret-${'x'.repeat(4_089)}`;
+    expect(
+      sanitizeTraceText(`${mediumSecret}\n${maximumSecret}`, {
+        customHeaderValues: [mediumSecret, maximumSecret]
+      }).text
+    ).not.toMatch(/secret-/u);
+
     expect(() =>
       sanitizeTraceText('safe', {
-        customHeaderValues: Array.from({ length: 33 }, (_, index) => `secret-${index}`)
+        customHeaderValues: Array.from({ length: 65 }, (_, index) => `secret-${index}`)
       })
     ).toThrow(RangeError);
     expect(() =>
       sanitizeTraceText('safe', {
-        customHeaderValues: ['x'.repeat(513)]
+        customHeaderValues: ['x'.repeat(4_097)]
+      })
+    ).toThrow(RangeError);
+    expect(() =>
+      sanitizeTraceText('safe', {
+        customHeaderValues: Array.from(
+          { length: 17 },
+          (_, index) => `aggregate-${index}-${'x'.repeat(3_990)}`
+        )
       })
     ).toThrow(RangeError);
   });
@@ -130,7 +146,7 @@ describe('agent run trace contracts', () => {
   });
 
   it('redacts a maximum-length custom secret that crosses the bounded scan edge', () => {
-    const customSecret = `cust${'x'.repeat(508)}`;
+    const customSecret = `cust${'x'.repeat(4_092)}`;
     const input = `${'a'.repeat(MAX_TRACE_TEXT_INPUT_CHARS - 4)}${customSecret}tail`;
     const sanitized = sanitizeTraceText(input, {
       maxBytes: MAX_TRACE_TEXT_MAX_BYTES,

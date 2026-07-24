@@ -4,8 +4,9 @@ export const MAX_TRACE_TEXT_OUTPUT_CODE_UNITS = 32_768;
 export const DEFAULT_TRACE_TEXT_MAX_BYTES = 16_384;
 export const MAX_TRACE_TEXT_MAX_BYTES = 32_768;
 export const MAX_TRACE_TEXT_INPUT_CHARS = 32_768;
-export const MAX_TRACE_CUSTOM_HEADER_VALUES = 32;
-export const MAX_TRACE_CUSTOM_HEADER_VALUE_LENGTH = 512;
+export const MAX_TRACE_CUSTOM_HEADER_VALUES = 64;
+export const MAX_TRACE_CUSTOM_HEADER_VALUE_LENGTH = 4_096;
+export const MAX_TRACE_CUSTOM_HEADER_AGGREGATE_LENGTH = 64 * 1_024;
 
 const REDACTION_MARKER = '[REDACTED]';
 const boundedTextSchema = z.string().max(MAX_TRACE_TEXT_OUTPUT_CODE_UNITS);
@@ -242,9 +243,18 @@ function normalizeCustomHeaderValues(values: readonly string[] | undefined): rea
       if (!uniqueValues.has(key)) uniqueValues.set(key, wellFormedValue);
     }
   });
-  return [...uniqueValues.values()].sort(
+  const normalized = [...uniqueValues.values()].sort(
     (left, right) => right.length - left.length || left.localeCompare(right)
   );
+  if (
+    normalized.reduce((total, value) => total + value.length, 0) >
+    MAX_TRACE_CUSTOM_HEADER_AGGREGATE_LENGTH
+  ) {
+    throw new RangeError(
+      `customHeaderValues may contain at most ${MAX_TRACE_CUSTOM_HEADER_AGGREGATE_LENGTH} characters in aggregate`
+    );
+  }
+  return normalized;
 }
 
 function redactRecognizedSecrets(value: string): string {
@@ -278,18 +288,36 @@ function findTrailingCustomSpanLength(value: string, customValues: readonly stri
   let longestMatch = 0;
 
   for (const customValue of customValues) {
-    let spanLength = 0;
-    for (const character of customValue) {
-      spanLength += character.length;
-      if (
-        spanLength > longestMatch &&
-        tail.endsWith(customValue.slice(0, spanLength).toLowerCase())
-      ) {
-        longestMatch = spanLength;
-      }
-    }
+    longestMatch = Math.max(
+      longestMatch,
+      longestPrefixMatchingSuffix(tail, customValue.toLowerCase())
+    );
   }
   return longestMatch;
+}
+
+function longestPrefixMatchingSuffix(value: string, pattern: string): number {
+  if (pattern.length === 0) return 0;
+  const prefixLengths = new Uint32Array(pattern.length);
+  for (let index = 1, matched = 0; index < pattern.length; index += 1) {
+    while (matched > 0 && pattern[index] !== pattern[matched]) {
+      matched = prefixLengths[matched - 1]!;
+    }
+    if (pattern[index] === pattern[matched]) matched += 1;
+    prefixLengths[index] = matched;
+  }
+
+  let matched = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    while (matched > 0 && value[index] !== pattern[matched]) {
+      matched = prefixLengths[matched - 1]!;
+    }
+    if (value[index] === pattern[matched]) matched += 1;
+    if (matched === pattern.length && index < value.length - 1) {
+      matched = prefixLengths[matched - 1]!;
+    }
+  }
+  return matched;
 }
 
 function takeCodePointSafePrefix(

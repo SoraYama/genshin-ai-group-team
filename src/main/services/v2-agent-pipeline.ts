@@ -30,7 +30,11 @@ import {
   type ToolAudit
 } from './agent-turn-audit.js';
 import { AgentPayloadTooLargeError, stringifyAgentPayload } from './agent-payload-budget.js';
-import type { AgentRunTraceWriter, CompleteStageInput } from './agent-run-trace-store.js';
+import type {
+  AgentRunTraceLease,
+  AgentRunTraceWriter,
+  CompleteStageInput
+} from './agent-run-trace-store.js';
 import type {
   AgentFailure,
   AgentFailureCode,
@@ -89,23 +93,46 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
   options: RunV2AgentPipelineOptions<P, I>
 ): Promise<V2AgentPipelineResult<P, I>> {
   const context = v2PipelineContextSchema.parse(options.context);
+  let initialComposerOptions: AgentSdkRunOptions;
+  try {
+    initialComposerOptions = options.sdkOptionsForStage('compose');
+  } catch (error) {
+    const trace = new PipelineTraceObserver(options.trace, context);
+    trace.failSdkStart('compose', 'Initial composer SDK options could not be prepared.');
+    throw error;
+  }
+  const trace = new PipelineTraceObserver(options.trace, context, initialComposerOptions);
+
+  try {
+    return await runV2AgentPipelineWithTrace(options, context, initialComposerOptions, trace);
+  } catch (error) {
+    trace.failUnexpected();
+    throw error;
+  }
+}
+
+async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I extends PipelineIssue>(
+  options: RunV2AgentPipelineOptions<P, I>,
+  context: V2PipelineContext,
+  initialComposerOptions: AgentSdkRunOptions,
+  trace: PipelineTraceObserver
+): Promise<V2AgentPipelineResult<P, I>> {
   let usage = zeroUsage();
   let repairs = 0;
   let previousPlan: unknown;
   let pendingIssues: PipelineIssue[] = [];
-  const initialComposerOptions = options.sdkOptionsForStage('compose');
-  const trace = new PipelineTraceObserver(options.trace, context, initialComposerOptions);
 
   while (true) {
     const stage: V2AgentStage = repairs === 0 ? 'compose' : repairs === 1 ? 'repair-1' : 'repair-2';
-    const composerOptions =
-      stage === 'compose' ? initialComposerOptions : options.sdkOptionsForStage(stage);
-    trace.startStage(
-      stage,
+    const inputSummary =
       stage === 'compose'
         ? `mode=${context.mode}; candidates=${context.candidate.eligibleCharacterIds.length}`
-        : `repair=${repairs}; issues=${pendingIssues.map(({ code }) => code).join(',') || 'none'}`,
-      composerOptions
+        : `repair=${repairs}; issues=${pendingIssues.map(({ code }) => code).join(',') || 'none'}`;
+    const composerOptions = startStageWithSdkOptions(
+      stage,
+      inputSummary,
+      () => (stage === 'compose' ? initialComposerOptions : options.sdkOptionsForStage(stage)),
+      trace
     );
     let composerPrompt: string;
     try {
@@ -210,11 +237,11 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
     }
     trace.completeStage(stage, composerTurn);
 
-    const critiqueOptions = toolFreeOptions(options.sdkOptionsForStage('critique'));
-    trace.startStage(
+    const critiqueOptions = startStageWithSdkOptions(
       'critique',
       `plan=${validated.plan.mode}; repairs=${repairs}`,
-      critiqueOptions
+      () => toolFreeOptions(options.sdkOptionsForStage('critique')),
+      trace
     );
     const critiqueResult = await runStrictStage({
       runner: options.runner,
@@ -280,8 +307,12 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
       continue;
     }
 
-    const rotationOptions = toolFreeOptions(options.sdkOptionsForStage('rotation'));
-    trace.startStage('rotation', `plan=${validated.plan.mode}; critique=accepted`, rotationOptions);
+    const rotationOptions = startStageWithSdkOptions(
+      'rotation',
+      `plan=${validated.plan.mode}; critique=accepted`,
+      () => toolFreeOptions(options.sdkOptionsForStage('rotation')),
+      trace
+    );
     const rotationResult = await runStrictStage({
       runner: options.runner,
       sdkOptions: rotationOptions,
@@ -337,8 +368,12 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
     }
     trace.completeStage('rotation', rotationResult.turn);
 
-    const explainOptions = toolFreeOptions(options.sdkOptionsForStage('explain'));
-    trace.startStage('explain', `plan=${validated.plan.mode}; rotation=validated`, explainOptions);
+    const explainOptions = startStageWithSdkOptions(
+      'explain',
+      `plan=${validated.plan.mode}; rotation=validated`,
+      () => toolFreeOptions(options.sdkOptionsForStage('explain')),
+      trace
+    );
     const explainResult = await runStrictStage({
       runner: options.runner,
       sdkOptions: explainOptions,
@@ -619,6 +654,23 @@ function toolFreeOptions(options: AgentSdkRunOptions): AgentSdkRunOptions {
   };
 }
 
+function startStageWithSdkOptions(
+  stage: V2AgentStage,
+  inputSummary: string,
+  getOptions: () => AgentSdkRunOptions,
+  trace: PipelineTraceObserver
+): AgentSdkRunOptions {
+  let stageOptions: AgentSdkRunOptions;
+  try {
+    stageOptions = getOptions();
+  } catch (error) {
+    trace.failSdkStart(stage, `${stage} SDK options could not be prepared.`);
+    throw error;
+  }
+  trace.startStage(stage, inputSummary, stageOptions);
+  return stageOptions;
+}
+
 function candidatePoolViolation(
   plan: RecommendationPlan,
   context: V2PipelineContext
@@ -764,36 +816,53 @@ const TRACE_PIPELINE_STAGES = [
 
 class PipelineTraceObserver {
   private readonly attempted = new Set<V2AgentStage>();
+  private readonly lease: AgentRunTraceLease | undefined;
+  private activeStage: V2AgentStage | undefined;
+  private terminal = false;
 
   constructor(
     private readonly writer: AgentRunTraceWriter | undefined,
     private readonly context: V2PipelineContext,
-    initialOptions: AgentSdkRunOptions
+    initialOptions?: AgentSdkRunOptions
   ) {
-    this.writer?.start({
+    this.lease = this.writer?.start({
       correlationId: context.correlationId,
-      model: initialOptions.model,
+      model: initialOptions?.model ?? '[unavailable]',
       knowledge: {
         trusted: context.knowledge.coverage.trusted,
         ephemeral: context.knowledge.coverage.ephemeral,
         unknown: context.knowledge.coverage.unknown,
         searched: context.knowledge.ephemeralMatches.length > 0
       },
-      sensitiveValues: [initialOptions.apiKey, ...Object.values(initialOptions.customHeaders ?? {})]
+      sensitiveValues: [
+        context.profileRef.uid,
+        ...(initialOptions === undefined
+          ? []
+          : [initialOptions.apiKey, ...Object.values(initialOptions.customHeaders ?? {})])
+      ]
     });
   }
 
   startStage(stage: V2AgentStage, inputSummary: string, stageOptions: AgentSdkRunOptions): void {
     this.attempted.add(stage);
-    this.writer?.startStage(this.context.correlationId, {
+    this.activeStage = stage;
+    if (this.writer === undefined || this.lease === undefined) return;
+    this.writer.startStage(this.lease, {
       stage,
       inputSummary,
-      sensitiveValues: [stageOptions.apiKey, ...Object.values(stageOptions.customHeaders ?? {})]
+      sensitiveValues: [
+        this.context.profileRef.uid,
+        stageOptions.apiKey,
+        ...Object.values(stageOptions.customHeaders ?? {})
+      ]
     });
   }
 
   completeStage(stage: V2AgentStage, turn: AuditedAgentTurn): void {
-    this.writer?.completeStage(this.context.correlationId, traceStageTerminalInput(stage, turn));
+    if (this.writer !== undefined && this.lease !== undefined) {
+      this.writer.completeStage(this.lease, traceStageTerminalInput(stage, turn));
+    }
+    if (this.activeStage === stage) this.activeStage = undefined;
   }
 
   failStage(
@@ -802,32 +871,72 @@ class PipelineTraceObserver {
     turn?: AuditedAgentTurn,
     usage: AgentUsage = zeroUsage()
   ): void {
-    this.writer?.failStage(this.context.correlationId, {
-      ...traceStageTerminalInput(stage, turn, usage),
-      failure
-    });
+    if (this.writer !== undefined && this.lease !== undefined) {
+      this.writer.failStage(this.lease, {
+        ...traceStageTerminalInput(stage, turn, usage),
+        failure
+      });
+    }
+    if (this.activeStage === stage) this.activeStage = undefined;
+  }
+
+  failSdkStart(stage: V2AgentStage, inputSummary: string): void {
+    if (this.terminal) return;
+    const failure = agentFailure(
+      'SDK_START_FAILED',
+      'Agent SDK options could not be prepared.',
+      true
+    );
+    this.attempted.add(stage);
+    this.activeStage = stage;
+    if (this.writer !== undefined && this.lease !== undefined) {
+      this.writer.startStage(this.lease, {
+        stage,
+        inputSummary,
+        sensitiveValues: [this.context.profileRef.uid]
+      });
+    }
+    this.failStage(stage, failure);
+    this.fail(failure);
+  }
+
+  failUnexpected(): void {
+    if (this.terminal) return;
+    const failure = agentFailure('PROVIDER_ERROR', 'Agent pipeline failed unexpectedly.', true);
+    if (this.activeStage !== undefined) this.failStage(this.activeStage, failure);
+    this.fail(failure);
   }
 
   complete(): void {
+    if (this.terminal) return;
     this.skipUnattempted();
-    this.writer?.finish(this.context.correlationId, { finalSource: 'smart-service' });
+    if (this.writer !== undefined && this.lease !== undefined) {
+      this.writer.finish(this.lease, { finalSource: 'smart-service' });
+    }
+    this.terminal = true;
   }
 
   fail(failure: AgentFailure): void {
+    if (this.terminal) return;
     this.skipUnattempted();
-    this.writer?.finish(this.context.correlationId, {
-      finalSource: 'blocked',
-      failure
-    });
+    if (this.writer !== undefined && this.lease !== undefined) {
+      this.writer.finish(this.lease, {
+        finalSource: 'blocked',
+        failure
+      });
+    }
+    this.terminal = true;
   }
 
   private skipUnattempted(): void {
     for (const stage of TRACE_PIPELINE_STAGES) {
       if (this.attempted.has(stage)) continue;
-      this.writer?.skipStage(this.context.correlationId, {
-        stage,
-        inputSummary: 'Stage was not executed.'
-      });
+      if (this.writer !== undefined && this.lease !== undefined) {
+        this.writer.skipStage(this.lease, {
+          stage,
+          inputSummary: 'Stage was not executed.'
+        });
+      }
     }
   }
 }

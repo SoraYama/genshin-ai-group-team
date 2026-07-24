@@ -41,10 +41,13 @@ function completedStage(
 describe('AgentRunTraceStore lifecycle', () => {
   it('replaces every field from the previous run when a new run starts', () => {
     const store = new AgentRunTraceStore();
-    store.start(run('one'));
-    store.startStage('one', { stage: 'compose', inputSummary: 'old-input' });
-    store.completeStage('one', completedStage('compose', { rawOutput: 'old raw model output' }));
-    store.finish('one', { finalSource: 'smart-service' });
+    const firstLease = store.start(run('one'));
+    store.startStage(firstLease, { stage: 'compose', inputSummary: 'old-input' });
+    store.completeStage(
+      firstLease,
+      completedStage('compose', { rawOutput: 'old raw model output' })
+    );
+    store.finish(firstLease, { finalSource: 'smart-service' });
 
     store.start(run('two', { model: 'new-model' }));
 
@@ -60,13 +63,13 @@ describe('AgentRunTraceStore lifecycle', () => {
 
   it('ignores stale correlations and every write after a terminal state', () => {
     const store = new AgentRunTraceStore();
-    store.start(run('old'));
-    store.start(run('current'));
-    store.startStage('old', { stage: 'compose', inputSummary: 'stale' });
-    store.startStage('current', { stage: 'compose', inputSummary: 'current' });
-    store.completeStage('old', completedStage('compose', { rawOutput: 'stale raw' }));
-    store.completeStage('current', completedStage('compose', { rawOutput: 'current raw' }));
-    store.finish('old', {
+    const staleLease = store.start(run('old'));
+    const currentLease = store.start(run('current'));
+    store.startStage(staleLease, { stage: 'compose', inputSummary: 'stale' });
+    store.startStage(currentLease, { stage: 'compose', inputSummary: 'current' });
+    store.completeStage(staleLease, completedStage('compose', { rawOutput: 'stale raw' }));
+    store.completeStage(currentLease, completedStage('compose', { rawOutput: 'current raw' }));
+    store.finish(staleLease, {
       finalSource: 'blocked',
       failure: {
         code: 'PROVIDER_ERROR',
@@ -74,11 +77,11 @@ describe('AgentRunTraceStore lifecycle', () => {
         retryable: true
       }
     });
-    store.finish('current', { finalSource: 'smart-service' });
+    store.finish(currentLease, { finalSource: 'smart-service' });
     const terminal = store.latest();
 
-    store.startStage('current', { stage: 'explain', inputSummary: 'late start' });
-    store.failStage('current', {
+    store.startStage(currentLease, { stage: 'explain', inputSummary: 'late start' });
+    store.failStage(currentLease, {
       stage: 'compose',
       rawOutput: 'late failure',
       tools: [],
@@ -90,7 +93,7 @@ describe('AgentRunTraceStore lifecycle', () => {
         retryable: false
       }
     });
-    store.finish('current', {
+    store.finish(currentLease, {
       finalSource: 'blocked',
       failure: {
         code: 'PROVIDER_ERROR',
@@ -102,18 +105,52 @@ describe('AgentRunTraceStore lifecycle', () => {
     expect(store.latest()).toEqual(terminal);
   });
 
+  it('uses an opaque per-start lease when the same correlation ID is reused', () => {
+    const store = new AgentRunTraceStore();
+    const oldLease = store.start(run('same-correlation'));
+    store.startStage(oldLease, { stage: 'compose', inputSummary: 'old input' });
+
+    const currentLease = store.start(run('same-correlation'));
+    store.startStage(currentLease, { stage: 'compose', inputSummary: 'current input' });
+    store.completeStage(oldLease, completedStage('compose', { rawOutput: 'stale async output' }));
+    store.completeStage(currentLease, completedStage('compose', { rawOutput: 'current output' }));
+    store.finish(oldLease, {
+      finalSource: 'blocked',
+      failure: {
+        code: 'PROVIDER_ERROR',
+        message: 'stale terminal',
+        retryable: true
+      }
+    });
+    store.finish(currentLease, { finalSource: 'smart-service' });
+
+    expect(store.latest()).toMatchObject({
+      correlationId: 'same-correlation',
+      status: 'completed',
+      stages: [
+        {
+          stage: 'compose',
+          status: 'completed',
+          inputSummary: 'current input',
+          rawOutput: 'current output'
+        }
+      ]
+    });
+    expect(JSON.stringify(store.latest())).not.toContain('stale async output');
+  });
+
   it('rejects unmatched and duplicate stage terminals without mutating the run', () => {
     const store = new AgentRunTraceStore();
-    store.start(run('run'));
+    const lease = store.start(run('run'));
     const before = store.latest();
-    store.completeStage('run', completedStage('compose'));
+    store.completeStage(lease, completedStage('compose'));
     expect(store.latest()).toEqual(before);
 
-    store.startStage('run', { stage: 'compose', inputSummary: 'one' });
-    store.completeStage('run', completedStage('compose'));
+    store.startStage(lease, { stage: 'compose', inputSummary: 'one' });
+    store.completeStage(lease, completedStage('compose'));
     const completed = store.latest();
-    store.completeStage('run', completedStage('compose', { rawOutput: 'duplicate' }));
-    store.failStage('run', {
+    store.completeStage(lease, completedStage('compose', { rawOutput: 'duplicate' }));
+    store.failStage(lease, {
       stage: 'compose',
       rawOutput: 'duplicate failure',
       tools: [],
@@ -130,8 +167,8 @@ describe('AgentRunTraceStore lifecycle', () => {
 
   it('returns a structured clone that cannot mutate internal state', () => {
     const store = new AgentRunTraceStore();
-    store.start(run('clone'));
-    store.startStage('clone', { stage: 'compose', inputSummary: 'safe' });
+    const lease = store.start(run('clone'));
+    store.startStage(lease, { stage: 'compose', inputSummary: 'safe' });
     const external = store.latest();
     if (!external) throw new Error('Expected trace');
     external.stages[0]!.inputSummary = 'mutated';
@@ -145,9 +182,9 @@ describe('AgentRunTraceStore lifecycle', () => {
 
   it('records skipped stages and produces schema-valid completed and failed traces', () => {
     const store = new AgentRunTraceStore();
-    store.start(run('completed'));
-    store.skipStage('completed', { stage: 'repair-1', inputSummary: 'not required' });
-    store.finish('completed', {
+    const completedLease = store.start(run('completed'));
+    store.skipStage(completedLease, { stage: 'repair-1', inputSummary: 'not required' });
+    store.finish(completedLease, {
       finalSource: 'local-rules',
       finishedAt: '2026-07-25T00:00:01.000Z'
     });
@@ -158,8 +195,8 @@ describe('AgentRunTraceStore lifecycle', () => {
       stages: [{ stage: 'repair-1', status: 'skipped' }]
     });
 
-    store.start(run('failed'));
-    store.finish('failed', {
+    const failedLease = store.start(run('failed'));
+    store.finish(failedLease, {
       finalSource: 'blocked',
       failure: {
         code: 'AGENT_ABORTED',
@@ -180,14 +217,14 @@ describe('AgentRunTraceStore privacy boundary', () => {
   it('keeps safe model text verbatim while explicitly marking redacted sensitive text', () => {
     const store = new AgentRunTraceStore();
     const safeRaw = '这套阵容先水后草，循环稳定。';
-    store.start(
+    const lease = store.start(
       run('privacy', {
         sensitiveValues: ['naked-provider-secret', 'PRIVATE-NICKNAME']
       })
     );
-    store.startStage('privacy', { stage: 'compose', inputSummary: safeRaw });
+    store.startStage(lease, { stage: 'compose', inputSummary: safeRaw });
     store.completeStage(
-      'privacy',
+      lease,
       completedStage('compose', {
         rawOutput:
           `${safeRaw}\nUID: 123456789\nCookie: ltoken_v2=secret-cookie\n` +
@@ -223,18 +260,18 @@ describe('AgentRunTraceStore privacy boundary', () => {
 
   it('redacts correlation, model, failure, and citation fields at the same store boundary', () => {
     const store = new AgentRunTraceStore();
-    store.start(
+    const lease = store.start(
       run('uid-123456789', {
         model: 'model Cookie=private-cookie',
         sensitiveValues: ['private-cookie']
       })
     );
     const publicCorrelationId = store.latest()!.correlationId;
-    store.startStage('uid-123456789', {
+    store.startStage(lease, {
       stage: 'compose',
       citationIds: ['uid-987654321']
     });
-    store.failStage('uid-123456789', {
+    store.failStage(lease, {
       stage: 'compose',
       rawOutput: 'safe raw',
       tools: [],
@@ -247,7 +284,7 @@ describe('AgentRunTraceStore privacy boundary', () => {
         details: { account: 'nickname: PRIVATE' }
       }
     });
-    store.finish('uid-123456789', {
+    store.finish(lease, {
       finalSource: 'blocked',
       failure: {
         code: 'PROVIDER_ERROR',
@@ -264,15 +301,117 @@ describe('AgentRunTraceStore privacy boundary', () => {
     expect(serialized).not.toContain('PRIVATE');
     expect(agentRunTraceSchema.safeParse(store.latest()).success).toBe(true);
   });
+
+  it('keeps ordinary large gameplay numbers verbatim while redacting a registered UID', () => {
+    const store = new AgentRunTraceStore();
+    const lease = store.start(
+      run('numeric-context', {
+        sensitiveValues: ['123456789']
+      })
+    );
+    store.startStage(lease, { stage: 'compose' });
+    store.completeStage(
+      lease,
+      completedStage('compose', {
+        rawOutput: '伤害 1234567890，累计 9876543210；UID: 123456789'
+      })
+    );
+
+    const raw = store.latest()?.stages[0]?.rawOutput;
+    expect(raw).toContain('1234567890');
+    expect(raw).toContain('9876543210');
+    expect(raw).not.toContain('UID: 123456789');
+    expect(raw).toContain('UID: [REDACTED]');
+  });
+
+  it('redacts more than 32 production-sized secrets without exposing the registry', () => {
+    const secrets = Array.from(
+      { length: 40 },
+      (_, index) => `stage-secret-${String(index).padStart(3, '0')}-${'x'.repeat(580)}`
+    );
+    const store = new AgentRunTraceStore();
+    const lease = store.start(run('many-secrets', { sensitiveValues: secrets }));
+    store.startStage(lease, { stage: 'compose' });
+    store.completeStage(
+      lease,
+      completedStage('compose', {
+        rawOutput: secrets.join('\n')
+      })
+    );
+
+    const serialized = JSON.stringify(store.latest());
+    secrets.forEach((secret) => expect(serialized).not.toContain(secret));
+    expect(serialized).toContain('[REDACTED]');
+    expect(serialized).not.toContain('sensitiveValues');
+  });
+
+  it.each([
+    {
+      name: 'a single value exceeds the per-secret limit',
+      secrets: [`api-${'z'.repeat(4_094)}`]
+    },
+    {
+      name: 'the registry exceeds the maximum secret count',
+      secrets: Array.from({ length: 65 }, (_, index) => `secret-${index}`)
+    },
+    {
+      name: 'the registry exceeds the aggregate character limit',
+      secrets: Array.from({ length: 17 }, (_, index) => `aggregate-${index}-${'a'.repeat(3_990)}`)
+    }
+  ])('fails closed when $name', ({ secrets }) => {
+    const store = new AgentRunTraceStore();
+    const lease = store.start(run('unsafe-registry', { sensitiveValues: secrets }));
+    store.startStage(lease, {
+      stage: 'compose',
+      inputSummary: 'otherwise safe input'
+    });
+    store.completeStage(
+      lease,
+      completedStage('compose', {
+        rawOutput: `safe-looking text ${secrets[0]}`
+      })
+    );
+
+    const trace = store.latest();
+    expect(JSON.stringify(trace)).not.toContain(secrets[0]);
+    expect(trace?.model).toBe('[REDACTED]');
+    expect(trace?.stages[0]).toMatchObject({
+      inputSummary: '[REDACTED]',
+      rawOutput: '[REDACTED]',
+      truncated: true
+    });
+  });
+
+  it('re-sanitizes earlier trace text when a stage registers a secret late', () => {
+    const lateSecret = `late-${'s'.repeat(595)}`;
+    const store = new AgentRunTraceStore();
+    const lease = store.start(run('late-registration'));
+    store.startStage(lease, { stage: 'compose' });
+    store.completeStage(
+      lease,
+      completedStage('compose', { rawOutput: `earlier output ${lateSecret}` })
+    );
+    expect(JSON.stringify(store.latest())).toContain(lateSecret);
+
+    store.startStage(lease, {
+      stage: 'critique',
+      sensitiveValues: [lateSecret]
+    });
+
+    const trace = store.latest();
+    expect(JSON.stringify(trace)).not.toContain(lateSecret);
+    expect(trace?.stages[0]).toMatchObject({ truncated: true });
+    expect(trace?.stages[1]).toMatchObject({ stage: 'critique', status: 'started' });
+  });
 });
 
 describe('AgentRunTraceStore UTF-8 budget', () => {
   it('keeps UTF-8-safe head and tail for a single oversized CJK and emoji stage', () => {
     const store = new AgentRunTraceStore({ maxBytes: 8_000 });
     const raw = `HEAD-${'原神🙂'.repeat(5_000)}-TAIL`;
-    store.start(run('large'));
-    store.startStage('large', { stage: 'compose', inputSummary: 'input' });
-    store.completeStage('large', completedStage('compose', { rawOutput: raw }));
+    const lease = store.start(run('large'));
+    store.startStage(lease, { stage: 'compose', inputSummary: 'input' });
+    store.completeStage(lease, completedStage('compose', { rawOutput: raw }));
 
     const trace = store.latest();
     const output = trace?.stages[0]?.rawOutput ?? '';
@@ -287,11 +426,11 @@ describe('AgentRunTraceStore UTF-8 budget', () => {
 
   it('enforces the aggregate budget across stages while retaining stage metadata', () => {
     const store = new AgentRunTraceStore({ maxBytes: 12_000 });
-    store.start(run('aggregate'));
+    const lease = store.start(run('aggregate'));
     for (const stage of ['compose', 'repair-1', 'critique', 'rotation', 'explain'] as const) {
-      store.startStage('aggregate', { stage, inputSummary: `${stage}-${'输入'.repeat(1_000)}` });
+      store.startStage(lease, { stage, inputSummary: `${stage}-${'输入'.repeat(1_000)}` });
       store.completeStage(
-        'aggregate',
+        lease,
         completedStage(stage, { rawOutput: `${stage}-${'输出🙂'.repeat(1_500)}-${stage}` })
       );
     }
@@ -311,12 +450,12 @@ describe('AgentRunTraceStore UTF-8 budget', () => {
 
   it('retains failure, tool outcome, and token usage when compacting text', () => {
     const store = new AgentRunTraceStore({ maxBytes: 7_000 });
-    store.start(run('failure-budget'));
-    store.startStage('failure-budget', {
+    const lease = store.start(run('failure-budget'));
+    store.startStage(lease, {
       stage: 'compose',
       inputSummary: '输入'.repeat(4_000)
     });
-    store.failStage('failure-budget', {
+    store.failStage(lease, {
       stage: 'compose',
       rawOutput: `head-${'原文🙂'.repeat(4_000)}-tail`,
       tools: [
@@ -354,6 +493,105 @@ describe('AgentRunTraceStore UTF-8 budget', () => {
         }
       ]
     });
+  });
+
+  it('always commits a valid terminal trace at 4096 bytes with the maximum tool count', () => {
+    const store = new AgentRunTraceStore({ maxBytes: 4_096 });
+    const lease = store.start(run('fixed-overhead'));
+    store.startStage(lease, {
+      stage: 'compose',
+      inputSummary: 'bounded input'
+    });
+    store.failStage(lease, {
+      stage: 'compose',
+      rawOutput: 'model output',
+      tools: Array.from({ length: 64 }, (_, index) => ({
+        name: `${String(index).padStart(2, '0')}-${'x'.repeat(125)}`,
+        status: 'completed' as const,
+        inputSummary: `input-${index}-${'y'.repeat(200)}`
+      })),
+      citationIds: Array.from({ length: 64 }, (_, index) => `citation-${index}`),
+      usage: { inputTokens: 987, outputTokens: 654 },
+      failure: {
+        code: 'PROVIDER_ERROR',
+        message: 'provider failed',
+        retryable: true
+      }
+    });
+    store.finish(lease, {
+      finalSource: 'blocked',
+      failure: {
+        code: 'PROVIDER_ERROR',
+        message: 'provider failed',
+        retryable: true
+      }
+    });
+
+    const trace = store.latest();
+    expect(agentRunTraceSchema.safeParse(trace).success).toBe(true);
+    expect(trace).toMatchObject({
+      status: 'failed',
+      failure: { code: 'PROVIDER_ERROR', retryable: true },
+      usage: { inputTokens: 987, outputTokens: 654 }
+    });
+    expect(trace?.stages[0]).toMatchObject({
+      stage: 'compose',
+      status: 'failed',
+      truncated: true,
+      failure: { code: 'PROVIDER_ERROR', retryable: true },
+      usage: { inputTokens: 987, outputTokens: 654 }
+    });
+    expect(trace?.stages[0]?.tools.length).toBeGreaterThan(0);
+    expect(Buffer.byteLength(JSON.stringify(trace), 'utf8')).toBeLessThanOrEqual(4_096);
+  });
+
+  it('preserves every stage status and aggregate usage at the minimum supported budget', () => {
+    const store = new AgentRunTraceStore({ maxBytes: 4_096 });
+    const lease = store.start(run('many-stages'));
+    const stages = Array.from({ length: 16 }, (_, index) =>
+      index === 0
+        ? ('compose' as const)
+        : index % 2 === 0
+          ? ('critique' as const)
+          : ('rotation' as const)
+    );
+    stages.forEach((stage, index) => {
+      store.startStage(lease, {
+        stage,
+        inputSummary: `input-${index}-${'x'.repeat(1_000)}`
+      });
+      store.failStage(lease, {
+        stage,
+        rawOutput: `raw-${index}-${'原文'.repeat(1_000)}`,
+        tools: [],
+        citationIds: [],
+        usage: { inputTokens: 10, outputTokens: 5 },
+        failure: {
+          code: 'VALIDATION_FAILED',
+          message: `validation-${index}-${'detail'.repeat(100)}`,
+          retryable: false
+        }
+      });
+    });
+    store.finish(lease, {
+      finalSource: 'blocked',
+      failure: {
+        code: 'VALIDATION_FAILED',
+        message: 'all attempts failed',
+        retryable: false
+      }
+    });
+
+    const trace = store.latest();
+    expect(agentRunTraceSchema.safeParse(trace).success).toBe(true);
+    expect(trace).toMatchObject({
+      status: 'failed',
+      failure: { code: 'VALIDATION_FAILED', retryable: false },
+      usage: { inputTokens: 160, outputTokens: 80 }
+    });
+    expect(trace?.stages).toHaveLength(16);
+    expect(trace?.stages.every(({ status }) => status === 'failed')).toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(trace), 'utf8')).toBeLessThanOrEqual(4_096);
   });
 });
 
