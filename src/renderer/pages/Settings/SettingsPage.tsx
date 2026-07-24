@@ -9,12 +9,7 @@ import type {
 import { DEFAULT_BASE_URL, DEFAULT_MODEL } from '../../../shared/domain';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { GtaDialog } from '../../components/ui/GtaDialog';
-import {
-  destructiveErrorRecovery,
-  getErrorCode,
-  localizeError,
-  useI18n
-} from '../../i18n';
+import { destructiveErrorRecovery, getErrorCode, localizeError, useI18n } from '../../i18n';
 import { api } from '../../ipc';
 import { dataClearCopy, formatStorageSize } from './settings-presentation';
 import { SettingsLoadState } from './SettingsLoadState';
@@ -376,16 +371,16 @@ export function SettingsPage({
             title={isEnglish ? 'Challenge cache' : '挑战资料缓存'}
             meta={
               isEnglish
-                ? `${dataSummary.scenarios.clearableCount} downloaded · ${formatStorageSize(dataSummary.scenarios.sizeBytes, language)}`
-                : `${dataSummary.scenarios.clearableCount} 份已下载 · ${formatStorageSize(dataSummary.scenarios.sizeBytes, language)}`
+                ? `${dataSummary.scenarios.clearableCount} downloaded + ${dataSummary.guideResearch.count} temporary guides · ${formatStorageSize((dataSummary.scenarios.sizeBytes ?? 0) + (dataSummary.guideResearch.sizeBytes ?? 0), language)}`
+                : `${dataSummary.scenarios.clearableCount} 份已下载 + ${dataSummary.guideResearch.count} 条临时攻略 · ${formatStorageSize((dataSummary.scenarios.sizeBytes ?? 0) + (dataSummary.guideResearch.sizeBytes ?? 0), language)}`
             }
             impact={
               isEnglish
-                ? 'Removes downloaded updates; bundled base data remains.'
-                : '移除下载更新；应用随附的基础资料保留。'
+                ? 'Removes downloaded updates and temporary web-guide summaries; bundled trusted knowledge remains.'
+                : '移除下载更新与临时网页攻略摘要；应用随附的可信知识库保留。'
             }
             action={isEnglish ? 'Clear challenge cache' : '清除挑战资料缓存'}
-            disabled={dataSummary.scenarios.clearableCount === 0}
+            disabled={dataSummary.scenarios.clearableCount + dataSummary.guideResearch.count === 0}
             onClear={() => void prepareClear('scenarios')}
           />
           <DataManagementRow

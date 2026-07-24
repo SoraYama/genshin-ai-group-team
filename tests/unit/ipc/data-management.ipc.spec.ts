@@ -59,6 +59,12 @@ describe('data management IPC', () => {
         fingerprint: 'private-scenario-fingerprint'
       },
       history: { count: 0, fingerprint: 'private-history-fingerprint' },
+      guideResearch: {
+        count: 3,
+        sizeBytes: 96,
+        fingerprint: 'private-guide-fingerprint',
+        privateContents: 'https://secret.example/raw-guide'
+      },
       serviceKey: { count: 1, fingerprint: 'private-key-fingerprint' }
     };
     const service = {
@@ -74,6 +80,7 @@ describe('data management IPC', () => {
       profiles: { count: 0 },
       scenarios: { count: 2, clearableCount: 1, sizeBytes: 128 },
       history: { count: 0 },
+      guideResearch: { count: 3, sizeBytes: 96 },
       serviceKey: { count: 1 }
     });
     await expect(
@@ -91,6 +98,7 @@ describe('data management IPC', () => {
         profiles: { count: 0 },
         scenarios: { count: 2, clearableCount: 1, sizeBytes: 128 },
         history: { count: 0 },
+        guideResearch: { count: 3, sizeBytes: 96 },
         serviceKey: { count: 1 }
       }
     });

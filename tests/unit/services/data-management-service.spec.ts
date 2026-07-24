@@ -18,6 +18,12 @@ function createDeps() {
     },
     history: { count: 4, sizeBytes: 2048, updatedAt: '2026-07-21T00:00:00.000Z' },
     historyToken: 'h1',
+    guideResearch: {
+      count: 2,
+      sizeBytes: 768,
+      updatedAt: '2026-07-24T00:00:00.000Z',
+      fingerprint: 'g1'
+    },
     hasKey: true,
     keyFingerprint: 'k1'
   };
@@ -58,6 +64,18 @@ function createDeps() {
         return 4;
       })
     },
+    guideResearch: {
+      getDataManagementSnapshot: vi.fn(async () => state.guideResearch),
+      clearAll: vi.fn(async () => {
+        const removed = state.guideResearch.count;
+        state.guideResearch = {
+          count: 0,
+          sizeBytes: 0,
+          fingerprint: 'g0'
+        } as typeof state.guideResearch;
+        return removed;
+      })
+    },
     config: {
       getPublicView: vi.fn(() => ({
         hasApiKey: state.hasKey,
@@ -94,6 +112,11 @@ describe('DataManagementService', () => {
         count: 4,
         sizeBytes: 2048,
         updatedAt: '2026-07-21T00:00:00.000Z'
+      },
+      guideResearch: {
+        count: 2,
+        sizeBytes: 768,
+        updatedAt: '2026-07-24T00:00:00.000Z'
       },
       serviceKey: { count: 1 }
     });
@@ -150,6 +173,59 @@ describe('DataManagementService', () => {
     expect(deps.scenarios.clearDownloadedCache).toHaveBeenCalledWith({
       count: 2,
       fingerprint: 's1'
+    });
+    expect(deps.guideResearch.clearAll).toHaveBeenCalledWith({
+      count: 2,
+      fingerprint: 'g1'
+    });
+  });
+
+  it('clears the guide cache with scenarios and reports only aggregate metadata', async () => {
+    const deps = createDeps();
+    const service = new DataManagementService(deps);
+    const summary = await service.getSummary();
+    expect(summary.guideResearch).toEqual({
+      count: 2,
+      sizeBytes: 768,
+      updatedAt: '2026-07-24T00:00:00.000Z'
+    });
+    expect(JSON.stringify(summary)).not.toContain('https://');
+    const confirmation = await service.prepareClear('scenarios');
+    expect(confirmation.count).toBe(4);
+
+    await expect(
+      service.clear({
+        scope: 'scenarios',
+        expectedCount: confirmation.count,
+        confirmationToken: confirmation.confirmationToken
+      })
+    ).resolves.toMatchObject({
+      removed: 4,
+      summary: { guideResearch: { count: 0, sizeBytes: 0 } }
+    });
+  });
+
+  it('prepares and clears scenarios when the guide cache file is missing', async () => {
+    const deps = createDeps();
+    deps.state.guideResearch = {
+      count: 0,
+      sizeBytes: 0,
+      fingerprint: 'guide-cache-missing'
+    } as typeof deps.state.guideResearch;
+    const service = new DataManagementService(deps);
+
+    const confirmation = await service.prepareClear('scenarios');
+    expect(confirmation.count).toBe(2);
+    await expect(
+      service.clear({
+        scope: 'scenarios',
+        expectedCount: confirmation.count,
+        confirmationToken: confirmation.confirmationToken
+      })
+    ).resolves.toMatchObject({ removed: 2 });
+    expect(deps.guideResearch.clearAll).toHaveBeenCalledWith({
+      count: 0,
+      fingerprint: 'guide-cache-missing'
     });
   });
 

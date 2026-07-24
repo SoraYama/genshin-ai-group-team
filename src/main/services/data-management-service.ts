@@ -10,6 +10,11 @@ interface Snapshot {
   fingerprint: string;
 }
 
+interface ScenarioClearSnapshot extends Snapshot {
+  scenario: Snapshot;
+  guideResearch: Snapshot;
+}
+
 interface ProfileDataManager {
   getDataManagementSnapshot(): {
     count: number;
@@ -51,10 +56,21 @@ interface ConfigDataManager {
   clearApiKey(): void;
 }
 
+interface GuideResearchDataManager {
+  getDataManagementSnapshot(): Promise<{
+    count: number;
+    sizeBytes?: number;
+    updatedAt?: string;
+    fingerprint: string;
+  }>;
+  clearAll(expected: { count: number; fingerprint: string }): Promise<number>;
+}
+
 export interface DataManagementDeps {
   profiles: ProfileDataManager;
   scenarios: ScenarioDataManager;
   history: HistoryDataManager;
+  guideResearch: GuideResearchDataManager;
   config: ConfigDataManager;
 }
 
@@ -78,7 +94,7 @@ export class DataManagementError extends Error {
 export class DataManagementService {
   private readonly confirmations = new Map<
     string,
-    { scope: DataManagementScope; snapshot: Snapshot; expiresAt: number }
+    { scope: DataManagementScope; snapshot: Snapshot | ScenarioClearSnapshot; expiresAt: number }
   >();
 
   constructor(
@@ -89,11 +105,13 @@ export class DataManagementService {
   async getSummary(): Promise<DataManagementSummary> {
     const profiles = this.deps.profiles.getDataManagementSnapshot();
     const scenarios = await this.deps.scenarios.getDataManagementSnapshot();
+    const guideResearch = await this.deps.guideResearch.getDataManagementSnapshot();
     const history = this.deps.history.getSummary();
     return {
       profiles: withoutFingerprint(profiles),
       scenarios: withoutFingerprint(scenarios),
       history,
+      guideResearch: withoutFingerprint(guideResearch),
       serviceKey: { count: this.deps.config.getPublicView().hasApiKey ? 1 : 0 }
     };
   }
@@ -132,8 +150,16 @@ export class DataManagementService {
     }
     let removed = 0;
     if (request.scope === 'scenarios') {
+      const snapshot = confirmation.snapshot;
+      if (!isScenarioClearSnapshot(snapshot)) {
+        throw new DataManagementError(
+          'DATA_SELECTION_CHANGED',
+          'Scenario clear snapshot is no longer valid'
+        );
+      }
       try {
-        removed = await this.deps.scenarios.clearDownloadedCache(confirmation.snapshot);
+        removed = await this.deps.scenarios.clearDownloadedCache(snapshot.scenario);
+        removed += await this.deps.guideResearch.clearAll(snapshot.guideResearch);
       } catch (error) {
         const code =
           typeof error === 'object' && error !== null && 'code' in error
@@ -149,6 +175,12 @@ export class DataManagementService {
           throw new DataManagementError(
             'DATA_SELECTION_CHANGED',
             'Scenario data changed; confirm again'
+          );
+        }
+        if (code === 'GUIDE_RESEARCH_SELECTION_CHANGED') {
+          throw new DataManagementError(
+            'DATA_SELECTION_CHANGED',
+            'Temporary guide cache changed; confirm again'
           );
         }
         throw error;
@@ -186,21 +218,32 @@ export class DataManagementService {
     return { removed, summary: await this.getSummary() };
   }
 
-  private async snapshot(scope: DataManagementScope): Promise<Snapshot> {
+  private async snapshot(scope: DataManagementScope): Promise<Snapshot | ScenarioClearSnapshot> {
     switch (scope) {
       case 'profiles': {
         const value = this.deps.profiles.getDataManagementSnapshot();
         return { count: value.count, fingerprint: value.fingerprint };
       }
       case 'scenarios': {
-        const value = await this.deps.scenarios.getDataManagementSnapshot();
-        if (value.sizeBytes === undefined) {
+        const [scenario, guideResearch] = await Promise.all([
+          this.deps.scenarios.getDataManagementSnapshot(),
+          this.deps.guideResearch.getDataManagementSnapshot()
+        ]);
+        if (scenario.sizeBytes === undefined || guideResearch.sizeBytes === undefined) {
           throw new DataManagementError(
             'DATA_FILE_INSPECTION_FAILED',
             'Scenario files could not be fully inspected; clear is unavailable'
           );
         }
-        return { count: value.clearableCount, fingerprint: value.fingerprint };
+        return {
+          count: scenario.clearableCount + guideResearch.count,
+          fingerprint: `${scenario.fingerprint}:${guideResearch.fingerprint}`,
+          scenario: { count: scenario.clearableCount, fingerprint: scenario.fingerprint },
+          guideResearch: {
+            count: guideResearch.count,
+            fingerprint: guideResearch.fingerprint
+          }
+        };
       }
       case 'history': {
         return this.deps.history.getChallengeScopeSnapshot({ scope: 'all' });
@@ -217,7 +260,13 @@ export class DataManagementService {
 function withoutFingerprint<
   T extends { fingerprint: string; count: number; sizeBytes?: number; updatedAt?: string }
 >(value: T): Omit<T, 'fingerprint'> {
-  const result = { ...value };
-  delete (result as Partial<T>).fingerprint;
-  return result;
+  const result = { ...value } as Partial<T>;
+  delete result.fingerprint;
+  if (result.sizeBytes === undefined) delete result.sizeBytes;
+  if (result.updatedAt === undefined) delete result.updatedAt;
+  return result as Omit<T, 'fingerprint'>;
+}
+
+function isScenarioClearSnapshot(snapshot: Snapshot): snapshot is ScenarioClearSnapshot {
+  return 'scenario' in snapshot && 'guideResearch' in snapshot;
 }

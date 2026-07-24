@@ -73,6 +73,7 @@ function publicSummary(summary: DataManagementSummary): DataManagementSummary {
       clearableCount: summary.scenarios.clearableCount
     },
     history: publicDataArea(summary.history),
+    guideResearch: publicDataArea(summary.guideResearch),
     serviceKey: { count: summary.serviceKey.count }
   };
 }

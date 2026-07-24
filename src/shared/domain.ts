@@ -50,6 +50,7 @@ export interface DataManagementSummary {
   profiles: DataAreaSummary;
   scenarios: ScenarioDataAreaSummary;
   history: DataAreaSummary;
+  guideResearch: DataAreaSummary;
   serviceKey: { count: 0 | 1 };
 }
 
