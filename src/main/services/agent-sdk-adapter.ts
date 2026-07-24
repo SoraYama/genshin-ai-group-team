@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import {
@@ -8,7 +9,7 @@ import {
 } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { validateCustomHeaders } from '../../shared/custom-headers.js';
-import { privacySafeResearchText } from './research-privacy.js';
+import { canonicalizeResearchPrivacyText, privacySafeResearchText } from './research-privacy.js';
 
 const DENIED_NATIVE_TOOLS = [
   'Agent',
@@ -93,35 +94,52 @@ type ResearchGateDecision = {
   };
 };
 
+interface BoundResearchGateDecision {
+  fingerprint: string;
+  decision: ResearchGateDecision;
+}
+
+const INVALID_RESEARCH_TOOL_FINGERPRINT = 'invalid-research-tool-payload';
+
 export function createResearchToolGate(input: {
   maxSearches: 3;
   allowedQueries: readonly string[];
 }): HookCallback {
   const allowedQueries = new Set(researchAllowedQueriesSchema.parse(input.allowedQueries));
-  const decisionsByToolUseId = new Map<string, ResearchGateDecision>();
+  const decisionsByToolUseId = new Map<string, BoundResearchGateDecision>();
   let searchAttempts = 0;
   return async (hookInput) => {
     if (hookInput.hook_event_name !== 'PreToolUse') return { continue: true };
-    if (hookInput.tool_name !== 'WebSearch') {
-      return denyResearchTool('RESEARCH_TOOL_NOT_ALLOWED');
-    }
     const toolUseId = validToolUseId(hookInput.tool_use_id);
+    const toolName = normalizedToolName(hookInput.tool_name);
+    const fingerprint =
+      researchToolPayloadFingerprint(toolName, hookInput.tool_input) ??
+      INVALID_RESEARCH_TOOL_FINGERPRINT;
     if (toolUseId !== undefined) {
       const replay = decisionsByToolUseId.get(toolUseId);
-      if (replay !== undefined) return replay;
+      if (replay !== undefined) {
+        return replay.fingerprint === fingerprint
+          ? replay.decision
+          : denyResearchTool('SEARCH_TOOL_REPLAY_MISMATCH');
+      }
+    }
+    if (toolName !== 'WebSearch') {
+      const decision = denyResearchTool('RESEARCH_TOOL_NOT_ALLOWED');
+      bindResearchDecision(decisionsByToolUseId, toolUseId, fingerprint, decision);
+      return decision;
     }
 
     searchAttempts += 1;
     if (searchAttempts > input.maxSearches) {
       const decision = denyResearchTool('SEARCH_BUDGET_EXCEEDED');
-      if (toolUseId !== undefined) decisionsByToolUseId.set(toolUseId, decision);
+      bindResearchDecision(decisionsByToolUseId, toolUseId, fingerprint, decision);
       return decision;
     }
     const parsedInput = researchSearchInputSchema.safeParse(hookInput.tool_input);
     const query = parsedInput.success ? privacySafeResearchText(parsedInput.data.query) : undefined;
     if (toolUseId === undefined || query === undefined || !allowedQueries.has(query)) {
       const decision = denyResearchTool('SEARCH_QUERY_REJECTED');
-      if (toolUseId !== undefined) decisionsByToolUseId.set(toolUseId, decision);
+      bindResearchDecision(decisionsByToolUseId, toolUseId, fingerprint, decision);
       return decision;
     }
     const decision: ResearchGateDecision = {
@@ -130,9 +148,18 @@ export function createResearchToolGate(input: {
         permissionDecision: 'allow'
       }
     };
-    decisionsByToolUseId.set(toolUseId, decision);
+    bindResearchDecision(decisionsByToolUseId, toolUseId, fingerprint, decision);
     return decision;
   };
+}
+
+function bindResearchDecision(
+  decisions: Map<string, BoundResearchGateDecision>,
+  toolUseId: string | undefined,
+  fingerprint: string,
+  decision: ResearchGateDecision
+): void {
+  if (toolUseId !== undefined) decisions.set(toolUseId, { fingerprint, decision });
 }
 
 function denyResearchTool(reason: string): ResearchGateDecision {
@@ -149,6 +176,76 @@ function validToolUseId(value: unknown): string | undefined {
   return typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(value)
     ? value
     : undefined;
+}
+
+function normalizedToolName(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = normalizeToolPayloadString(value);
+  return normalized !== undefined && normalized.length > 0 && normalized.length <= 80
+    ? normalized
+    : undefined;
+}
+
+function researchToolPayloadFingerprint(
+  toolName: string | undefined,
+  toolInput: unknown
+): string | undefined {
+  if (toolName === undefined) return undefined;
+  const budget = { nodes: 0 };
+  const canonicalInput = canonicalToolPayload(toolInput, 0, budget);
+  if (canonicalInput === undefined || canonicalInput.length > 8_192) return undefined;
+  return createHash('sha256')
+    .update(`${JSON.stringify(toolName)}:${canonicalInput}`)
+    .digest('hex');
+}
+
+function canonicalToolPayload(
+  value: unknown,
+  depth: number,
+  budget: { nodes: number }
+): string | undefined {
+  budget.nodes += 1;
+  if (depth > 8 || budget.nodes > 256) return undefined;
+  if (value === null) return 'null';
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (typeof value === 'number') return Number.isFinite(value) ? JSON.stringify(value) : undefined;
+  if (typeof value === 'string') {
+    const normalized = normalizeToolPayloadString(value);
+    return normalized !== undefined && normalized.length <= 2_048
+      ? JSON.stringify(normalized)
+      : undefined;
+  }
+  if (Array.isArray(value)) {
+    if (value.length > 64) return undefined;
+    const items = value.map((item) => canonicalToolPayload(item, depth + 1, budget));
+    return items.some((item) => item === undefined) ? undefined : `[${items.join(',')}]`;
+  }
+  if (typeof value !== 'object' || value === null) return undefined;
+  const entries = Object.entries(value);
+  if (entries.length > 64) return undefined;
+  const normalizedEntries = entries.map(([key, child]) => {
+    const normalizedKey = normalizeToolPayloadString(key);
+    return normalizedKey === undefined ? undefined : { key: normalizedKey, child };
+  });
+  if (
+    normalizedEntries.some(
+      (entry) => entry === undefined || entry.key.length === 0 || entry.key.length > 128
+    )
+  ) {
+    return undefined;
+  }
+  const validEntries = normalizedEntries as Array<{ key: string; child: unknown }>;
+  if (new Set(validEntries.map(({ key }) => key)).size !== validEntries.length) return undefined;
+  validEntries.sort((left, right) => (left.key < right.key ? -1 : left.key > right.key ? 1 : 0));
+  const members = validEntries.map(({ key, child }) => {
+    const canonicalChild = canonicalToolPayload(child, depth + 1, budget);
+    return canonicalChild === undefined ? undefined : `${JSON.stringify(key)}:${canonicalChild}`;
+  });
+  return members.some((member) => member === undefined) ? undefined : `{${members.join(',')}}`;
+}
+
+function normalizeToolPayloadString(value: string): string | undefined {
+  return canonicalizeResearchPrivacyText(value);
 }
 
 export interface AgentSdkRunOptions {

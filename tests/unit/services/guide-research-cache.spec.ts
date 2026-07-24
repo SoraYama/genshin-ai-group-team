@@ -518,6 +518,39 @@ describe('GuideResearchCache', () => {
     ).resolves.toBeDefined();
   });
 
+  it.each([
+    ['one numeric field', 'one', '攻击力: 2000'],
+    ['two numeric fields', 'two', '攻击力: 2000，暴击率: 70%']
+  ])('persists guide prose containing %s', async (_label, seed, summary) => {
+    const filePath = await makeCachePath();
+    const cache = createCacheAt(filePath, { now: () => START });
+    const candidate = value(`public-panel-${seed}`);
+    candidate.matches[0]!.summary = summary;
+
+    await expect(
+      cache.put({
+        task: task({ key: `public-panel-${seed}` }),
+        knowledgeVersion: 'knowledge-v4',
+        value: candidate
+      })
+    ).resolves.toBeDefined();
+  });
+
+  it('rejects guide prose containing three distinct numeric panel fields', async () => {
+    const filePath = await makeCachePath();
+    const cache = createCacheAt(filePath, { now: () => START });
+    const candidate = value('private-full-panel');
+    candidate.matches[0]!.summary = '攻击力: 2000，生命值: 25000，暴击率: 70%';
+
+    await expect(
+      cache.put({
+        task: task({ key: 'private-full-panel' }),
+        knowledgeVersion: 'knowledge-v4',
+        value: candidate
+      })
+    ).rejects.toThrow();
+  });
+
   it('rejects credential-bearing and user-identity URL components without blocking article IDs', async () => {
     const filePath = await makeCachePath();
     const cache = createCacheAt(filePath, { now: () => START });

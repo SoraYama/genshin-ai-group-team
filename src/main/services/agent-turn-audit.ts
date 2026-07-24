@@ -1,3 +1,6 @@
+import type { WebSearchOutput } from '@anthropic-ai/claude-agent-sdk/sdk-tools';
+import { z } from 'zod';
+
 import type { AgentSdkRunOptions } from './agent-sdk-adapter.js';
 import { privacySafeResearchText } from './research-privacy.js';
 
@@ -5,6 +8,42 @@ export const AGENT_TURN_RAW_SUMMARY_MAX_MESSAGES = 64;
 export const AGENT_TURN_RAW_SUMMARY_PREVIEW_MAX_CHARS = 500;
 export const AGENT_TURN_FINAL_TEXT_MAX_CHARS = 100_000;
 export const AGENT_TURN_WEB_SEARCH_EVIDENCE_MAX_ATTEMPTS = 4;
+export const AGENT_TURN_WEB_SEARCH_MAX_RESULTS = 32;
+export const AGENT_TURN_WEB_SEARCH_MAX_URLS = 32;
+
+const webSearchOutputSchema = z
+  .object({
+    query: z.string().trim().min(1).max(300),
+    results: z
+      .array(
+        z.union([
+          z.string().max(2_000),
+          z
+            .object({
+              tool_use_id: z
+                .string()
+                .min(1)
+                .max(128)
+                .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u),
+              content: z
+                .array(
+                  z
+                    .object({
+                      title: z.string().max(500),
+                      url: z.string().trim().min(1).max(2_048)
+                    })
+                    .strict()
+                )
+                .max(20)
+            })
+            .strict()
+        ])
+      )
+      .max(AGENT_TURN_WEB_SEARCH_MAX_RESULTS),
+    durationSeconds: z.number().finite().nonnegative().max(3_600),
+    searchCount: z.number().int().min(1).max(3).optional()
+  })
+  .strict();
 
 export interface AuditedAgentRunner {
   run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown>;
@@ -31,6 +70,7 @@ export interface WebSearchEvidenceAttempt {
   toolUseId: string;
   query?: string;
   status: WebSearchEvidenceStatus;
+  urls: string[];
 }
 
 export interface WebSearchEvidence {
@@ -91,11 +131,13 @@ export async function runAuditedAgentTurn(options: {
     round: ToolAudit['round'];
   };
   onUsageDelta?: (usage: AgentUsage) => void;
+  normalizeResearchUrl?: (url: string) => string | undefined;
 }): Promise<AuditedAgentTurn> {
   let resultText = '';
   let assistantText = '';
   let sawSuccessResult = false;
-  const tools = new Map<string, ToolAudit>();
+  const tools: ToolAudit[] = [];
+  const toolsById = new Map<string, ToolAudit[]>();
   const webSearchById = new Map<string, WebSearchEvidenceAttempt>();
   const webSearchAttempts: WebSearchEvidenceAttempt[] = [];
   let webSearchEvidenceTruncated = false;
@@ -165,14 +207,18 @@ export async function runAuditedAgentTurn(options: {
             typeof block['id'] === 'string' &&
             typeof block['name'] === 'string'
           ) {
-            tools.set(block['id'], {
+            const audit: ToolAudit = {
               id: block['id'],
               name: block['name'],
               input: isRecord(block['input']) ? block['input'] : {},
               succeeded: false,
               correlationId: options.auditContext?.correlationId ?? 'unscoped',
               round: options.auditContext?.round ?? 'single'
-            });
+            };
+            tools.push(audit);
+            const matchingAudits = toolsById.get(block['id']) ?? [];
+            matchingAudits.push(audit);
+            toolsById.set(block['id'], matchingAudits);
             if (block['name'] === 'WebSearch') {
               const id = webSearchToolUseId(block['id']);
               const query =
@@ -184,13 +230,15 @@ export async function runAuditedAgentTurn(options: {
               } else if (id === undefined || query === undefined || webSearchById.has(id)) {
                 webSearchAttempts.push({
                   toolUseId: id ?? 'invalid',
-                  status: 'invalid'
+                  status: 'invalid',
+                  urls: []
                 });
               } else {
                 const evidence: WebSearchEvidenceAttempt = {
                   toolUseId: id,
                   query,
-                  status: 'unresolved'
+                  status: 'unresolved',
+                  urls: []
                 };
                 webSearchById.set(id, evidence);
                 webSearchAttempts.push(evidence);
@@ -208,10 +256,24 @@ export async function runAuditedAgentTurn(options: {
             block['type'] === 'tool_result' &&
             typeof block['tool_use_id'] === 'string'
           ) {
-            const use = tools.get(block['tool_use_id']);
-            if (use) use.succeeded = block['is_error'] !== true;
+            toolsById
+              .get(block['tool_use_id'])
+              ?.forEach((use) => (use.succeeded = block['is_error'] !== true));
             const search = webSearchById.get(block['tool_use_id']);
-            if (search) search.status = block['is_error'] === true ? 'error' : 'resolved';
+            if (search) {
+              if (block['is_error'] === true) {
+                search.status = 'error';
+                search.urls = [];
+              } else {
+                const urls = parseWebSearchUrls(
+                  message['tool_use_result'],
+                  search,
+                  options.normalizeResearchUrl
+                );
+                search.status = urls === undefined ? 'invalid' : 'resolved';
+                search.urls = urls ?? [];
+              }
+            }
           }
         }
       }
@@ -243,9 +305,9 @@ export async function runAuditedAgentTurn(options: {
     text: finalRawText,
     finalRawText,
     rawMessagesSummary,
-    tools: [...tools.values()],
+    tools: tools.map((tool) => ({ ...tool, input: { ...tool.input } })),
     webSearchEvidence: {
-      attempts: webSearchAttempts.map((attempt) => ({ ...attempt })),
+      attempts: webSearchAttempts.map((attempt) => ({ ...attempt, urls: [...attempt.urls] })),
       truncated: webSearchEvidenceTruncated
     },
     usage
@@ -328,4 +390,29 @@ function boundedResearchQuery(value: string): string | undefined {
   if (value.length > 300) return undefined;
   const query = privacySafeResearchText(value);
   return query === undefined || query.length === 0 ? undefined : query;
+}
+
+function parseWebSearchUrls(
+  value: unknown,
+  expected: Pick<WebSearchEvidenceAttempt, 'toolUseId' | 'query'>,
+  normalizeResearchUrl: ((url: string) => string | undefined) | undefined
+): string[] | undefined {
+  if (expected.query === undefined || normalizeResearchUrl === undefined) return undefined;
+  const parsed = webSearchOutputSchema.safeParse(value);
+  if (!parsed.success) return undefined;
+  const output = parsed.data as WebSearchOutput;
+  if (privacySafeResearchText(output.query) !== expected.query) return undefined;
+  const urls: string[] = [];
+  for (const result of output.results) {
+    if (typeof result === 'string') continue;
+    if (result.tool_use_id !== expected.toolUseId) return undefined;
+    for (const content of result.content) {
+      if (privacySafeResearchText(content.url) === undefined) return undefined;
+      const normalizedUrl = normalizeResearchUrl(content.url);
+      if (normalizedUrl === undefined) return undefined;
+      urls.push(normalizedUrl);
+      if (urls.length > AGENT_TURN_WEB_SEARCH_MAX_URLS) return undefined;
+    }
+  }
+  return urls.length === 0 ? undefined : Array.from(new Set(urls));
 }

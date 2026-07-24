@@ -30,7 +30,22 @@ describe('runAuditedAgentTurn', () => {
         };
         yield {
           type: 'user',
-          tool_use_result: { raw: 'provider-secret-result-must-not-be-retained' },
+          tool_use_result: {
+            query: '原神 雷电将军 配队 攻略',
+            results: [
+              {
+                tool_use_id: 'search-1',
+                content: [
+                  {
+                    title: 'provider-secret-title-must-not-be-retained',
+                    url: 'https://keqingmains.com/q/raiden-quickguide/'
+                  }
+                ]
+              }
+            ],
+            durationSeconds: 0.5,
+            searchCount: 1
+          },
           message: {
             content: [
               {
@@ -50,7 +65,8 @@ describe('runAuditedAgentTurn', () => {
       runner,
       prompt: '{}',
       sdkOptions: sdkOptions(),
-      systemPrompt: 'test'
+      systemPrompt: 'test',
+      normalizeResearchUrl: trustedResearchUrl
     });
 
     expect(result.webSearchEvidence).toEqual({
@@ -58,12 +74,138 @@ describe('runAuditedAgentTurn', () => {
         {
           toolUseId: 'search-1',
           query: '原神 雷电将军 配队 攻略',
-          status: 'resolved'
+          status: 'resolved',
+          urls: ['https://keqingmains.com/q/raiden-quickguide/']
         }
       ],
       truncated: false
     });
     expect(JSON.stringify(result.webSearchEvidence)).not.toContain('provider-secret');
+  });
+
+  it('deduplicates normalized URLs from the typed WebSearch output without retaining titles', async () => {
+    const runner = sdkWebSearchRunner({
+      query: '原神 雷电将军 配队 攻略',
+      results: [
+        {
+          tool_use_id: 'search-shaped',
+          content: [
+            { title: 'secret-title-one', url: 'https://KEQINGMAINS.COM/q/raiden' },
+            { title: 'secret-title-two', url: 'https://keqingmains.com/q/raiden' }
+          ]
+        }
+      ],
+      durationSeconds: 0.2,
+      searchCount: 1
+    });
+
+    const result = await runAuditedAgentTurn({
+      runner,
+      prompt: '{}',
+      sdkOptions: sdkOptions(),
+      systemPrompt: 'test',
+      normalizeResearchUrl: trustedResearchUrl
+    });
+
+    expect(result.webSearchEvidence.attempts[0]).toEqual({
+      toolUseId: 'search-shaped',
+      query: '原神 雷电将军 配队 攻略',
+      status: 'resolved',
+      urls: ['https://keqingmains.com/q/raiden']
+    });
+    expect(JSON.stringify(result.webSearchEvidence)).not.toContain('secret-title');
+  });
+
+  it.each([
+    [
+      'no result URL',
+      {
+        query: '原神 雷电将军 配队 攻略',
+        results: ['search commentary only'],
+        durationSeconds: 0.2,
+        searchCount: 1
+      }
+    ],
+    [
+      'a mismatched nested tool-use ID',
+      {
+        query: '原神 雷电将军 配队 攻略',
+        results: [
+          {
+            tool_use_id: 'different-search',
+            content: [{ title: 'Guide', url: 'https://keqingmains.com/q/raiden' }]
+          }
+        ],
+        durationSeconds: 0.2,
+        searchCount: 1
+      }
+    ],
+    [
+      'a mismatched query',
+      {
+        query: '原神 纳西妲 配队 攻略',
+        results: [
+          {
+            tool_use_id: 'search-shaped',
+            content: [{ title: 'Guide', url: 'https://keqingmains.com/q/raiden' }]
+          }
+        ],
+        durationSeconds: 0.2,
+        searchCount: 1
+      }
+    ],
+    [
+      'an untrusted result URL',
+      {
+        query: '原神 雷电将军 配队 攻略',
+        results: [
+          {
+            tool_use_id: 'search-shaped',
+            content: [{ title: 'Guide', url: 'https://attacker.example/q/raiden' }]
+          }
+        ],
+        durationSeconds: 0.2,
+        searchCount: 1
+      }
+    ],
+    [
+      'an oversized result list',
+      {
+        query: '原神 雷电将军 配队 攻略',
+        results: Array.from({ length: 33 }, () => 'bounded commentary'),
+        durationSeconds: 0.2,
+        searchCount: 1
+      }
+    ],
+    [
+      'more than 32 result URLs across bounded result groups',
+      {
+        query: '原神 雷电将军 配队 攻略',
+        results: [0, 1].map((group) => ({
+          tool_use_id: 'search-shaped',
+          content: Array.from({ length: 17 }, (_, index) => ({
+            title: `Guide ${group}-${index}`,
+            url: `https://keqingmains.com/q/raiden-${group}-${index}`
+          }))
+        })),
+        durationSeconds: 0.2,
+        searchCount: 1
+      }
+    ]
+  ])('fails closed for typed WebSearch output with %s', async (_label, toolUseResult) => {
+    const result = await runAuditedAgentTurn({
+      runner: sdkWebSearchRunner(toolUseResult),
+      prompt: '{}',
+      sdkOptions: sdkOptions(),
+      systemPrompt: 'test',
+      normalizeResearchUrl: trustedResearchUrl
+    });
+
+    expect(result.webSearchEvidence.attempts[0]).toMatchObject({
+      toolUseId: 'search-shaped',
+      status: 'invalid',
+      urls: []
+    });
   });
 
   it.each([
@@ -609,4 +751,50 @@ function sdkOptions(): AgentSdkRunOptions {
     abortController: new AbortController(),
     maxTurns: 1
   };
+}
+
+function sdkWebSearchRunner(toolUseResult: unknown): AuditedAgentRunner {
+  return {
+    async *run() {
+      yield {
+        type: 'assistant',
+        message: {
+          content: [
+            {
+              type: 'tool_use',
+              id: 'search-shaped',
+              name: 'WebSearch',
+              input: { query: '原神 雷电将军 配队 攻略' }
+            }
+          ]
+        }
+      };
+      yield {
+        type: 'user',
+        tool_use_result: toolUseResult,
+        message: {
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'search-shaped',
+              is_error: false,
+              content: 'raw provider output is not retained'
+            }
+          ]
+        }
+      };
+      yield { type: 'result', subtype: 'success', result: '{}', usage: {} };
+    }
+  };
+}
+
+function trustedResearchUrl(value: string): string | undefined {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && url.hostname.toLowerCase() === 'keqingmains.com'
+      ? url.href
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }

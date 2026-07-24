@@ -139,6 +139,7 @@ export class GuideResearchAgent {
     }
 
     let rawOutput: string;
+    let searchedUrls: ReadonlySet<string>;
     try {
       const turn = await runAuditedAgentTurn({
         runner: this.runner,
@@ -156,9 +157,11 @@ export class GuideResearchAgent {
           researchAllowedQueries: queries,
           maxTurns: 4
         },
-        systemPrompt: GUIDE_RESEARCH_PROMPT_V1
+        systemPrompt: GUIDE_RESEARCH_PROMPT_V1,
+        normalizeResearchUrl: (url) => canonicalGuideSource(url, sourcesByHost)?.url
       });
-      if (!hasResolvedSearchEvidence(turn.webSearchEvidence, queries)) {
+      const resolvedUrls = resolvedSearchUrls(turn.webSearchEvidence, queries, turn.tools);
+      if (resolvedUrls === undefined) {
         return combineGuideResearchResult(
           parsed.tasks,
           cachedByKey,
@@ -166,6 +169,7 @@ export class GuideResearchAgent {
           gapsFor(runtimeMisses, 'SEARCH_OUTPUT_INVALID')
         );
       }
+      searchedUrls = resolvedUrls;
       rawOutput = turn.finalRawText;
     } catch (error) {
       return combineGuideResearchResult(
@@ -212,7 +216,7 @@ export class GuideResearchAgent {
       const applicability = candidateApplicabilityForTask(candidate, pending.projected);
       if (applicability === undefined) continue;
       const source = canonicalGuideSource(candidate.source.url, sourcesByHost);
-      if (source === undefined) continue;
+      if (source === undefined || !searchedUrls.has(source.url)) continue;
       const accepted = acceptedByKey.get(pending.task.key) ?? [];
       accepted.push({
         ...candidate,
@@ -288,20 +292,67 @@ function searchFailureCode(error: unknown): GuideResearchGapCode {
   return 'SEARCH_UNAVAILABLE';
 }
 
-function hasResolvedSearchEvidence(
+function resolvedSearchUrls(
   evidence: {
-    attempts: ReadonlyArray<{ query?: string; status: string }>;
+    attempts: ReadonlyArray<{
+      toolUseId: string;
+      query?: string;
+      status: string;
+      urls: readonly string[];
+    }>;
     truncated: boolean;
   },
-  allowedQueries: readonly string[]
-): boolean {
-  if (evidence.truncated || evidence.attempts.length < 1 || evidence.attempts.length > 3) {
-    return false;
+  allowedQueries: readonly string[],
+  tools: ReadonlyArray<{
+    id: string;
+    name: string;
+    input: Readonly<Record<string, unknown>>;
+    succeeded: boolean;
+  }>
+): ReadonlySet<string> | undefined {
+  if (
+    evidence.truncated ||
+    evidence.attempts.length < 1 ||
+    evidence.attempts.length > 3 ||
+    tools.length !== evidence.attempts.length
+  ) {
+    return undefined;
   }
   const allowed = new Set(allowedQueries);
-  return evidence.attempts.every(
-    ({ query, status }) => status === 'resolved' && query !== undefined && allowed.has(query)
-  );
+  const evidenceById = new Map(evidence.attempts.map((attempt) => [attempt.toolUseId, attempt]));
+  if (evidenceById.size !== evidence.attempts.length) return undefined;
+  for (const tool of tools) {
+    const attempt = evidenceById.get(tool.id);
+    const inputKeys = Object.keys(tool.input);
+    const query =
+      typeof tool.input['query'] === 'string'
+        ? privacySafeResearchText(tool.input['query'])
+        : undefined;
+    if (
+      tool.name !== 'WebSearch' ||
+      !tool.succeeded ||
+      inputKeys.length !== 1 ||
+      inputKeys[0] !== 'query' ||
+      attempt === undefined ||
+      query === undefined ||
+      query !== attempt.query
+    ) {
+      return undefined;
+    }
+  }
+  const urls = new Set<string>();
+  for (const attempt of evidence.attempts) {
+    if (
+      attempt.status !== 'resolved' ||
+      attempt.query === undefined ||
+      !allowed.has(attempt.query) ||
+      attempt.urls.length === 0
+    ) {
+      return undefined;
+    }
+    attempt.urls.forEach((url) => urls.add(url));
+  }
+  return urls.size === 0 ? undefined : urls;
 }
 
 function errorDiagnosticText(error: unknown, depth = 0): string {

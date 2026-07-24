@@ -95,14 +95,26 @@ function modelOutput(taskRef: string, overrides: Record<string, unknown> = {}): 
   });
 }
 
+interface SdkWebSearchTurnOptions {
+  status?: 'resolved' | 'error' | 'unresolved';
+  toolName?: string;
+  searchCount?: number;
+  query?: string;
+  resultUrlsBySearch?: ReadonlyArray<readonly string[]>;
+  toolUseResultBySearch?: readonly unknown[];
+  additionalToolNames?: readonly string[];
+  prependedCollidingToolName?: string;
+}
+
 function successRunner(
   output: string,
-  onRun?: (prompt: string, options: AgentSdkRunOptions) => void
+  onRun?: (prompt: string, options: AgentSdkRunOptions) => void,
+  turnOptions: SdkWebSearchTurnOptions = {}
 ): AuditedAgentRunner {
   return {
     async *run(prompt, options) {
       onRun?.(prompt, options);
-      for (const message of sdkWebSearchTurn(prompt, output)) yield message;
+      for (const message of sdkWebSearchTurn(prompt, output, turnOptions)) yield message;
     }
   };
 }
@@ -110,18 +122,41 @@ function successRunner(
 function sdkWebSearchTurn(
   prompt: string,
   output: string,
-  options: {
-    status?: 'resolved' | 'error' | 'unresolved';
-    toolName?: string;
-    searchCount?: number;
-    query?: string;
-  } = {}
+  options: SdkWebSearchTurnOptions = {}
 ): unknown[] {
   const payload = JSON.parse(prompt) as { searchQueries?: string[] };
   const queries = payload.searchQueries ?? [];
   const toolName = options.toolName ?? 'WebSearch';
   const searchCount = options.searchCount ?? 1;
   const messages: unknown[] = [];
+  if (options.prependedCollidingToolName !== undefined) {
+    messages.push({
+      type: 'assistant',
+      message: {
+        content: [
+          {
+            type: 'tool_use',
+            id: 'search-1',
+            name: options.prependedCollidingToolName,
+            input: { path: '/not-allowed' }
+          }
+        ]
+      }
+    });
+    messages.push({
+      type: 'user',
+      message: {
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'search-1',
+            is_error: true,
+            content: 'denied by research policy'
+          }
+        ]
+      }
+    });
+  }
   for (let index = 0; index < searchCount; index += 1) {
     const id = `search-${index + 1}`;
     messages.push({
@@ -141,8 +176,31 @@ function sdkWebSearchTurn(
       }
     });
     if (options.status !== 'unresolved') {
+      const executedQuery =
+        options.query ?? queries[index % Math.max(queries.length, 1)] ?? '原神 配队 攻略';
+      const resultUrls = options.resultUrlsBySearch?.[index] ?? [
+        'https://keqingmains.com/q/raiden-quickguide/'
+      ];
       messages.push({
         type: 'user',
+        tool_use_result:
+          options.toolUseResultBySearch?.[index] ??
+          (options.status === 'error'
+            ? undefined
+            : {
+                query: executedQuery,
+                results: [
+                  {
+                    tool_use_id: id,
+                    content: resultUrls.map((url, urlIndex) => ({
+                      title: `Search result ${urlIndex + 1}`,
+                      url
+                    }))
+                  }
+                ],
+                durationSeconds: 0.2,
+                searchCount: 1
+              }),
         message: {
           content: [
             {
@@ -156,6 +214,28 @@ function sdkWebSearchTurn(
       });
     }
   }
+  options.additionalToolNames?.forEach((name, index) => {
+    const id = `mixed-tool-${index + 1}`;
+    messages.push({
+      type: 'assistant',
+      message: {
+        content: [{ type: 'tool_use', id, name, input: { path: '/not-allowed' } }]
+      }
+    });
+    messages.push({
+      type: 'user',
+      message: {
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: id,
+            is_error: true,
+            content: 'denied by research policy'
+          }
+        ]
+      }
+    });
+  });
   messages.push({ type: 'result', subtype: 'success', result: output, usage: {} });
   return messages;
 }
@@ -244,6 +324,9 @@ describe('GuideResearchAgent', () => {
       (prompt, options) => {
         observedPrompt = prompt;
         observedOptions = options;
+      },
+      {
+        resultUrlsBySearch: [['https://keqingmains.com/q/nahida-quickguide/']]
       }
     );
     const agent = new GuideResearchAgent({
@@ -365,7 +448,8 @@ describe('GuideResearchAgent', () => {
     ['zero WebSearch calls', { searchCount: 0 }],
     ['only another tool', { toolName: 'Read' }],
     ['an errored WebSearch', { status: 'error' as const }],
-    ['an unresolved WebSearch', { status: 'unresolved' as const }]
+    ['an unresolved WebSearch', { status: 'unresolved' as const }],
+    ['a resolved WebSearch without a result URL', { resultUrlsBySearch: [[]] }]
   ])('does not cache provider JSON backed by %s', async (_label, turnOptions) => {
     const researchTask = task('guide-search-evidence-missing');
     const researchCache = cache();
@@ -424,6 +508,58 @@ describe('GuideResearchAgent', () => {
       expect(result.entries).toHaveLength(1);
     }
   );
+
+  it.each(['Read', 'Bash', 'mcp__other__lookup'])(
+    'rejects resolved WebSearch evidence mixed with denied %s tool use',
+    async (additionalToolName) => {
+      const researchTask = task(`guide-mixed-tool-${additionalToolName}`);
+      const researchCache = cache();
+      const agent = new GuideResearchAgent({
+        runner: successRunner(modelOutput('ref-1'), undefined, {
+          additionalToolNames: [additionalToolName]
+        }),
+        cache: researchCache,
+        sourceRegistry: sourceRegistry(),
+        sdkOptions: sdkOptions(),
+        canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
+        now: () => NOW
+      });
+
+      const result = await agent.research({
+        tasks: [researchTask],
+        knowledgeVersion: 'knowledge-v2'
+      });
+
+      expect(researchCache.put).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        entries: [],
+        gaps: [{ taskKey: researchTask.key, code: 'SEARCH_OUTPUT_INVALID' }]
+      });
+    }
+  );
+
+  it('rejects a denied mixed tool even when a later WebSearch reuses its tool-use ID', async () => {
+    const researchTask = task('guide-mixed-colliding-id');
+    const researchCache = cache();
+    const agent = new GuideResearchAgent({
+      runner: successRunner(modelOutput('ref-1'), undefined, {
+        prependedCollidingToolName: 'Read'
+      }),
+      cache: researchCache,
+      sourceRegistry: sourceRegistry(),
+      sdkOptions: sdkOptions(),
+      canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
+      now: () => NOW
+    });
+
+    const result = await agent.research({
+      tasks: [researchTask],
+      knowledgeVersion: 'knowledge-v2'
+    });
+
+    expect(researchCache.put).not.toHaveBeenCalled();
+    expect(result.gaps).toEqual([{ taskKey: researchTask.key, code: 'SEARCH_OUTPUT_INVALID' }]);
+  });
 
   it.each([
     ['more than three resolved searches', { searchCount: 4 }],
@@ -749,7 +885,9 @@ describe('GuideResearchAgent', () => {
             title: 'Boundary Guide',
             timelineClue: '页面时间线索存在'
           }
-        })
+        }),
+        undefined,
+        accepted ? { resultUrlsBySearch: [[url]] } : undefined
       ),
       cache: researchCache,
       sourceRegistry: sourceRegistry(),
@@ -771,6 +909,82 @@ describe('GuideResearchAgent', () => {
       expect(result.entries).toEqual([]);
       expect(result.gaps).toEqual([{ taskKey: researchTask.key, code: 'SEARCH_NO_VALID_RESULTS' }]);
     }
+  });
+
+  it('rejects a fabricated citation on the same trusted host when it was not in search results', async () => {
+    const researchTask = task('guide-fabricated-same-host');
+    const researchCache = cache();
+    const agent = new GuideResearchAgent({
+      runner: successRunner(
+        modelOutput('ref-1', {
+          source: {
+            url: 'https://keqingmains.com/q/fabricated-guide/',
+            title: 'Fabricated Guide',
+            timelineClue: '模型声称存在'
+          }
+        })
+      ),
+      cache: researchCache,
+      sourceRegistry: sourceRegistry(),
+      sdkOptions: sdkOptions(),
+      canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
+      now: () => NOW
+    });
+
+    const result = await agent.research({
+      tasks: [researchTask],
+      knowledgeVersion: 'knowledge-v2'
+    });
+
+    expect(researchCache.put).not.toHaveBeenCalled();
+    expect(result.entries).toEqual([]);
+    expect(result.gaps).toEqual([{ taskKey: researchTask.key, code: 'SEARCH_NO_VALID_RESULTS' }]);
+  });
+
+  it('accepts a citation returned by the second of multiple resolved searches', async () => {
+    const firstTask = task('guide-multi-search-first');
+    const secondTask = task('guide-multi-search-second');
+    const secondUrl = 'https://keqingmains.com/q/raiden-second-result/';
+    const agent = new GuideResearchAgent({
+      runner: {
+        async *run(prompt) {
+          for (const message of sdkWebSearchTurn(
+            prompt,
+            modelOutput('ref-1', {
+              source: {
+                url: secondUrl,
+                title: 'Second Search Guide',
+                timelineClue: '第二条查询返回'
+              }
+            }),
+            {
+              searchCount: 2,
+              resultUrlsBySearch: [
+                ['https://keqingmains.com/q/unrelated-first-result/'],
+                [secondUrl, secondUrl]
+              ]
+            }
+          )) {
+            yield message;
+          }
+        }
+      },
+      cache: cache(),
+      sourceRegistry: sourceRegistry(),
+      sdkOptions: sdkOptions(),
+      canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
+      now: () => NOW
+    });
+
+    const result = await agent.research({
+      tasks: [firstTask, secondTask],
+      knowledgeVersion: 'knowledge-v2'
+    });
+
+    expect(result.entries).toEqual([
+      expect.objectContaining({ taskKey: firstTask.key, origin: 'research' })
+    ]);
+    expect(result.entries[0]?.value.citations[0]?.url).toBe(secondUrl);
   });
 
   it('allows trusted sources to share a host and selects a deterministic source ID', async () => {
@@ -1028,6 +1242,32 @@ describe('GuideResearchAgent', () => {
   });
 
   it.each([
+    ['ordinary build prose', '班尼特提供攻击力加成，生命值提升取决于治疗角色。'],
+    ['one numeric stat', '攻击力: 2000'],
+    ['two distinct numeric stats', '攻击力: 2000，暴击率: 70%']
+  ])('accepts privacy-safe provider %s', async (_label, summary) => {
+    const researchTask = task(`guide-public-provider-${_label.replaceAll(' ', '-')}`);
+    const researchCache = cache();
+    const agent = new GuideResearchAgent({
+      runner: successRunner(modelOutput('ref-1', { summary })),
+      cache: researchCache,
+      sourceRegistry: sourceRegistry(),
+      sdkOptions: sdkOptions(),
+      canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
+      now: () => NOW
+    });
+
+    const result = await agent.research({
+      tasks: [researchTask],
+      knowledgeVersion: 'knowledge-v2'
+    });
+
+    expect(result.gaps).toEqual([]);
+    expect(result.entries).toHaveLength(1);
+    expect(researchCache.put).toHaveBeenCalledOnce();
+  });
+
+  it.each([
     ['summary', { summary: '私人账号 123456789 的配队结论' }],
     [
       'source title',
@@ -1049,7 +1289,10 @@ describe('GuideResearchAgent', () => {
         }
       }
     ],
-    ['conflicts', { conflicts: ['critRate: 88 时有冲突'] }],
+    [
+      'full panel in conflicts',
+      { conflicts: ['攻击力: 2000，生命值: 25000，暴击率: 70% 时有冲突'] }
+    ],
     [
       'source URL path',
       {
@@ -1113,7 +1356,9 @@ describe('GuideResearchAgent', () => {
             title: 'Raiden Guide',
             timelineClue: '页面时间线索存在'
           }
-        })
+        }),
+        undefined,
+        { resultUrlsBySearch: [[encodedUrl]] }
       ),
       cache: cache(),
       sourceRegistry: sourceRegistry(),
@@ -1162,6 +1407,43 @@ describe('GuideResearchAgent', () => {
       ).resolves.toBeUndefined();
       await expect(fs.readFile(researchCache.filePath, 'utf8')).rejects.toMatchObject({
         code: 'ENOENT'
+      });
+    } finally {
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it('writes an SDK-shaped search result to the real cache only when citation URL is evidenced', async () => {
+    const userDataDirectory = await fs.mkdtemp(path.join(tmpdir(), 'guide-research-evidence-'));
+    try {
+      const researchTask = task('guide-real-cache-evidenced-output');
+      const researchCache = new GuideResearchCache({
+        userDataDirectory,
+        now: () => NOW
+      });
+      const agent = new GuideResearchAgent({
+        runner: successRunner(modelOutput('ref-1')),
+        cache: researchCache,
+        sourceRegistry: sourceRegistry(),
+        sdkOptions: sdkOptions(),
+        canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
+        now: () => NOW
+      });
+
+      const result = await agent.research({
+        tasks: [researchTask],
+        knowledgeVersion: 'knowledge-v2'
+      });
+
+      expect(result.entries).toHaveLength(1);
+      await expect(
+        researchCache.get({ task: researchTask, knowledgeVersion: 'knowledge-v2' })
+      ).resolves.toMatchObject({
+        citations: [
+          expect.objectContaining({
+            url: 'https://keqingmains.com/q/raiden-quickguide/'
+          })
+        ]
       });
     } finally {
       await fs.rm(userDataDirectory, { recursive: true, force: true });

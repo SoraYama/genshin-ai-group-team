@@ -6,6 +6,11 @@ import { z } from 'zod';
 
 import { ephemeralGuideMatchSchema, sourceCitationSchema } from '../../shared/advisor-knowledge.js';
 import { guideResearchTaskSchema, type GuideResearchTask } from './knowledge-coverage-gate.js';
+import {
+  canonicalizeResearchPrivacyText,
+  isSensitiveResearchCanonicalText,
+  isSensitiveResearchFreeText
+} from './research-privacy.js';
 
 export const GUIDE_RESEARCH_CACHE_FILENAME = 'guide-research.json';
 export const GUIDE_RESEARCH_CACHE_SCHEMA_VERSION = 1;
@@ -13,11 +18,8 @@ export const GUIDE_RESEARCH_CACHE_TTL_MS = 24 * 60 * 60 * 1_000;
 export const GUIDE_RESEARCH_CACHE_MAX_ENTRIES = 100;
 export const GUIDE_RESEARCH_CACHE_MAX_BYTES = 2 * 1024 * 1024;
 
-const GUIDE_RESEARCH_PRIVACY_TEXT_MAX_LENGTH = 2_048;
-const GUIDE_RESEARCH_PRIVACY_DECODE_MAX_ROUNDS = 8;
 const GUIDE_RESEARCH_CACHE_MAX_MANAGED_FILES = 512;
 const GUIDE_RESEARCH_CACHE_IO_CONCURRENCY = 8;
-const ENCODED_OCTET_PATTERN = /%[0-9a-f]{2}/iu;
 const GUIDE_RESEARCH_TOMBSTONE_PATTERN =
   /^\.guide-research\.json\.[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.clear-tombstone$/iu;
 const GUIDE_RESEARCH_TEMPORARY_PATTERN =
@@ -1075,112 +1077,40 @@ function containsForbiddenSensitiveText(value: EphemeralGuideCacheValue): boolea
     ...value.applicability.buildSignals,
     ...value.conflicts
   ];
-  if (privateText.some(isSensitiveFreeText)) return true;
+  if (privateText.some(isSensitiveResearchFreeText)) return true;
   return value.citations.some(({ url }) => {
     const parsed = new URL(url);
     if (parsed.username.length > 0 || parsed.password.length > 0) return true;
     if (
       Array.from(parsed.searchParams.entries()).some(([key, parameterValue]) => {
-        const canonicalKey = canonicalizePrivacyText(key);
-        const canonicalValue = canonicalizePrivacyText(parameterValue);
+        const canonicalKey = canonicalizeResearchPrivacyText(key);
+        const canonicalValue = canonicalizeResearchPrivacyText(parameterValue);
         return (
           canonicalKey === undefined ||
           canonicalValue === undefined ||
-          isSensitiveCanonicalText(canonicalKey) ||
-          isSensitiveCanonicalText(canonicalValue) ||
+          isSensitiveResearchCanonicalText(canonicalKey) ||
+          isSensitiveResearchCanonicalText(canonicalValue) ||
           /^(?:uid|user|users|account|player|profile)(?:[-_]?id)?$/iu.test(canonicalKey)
         );
       })
     ) {
       return true;
     }
-    const decodedPath = canonicalizePrivacyText(parsed.pathname);
+    const decodedPath = canonicalizeResearchPrivacyText(parsed.pathname);
     if (decodedPath === undefined) return true;
     if (
-      isSensitiveCanonicalText(decodedPath) ||
+      isSensitiveResearchCanonicalText(decodedPath) ||
       /\/(?:uid|user|users|account|player|profile)(?:\/|$)/iu.test(decodedPath)
     ) {
       return true;
     }
-    const decodedFragment = canonicalizePrivacyText(parsed.hash.slice(1));
+    const decodedFragment = canonicalizeResearchPrivacyText(parsed.hash.slice(1));
     if (decodedFragment === undefined) return true;
     return (
-      isSensitiveCanonicalText(decodedFragment) ||
+      isSensitiveResearchCanonicalText(decodedFragment) ||
       /(?:^|[/#&])(?:uid|user|users|account|player|profile)(?:[=/:]|$)/iu.test(decodedFragment)
     );
   });
-}
-
-function isSensitiveFreeText(text: string): boolean {
-  const canonical = canonicalizePrivacyText(text);
-  return canonical === undefined || isSensitiveCanonicalText(canonical);
-}
-
-function isSensitiveCanonicalText(text: string): boolean {
-  if (
-    [
-      /private[-_ ]nickname/iu,
-      /(?:玩家|用户)\s*uid/iu,
-      /(?:^|[^\p{L}\p{N}_])uid(?:[^\p{L}\p{N}_]|$)/iu,
-      /(?:^|[^\p{L}\p{N}_])nickname(?:[^\p{L}\p{N}_]|$)/iu,
-      /昵称|玩家名/iu,
-      /(?:^|[^\p{L}\p{N}_])cookie(?:[^\p{L}\p{N}_]|$)|ltoken(?:_v\d+)?|ltuid(?:_v\d+)?/iu,
-      /(?:^|[^\p{L}\p{N}_])authorization(?:[^\p{L}\p{N}_]|$)|(?:^|[^\p{L}\p{N}_])bearer(?:[^\p{L}\p{N}_]|$)/iu,
-      /(?:^|[^\p{L}\p{N}_])api[-_ ]?key(?:[^\p{L}\p{N}_]|$)|(?:^|[^\p{L}\p{N}_])token(?:[^\p{L}\p{N}_]|$)/iu,
-      /(?:^|[^\p{L}\p{N}_])credentials?(?:[^\p{L}\p{N}_]|$)/iu,
-      /(?:^|[^\p{L}\p{N}_])prompt(?:[^\p{L}\p{N}_]|$)|system[-_ ]prompt/iu,
-      /(?:sdk[-_ ]+)?raw[-_ ]+(?:sdk[-_ ]+)?message|原始消息/iu,
-      /tool[-_ ]+(?:call[-_ ]+)?payload|tool[-_ ]+载荷|工具载荷/iu,
-      /(?:tool_use|function_call|tool_result|arguments|input)\s*[:=：]/iu,
-      /full[-_ ]?stats|full[-_ ]?panel|完整面板|完整属性/iu
-    ].some((pattern) => pattern.test(text))
-  ) {
-    return true;
-  }
-  return hasFullPanelStatShape(text);
-}
-
-function hasFullPanelStatShape(text: string): boolean {
-  const labels = new Set<string>();
-  const statPattern =
-    /(?:^|[^\p{L}\p{N}_])(?<label>hp|atk|def|crit(?:ical)?[\s_-]*rate|crit(?:ical)?[\s_-]*(?:dmg|damage)|er|em|生命(?:值)?|攻击(?:力)?|防御(?:力)?|暴击率|暴击伤害|元素充能效率|元素精通)\s*[:：=]\s*[+-]?\d+(?:\.\d+)?%?/giu;
-  for (const match of text.matchAll(statPattern)) {
-    const label = match.groups?.label;
-    if (label !== undefined) labels.add(canonicalStatLabel(label));
-  }
-  return labels.size >= 3;
-}
-
-function canonicalStatLabel(label: string): string {
-  const normalized = label.toLocaleLowerCase('en').replace(/[\s_-]/gu, '');
-  if (/^(?:生命|生命值)$/u.test(normalized)) return 'hp';
-  if (/^(?:攻击|攻击力)$/u.test(normalized)) return 'atk';
-  if (/^(?:防御|防御力)$/u.test(normalized)) return 'def';
-  if (normalized === '暴击率') return 'critrate';
-  if (normalized === '暴击伤害') return 'critdmg';
-  if (normalized === '元素充能效率') return 'er';
-  if (normalized === '元素精通') return 'em';
-  return normalized.replace(/^critical/u, 'crit').replace(/damage$/u, 'dmg');
-}
-
-function canonicalizePrivacyText(value: string): string | undefined {
-  if (value.length > GUIDE_RESEARCH_PRIVACY_TEXT_MAX_LENGTH) return undefined;
-  let decoded = normalizePrivacyUnicode(value);
-  for (let attempt = 0; attempt < GUIDE_RESEARCH_PRIVACY_DECODE_MAX_ROUNDS; attempt += 1) {
-    if (!ENCODED_OCTET_PATTERN.test(decoded)) return decoded;
-    try {
-      const next = normalizePrivacyUnicode(decodeURIComponent(decoded));
-      if (next === decoded) return decoded;
-      decoded = next;
-    } catch {
-      return undefined;
-    }
-  }
-  return ENCODED_OCTET_PATTERN.test(decoded) ? undefined : decoded;
-}
-
-function normalizePrivacyUnicode(value: string): string {
-  return value.normalize('NFKC').replace(/\p{Default_Ignorable_Code_Point}/gu, '');
 }
 
 function hasErrorCode(error: unknown, code: string): boolean {

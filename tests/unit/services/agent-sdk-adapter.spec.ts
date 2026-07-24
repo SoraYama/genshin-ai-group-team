@@ -419,7 +419,41 @@ describe('buildAgentSdkOptions', () => {
     });
   });
 
-  it('returns the cached decision for a valid tool-use ID replay without consuming budget', async () => {
+  it.each([
+    ['UID query', 'WebSearch', { query: 'UID 123456789' }],
+    ['authorization query', 'WebSearch', { query: 'Authorization: Bearer private' }],
+    ['outside-allowlist query', 'WebSearch', { query: '原神 纳西妲 配队 攻略' }],
+    ['different tool', 'Read', { query: RESEARCH_QUERY }]
+  ])(
+    'denies a replayed tool-use ID whose normalized payload changes to %s',
+    async (_label, toolName, toolInput) => {
+      const gate = createResearchToolGate({
+        maxSearches: 3,
+        allowedQueries: [RESEARCH_QUERY]
+      });
+      const signal = new AbortController().signal;
+      await expect(
+        gate(
+          preToolInput('WebSearch', 'replayed-search', { query: RESEARCH_QUERY }),
+          'replayed-search',
+          { signal }
+        )
+      ).resolves.toMatchObject({
+        hookSpecificOutput: { permissionDecision: 'allow' }
+      });
+
+      await expect(
+        gate(preToolInput(toolName, 'replayed-search', toolInput), 'replayed-search', { signal })
+      ).resolves.toMatchObject({
+        hookSpecificOutput: {
+          permissionDecision: 'deny',
+          permissionDecisionReason: 'SEARCH_TOOL_REPLAY_MISMATCH'
+        }
+      });
+    }
+  );
+
+  it('replays the same decision for the same canonical payload without consuming budget', async () => {
     const gate = createResearchToolGate({
       maxSearches: 3,
       allowedQueries: [RESEARCH_QUERY]
@@ -431,7 +465,7 @@ describe('buildAgentSdkOptions', () => {
       { signal }
     );
     const replay = await gate(
-      preToolInput('WebSearch', 'replayed-search', { query: '原神 纳西妲 配队 攻略' }),
+      preToolInput('WebSearch', 'replayed-search', { query: RESEARCH_QUERY }),
       'replayed-search',
       { signal }
     );
@@ -454,6 +488,95 @@ describe('buildAgentSdkOptions', () => {
         permissionDecisionReason: 'SEARCH_BUDGET_EXCEEDED'
       }
     });
+  });
+
+  it('binds an immutable fingerprint instead of retaining a mutable payload reference', async () => {
+    const gate = createResearchToolGate({
+      maxSearches: 3,
+      allowedQueries: [RESEARCH_QUERY]
+    });
+    const signal = new AbortController().signal;
+    const toolInput = { query: RESEARCH_QUERY };
+    await expect(
+      gate(preToolInput('WebSearch', 'mutable-replay', toolInput), 'mutable-replay', { signal })
+    ).resolves.toMatchObject({
+      hookSpecificOutput: { permissionDecision: 'allow' }
+    });
+
+    toolInput.query = '原神 纳西妲 配队 攻略';
+
+    await expect(
+      gate(preToolInput('WebSearch', 'mutable-replay', toolInput), 'mutable-replay', { signal })
+    ).resolves.toMatchObject({
+      hookSpecificOutput: {
+        permissionDecision: 'deny',
+        permissionDecisionReason: 'SEARCH_TOOL_REPLAY_MISMATCH'
+      }
+    });
+  });
+
+  it('reserves a tool-use ID after an uncanonicalizable payload fails closed', async () => {
+    const gate = createResearchToolGate({
+      maxSearches: 3,
+      allowedQueries: [RESEARCH_QUERY]
+    });
+    const signal = new AbortController().signal;
+    const oversizedInput = { query: RESEARCH_QUERY, extra: 'x'.repeat(2_049) };
+    await expect(
+      gate(preToolInput('WebSearch', 'invalid-first', oversizedInput), 'invalid-first', {
+        signal
+      })
+    ).resolves.toMatchObject({
+      hookSpecificOutput: {
+        permissionDecision: 'deny',
+        permissionDecisionReason: 'SEARCH_QUERY_REJECTED'
+      }
+    });
+
+    await expect(
+      gate(preToolInput('WebSearch', 'invalid-first', { query: RESEARCH_QUERY }), 'invalid-first', {
+        signal
+      })
+    ).resolves.toMatchObject({
+      hookSpecificOutput: {
+        permissionDecision: 'deny',
+        permissionDecisionReason: 'SEARCH_TOOL_REPLAY_MISMATCH'
+      }
+    });
+  });
+
+  it('uses stable object-key ordering when binding a rejected replay payload', async () => {
+    const gate = createResearchToolGate({
+      maxSearches: 3,
+      allowedQueries: [RESEARCH_QUERY]
+    });
+    const signal = new AbortController().signal;
+    const first = await gate(
+      preToolInput('WebSearch', 'rejected-replay', {
+        query: RESEARCH_QUERY,
+        extraA: 'one',
+        extraB: 2
+      }),
+      'rejected-replay',
+      { signal }
+    );
+    const replay = await gate(
+      preToolInput('WebSearch', 'rejected-replay', {
+        extraB: 2,
+        extraA: 'one',
+        query: RESEARCH_QUERY
+      }),
+      'rejected-replay',
+      { signal }
+    );
+
+    expect(first).toMatchObject({
+      hookSpecificOutput: {
+        permissionDecision: 'deny',
+        permissionDecisionReason: 'SEARCH_QUERY_REJECTED'
+      }
+    });
+    expect(replay).toEqual(first);
   });
 
   it('fails closed and consumes attempts for missing or invalid tool-use IDs without replay caching', async () => {
