@@ -228,7 +228,10 @@ interface ManagedPhysicalFile {
 }
 
 type ReadPhysicalFile = ManagedPhysicalFile &
-  ({ readable: true; raw: string; sizeMatchesStat: boolean } | { readable: false });
+  (
+    | { readable: true; raw: string; contentHash: string; sizeMatchesStat: boolean }
+    | { readable: false }
+  );
 
 interface GuideResearchCacheCoordinator {
   tail: Promise<void>;
@@ -593,17 +596,6 @@ export class GuideResearchCache {
     }
 
     const sizeBytes = physicalFiles.reduce((total, file) => total + file.size, 0);
-    const fingerprint = createHash('sha256')
-      .update(
-        JSON.stringify(
-          physicalFiles.map(({ filePath, role, size }) => ({
-            name: path.basename(filePath),
-            role,
-            size
-          }))
-        )
-      )
-      .digest('hex');
     const exceedsReadLimits =
       physicalFiles.length > GUIDE_RESEARCH_CACHE_MAX_MANAGED_FILES ||
       physicalFiles.some(({ size }) => size > GUIDE_RESEARCH_CACHE_MAX_BYTES) ||
@@ -614,7 +606,7 @@ export class GuideResearchCache {
         document: documentWith([]),
         selectionCount: physicalFiles.length,
         sizeBytes,
-        fingerprint,
+        fingerprint: fingerprintForMetadataSelection(physicalFiles, 'read-skipped-limit'),
         liveFilePresent,
         managedArtifacts
       };
@@ -623,8 +615,8 @@ export class GuideResearchCache {
     /*
      * Normal Electron startup is single-instance and same-process calls share a coordinator.
      * There is intentionally no cross-process filesystem lock: an external writer can still
-     * race this stat/read window. Size changes are detected below and fail closed; a same-size
-     * external rewrite remains an explicit boundary of the metadata fingerprint.
+     * race the stat/read/rename windows. Size changes fail closed and successful reads are
+     * content-hashed; mutation after the final read and before rename remains an explicit boundary.
      */
     const readFiles = await mapWithConcurrency(
       physicalFiles,
@@ -636,6 +628,7 @@ export class GuideResearchCache {
             ...file,
             readable: true,
             raw,
+            contentHash: createHash('sha256').update(raw).digest('hex'),
             sizeMatchesStat: Buffer.byteLength(raw, 'utf8') === file.size
           };
         } catch {
@@ -643,6 +636,7 @@ export class GuideResearchCache {
         }
       }
     );
+    const fingerprint = fingerprintForReadSelection(readFiles);
     if (readFiles.some((file) => !file.readable)) {
       this.diagnostic('GUIDE_RESEARCH_CACHE_UNREADABLE');
       return {
@@ -902,6 +896,41 @@ export class GuideResearchCache {
 
 function isValidManagedFileSize(size: number): boolean {
   return Number.isSafeInteger(size) && size >= 0;
+}
+
+function fingerprintForMetadataSelection(
+  files: readonly ManagedPhysicalFile[],
+  status: 'read-skipped-limit'
+): string {
+  return fingerprintPayload({
+    status,
+    files: files.map(({ filePath, role, size }) => ({
+      name: path.basename(filePath),
+      role,
+      size
+    }))
+  });
+}
+
+function fingerprintForReadSelection(files: readonly ReadPhysicalFile[]): string {
+  return fingerprintPayload({
+    status: 'read-attempted',
+    files: files.map((file) => ({
+      name: path.basename(file.filePath),
+      role: file.role,
+      size: file.size,
+      ...(file.readable
+        ? {
+            readStatus: file.sizeMatchesStat ? 'readable' : 'size-mismatch',
+            contentHash: file.contentHash
+          }
+        : { readStatus: 'unreadable' })
+    }))
+  });
+}
+
+function fingerprintPayload(value: unknown): string {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
 async function mapWithConcurrency<Input, Output>(

@@ -10,11 +10,16 @@ interface ConfigureSingleInstanceOptions {
   focusPrimaryWindow: () => void;
 }
 
+export function nonEmptyEnvironmentValue(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
+}
+
 function isIsolatedProcessHarness(env: Readonly<Record<string, string | undefined>>): boolean {
   return (
     env.NODE_ENV === 'test' ||
-    env.GTA_E2E_USER_DATA_DIR !== undefined ||
-    env.GTA_PACKAGED_SDK_SMOKE_URL !== undefined
+    nonEmptyEnvironmentValue(env.GTA_E2E_USER_DATA_DIR) !== undefined ||
+    nonEmptyEnvironmentValue(env.GTA_PACKAGED_SDK_SMOKE_URL) !== undefined
   );
 }
 

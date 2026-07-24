@@ -1346,6 +1346,42 @@ describe('GuideResearchCache', () => {
     ).resolves.toBe(0);
   });
 
+  it('invalidates an old clear confirmation after a same-size normal put changes content', async () => {
+    const filePath = await makeCachePath();
+    let now = START;
+    const cache = createCacheAt(filePath, { now: () => now });
+    const original = value('same-a');
+    const replacement = value('same-b');
+    expect(Buffer.byteLength(JSON.stringify(replacement), 'utf8')).toBe(
+      Buffer.byteLength(JSON.stringify(original), 'utf8')
+    );
+    await cache.put({
+      task: task(),
+      knowledgeVersion: 'knowledge-v4',
+      value: original
+    });
+    const initialSize = (await fs.stat(filePath)).size;
+    const oldConfirmation = await cache.getDataManagementSnapshot();
+
+    now += 1;
+    await cache.put({
+      task: task(),
+      knowledgeVersion: 'knowledge-v4',
+      value: replacement
+    });
+    expect((await fs.stat(filePath)).size).toBe(initialSize);
+
+    await expect(
+      cache.clearAll({
+        clearableCount: oldConfirmation.clearableCount,
+        fingerprint: oldConfirmation.fingerprint
+      })
+    ).rejects.toMatchObject({ code: 'GUIDE_RESEARCH_SELECTION_CHANGED' });
+    await expect(cache.get({ task: task(), knowledgeVersion: 'knowledge-v4' })).resolves.toEqual(
+      replacement
+    );
+  });
+
   it('distinguishes a present zero-byte file from a missing cache without public internals', async () => {
     const filePath = await makeCachePath();
     const cache = createCacheAt(filePath, { now: () => START });

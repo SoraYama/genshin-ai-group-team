@@ -65,9 +65,9 @@ import {
 import { DataManagementService } from './services/data-management-service.js';
 import { registerDataManagementIpc } from './ipc/data-management.ipc.js';
 import { GuideResearchCache } from './services/guide-research-cache.js';
-import { configureSingleInstance } from './single-instance.js';
+import { configureSingleInstance, nonEmptyEnvironmentValue } from './single-instance.js';
 
-const isolatedUserDataDir = process.env.GTA_E2E_USER_DATA_DIR;
+const isolatedUserDataDir = nonEmptyEnvironmentValue(process.env.GTA_E2E_USER_DATA_DIR);
 if (isolatedUserDataDir) {
   app.setPath('userData', isolatedUserDataDir);
 }
@@ -76,7 +76,7 @@ registerIconProxyScheme();
 
 const isDev = process.env.NODE_ENV === 'development';
 const backgroundRefreshEnabled = process.env.GTA_DISABLE_BACKGROUND_REFRESH !== '1';
-const packagedSdkSmokeUrl = process.env.GTA_PACKAGED_SDK_SMOKE_URL;
+const packagedSdkSmokeUrl = nonEmptyEnvironmentValue(process.env.GTA_PACKAGED_SDK_SMOKE_URL);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let mainWindow: BrowserWindow | undefined;

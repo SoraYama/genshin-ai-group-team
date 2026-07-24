@@ -71,4 +71,24 @@ describe('configureSingleInstance', () => {
     expect(testApp.app.quit).not.toHaveBeenCalled();
     expect(testApp.app.on).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ['empty E2E path', { NODE_ENV: 'production', GTA_E2E_USER_DATA_DIR: '' }],
+    ['blank E2E path', { NODE_ENV: 'production', GTA_E2E_USER_DATA_DIR: '   ' }],
+    ['empty smoke URL', { NODE_ENV: 'production', GTA_PACKAGED_SDK_SMOKE_URL: '' }],
+    ['blank smoke URL', { NODE_ENV: 'production', GTA_PACKAGED_SDK_SMOKE_URL: ' \t ' }]
+  ])('still enforces the instance lock for an %s', (_name, env) => {
+    const testApp = appDouble(false);
+
+    expect(
+      configureSingleInstance({
+        app: testApp.app,
+        env,
+        focusPrimaryWindow: vi.fn()
+      })
+    ).toBe(false);
+    expect(testApp.app.requestSingleInstanceLock).toHaveBeenCalledOnce();
+    expect(testApp.app.quit).toHaveBeenCalledOnce();
+    expect(testApp.app.on).not.toHaveBeenCalled();
+  });
 });
