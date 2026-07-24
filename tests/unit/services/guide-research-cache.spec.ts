@@ -336,7 +336,7 @@ describe('GuideResearchCache', () => {
           matches: [{ ...value('7').matches[0]!, summary: '公开攻略文章 123456789' }]
         }
       })
-    ).resolves.toBeDefined();
+    ).rejects.toThrow();
   });
 
   it('rejects explicit private labels across every free-text field', async () => {
@@ -485,6 +485,8 @@ describe('GuideResearchCache', () => {
       'ＵＩＤ：１２３４５６７８９',
       'Ｃｒｅｄｅｎｔｉａｌｓ：secret',
       encodeLayers('UID: 123456789', 4),
+      '这份攻略适用于 １２３４５６７８９',
+      encodeLayers('这份攻略适用于 123456789', 4),
       encodeLayers('credentials: secret', 8),
       encodeLayers('ordinary public guide:', 9)
     ];
@@ -501,12 +503,12 @@ describe('GuideResearchCache', () => {
     }
   });
 
-  it('keeps public article numbers and individual build thresholds persistable', async () => {
+  it('keeps explicit article URL IDs, eight-digit prose, and build thresholds persistable', async () => {
     const filePath = await makeCachePath();
     const cache = createCacheAt(filePath, { now: () => START });
     const publicSummary = value('public-shapes');
     publicSummary.matches[0]!.summary =
-      '公开攻略文章 123456789：HP:25000 与生命值:25000 是同一阈值；CRIT RATE:70% 与 CRITICAL RATE:70% 也是同一阈值。';
+      '公开攻略编号 12345678：HP:25000 与生命值:25000 是同一阈值；CRIT RATE:70% 与 CRITICAL RATE:70% 也是同一阈值。';
     publicSummary.citations[0]!.url = 'https://example.test/articles/123456789';
 
     await expect(
@@ -566,6 +568,12 @@ describe('GuideResearchCache', () => {
       'https://example.test/guide?next=Authorization%3A%20Bearer%20secret',
       `https://example.test/guide?next=${encodeLayers('credentials: secret', 4)}`,
       `https://example.test/guide?next=${encodeLayers('ordinary public guide', 10)}`,
+      'https://example.test/articles/123456789?ref=123456789&topic=guide',
+      'https://example.test/articles/123456789#guide-123456789',
+      'https://123456789.example.test/guide',
+      'https://example.test/not-articles/123456789',
+      'https://example.test/articles/123456789-extra',
+      'https://example.test/guide?article-id=123456789',
       'https://example.test/guide#token=secret',
       'https://example.test/guide#user/PRIVATE-NICKNAME',
       `https://example.test/articles/${encodeLayers('ordinary-public-guide:', 9)}`
@@ -597,6 +605,31 @@ describe('GuideResearchCache', () => {
         }
       })
     ).resolves.toBeDefined();
+  });
+
+  it('rejects long decimal identifiers across every free-text field', async () => {
+    const filePath = await makeCachePath();
+    const cache = createCacheAt(filePath, { now: () => START });
+    const freeTextFields = [
+      'match.summary',
+      'citation.title',
+      'applicability.characterNames',
+      'applicability.scenarioTags',
+      'applicability.buildSignals',
+      'conflicts'
+    ] as const;
+
+    for (const [index, field] of freeTextFields.entries()) {
+      await expect(
+        cache.put({
+          task: task({ key: `long-number-${index}` }),
+          knowledgeVersion: 'knowledge-v4',
+          value: withFreeTextAt(value(`long-number-${index}`), field, '这份攻略适用于 123456789')
+        }),
+        `${field} accepted a long decimal identifier`
+      ).rejects.toThrow();
+    }
+    await expect(fs.stat(filePath)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('parses and clones on put/get so callers cannot mutate cached values', async () => {

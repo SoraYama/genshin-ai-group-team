@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import type { SanitizedResearchTask } from './guide-research-contract.js';
-import { privacySafeResearchText } from './research-privacy.js';
+import { privacySafeResearchText, privacySafeResearchUrl } from './research-privacy.js';
 
 const boundedTextSchema = z.string().trim().min(1).max(700);
 const boundedListTextSchema = z.string().trim().min(1).max(160);
@@ -67,7 +67,7 @@ function sanitizeProviderCandidate(candidate: ResearchCandidate): ResearchCandid
     summary === undefined ||
     title === undefined ||
     timelineClue === undefined ||
-    privacySafeResearchText(candidate.source.url) === undefined ||
+    privacySafeResearchUrl(candidate.source.url) === undefined ||
     conflicts.some((conflict) => conflict === undefined)
   ) {
     return undefined;

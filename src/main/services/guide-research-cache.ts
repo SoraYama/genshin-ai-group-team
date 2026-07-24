@@ -7,9 +7,9 @@ import { z } from 'zod';
 import { ephemeralGuideMatchSchema, sourceCitationSchema } from '../../shared/advisor-knowledge.js';
 import { guideResearchTaskSchema, type GuideResearchTask } from './knowledge-coverage-gate.js';
 import {
-  canonicalizeResearchPrivacyText,
-  isSensitiveResearchCanonicalText,
-  isSensitiveResearchFreeText
+  isSensitiveResearchFreeText,
+  isSensitiveResearchIdentifier,
+  privacySafeResearchUrl
 } from './research-privacy.js';
 
 export const GUIDE_RESEARCH_CACHE_FILENAME = 'guide-research.json';
@@ -1069,48 +1069,30 @@ function addDuplicateIssues(
 }
 
 function containsForbiddenSensitiveText(value: EphemeralGuideCacheValue): boolean {
+  const identifiers = [
+    ...value.matches.flatMap(({ id, subjectId }) => [id, subjectId]),
+    ...value.citations.flatMap(({ id, sourceId }) => [id, sourceId])
+  ];
   const privateText = [
-    ...value.matches.flatMap(({ id, subjectId, summary }) => [id, subjectId, summary]),
-    ...value.citations.flatMap(({ id, sourceId, title }) => [id, sourceId, title]),
+    ...value.matches.map(({ summary }) => summary),
+    ...value.citations.map(({ title }) => title),
     ...value.applicability.characterNames,
     ...value.applicability.scenarioTags,
     ...value.applicability.buildSignals,
     ...value.conflicts
   ];
-  if (privateText.some(isSensitiveResearchFreeText)) return true;
-  return value.citations.some(({ url }) => {
-    const parsed = new URL(url);
-    if (parsed.username.length > 0 || parsed.password.length > 0) return true;
-    if (
-      Array.from(parsed.searchParams.entries()).some(([key, parameterValue]) => {
-        const canonicalKey = canonicalizeResearchPrivacyText(key);
-        const canonicalValue = canonicalizeResearchPrivacyText(parameterValue);
-        return (
-          canonicalKey === undefined ||
-          canonicalValue === undefined ||
-          isSensitiveResearchCanonicalText(canonicalKey) ||
-          isSensitiveResearchCanonicalText(canonicalValue) ||
-          /^(?:uid|user|users|account|player|profile)(?:[-_]?id)?$/iu.test(canonicalKey)
-        );
-      })
-    ) {
-      return true;
-    }
-    const decodedPath = canonicalizeResearchPrivacyText(parsed.pathname);
-    if (decodedPath === undefined) return true;
-    if (
-      isSensitiveResearchCanonicalText(decodedPath) ||
-      /\/(?:uid|user|users|account|player|profile)(?:\/|$)/iu.test(decodedPath)
-    ) {
-      return true;
-    }
-    const decodedFragment = canonicalizeResearchPrivacyText(parsed.hash.slice(1));
-    if (decodedFragment === undefined) return true;
-    return (
-      isSensitiveResearchCanonicalText(decodedFragment) ||
-      /(?:^|[/#&])(?:uid|user|users|account|player|profile)(?:[=/:]|$)/iu.test(decodedFragment)
-    );
-  });
+  return (
+    identifiers.some(isSensitiveResearchIdentifier) ||
+    privateText.some(isSensitiveResearchFreeText) ||
+    value.citations.some(({ url }) => {
+      const parsed = new URL(url);
+      return (
+        parsed.username.length > 0 ||
+        parsed.password.length > 0 ||
+        privacySafeResearchUrl(url) === undefined
+      );
+    })
+  );
 }
 
 function hasErrorCode(error: unknown, code: string): boolean {

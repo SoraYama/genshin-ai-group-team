@@ -2,7 +2,7 @@ import type { WebSearchOutput } from '@anthropic-ai/claude-agent-sdk/sdk-tools';
 import { z } from 'zod';
 
 import type { AgentSdkRunOptions } from './agent-sdk-adapter.js';
-import { privacySafeResearchText } from './research-privacy.js';
+import { privacySafeResearchText, privacySafeResearchUrl } from './research-privacy.js';
 
 export const AGENT_TURN_RAW_SUMMARY_MAX_MESSAGES = 64;
 export const AGENT_TURN_RAW_SUMMARY_PREVIEW_MAX_CHARS = 500;
@@ -64,7 +64,7 @@ export interface ToolAudit {
   round: 'compose' | 'repair' | 'single';
 }
 
-export type WebSearchEvidenceStatus = 'resolved' | 'error' | 'unresolved' | 'invalid';
+export type WebSearchEvidenceStatus = 'resolved' | 'error' | 'unresolved' | 'invalid' | 'duplicate';
 
 export interface WebSearchEvidenceAttempt {
   toolUseId: string;
@@ -140,6 +140,7 @@ export async function runAuditedAgentTurn(options: {
   const toolsById = new Map<string, ToolAudit[]>();
   const webSearchById = new Map<string, WebSearchEvidenceAttempt>();
   const webSearchAttempts: WebSearchEvidenceAttempt[] = [];
+  const toolResultIds = new Set<string>();
   let webSearchEvidenceTruncated = false;
   let usage: AgentUsage = { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 };
   const rawMessagesSummary: RawAgentMessagesSummary = {
@@ -210,7 +211,7 @@ export async function runAuditedAgentTurn(options: {
             const audit: ToolAudit = {
               id: block['id'],
               name: block['name'],
-              input: isRecord(block['input']) ? block['input'] : {},
+              input: isRecord(block['input']) ? { ...block['input'] } : {},
               succeeded: false,
               correlationId: options.auditContext?.correlationId ?? 'unscoped',
               round: options.auditContext?.round ?? 'single'
@@ -227,12 +228,22 @@ export async function runAuditedAgentTurn(options: {
                   : undefined;
               if (webSearchAttempts.length >= AGENT_TURN_WEB_SEARCH_EVIDENCE_MAX_ATTEMPTS) {
                 webSearchEvidenceTruncated = true;
-              } else if (id === undefined || query === undefined || webSearchById.has(id)) {
-                webSearchAttempts.push({
+              } else if (
+                id === undefined ||
+                query === undefined ||
+                webSearchById.has(id) ||
+                toolResultIds.has(id)
+              ) {
+                const evidence: WebSearchEvidenceAttempt = {
                   toolUseId: id ?? 'invalid',
-                  status: 'invalid',
+                  ...(query === undefined ? {} : { query }),
+                  status: id !== undefined && toolResultIds.has(id) ? 'duplicate' : 'invalid',
                   urls: []
-                });
+                };
+                webSearchAttempts.push(evidence);
+                if (id !== undefined && !webSearchById.has(id)) {
+                  webSearchById.set(id, evidence);
+                }
               } else {
                 const evidence: WebSearchEvidenceAttempt = {
                   toolUseId: id,
@@ -256,12 +267,18 @@ export async function runAuditedAgentTurn(options: {
             block['type'] === 'tool_result' &&
             typeof block['tool_use_id'] === 'string'
           ) {
+            const toolUseId = block['tool_use_id'];
+            const duplicate = toolResultIds.has(toolUseId);
+            toolResultIds.add(toolUseId);
             toolsById
-              .get(block['tool_use_id'])
-              ?.forEach((use) => (use.succeeded = block['is_error'] !== true));
-            const search = webSearchById.get(block['tool_use_id']);
+              .get(toolUseId)
+              ?.forEach((use) => (use.succeeded = !duplicate && block['is_error'] !== true));
+            const search = webSearchById.get(toolUseId);
             if (search) {
-              if (block['is_error'] === true) {
+              if (duplicate) {
+                search.status = 'duplicate';
+                search.urls = [];
+              } else if (block['is_error'] === true) {
                 search.status = 'error';
                 search.urls = [];
               } else {
@@ -407,7 +424,7 @@ function parseWebSearchUrls(
     if (typeof result === 'string') continue;
     if (result.tool_use_id !== expected.toolUseId) return undefined;
     for (const content of result.content) {
-      if (privacySafeResearchText(content.url) === undefined) return undefined;
+      if (privacySafeResearchUrl(content.url) === undefined) return undefined;
       const normalizedUrl = normalizeResearchUrl(content.url);
       if (normalizedUrl === undefined) return undefined;
       urls.push(normalizedUrl);

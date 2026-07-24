@@ -515,6 +515,86 @@ describe('buildAgentSdkOptions', () => {
     });
   });
 
+  it('charges replay mismatches against the search budget before returning a decision', async () => {
+    const gate = createResearchToolGate({
+      maxSearches: 3,
+      allowedQueries: [RESEARCH_QUERY]
+    });
+    const signal = new AbortController().signal;
+    await expect(
+      gate(preToolInput('WebSearch', 'budgeted-replay', { query: RESEARCH_QUERY }), 'call-1', {
+        signal
+      })
+    ).resolves.toMatchObject({
+      hookSpecificOutput: { permissionDecision: 'allow' }
+    });
+
+    for (const [index, query] of ['UID 123456789', '原神 纳西妲 配队 攻略'].entries()) {
+      await expect(
+        gate(preToolInput('WebSearch', 'budgeted-replay', { query }), `call-${index + 2}`, {
+          signal
+        })
+      ).resolves.toMatchObject({
+        hookSpecificOutput: {
+          permissionDecision: 'deny',
+          permissionDecisionReason: 'SEARCH_TOOL_REPLAY_MISMATCH'
+        }
+      });
+    }
+    await expect(
+      gate(
+        preToolInput('WebSearch', 'budgeted-replay', { query: '原神 深渊 配队 攻略' }),
+        'call-4',
+        { signal }
+      )
+    ).resolves.toMatchObject({
+      hookSpecificOutput: {
+        permissionDecision: 'deny',
+        permissionDecisionReason: 'SEARCH_BUDGET_EXCEEDED'
+      }
+    });
+    await expect(
+      gate(preToolInput('WebSearch', 'new-after-replays', { query: RESEARCH_QUERY }), 'call-5', {
+        signal
+      })
+    ).resolves.toMatchObject({
+      hookSpecificOutput: {
+        permissionDecision: 'deny',
+        permissionDecisionReason: 'SEARCH_BUDGET_EXCEEDED'
+      }
+    });
+  });
+
+  it.each([
+    ['whitespace-normalized key', { ' query ': RESEARCH_QUERY }],
+    ['trimmed value', { query: ` ${RESEARCH_QUERY} ` }],
+    ['NFKC-normalized value', { query: '原神 雷电将军 配队 攻略 Ａ' }]
+  ])('does not treat a %s as an exact replay', async (_label, replayInput) => {
+    const canonicalQuery =
+      _label === 'NFKC-normalized value' ? '原神 雷电将军 配队 攻略 A' : RESEARCH_QUERY;
+    const gate = createResearchToolGate({
+      maxSearches: 3,
+      allowedQueries: [canonicalQuery]
+    });
+    const signal = new AbortController().signal;
+    await expect(
+      gate(preToolInput('WebSearch', 'strict-replay', { query: canonicalQuery }), 'call-1', {
+        signal
+      })
+    ).resolves.toMatchObject({
+      hookSpecificOutput: { permissionDecision: 'allow' }
+    });
+
+    await expect(
+      gate(preToolInput('WebSearch', 'strict-replay', replayInput), 'call-2', { signal })
+    ).resolves.toMatchObject({
+      hookSpecificOutput: {
+        permissionDecision: 'deny',
+        permissionDecisionReason: 'SEARCH_TOOL_REPLAY_MISMATCH'
+      }
+    });
+  });
+
   it('reserves a tool-use ID after an uncanonicalizable payload fails closed', async () => {
     const gate = createResearchToolGate({
       maxSearches: 3,

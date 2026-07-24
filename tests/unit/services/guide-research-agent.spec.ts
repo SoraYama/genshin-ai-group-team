@@ -104,6 +104,9 @@ interface SdkWebSearchTurnOptions {
   toolUseResultBySearch?: readonly unknown[];
   additionalToolNames?: readonly string[];
   prependedCollidingToolName?: string;
+  toolResultBeforeSearch?: boolean;
+  extraToolResultStatuses?: ReadonlyArray<'success' | 'error'>;
+  invalidFirstResult?: boolean;
 }
 
 function successRunner(
@@ -129,6 +132,10 @@ function sdkWebSearchTurn(
   const toolName = options.toolName ?? 'WebSearch';
   const searchCount = options.searchCount ?? 1;
   const messages: unknown[] = [];
+  const firstQuery = options.query ?? queries[0] ?? '原神 配队 攻略';
+  if (options.toolResultBeforeSearch === true) {
+    messages.push(sdkSearchToolResultMessage('search-1', firstQuery, 'success'));
+  }
   if (options.prependedCollidingToolName !== undefined) {
     messages.push({
       type: 'assistant',
@@ -187,20 +194,27 @@ function sdkWebSearchTurn(
           options.toolUseResultBySearch?.[index] ??
           (options.status === 'error'
             ? undefined
-            : {
-                query: executedQuery,
-                results: [
-                  {
-                    tool_use_id: id,
-                    content: resultUrls.map((url, urlIndex) => ({
-                      title: `Search result ${urlIndex + 1}`,
-                      url
-                    }))
-                  }
-                ],
-                durationSeconds: 0.2,
-                searchCount: 1
-              }),
+            : options.invalidFirstResult === true
+              ? {
+                  query: executedQuery,
+                  results: ['commentary without URL'],
+                  durationSeconds: 0.2,
+                  searchCount: 1
+                }
+              : {
+                  query: executedQuery,
+                  results: [
+                    {
+                      tool_use_id: id,
+                      content: resultUrls.map((url, urlIndex) => ({
+                        title: `Search result ${urlIndex + 1}`,
+                        url
+                      }))
+                    }
+                  ],
+                  durationSeconds: 0.2,
+                  searchCount: 1
+                }),
         message: {
           content: [
             {
@@ -214,6 +228,9 @@ function sdkWebSearchTurn(
       });
     }
   }
+  options.extraToolResultStatuses?.forEach((status) => {
+    messages.push(sdkSearchToolResultMessage('search-1', firstQuery, status));
+  });
   options.additionalToolNames?.forEach((name, index) => {
     const id = `mixed-tool-${index + 1}`;
     messages.push({
@@ -240,6 +257,46 @@ function sdkWebSearchTurn(
   return messages;
 }
 
+function sdkSearchToolResultMessage(
+  id: string,
+  query: string,
+  status: 'success' | 'error'
+): unknown {
+  return {
+    type: 'user',
+    ...(status === 'success'
+      ? {
+          tool_use_result: {
+            query,
+            results: [
+              {
+                tool_use_id: id,
+                content: [
+                  {
+                    title: 'Duplicate search result',
+                    url: 'https://keqingmains.com/q/raiden-quickguide/'
+                  }
+                ]
+              }
+            ],
+            durationSeconds: 0.2,
+            searchCount: 1
+          }
+        }
+      : {}),
+    message: {
+      content: [
+        {
+          type: 'tool_result',
+          tool_use_id: id,
+          is_error: status === 'error',
+          content: status === 'error' ? 'search failed' : 'search resolved'
+        }
+      ]
+    }
+  };
+}
+
 function sdkOptions(): AgentSdkRunOptions {
   return {
     apiKey: 'test-key',
@@ -260,6 +317,12 @@ function sourceRegistry() {
       ]
     })
   };
+}
+
+function encodeLayers(value: string, count: number): string {
+  let encoded = value;
+  for (let index = 0; index < count; index += 1) encoded = encodeURIComponent(encoded);
+  return encoded;
 }
 
 function cache(
@@ -508,6 +571,42 @@ describe('GuideResearchAgent', () => {
       expect(result.entries).toHaveLength(1);
     }
   );
+
+  it.each([
+    ['tool result before tool use', { toolResultBeforeSearch: true }],
+    ['duplicate success', { extraToolResultStatuses: ['success'] as const }],
+    [
+      'error then success',
+      { status: 'error' as const, extraToolResultStatuses: ['success'] as const }
+    ],
+    ['success then error', { extraToolResultStatuses: ['error'] as const }],
+    [
+      'invalid then success',
+      { invalidFirstResult: true, extraToolResultStatuses: ['success'] as const }
+    ]
+  ])('does not cache provider JSON after %s', async (_label, turnOptions) => {
+    const researchTask = task(`guide-duplicate-result-${_label.replaceAll(' ', '-')}`);
+    const researchCache = cache();
+    const agent = new GuideResearchAgent({
+      runner: successRunner(modelOutput('ref-1'), undefined, turnOptions),
+      cache: researchCache,
+      sourceRegistry: sourceRegistry(),
+      sdkOptions: sdkOptions(),
+      canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
+      now: () => NOW
+    });
+
+    const result = await agent.research({
+      tasks: [researchTask],
+      knowledgeVersion: 'knowledge-v2'
+    });
+
+    expect(researchCache.put).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      entries: [],
+      gaps: [{ taskKey: researchTask.key, code: 'SEARCH_OUTPUT_INVALID' }]
+    });
+  });
 
   it.each(['Read', 'Bash', 'mcp__other__lookup'])(
     'rejects resolved WebSearch evidence mixed with denied %s tool use',
@@ -1243,6 +1342,7 @@ describe('GuideResearchAgent', () => {
 
   it.each([
     ['ordinary build prose', '班尼特提供攻击力加成，生命值提升取决于治疗角色。'],
+    ['ordinary eight-digit number', '公开攻略编号 12345678'],
     ['one numeric stat', '攻击力: 2000'],
     ['two distinct numeric stats', '攻击力: 2000，暴击率: 70%']
   ])('accepts privacy-safe provider %s', async (_label, summary) => {
@@ -1268,13 +1368,14 @@ describe('GuideResearchAgent', () => {
   });
 
   it.each([
-    ['summary', { summary: '私人账号 123456789 的配队结论' }],
+    ['summary', { summary: '这份攻略适用于 123456789' }],
+    ['encoded summary', { summary: encodeLayers('这份攻略适用于 123456789', 4) }],
     [
       'source title',
       {
         source: {
           url: 'https://keqingmains.com/q/raiden-quickguide/',
-          title: '账号 ١٢٣٤\u200b٥٦٧٨٩ 的攻略',
+          title: 'Guide post for ١٢٣٤\u200b٥٦٧٨٩',
           timelineClue: '页面时间线索存在'
         }
       }
@@ -1285,10 +1386,11 @@ describe('GuideResearchAgent', () => {
         source: {
           url: 'https://keqingmains.com/q/raiden-quickguide/',
           title: 'Boundary Guide',
-          timelineClue: 'Authorization: Bearer private-token'
+          timelineClue: '攻略更新于编号 １２３４５６７８９'
         }
       }
     ],
+    ['long number in conflicts', { conflicts: ['post build 123456789'] }],
     [
       'full panel in conflicts',
       { conflicts: ['攻击力: 2000，生命值: 25000，暴击率: 70% 时有冲突'] }
@@ -1375,20 +1477,50 @@ describe('GuideResearchAgent', () => {
     expect(result.entries[0]?.value.citations[0]?.url).toBe(encodedUrl);
   });
 
-  it('does not write rejected provider output through the real guide cache', async () => {
+  it('allows a long article ID only as an exact article URL path segment', async () => {
+    const researchTask = task('guide-safe-article-id-url');
+    const articleUrl = 'https://keqingmains.com/articles/123456789';
+    const agent = new GuideResearchAgent({
+      runner: successRunner(
+        modelOutput('ref-1', {
+          source: {
+            url: articleUrl,
+            title: 'Raiden Guide',
+            timelineClue: '页面时间线索存在'
+          }
+        }),
+        undefined,
+        { resultUrlsBySearch: [[articleUrl]] }
+      ),
+      cache: cache(),
+      sourceRegistry: sourceRegistry(),
+      sdkOptions: sdkOptions(),
+      canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
+      now: () => NOW
+    });
+
+    const result = await agent.research({
+      tasks: [researchTask],
+      knowledgeVersion: 'knowledge-v2'
+    });
+
+    expect(result.entries[0]?.value.citations[0]?.url).toBe(articleUrl);
+  });
+
+  it.each([
+    ['guide prose', '这份攻略适用于 123456789'],
+    ['Unicode decimal digits', '这份攻略适用于 １２３４５６７８９'],
+    ['encoded guide prose', encodeLayers('这份攻略适用于 123456789', 4)]
+  ])('does not write rejected provider %s through the real guide cache', async (label, summary) => {
     const userDataDirectory = await fs.mkdtemp(path.join(tmpdir(), 'guide-research-agent-'));
     try {
-      const researchTask = task('guide-real-cache-sensitive-output');
+      const researchTask = task(`guide-real-cache-${label.replaceAll(' ', '-')}`);
       const researchCache = new GuideResearchCache({
         userDataDirectory,
         now: () => NOW
       });
       const agent = new GuideResearchAgent({
-        runner: successRunner(
-          modelOutput('ref-1', {
-            summary: '私人账号 123456789 的配队结论'
-          })
-        ),
+        runner: successRunner(modelOutput('ref-1', { summary })),
         cache: researchCache,
         sourceRegistry: sourceRegistry(),
         sdkOptions: sdkOptions(),
@@ -1402,6 +1534,45 @@ describe('GuideResearchAgent', () => {
       });
 
       expect(result.entries).toEqual([]);
+      await expect(
+        researchCache.get({ task: researchTask, knowledgeVersion: 'knowledge-v2' })
+      ).resolves.toBeUndefined();
+      await expect(fs.readFile(researchCache.filePath, 'utf8')).rejects.toMatchObject({
+        code: 'ENOENT'
+      });
+    } finally {
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it('does not write duplicate WebSearch results through the real guide cache', async () => {
+    const userDataDirectory = await fs.mkdtemp(path.join(tmpdir(), 'guide-research-duplicate-'));
+    try {
+      const researchTask = task('guide-real-cache-duplicate-result');
+      const researchCache = new GuideResearchCache({
+        userDataDirectory,
+        now: () => NOW
+      });
+      const agent = new GuideResearchAgent({
+        runner: successRunner(modelOutput('ref-1'), undefined, {
+          extraToolResultStatuses: ['success']
+        }),
+        cache: researchCache,
+        sourceRegistry: sourceRegistry(),
+        sdkOptions: sdkOptions(),
+        canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
+        now: () => NOW
+      });
+
+      const result = await agent.research({
+        tasks: [researchTask],
+        knowledgeVersion: 'knowledge-v2'
+      });
+
+      expect(result).toEqual({
+        entries: [],
+        gaps: [{ taskKey: researchTask.key, code: 'SEARCH_OUTPUT_INVALID' }]
+      });
       await expect(
         researchCache.get({ task: researchTask, knowledgeVersion: 'knowledge-v2' })
       ).resolves.toBeUndefined();

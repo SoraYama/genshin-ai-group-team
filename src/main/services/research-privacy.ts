@@ -2,8 +2,13 @@ const RESEARCH_PRIVACY_TEXT_MAX_LENGTH = 16_384;
 const RESEARCH_PRIVACY_DECODE_MAX_ROUNDS = 8;
 const ENCODED_OCTET_PATTERN = /%[0-9a-f]{2}/iu;
 const LONG_IDENTITY_NUMBER_PATTERN = /\p{Decimal_Number}{9,}/u;
-const PUBLIC_ARTICLE_NUMBER_CONTEXT =
-  /(?:公开\s*)?(?:攻略|文章)|(?:^|[^\p{L}\p{N}_])(?:guide|article|articles|post|posts)(?:[^\p{L}\p{N}_]|$)/iu;
+const PRIVATE_URL_ID_KEY_PATTERN = /^(?:uid|user|users|account|player|profile)(?:[-_]?id)?$/iu;
+const PRIVATE_URL_PATH_PATTERN = /\/(?:uid|user|users|account|player|profile)(?:\/|$)/iu;
+const PRIVATE_URL_FRAGMENT_PATTERN =
+  /(?:^|[/#&])(?:uid|user|users|account|player|profile)(?:[=/:]|$)/iu;
+const GENERATED_RESEARCH_IDENTIFIER_PATTERN =
+  /^(?:web-(?:match|citation)-|guide-subject-)[0-9a-f]{24}$/u;
+const EXPLICIT_ARTICLE_IDENTIFIER_PATTERN = /^article-id[:_-]\p{Decimal_Number}{9,}$/iu;
 
 const SENSITIVE_CANONICAL_PATTERNS = [
   /private[-_ ]nickname/iu,
@@ -27,10 +32,51 @@ export function privacySafeResearchText(value: string): string | undefined {
   const canonical = canonicalizeResearchPrivacyText(value);
   return canonical === undefined ||
     hasAsciiControl(canonical) ||
-    hasUnlabeledIdentityNumber(canonical) ||
     isSensitiveResearchCanonicalText(canonical)
     ? undefined
     : canonical;
+}
+
+export function privacySafeResearchUrl(value: string): string | undefined {
+  if (value.length === 0 || value.length > 2_048) return undefined;
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return undefined;
+  }
+  if (isSensitiveResearchCanonicalText(parsed.hostname)) return undefined;
+  for (const [key, parameterValue] of parsed.searchParams.entries()) {
+    const canonicalKey = canonicalizeResearchPrivacyText(key);
+    const canonicalValue = canonicalizeResearchPrivacyText(parameterValue);
+    if (
+      canonicalKey === undefined ||
+      canonicalValue === undefined ||
+      isSensitiveResearchCanonicalText(canonicalKey) ||
+      isSensitiveResearchCanonicalText(canonicalValue) ||
+      PRIVATE_URL_ID_KEY_PATTERN.test(canonicalKey)
+    ) {
+      return undefined;
+    }
+  }
+  const canonicalPath = canonicalizeResearchPrivacyText(parsed.pathname);
+  if (
+    canonicalPath === undefined ||
+    hasSensitiveResearchMaterialWithoutLongNumber(canonicalPath) ||
+    hasUnsafeUrlPathLongNumber(canonicalPath) ||
+    PRIVATE_URL_PATH_PATTERN.test(canonicalPath)
+  ) {
+    return undefined;
+  }
+  const canonicalFragment = canonicalizeResearchPrivacyText(parsed.hash.slice(1));
+  if (
+    canonicalFragment === undefined ||
+    isSensitiveResearchCanonicalText(canonicalFragment) ||
+    PRIVATE_URL_FRAGMENT_PATTERN.test(canonicalFragment)
+  ) {
+    return undefined;
+  }
+  return value.trim();
 }
 
 export function canonicalizeResearchPrivacyText(value: string): string | undefined {
@@ -57,12 +103,40 @@ export function isSensitiveResearchFreeText(value: string): boolean {
 }
 
 export function isSensitiveResearchCanonicalText(value: string): boolean {
-  if (SENSITIVE_CANONICAL_PATTERNS.some((pattern) => pattern.test(value))) return true;
-  return hasFullPanelStatShape(value);
+  return (
+    hasSensitiveResearchMaterialWithoutLongNumber(value) || LONG_IDENTITY_NUMBER_PATTERN.test(value)
+  );
 }
 
-function hasUnlabeledIdentityNumber(value: string): boolean {
-  return LONG_IDENTITY_NUMBER_PATTERN.test(value) && !PUBLIC_ARTICLE_NUMBER_CONTEXT.test(value);
+export function isSensitiveResearchIdentifier(value: string): boolean {
+  const canonical = canonicalizeResearchPrivacyText(value);
+  if (canonical === undefined || hasSensitiveResearchMaterialWithoutLongNumber(canonical)) {
+    return true;
+  }
+  return (
+    LONG_IDENTITY_NUMBER_PATTERN.test(canonical) &&
+    !GENERATED_RESEARCH_IDENTIFIER_PATTERN.test(canonical) &&
+    !EXPLICIT_ARTICLE_IDENTIFIER_PATTERN.test(canonical)
+  );
+}
+
+function hasSensitiveResearchMaterialWithoutLongNumber(value: string): boolean {
+  return (
+    SENSITIVE_CANONICAL_PATTERNS.some((pattern) => pattern.test(value)) ||
+    hasFullPanelStatShape(value)
+  );
+}
+
+function hasUnsafeUrlPathLongNumber(value: string): boolean {
+  for (const match of value.matchAll(/\p{Decimal_Number}{9,}/gu)) {
+    const index = match.index;
+    const number = match[0];
+    if (index === undefined || number === undefined) return true;
+    const before = value.slice(0, index);
+    const after = value.slice(index + number.length);
+    if (!/\/articles?\/$/iu.test(before) || !/^(?:\/|$)/u.test(after)) return true;
+  }
+  return false;
 }
 
 function hasFullPanelStatShape(value: string): boolean {

@@ -261,6 +261,45 @@ describe('runAuditedAgentTurn', () => {
     }
   );
 
+  it.each([
+    ['tool result before tool use', ['success', 'tool'] as const],
+    ['duplicate success', ['tool', 'success', 'success'] as const],
+    ['error then success', ['tool', 'error', 'success'] as const],
+    ['success then error', ['tool', 'success', 'error'] as const],
+    ['invalid then success', ['tool', 'invalid', 'success'] as const]
+  ])('permanently invalidates WebSearch evidence after %s', async (_label, sequence) => {
+    const runner: AuditedAgentRunner = {
+      async *run() {
+        for (const item of sequence) yield webSearchSequenceMessage(item);
+        yield { type: 'result', subtype: 'success', result: '{}', usage: {} };
+      }
+    };
+
+    const result = await runAuditedAgentTurn({
+      runner,
+      prompt: '{}',
+      sdkOptions: sdkOptions(),
+      systemPrompt: 'test',
+      normalizeResearchUrl: trustedResearchUrl
+    });
+
+    expect(result.webSearchEvidence.attempts).toEqual([
+      {
+        toolUseId: 'search-duplicate',
+        query: '原神 雷电将军 配队 攻略',
+        status: 'duplicate',
+        urls: []
+      }
+    ]);
+    expect(result.tools).toEqual([
+      expect.objectContaining({
+        id: 'search-duplicate',
+        name: 'WebSearch',
+        succeeded: false
+      })
+    ]);
+  });
+
   it('bounds WebSearch evidence and marks overflow instead of retaining extra attempts', async () => {
     const runner: AuditedAgentRunner = {
       async *run() {
@@ -784,6 +823,67 @@ function sdkWebSearchRunner(toolUseResult: unknown): AuditedAgentRunner {
         }
       };
       yield { type: 'result', subtype: 'success', result: '{}', usage: {} };
+    }
+  };
+}
+
+function webSearchSequenceMessage(
+  kind: 'tool' | 'success' | 'error' | 'invalid'
+): Record<string, unknown> {
+  if (kind === 'tool') {
+    return {
+      type: 'assistant',
+      message: {
+        content: [
+          {
+            type: 'tool_use',
+            id: 'search-duplicate',
+            name: 'WebSearch',
+            input: { query: '原神 雷电将军 配队 攻略' }
+          }
+        ]
+      }
+    };
+  }
+  return {
+    type: 'user',
+    ...(kind === 'error'
+      ? {}
+      : {
+          tool_use_result:
+            kind === 'invalid'
+              ? {
+                  query: '原神 雷电将军 配队 攻略',
+                  results: ['commentary without URL'],
+                  durationSeconds: 0.2,
+                  searchCount: 1
+                }
+              : {
+                  query: '原神 雷电将军 配队 攻略',
+                  results: [
+                    {
+                      tool_use_id: 'search-duplicate',
+                      content: [
+                        {
+                          title: 'Guide',
+                          url: 'https://keqingmains.com/q/raiden-quickguide/'
+                        }
+                      ]
+                    }
+                  ],
+                  durationSeconds: 0.2,
+                  searchCount: 1
+                }
+        }),
+    message: {
+      content: [
+        {
+          type: 'tool_result',
+          tool_use_id: 'search-duplicate',
+          is_error: kind === 'error',
+          content: 'not retained'
+        }
+      ]
     }
   };
 }

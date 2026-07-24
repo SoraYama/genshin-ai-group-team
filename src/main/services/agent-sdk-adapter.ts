@@ -9,7 +9,7 @@ import {
 } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { validateCustomHeaders } from '../../shared/custom-headers.js';
-import { canonicalizeResearchPrivacyText, privacySafeResearchText } from './research-privacy.js';
+import { privacySafeResearchText } from './research-privacy.js';
 
 const DENIED_NATIVE_TOOLS = [
   'Agent',
@@ -112,14 +112,21 @@ export function createResearchToolGate(input: {
     if (hookInput.hook_event_name !== 'PreToolUse') return { continue: true };
     const toolUseId = validToolUseId(hookInput.tool_use_id);
     const toolName = normalizedToolName(hookInput.tool_name);
-    const fingerprint =
-      researchToolPayloadFingerprint(toolName, hookInput.tool_input) ??
-      INVALID_RESEARCH_TOOL_FINGERPRINT;
+    const exactFingerprint = researchToolPayloadFingerprint(toolName, hookInput.tool_input);
+    const fingerprint = exactFingerprint ?? INVALID_RESEARCH_TOOL_FINGERPRINT;
     if (toolUseId !== undefined) {
       const replay = decisionsByToolUseId.get(toolUseId);
       if (replay !== undefined) {
-        return replay.fingerprint === fingerprint
-          ? replay.decision
+        if (
+          exactFingerprint !== undefined &&
+          replay.fingerprint !== INVALID_RESEARCH_TOOL_FINGERPRINT &&
+          replay.fingerprint === exactFingerprint
+        ) {
+          return replay.decision;
+        }
+        searchAttempts += 1;
+        return searchAttempts > input.maxSearches
+          ? denyResearchTool('SEARCH_BUDGET_EXCEEDED')
           : denyResearchTool('SEARCH_TOOL_REPLAY_MISMATCH');
       }
     }
@@ -179,11 +186,7 @@ function validToolUseId(value: unknown): string | undefined {
 }
 
 function normalizedToolName(value: unknown): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  const normalized = normalizeToolPayloadString(value);
-  return normalized !== undefined && normalized.length > 0 && normalized.length <= 80
-    ? normalized
-    : undefined;
+  return typeof value === 'string' && value.length > 0 && value.length <= 80 ? value : undefined;
 }
 
 function researchToolPayloadFingerprint(
@@ -210,10 +213,7 @@ function canonicalToolPayload(
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   if (typeof value === 'number') return Number.isFinite(value) ? JSON.stringify(value) : undefined;
   if (typeof value === 'string') {
-    const normalized = normalizeToolPayloadString(value);
-    return normalized !== undefined && normalized.length <= 2_048
-      ? JSON.stringify(normalized)
-      : undefined;
+    return value.length <= 2_048 ? JSON.stringify(value) : undefined;
   }
   if (Array.isArray(value)) {
     if (value.length > 64) return undefined;
@@ -223,29 +223,13 @@ function canonicalToolPayload(
   if (typeof value !== 'object' || value === null) return undefined;
   const entries = Object.entries(value);
   if (entries.length > 64) return undefined;
-  const normalizedEntries = entries.map(([key, child]) => {
-    const normalizedKey = normalizeToolPayloadString(key);
-    return normalizedKey === undefined ? undefined : { key: normalizedKey, child };
-  });
-  if (
-    normalizedEntries.some(
-      (entry) => entry === undefined || entry.key.length === 0 || entry.key.length > 128
-    )
-  ) {
-    return undefined;
-  }
-  const validEntries = normalizedEntries as Array<{ key: string; child: unknown }>;
-  if (new Set(validEntries.map(({ key }) => key)).size !== validEntries.length) return undefined;
-  validEntries.sort((left, right) => (left.key < right.key ? -1 : left.key > right.key ? 1 : 0));
-  const members = validEntries.map(({ key, child }) => {
+  if (entries.some(([key]) => key.length === 0 || key.length > 128)) return undefined;
+  entries.sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
+  const members = entries.map(([key, child]) => {
     const canonicalChild = canonicalToolPayload(child, depth + 1, budget);
     return canonicalChild === undefined ? undefined : `${JSON.stringify(key)}:${canonicalChild}`;
   });
   return members.some((member) => member === undefined) ? undefined : `{${members.join(',')}}`;
-}
-
-function normalizeToolPayloadString(value: string): string | undefined {
-  return canonicalizeResearchPrivacyText(value);
 }
 
 export interface AgentSdkRunOptions {
