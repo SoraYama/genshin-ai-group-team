@@ -301,6 +301,16 @@ describe('buildAgentSdkOptions', () => {
     [{ query: '原神攻略 critRate 88.8' }, 'panel attribute'],
     [{ query: '原神攻略 U%2549D%253A123456789' }, 'repeatedly encoded UID'],
     [{ query: '原神攻略 x123456789x' }, 'UID digits adjacent to letters'],
+    [{ query: '原神攻略 ١٢٣٤٥٦٧٨٩' }, 'Arabic-Indic UID digits'],
+    [{ query: '原神攻略 ۱۲۳۴۵۶۷۸۹' }, 'Extended Arabic-Indic UID digits'],
+    [{ query: '原神攻略 ١٢٣٤\u200b٥٦٧٨٩' }, 'Unicode UID digits split by zero-width text'],
+    [
+      {
+        query:
+          '原神攻略 %25D9%25A1%25D9%25A2%25D9%25A3%25D9%25A4%25D9%25A5%25D9%25A6%25D9%25A7%25D9%25A8%25D9%25A9'
+      },
+      'repeatedly encoded Arabic-Indic UID digits'
+    ],
     [{ query: '原神攻略', extra: 'not-supported' }, 'unexpected input field']
   ])('rejects a WebSearch input containing %s (%s)', async (toolInput, _label) => {
     const gate = createResearchToolGate({ maxSearches: 3 });
@@ -315,6 +325,24 @@ describe('buildAgentSdkOptions', () => {
       hookSpecificOutput: {
         permissionDecision: 'deny',
         permissionDecisionReason: 'SEARCH_QUERY_REJECTED'
+      }
+    });
+  });
+
+  it('allows canonical research terms and a bounded non-UID article number', async () => {
+    const gate = createResearchToolGate({ maxSearches: 3 });
+
+    await expect(
+      gate(
+        preToolInput('WebSearch', 'safe-search', {
+          query: '原神 雷电将军 electro polearm single-target build-match-present article-20240725'
+        }),
+        'safe-search',
+        { signal: new AbortController().signal }
+      )
+    ).resolves.toMatchObject({
+      hookSpecificOutput: {
+        permissionDecision: 'allow'
       }
     });
   });

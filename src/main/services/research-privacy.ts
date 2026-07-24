@@ -1,5 +1,5 @@
 const SENSITIVE_RESEARCH_TEXT =
-  /(?:\buid\b|\d{9,}|昵称|cookie|authorization|api[-_ ]?key|bearer\s|ltoken|ltuid|ltmid|sk-[a-z0-9_-]+|crit(?:ical)?[-_ ]?(?:rate|dmg)|暴击(?:率|伤害)?|攻击力|生命值|防御力)/iu;
+  /(?:\buid\b|\p{Decimal_Number}{9,}|昵称|cookie|authorization|api[-_ ]?key|bearer\s|ltoken|ltuid|ltmid|sk-[a-z0-9_-]+|crit(?:ical)?[-_ ]?(?:rate|dmg)|暴击(?:率|伤害)?|攻击力|生命值|防御力)/iu;
 
 export function privacySafeResearchText(value: string): string | undefined {
   let normalized = normalizeResearchText(value);

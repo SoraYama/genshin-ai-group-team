@@ -15,7 +15,10 @@ import type { AgentSdkRunOptions } from '../../../src/main/services/agent-sdk-ad
 import { GUIDE_RESEARCH_PROMPT_V1 } from '../../../src/main/agents/research/prompt.js';
 
 const NOW = Date.parse('2026-07-25T02:00:00.000Z');
-const CANONICAL_CHARACTER_NAMES = new Set(['雷电将军', '纳西妲']);
+const CANONICAL_CHARACTER_CATALOG = [
+  { name: '雷电将军', element: 'electro' },
+  { name: '纳西妲', element: 'dendro' }
+] as const;
 
 function task(key: string, overrides: Partial<GuideResearchTask> = {}): GuideResearchTask {
   return {
@@ -188,7 +191,7 @@ describe('GuideResearchAgent', () => {
       cache: researchCache,
       sourceRegistry: sourceRegistry(),
       sdkOptions: sdkOptions(),
-      canonicalCharacterNames: CANONICAL_CHARACTER_NAMES,
+      canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
       now: () => NOW
     });
 
@@ -244,7 +247,7 @@ describe('GuideResearchAgent', () => {
       cache: researchCache,
       sourceRegistry: sourceRegistry(),
       sdkOptions: sdkOptions(),
-      canonicalCharacterNames: CANONICAL_CHARACTER_NAMES,
+      canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
       now: () => NOW
     });
 
@@ -284,7 +287,7 @@ describe('GuideResearchAgent', () => {
         cache: cache(),
         sourceRegistry: sourceRegistry(),
         sdkOptions: sdkOptions(),
-        canonicalCharacterNames: CANONICAL_CHARACTER_NAMES,
+        canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
         now: () => NOW
       });
 
@@ -302,6 +305,84 @@ describe('GuideResearchAgent', () => {
   );
 
   it.each([
+    [
+      'non-enum research reason',
+      task('guide-invalid-reason', {
+        reason: 'private-context' as never
+      })
+    ],
+    [
+      'non-enum weapon type',
+      task('guide-invalid-weapon', {
+        character: {
+          name: '雷电将军',
+          element: 'electro',
+          weaponType: 'custom-weapon' as never,
+          buildSignals: ['build-match-present']
+        }
+      })
+    ],
+    [
+      'non-taxonomy scenario tag',
+      task('guide-invalid-scenario', {
+        scenarioTags: ['player-private-scenario']
+      })
+    ],
+    [
+      'non-allowlist build signal',
+      task('guide-invalid-build-signal', {
+        character: {
+          name: '雷电将军',
+          element: 'electro',
+          weaponType: 'polearm',
+          buildSignals: ['custom-build-signal']
+        }
+      })
+    ],
+    [
+      'canonical name paired with the wrong element',
+      task('guide-wrong-element', {
+        character: {
+          name: '雷电将军',
+          element: 'pyro',
+          weaponType: 'polearm',
+          buildSignals: ['build-match-present']
+        }
+      })
+    ],
+    [
+      'nickname in element',
+      task('guide-element-nickname', {
+        character: {
+          name: '雷电将军',
+          element: '私人昵称',
+          weaponType: 'polearm',
+          buildSignals: ['build-match-present']
+        }
+      })
+    ],
+    [
+      'zero-width nickname in element',
+      task('guide-element-zero-width-nickname', {
+        character: {
+          name: '雷电将军',
+          element: '私人昵\u200b称',
+          weaponType: 'polearm',
+          buildSignals: ['build-match-present']
+        }
+      })
+    ],
+    [
+      'Unicode decimal-number sentinel in element',
+      task('guide-element-unicode-digits', {
+        character: {
+          name: '雷电将军',
+          element: '١٢٣٤٥٦٧٨٩',
+          weaponType: 'polearm',
+          buildSignals: ['build-match-present']
+        }
+      })
+    ],
     [
       'encoded UID',
       task('guide-encoded-value', {
@@ -342,7 +423,7 @@ describe('GuideResearchAgent', () => {
       cache: cache(),
       sourceRegistry: sourceRegistry(),
       sdkOptions: sdkOptions(),
-      canonicalCharacterNames: CANONICAL_CHARACTER_NAMES,
+      canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
       now: () => NOW
     });
 
@@ -353,6 +434,142 @@ describe('GuideResearchAgent', () => {
       })
     ).rejects.toMatchObject({ code: 'RESEARCH_TASK_INVALID' });
     expect(run).not.toHaveBeenCalled();
+  });
+
+  it('accepts a canonical name and exact catalog element pairing', async () => {
+    let observedPrompt = '';
+    const agent = new GuideResearchAgent({
+      runner: successRunner(modelOutput('ref-1'), (prompt) => {
+        observedPrompt = prompt;
+      }),
+      cache: cache(),
+      sourceRegistry: sourceRegistry(),
+      sdkOptions: sdkOptions(),
+      canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
+      now: () => NOW
+    });
+
+    const result = await agent.research({
+      tasks: [task('guide-canonical-pair')],
+      knowledgeVersion: 'knowledge-v2'
+    });
+
+    expect(result.entries).toHaveLength(1);
+    expect(observedPrompt).toContain('"name":"雷电将军","element":"electro"');
+  });
+
+  it('allows unknown element only when the trusted catalog has the exact unknown pairing', async () => {
+    const unknownTask = task('guide-canonical-unknown', {
+      character: {
+        name: '元素待确认角色',
+        element: 'unknown',
+        buildSignals: ['build-match-present']
+      }
+    });
+    const agent = new GuideResearchAgent({
+      runner: successRunner(
+        modelOutput('ref-1', {
+          applicability: {
+            characterNames: ['元素待确认角色'],
+            scenarioTags: ['single-target'],
+            buildSignals: ['build-match-present']
+          }
+        })
+      ),
+      cache: cache(),
+      sourceRegistry: sourceRegistry(),
+      sdkOptions: sdkOptions(),
+      canonicalCharacterCatalog: [{ name: '元素待确认角色', element: 'unknown' }],
+      now: () => NOW
+    });
+
+    const result = await agent.research({
+      tasks: [unknownTask],
+      knowledgeVersion: 'knowledge-v2'
+    });
+
+    expect(result.entries).toHaveLength(1);
+  });
+
+  it('takes an immutable identity snapshot at construction', async () => {
+    const mutableCatalog: Array<{
+      name: string;
+      element: 'electro' | 'pyro';
+    }> = [{ name: '雷电将军', element: 'electro' }];
+    const agent = new GuideResearchAgent({
+      runner: successRunner(modelOutput('ref-1')),
+      cache: cache(),
+      sourceRegistry: sourceRegistry(),
+      sdkOptions: sdkOptions(),
+      canonicalCharacterCatalog: mutableCatalog,
+      now: () => NOW
+    });
+    mutableCatalog[0]!.element = 'pyro';
+
+    const result = await agent.research({
+      tasks: [task('guide-catalog-snapshot')],
+      knowledgeVersion: 'knowledge-v2'
+    });
+
+    expect(result.entries).toHaveLength(1);
+  });
+
+  it('deduplicates identical name-element pairs from the committed catalog', async () => {
+    const travelerTask = task('guide-duplicate-traveler', {
+      character: {
+        name: '旅行者',
+        element: 'anemo',
+        weaponType: 'sword',
+        buildSignals: ['build-match-present']
+      }
+    });
+    const agent = new GuideResearchAgent({
+      runner: successRunner(
+        modelOutput('ref-1', {
+          applicability: {
+            characterNames: ['旅行者'],
+            scenarioTags: ['single-target'],
+            buildSignals: ['build-match-present']
+          }
+        })
+      ),
+      cache: cache(),
+      sourceRegistry: sourceRegistry(),
+      sdkOptions: sdkOptions(),
+      canonicalCharacterCatalog: [
+        { name: '旅行者', element: 'anemo' },
+        { name: '旅行者', element: 'anemo' }
+      ],
+      now: () => NOW
+    });
+
+    const result = await agent.research({
+      tasks: [travelerTask],
+      knowledgeVersion: 'knowledge-v2'
+    });
+
+    expect(result.entries).toHaveLength(1);
+  });
+
+  it('fails closed when one canonical name maps to conflicting elements', () => {
+    expect(
+      () =>
+        new GuideResearchAgent({
+          runner: successRunner(modelOutput('never-used')),
+          cache: cache(),
+          sourceRegistry: sourceRegistry(),
+          sdkOptions: sdkOptions(),
+          canonicalCharacterCatalog: [
+            { name: '旅行者', element: 'anemo' },
+            { name: '旅行者', element: 'geo' }
+          ],
+          now: () => NOW
+        })
+    ).toThrowError(
+      expect.objectContaining({
+        code: 'RESEARCH_TASK_INVALID'
+      })
+    );
   });
 
   it.each([
@@ -383,7 +600,7 @@ describe('GuideResearchAgent', () => {
       cache: researchCache,
       sourceRegistry: sourceRegistry(),
       sdkOptions: sdkOptions(),
-      canonicalCharacterNames: CANONICAL_CHARACTER_NAMES,
+      canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
       now: () => NOW
     });
 
@@ -421,7 +638,7 @@ describe('GuideResearchAgent', () => {
         cache: researchCache,
         sourceRegistry: sourceRegistry(),
         sdkOptions: sdkOptions(),
-        canonicalCharacterNames: CANONICAL_CHARACTER_NAMES,
+        canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
         now: () => NOW
       });
 
@@ -468,7 +685,7 @@ describe('GuideResearchAgent', () => {
       cache: researchCache,
       sourceRegistry: sourceRegistry(),
       sdkOptions: sdkOptions(),
-      canonicalCharacterNames: CANONICAL_CHARACTER_NAMES,
+      canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
       now: () => NOW
     });
 
@@ -520,7 +737,7 @@ describe('GuideResearchAgent', () => {
       cache: researchCache,
       sourceRegistry: sourceRegistry(),
       sdkOptions: sdkOptions(),
-      canonicalCharacterNames: CANONICAL_CHARACTER_NAMES,
+      canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
       now: () => NOW
     });
 
@@ -556,7 +773,7 @@ describe('GuideResearchAgent', () => {
       cache: researchCache,
       sourceRegistry: sourceRegistry(),
       sdkOptions: sdkOptions(),
-      canonicalCharacterNames: CANONICAL_CHARACTER_NAMES,
+      canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
       now: () => NOW
     });
 
@@ -581,7 +798,7 @@ describe('GuideResearchAgent', () => {
       cache: researchCache,
       sourceRegistry: sourceRegistry(),
       sdkOptions: sdkOptions(),
-      canonicalCharacterNames: CANONICAL_CHARACTER_NAMES,
+      canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
       now: () => NOW
     });
 
@@ -600,7 +817,8 @@ describe('GuideResearchAgent', () => {
     ['cookie', 'ltoken_v2=secret'],
     ['authorization', 'Bearer secret'],
     ['apiKey', 'sk-secret'],
-    ['panelStats', { critRate: 88.8 }]
+    ['panelStats', { critRate: 88.8 }],
+    ['taskRef', 'caller-controlled-ref']
   ])('rejects an input that attempts to bypass anonymity through %s', async (field, value) => {
     const runner = successRunner(modelOutput('never-used'));
     const agent = new GuideResearchAgent({
@@ -608,7 +826,7 @@ describe('GuideResearchAgent', () => {
       cache: cache(),
       sourceRegistry: sourceRegistry(),
       sdkOptions: sdkOptions(),
-      canonicalCharacterNames: CANONICAL_CHARACTER_NAMES,
+      canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
       now: () => NOW
     });
     const privateTask = { ...task('guide-private'), [field]: value };
@@ -658,7 +876,7 @@ describe('GuideResearchAgent', () => {
       cache: cache(),
       sourceRegistry: sourceRegistry(),
       sdkOptions: sdkOptions(),
-      canonicalCharacterNames: CANONICAL_CHARACTER_NAMES,
+      canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
       now: () => NOW
     });
 
@@ -683,7 +901,7 @@ describe('GuideResearchAgent', () => {
       cache: cache(),
       sourceRegistry: registry,
       sdkOptions: sdkOptions(),
-      canonicalCharacterNames: CANONICAL_CHARACTER_NAMES,
+      canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
       now: () => NOW
     });
 

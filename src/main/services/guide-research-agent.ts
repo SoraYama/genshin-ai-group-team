@@ -4,6 +4,7 @@ import { z } from 'zod';
 
 import { GUIDE_RESEARCH_PROMPT_V1 } from '../agents/research/prompt.js';
 import { scenarioMechanicTagSchema } from '../../shared/advisor-scenario-taxonomy.js';
+import { elementalTypeSchema } from '../../shared/scenario-v2.js';
 import {
   ephemeralGuideCacheValueSchema,
   type EphemeralGuideCacheValue,
@@ -21,6 +22,7 @@ import { privacySafeResearchText } from './research-privacy.js';
 const knowledgeVersionSchema = z.string().trim().min(1).max(128);
 const boundedTextSchema = z.string().trim().min(1).max(700);
 const boundedListTextSchema = z.string().trim().min(1).max(160);
+const canonicalCatalogElementSchema = elementalTypeSchema.or(z.literal('unknown'));
 const sourceRegistryResultSchema = z
   .object({
     sources: z
@@ -129,8 +131,15 @@ export interface GuideResearchAgentOptions {
   cache: Pick<GuideResearchCache, 'get' | 'put'>;
   sourceRegistry: GuideResearchSourceRegistryReader;
   sdkOptions: AgentSdkRunOptions;
-  canonicalCharacterNames: ReadonlySet<string>;
+  canonicalCharacterCatalog: readonly GuideResearchCanonicalCharacterIdentity[];
   now?: () => number;
+}
+
+export type GuideResearchCanonicalElement = z.infer<typeof elementalTypeSchema> | 'unknown';
+
+export interface GuideResearchCanonicalCharacterIdentity {
+  readonly name: string;
+  readonly element: GuideResearchCanonicalElement;
 }
 
 export interface GuideResearchEntry {
@@ -205,7 +214,7 @@ export class GuideResearchAgent {
   private readonly cache: Pick<GuideResearchCache, 'get' | 'put'>;
   private readonly sourceRegistry: GuideResearchSourceRegistryReader;
   private readonly sdkOptions: AgentSdkRunOptions;
-  private readonly canonicalCharacterNames: ReadonlySet<string>;
+  private readonly canonicalCharacterCatalog: ReadonlyMap<string, GuideResearchCanonicalElement>;
   private readonly now: () => number;
 
   constructor(options: GuideResearchAgentOptions) {
@@ -213,7 +222,9 @@ export class GuideResearchAgent {
     this.cache = options.cache;
     this.sourceRegistry = options.sourceRegistry;
     this.sdkOptions = options.sdkOptions;
-    this.canonicalCharacterNames = canonicalNameSnapshot(options.canonicalCharacterNames);
+    this.canonicalCharacterCatalog = canonicalCharacterCatalogSnapshot(
+      options.canonicalCharacterCatalog
+    );
     this.now = options.now ?? Date.now;
   }
 
@@ -230,7 +241,11 @@ export class GuideResearchAgent {
       );
     }
     const safeTasks = parsed.data.tasks.map((task, index) => {
-      const projected = projectResearchTask(task, `ref-${index + 1}`, this.canonicalCharacterNames);
+      const projected = projectResearchTask(
+        task,
+        `ref-${index + 1}`,
+        this.canonicalCharacterCatalog
+      );
       if (projected === undefined) {
         throw new GuideResearchAgentError(
           'RESEARCH_TASK_INVALID',
@@ -622,23 +637,49 @@ function safeQueryTerm(value: string | undefined): string | undefined {
   return normalized;
 }
 
-function canonicalNameSnapshot(names: ReadonlySet<string>): ReadonlySet<string> {
-  if (names === undefined || typeof names[Symbol.iterator] !== 'function') {
+function canonicalCharacterCatalogSnapshot(
+  catalog: readonly GuideResearchCanonicalCharacterIdentity[]
+): ReadonlyMap<string, GuideResearchCanonicalElement> {
+  if (!Array.isArray(catalog)) {
     throw new GuideResearchAgentError(
       'RESEARCH_TASK_INVALID',
-      'Guide research requires a canonical character name set'
+      'Guide research requires canonical character identity entries'
     );
   }
-  const snapshot = new Set<string>();
-  for (const name of names) {
-    const normalized = privacySafeResearchText(name);
-    if (normalized === undefined || normalized.length === 0) {
+  const snapshot = new Map<string, GuideResearchCanonicalElement>();
+  for (const identity of catalog) {
+    if (
+      typeof identity !== 'object' ||
+      identity === null ||
+      typeof identity.name !== 'string' ||
+      typeof identity.element !== 'string'
+    ) {
       throw new GuideResearchAgentError(
         'RESEARCH_TASK_INVALID',
-        'Canonical character names failed privacy validation'
+        'Canonical character identity entries are invalid'
       );
     }
-    snapshot.add(normalized);
+    const name = privacySafeResearchText(identity.name);
+    const element = canonicalCatalogElementSchema.safeParse(
+      privacySafeResearchText(identity.element)
+    );
+    if (name === undefined || name.length === 0 || !element.success) {
+      throw new GuideResearchAgentError(
+        'RESEARCH_TASK_INVALID',
+        'Canonical character identities failed validation'
+      );
+    }
+    const existingElement = snapshot.get(name);
+    if (existingElement !== undefined) {
+      if (existingElement !== element.data) {
+        throw new GuideResearchAgentError(
+          'RESEARCH_TASK_INVALID',
+          'Canonical character name maps to conflicting elements'
+        );
+      }
+      continue;
+    }
+    snapshot.set(name, element.data);
   }
   return snapshot;
 }
@@ -646,7 +687,7 @@ function canonicalNameSnapshot(names: ReadonlySet<string>): ReadonlySet<string> 
 function projectResearchTask(
   task: GuideResearchTask,
   taskRef: string,
-  canonicalCharacterNames: ReadonlySet<string>
+  canonicalCharacterCatalog: ReadonlyMap<string, GuideResearchCanonicalElement>
 ): SanitizedResearchTask | undefined {
   const scenarioTags = task.scenarioTags.map(privacySafeResearchText);
   if (
@@ -663,12 +704,14 @@ function projectResearchTask(
     };
   }
   const name = privacySafeResearchText(task.character.name);
-  const element = privacySafeResearchText(task.character.element);
+  const element = canonicalCatalogElementSchema.safeParse(
+    privacySafeResearchText(task.character.element)
+  );
   const buildSignals = task.character.buildSignals.map(privacySafeResearchText);
   if (
     name === undefined ||
-    element === undefined ||
-    !canonicalCharacterNames.has(name) ||
+    !element.success ||
+    canonicalCharacterCatalog.get(name) !== element.data ||
     buildSignals.some((signal) => signal === undefined) ||
     !(buildSignals as string[]).every((signal) =>
       ['build-match-present', 'build-conflict-present', 'build-unknown-present'].includes(signal)
@@ -681,7 +724,7 @@ function projectResearchTask(
     reason: task.reason,
     character: {
       name,
-      element,
+      element: element.data,
       ...(task.character.weaponType === undefined ? {} : { weaponType: task.character.weaponType }),
       buildSignals: buildSignals as string[]
     },
