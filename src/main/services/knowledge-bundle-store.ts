@@ -7,7 +7,8 @@ import type {
   CharacterStrategyResult,
   CommittedBuildArchetypeV2,
   CommittedCharacterCatalogEntry,
-  CommittedSourceRegistry
+  CommittedSourceRegistry,
+  EnemyMechanicStrategy
 } from '../../shared/advisor-knowledge.js';
 import { committedAdvisorKnowledgeSetSchema } from './committed-advisor-knowledge.js';
 
@@ -18,6 +19,7 @@ const COMMITTED_FILE_NAMES = {
   sources: 'sources.v1.json',
   catalog: 'character-catalog.v1.json',
   strategies: 'character-strategies.v2.json',
+  mechanics: 'enemy-mechanic-strategies.v1.json',
   evidence: 'review-evidence.v1.json'
 } as const;
 
@@ -47,6 +49,7 @@ export class KnowledgeBundleStore implements AdvisorKnowledgeReader {
     ReturnType<typeof committedAdvisorKnowledgeSetSchema.parse>['strategies']['characters'][number]
   >;
   private readonly citationsById: ReadonlyMap<string, CommittedCitation>;
+  private readonly mechanicsById: ReadonlyMap<string, EnemyMechanicStrategy>;
   private readonly sourcesById: ReadonlyMap<
     string,
     ReturnType<typeof committedAdvisorKnowledgeSetSchema.parse>['sources']['sources'][number]
@@ -61,6 +64,9 @@ export class KnowledgeBundleStore implements AdvisorKnowledgeReader {
     );
     this.citationsById = new Map(
       bundle.sources.citations.map((citation) => [citation.id, citation])
+    );
+    this.mechanicsById = new Map(
+      bundle.mechanics.mechanics.map((mechanic) => [mechanic.id, mechanic])
     );
     this.sourcesById = new Map(bundle.sources.sources.map((source) => [source.id, source]));
   }
@@ -133,6 +139,46 @@ export class KnowledgeBundleStore implements AdvisorKnowledgeReader {
     return archetype === undefined ? undefined : structuredClone(archetype);
   }
 
+  getMechanicStrategy(mechanicId: string): EnemyMechanicStrategy | undefined {
+    const mechanic = this.mechanicsById.get(mechanicId);
+    return mechanic === undefined ? undefined : structuredClone(mechanic);
+  }
+
+  matchMechanics(tags: readonly string[]): EnemyMechanicStrategy[] {
+    const requestedTags = new Set(tags);
+    return this.bundle.mechanics.mechanics
+      .filter(
+        ({ matchTags, avoidTags }) =>
+          matchTags.some((tag) => requestedTags.has(tag)) &&
+          !avoidTags.some((tag) => requestedTags.has(tag))
+      )
+      .map((mechanic) => structuredClone(mechanic));
+  }
+
+  mechanicCoverageFor(input: { mechanicIds: readonly string[]; now: Date }): {
+    requestedMechanicIds: string[];
+    trustedMechanicIds: string[];
+    unknownMechanicIds: string[];
+  } {
+    const requestedMechanicIds = Array.from(new Set(input.mechanicIds));
+    const trustedMechanicIds = requestedMechanicIds.filter((mechanicId) => {
+      const mechanic = this.mechanicsById.get(mechanicId);
+      return (
+        mechanic !== undefined &&
+        this.areCitationsWithinReviewCadence(
+          mechanic.facts.flatMap(({ citationIds }) => citationIds),
+          input.now
+        )
+      );
+    });
+    const trusted = new Set(trustedMechanicIds);
+    return {
+      requestedMechanicIds,
+      trustedMechanicIds,
+      unknownMechanicIds: requestedMechanicIds.filter((mechanicId) => !trusted.has(mechanicId))
+    };
+  }
+
   citations(ids: readonly string[]): CommittedCitation[] {
     const requestedIds = new Set(ids);
     return Array.from(requestedIds).flatMap((id) => {
@@ -167,10 +213,18 @@ export class KnowledgeBundleStore implements AdvisorKnowledgeReader {
   ): boolean {
     const nowMs = now.getTime();
     if (!Number.isFinite(nowMs)) return false;
-    const citationIds = new Set(
-      strategy.archetypes.flatMap(({ facts }) => facts.flatMap(({ citationIds }) => citationIds))
+    return this.areCitationsWithinReviewCadence(
+      strategy.archetypes.flatMap(({ facts }) => facts.flatMap(({ citationIds }) => citationIds)),
+      now
     );
-    return Array.from(citationIds).every((citationId) => {
+  }
+
+  private areCitationsWithinReviewCadence(citationIds: readonly string[], now: Date): boolean {
+    const nowMs = now.getTime();
+    if (!Number.isFinite(nowMs)) return false;
+    const uniqueCitationIds = new Set(citationIds);
+    if (uniqueCitationIds.size === 0) return false;
+    return Array.from(uniqueCitationIds).every((citationId) => {
       const citation = this.citationsById.get(citationId);
       const source = citation === undefined ? undefined : this.sourcesById.get(citation.sourceId);
       if (citation === undefined || source === undefined) return false;

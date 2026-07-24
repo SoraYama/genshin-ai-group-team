@@ -24,11 +24,21 @@ const reviewedGuideUrls = [
   'https://keqingmains.com/q/kokomi-quickguide/',
   'https://keqingmains.com/q/furina-quickguide/'
 ].sort();
+const reviewedMechanicUrls = [
+  'https://library.keqingmains.com/combat-mechanics/enemy-mechanics/enemy-shields-armor',
+  'https://library.keqingmains.com/combat-mechanics/enemy-mechanics/enemy-resistances',
+  'https://library.keqingmains.com/combat-mechanics/damage/other/aoe-scaling',
+  'https://library.keqingmains.com/combat-mechanics/damage/shields',
+  'https://library.keqingmains.com/evidence/combat-mechanics/enemy-mechanics/enemy-interactions',
+  'https://library.keqingmains.com/combat-mechanics/cooldowns',
+  'https://library.keqingmains.com/combat-mechanics/energy',
+  'https://library.keqingmains.com/combat-mechanics/internal-cooldown'
+].sort();
 
 describe('committed advisor source policy', () => {
   it('allows exactly the initial reviewed host registry', () => {
     expect(registry.schemaVersion).toBe(1);
-    expect(registry.sourceVersion).toBe('2026-07-24');
+    expect(registry.sourceVersion).toBe('2026-07-25');
     expect(registry.sources.map(({ host }) => host).sort()).toEqual(acceptedHosts);
     expect(registry.sources.every(({ trust }) => trust === 'trusted-local')).toBe(true);
   });
@@ -45,10 +55,17 @@ describe('committed advisor source policy', () => {
     }
   });
 
-  it('commits citations for exactly the five reviewed character guides', () => {
-    expect(registry.citations.map(({ url }) => url).sort()).toEqual(reviewedGuideUrls);
+  it('commits only the five reviewed character guides and eight reviewed mechanic pages', () => {
+    expect(registry.citations.map(({ url }) => url).sort()).toEqual(
+      [...reviewedGuideUrls, ...reviewedMechanicUrls].sort()
+    );
     for (const citation of registry.citations) {
-      expect(citation.subjectCharacterIds).toHaveLength(1);
+      if (citation.subjectCharacterIds.length === 0) {
+        expect(citation.subjectMechanicIds?.length).toBeGreaterThan(0);
+      } else {
+        expect(citation.subjectCharacterIds).toHaveLength(1);
+        expect(citation.subjectMechanicIds).toBeUndefined();
+      }
       expect(citation.retrievedAt).toMatch(/^2026-07-2[45]T/);
       expect(citation.reviewEvidenceVersion).toBe('paraphrased-evidence-v1');
       expect(citation.reviewEvidenceSha256).toMatch(/^[0-9a-f]{64}$/);
@@ -80,6 +97,12 @@ describe('committed advisor source policy', () => {
     );
 
     expect(knowledgeResource?.filter).toContain('**/*.json');
+  });
+
+  it('ships the reviewed enemy-mechanic strategy bundle as a committed resource', () => {
+    expect(
+      existsSync(resolve(repositoryRoot, 'resources/knowledge/enemy-mechanic-strategies.v1.json'))
+    ).toBe(true);
   });
 
   it('wires the deterministic manual Enka provenance gate', () => {

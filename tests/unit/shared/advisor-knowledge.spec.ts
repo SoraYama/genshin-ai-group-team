@@ -163,6 +163,62 @@ describe('advisor knowledge contracts', () => {
     );
   });
 
+  it('models enemy mechanics as capability constraints rather than fixed four-character teams', () => {
+    const bundle = {
+      schemaVersion: 1 as const,
+      knowledgeVersion: '2026.07.reviewed-1',
+      sourceVersion: '2026-07-24',
+      trust: 'trusted-local' as const,
+      sourceRegistry: sourceRegistry(),
+      mechanics: [
+        {
+          id: 'shield-breaking',
+          name: '元素盾处理',
+          matchTags: ['elemental-shield'],
+          avoidTags: ['shield-absent'],
+          requiredCapabilities: ['counter-element-application'],
+          preferredArchetypes: ['frequent-element-application'],
+          teamSkeletonHints: [
+            {
+              id: 'shield-response-core',
+              slots: ['counter-element-application', 'damage-core', 'sustain-or-flex']
+            }
+          ],
+          facts: [
+            {
+              id: 'shield-reaction-fact',
+              statement: '元素盾需要按实际盾类型准备可持续的克制元素附着。',
+              citationIds: ['citation-raiden']
+            }
+          ]
+        }
+      ]
+    };
+
+    expect(enemyMechanicStrategyBundleSchema.parse(bundle).mechanics[0]).toMatchObject({
+      avoidTags: ['shield-absent'],
+      requiredCapabilities: ['counter-element-application'],
+      preferredArchetypes: ['frequent-element-application'],
+      teamSkeletonHints: [
+        {
+          id: 'shield-response-core',
+          slots: ['counter-element-application', 'damage-core', 'sustain-or-flex']
+        }
+      ]
+    });
+    expect(
+      enemyMechanicStrategyBundleSchema.safeParse({
+        ...bundle,
+        mechanics: [
+          {
+            ...bundle.mechanics[0],
+            characterIds: ['10000052', '10000065', '10000073', '10000089']
+          }
+        ]
+      }).success
+    ).toBe(false);
+  });
+
   it('keeps trusted and ephemeral coverage separate and internally consistent', () => {
     const packet = knowledgeContextPacketSchema.parse({
       knowledgeVersion: '2026.07.reviewed-1',
@@ -199,6 +255,7 @@ describe('advisor knowledge contracts', () => {
         {
           id: 'gap-rotation',
           subjectId: '10000089',
+          kind: 'build-unmatched',
           reason: '本地知识与临时资料均未覆盖当前配装。'
         }
       ],
@@ -222,6 +279,7 @@ describe('advisor knowledge contracts', () => {
       ephemeral: 1,
       unknown: 1
     });
+    expect(packet.unknowns[0]?.kind).toBe('build-unmatched');
     expect(
       knowledgeContextPacketSchema.safeParse({
         ...packet,

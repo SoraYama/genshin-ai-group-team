@@ -62,6 +62,7 @@ export function buildUnknownKnowledgeContext(
 
 export function buildV2PipelineContext(options: BuildV2PipelineContextOptions): V2PipelineContext {
   const baseline = options.feasibleBaseline;
+  const selectedCharacterIds = new Set(planCharacterIds(baseline));
   const sortedCharacters = options.profile.characters
     .slice()
     .sort((left, right) => left.id - right.id);
@@ -119,17 +120,87 @@ export function buildV2PipelineContext(options: BuildV2PipelineContextOptions): 
     },
     mechanics: options.mechanics,
     interventions: boundedInterventions(options.interventions, options.locale ?? 'zh-CN'),
-    knowledge: options.knowledge
+    knowledge: knowledgeContextPacketSchema.parse(options.knowledge)
   };
+  let budgetError = contextBudgetError(baseContext);
+  if (budgetError !== undefined) {
+    addPayloadTruncationGap(baseContext.knowledge);
+    baseContext.profile.detailedProfiles = baseContext.profile.detailedProfiles.filter(({ id }) =>
+      selectedCharacterIds.has(String(id))
+    );
+    baseContext.knowledge.buildInterpretations = baseContext.knowledge.buildInterpretations.filter(
+      ({ characterId }) => selectedCharacterIds.has(characterId)
+    );
+    baseContext.knowledge.trustedMatches = baseContext.knowledge.trustedMatches.filter(
+      ({ characterId }) => characterId === undefined || selectedCharacterIds.has(characterId)
+    );
+    removeUnreferencedCitations(baseContext.knowledge);
+    synchronizeCoverage(baseContext.knowledge);
+    budgetError = contextBudgetError(baseContext);
+  }
+  if (budgetError !== undefined) {
+    baseContext.knowledge.trustedMatches = baseContext.knowledge.trustedMatches.map(
+      ({ factStatements: _factStatements, ...match }) => match
+    );
+    budgetError = contextBudgetError(baseContext);
+  }
+  if (budgetError !== undefined) {
+    throw budgetError;
+  }
+  return v2PipelineContextSchema.parse(baseContext);
+}
+
+function contextBudgetError(value: unknown): V2ContextBudgetError | undefined {
   try {
-    stringifyAgentPayload(baseContext, 'pipeline-context', MAX_V2_AGENT_CONTEXT_BYTES);
+    stringifyAgentPayload(value, 'pipeline-context', MAX_V2_AGENT_CONTEXT_BYTES);
+    return undefined;
   } catch (error) {
     if (error instanceof AgentPayloadTooLargeError) {
-      throw new V2ContextBudgetError(error.actualBytes);
+      return new V2ContextBudgetError(error.actualBytes);
     }
     throw error;
   }
-  return v2PipelineContextSchema.parse(baseContext);
+}
+
+function addPayloadTruncationGap(knowledge: KnowledgeContextPacket): void {
+  if (knowledge.unknowns.some(({ kind }) => kind === 'payload-truncated')) return;
+  const ids = new Set([
+    ...knowledge.trustedMatches.map(({ id }) => id),
+    ...knowledge.ephemeralMatches.map(({ id }) => id),
+    ...knowledge.unknowns.map(({ id }) => id)
+  ]);
+  let suffix = 1;
+  let id = 'gap-payload-truncated';
+  while (ids.has(id)) {
+    suffix += 1;
+    id = `gap-payload-truncated-${suffix}`;
+  }
+  knowledge.unknowns.push({
+    id,
+    subjectId: 'payload:knowledge-context',
+    kind: 'payload-truncated',
+    reason: 'Low-priority knowledge details were removed to fit the bounded agent context.'
+  });
+}
+
+function removeUnreferencedCitations(knowledge: KnowledgeContextPacket): void {
+  const referenced = new Set([
+    ...knowledge.trustedMatches.flatMap(({ citationIds }) => citationIds),
+    ...knowledge.ephemeralMatches.flatMap(({ citationIds }) => citationIds)
+  ]);
+  knowledge.citations = knowledge.citations.filter(({ id }) => referenced.has(id));
+}
+
+function synchronizeCoverage(knowledge: KnowledgeContextPacket): void {
+  knowledge.coverage = {
+    requested:
+      knowledge.trustedMatches.length +
+      knowledge.ephemeralMatches.length +
+      knowledge.unknowns.length,
+    trusted: knowledge.trustedMatches.length,
+    ephemeral: knowledge.ephemeralMatches.length,
+    unknown: knowledge.unknowns.length
+  };
 }
 
 function compactBaseline(

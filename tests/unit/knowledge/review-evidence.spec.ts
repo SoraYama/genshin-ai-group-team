@@ -10,7 +10,8 @@ import {
   committedCharacterCatalogSchema,
   committedCharacterStrategyBundleV2Schema,
   committedReviewEvidenceBundleSchema,
-  committedSourceRegistrySchema
+  committedSourceRegistrySchema,
+  enemyMechanicStrategyBundleSchema
 } from '../../../src/shared/advisor-knowledge.js';
 
 const knowledgeDirectory = resolve(process.cwd(), 'resources/knowledge');
@@ -25,25 +26,26 @@ const strategies = committedCharacterStrategyBundleV2Schema.parse(
   readJson('character-strategies.v2.json')
 );
 const evidence = committedReviewEvidenceBundleSchema.parse(readJson('review-evidence.v1.json'));
+const mechanics = enemyMechanicStrategyBundleSchema.parse(
+  readJson('enemy-mechanic-strategies.v1.json')
+);
 
 function evidenceDigest(entry: (typeof evidence.entries)[number]): string {
   return createHash('sha256').update(canonicalJsonStringify(entry), 'utf8').digest('hex');
 }
 
-function policyDigest(
-  archetype: (typeof strategies.characters)[number]['archetypes'][number]
-): string {
+function policyDigest(archetype: Parameters<typeof canonicalJsonStringify>[0]): string {
   return createHash('sha256').update(canonicalJsonStringify(archetype), 'utf8').digest('hex');
 }
 
 function knowledgeSet() {
-  return { sources, catalog, strategies, evidence };
+  return { sources, catalog, strategies, mechanics, evidence };
 }
 
 describe('committed paraphrased review evidence', () => {
   it('binds exactly one canonical evidence entry and deterministic digest to each citation', () => {
     expect(evidence.reviewEvidenceVersion).toBe('paraphrased-evidence-v1');
-    expect(evidence.entries).toHaveLength(5);
+    expect(evidence.entries).toHaveLength(sources.citations.length);
 
     const evidenceByCitation = new Map(evidence.entries.map((entry) => [entry.citationId, entry]));
     expect(
@@ -55,6 +57,7 @@ describe('committed paraphrased review evidence', () => {
       const entry = evidenceByCitation.get(citation.id);
       expect(entry).toBeDefined();
       expect(entry?.subjectCharacterIds).toEqual(citation.subjectCharacterIds);
+      expect(entry?.subjectMechanicIds ?? []).toEqual(citation.subjectMechanicIds ?? []);
       expect(entry?.url).toBe(citation.url);
       expect(entry?.reviewedAt).toBe(citation.reviewedAt);
       expect(citation.reviewEvidenceVersion).toBe(evidence.reviewEvidenceVersion);
@@ -62,6 +65,26 @@ describe('committed paraphrased review evidence', () => {
     }
 
     expect(() => committedAdvisorKnowledgeSetSchema.parse(knowledgeSet())).not.toThrow();
+  });
+
+  it('binds every trusted mechanic policy and rejects policy tampering', () => {
+    const bindings = evidence.entries.flatMap(({ mechanicBindings }) => mechanicBindings ?? []);
+
+    for (const mechanic of mechanics.mechanics) {
+      expect(bindings).toContainEqual({
+        mechanicId: mechanic.id,
+        policySha256: policyDigest(mechanic)
+      });
+    }
+
+    const tamperedMechanics = structuredClone(mechanics);
+    tamperedMechanics.mechanics[0]!.requiredCapabilities.push('unreviewed-capability');
+    expect(
+      committedAdvisorKnowledgeSetSchema.safeParse({
+        ...knowledgeSet(),
+        mechanics: tamperedMechanics
+      }).success
+    ).toBe(false);
   });
 
   it('binds every reviewed archetype policy exactly once and never binds a gap archetype', () => {

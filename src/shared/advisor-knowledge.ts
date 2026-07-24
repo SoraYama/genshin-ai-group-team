@@ -87,14 +87,23 @@ export const committedSourceCitationSchema = sourceCitationSchema
   .extend({
     subjectCharacterIds: z
       .array(canonicalCharacterIdSchema)
-      .min(1)
       .max(16)
       .refine((ids) => new Set(ids).size === ids.length, 'Subject character IDs must be unique'),
+    subjectMechanicIds: z
+      .array(boundedIdSchema)
+      .max(32)
+      .refine((ids) => new Set(ids).size === ids.length, 'Subject mechanic IDs must be unique')
+      .optional(),
     retrievedAt: reviewedAtSchema,
     reviewEvidenceVersion: z.literal('paraphrased-evidence-v1'),
     reviewEvidenceSha256: sha256Schema
   })
-  .strict();
+  .strict()
+  .refine(
+    ({ subjectCharacterIds, subjectMechanicIds }) =>
+      subjectCharacterIds.length > 0 || (subjectMechanicIds?.length ?? 0) > 0,
+    'A committed citation must declare a character or mechanic subject'
+  );
 
 export const sourceRegistrySchema = z
   .object({
@@ -652,9 +661,13 @@ export const reviewEvidenceEntrySchema = z
     citationId: boundedIdSchema,
     subjectCharacterIds: z
       .array(canonicalCharacterIdSchema)
-      .min(1)
       .max(16)
       .refine((ids) => new Set(ids).size === ids.length, 'Subject character IDs must be unique'),
+    subjectMechanicIds: z
+      .array(boundedIdSchema)
+      .max(32)
+      .refine((ids) => new Set(ids).size === ids.length, 'Subject mechanic IDs must be unique')
+      .optional(),
     url: httpsUrlSchema,
     reviewedAt: reviewedAtSchema,
     sectionLabels: z
@@ -664,19 +677,59 @@ export const reviewEvidenceEntrySchema = z
       .refine((labels) => new Set(labels).size === labels.length, 'Section labels must be unique'),
     archetypeBindings: z
       .array(reviewEvidenceArchetypeBindingSchema)
-      .min(1)
       .max(16)
       .refine(
         (bindings) =>
           new Set(bindings.map(({ archetypeId }) => archetypeId)).size === bindings.length,
         'Evidence archetype bindings must use unique archetype IDs'
       ),
+    mechanicBindings: z
+      .array(
+        z
+          .object({
+            mechanicId: boundedIdSchema,
+            policySha256: sha256Schema
+          })
+          .strict()
+      )
+      .max(32)
+      .refine(
+        (bindings) =>
+          new Set(bindings.map(({ mechanicId }) => mechanicId)).size === bindings.length,
+        'Evidence mechanic bindings must use unique mechanic IDs'
+      )
+      .optional(),
     paraphrasedEvidence: z.array(reviewEvidenceItemSchema).min(1).max(32)
   })
   .strict()
-  .superRefine(({ paraphrasedEvidence }, context) => {
-    addDuplicateIdIssues(paraphrasedEvidence, ['paraphrasedEvidence'], context);
-  });
+  .superRefine(
+    (
+      {
+        subjectCharacterIds,
+        subjectMechanicIds,
+        archetypeBindings,
+        mechanicBindings,
+        paraphrasedEvidence
+      },
+      context
+    ) => {
+      if (subjectCharacterIds.length === 0 && (subjectMechanicIds?.length ?? 0) === 0) {
+        context.addIssue({
+          code: 'custom',
+          path: ['subjectCharacterIds'],
+          message: 'Review evidence must declare a character or mechanic subject'
+        });
+      }
+      if (archetypeBindings.length === 0 && (mechanicBindings?.length ?? 0) === 0) {
+        context.addIssue({
+          code: 'custom',
+          path: ['archetypeBindings'],
+          message: 'Review evidence must bind an archetype or mechanic policy'
+        });
+      }
+      addDuplicateIdIssues(paraphrasedEvidence, ['paraphrasedEvidence'], context);
+    }
+  );
 
 export const committedReviewEvidenceBundleSchema = z
   .object({
@@ -723,10 +776,11 @@ export const committedAdvisorKnowledgeSetStructureSchema = z
     sources: committedSourceRegistrySchema,
     catalog: committedCharacterCatalogSchema,
     strategies: committedCharacterStrategyBundleV2Schema,
+    mechanics: z.lazy(() => enemyMechanicStrategyBundleSchema),
     evidence: committedReviewEvidenceBundleSchema
   })
   .strict()
-  .superRefine(({ sources, catalog, strategies, evidence }, context) => {
+  .superRefine(({ sources, catalog, strategies, mechanics, evidence }, context) => {
     if (strategies.sourceVersion !== sources.sourceVersion) {
       context.addIssue({
         code: 'custom',
@@ -739,6 +793,20 @@ export const committedAdvisorKnowledgeSetStructureSchema = z
         code: 'custom',
         path: ['strategies', 'catalogVersion'],
         message: 'Strategy catalogVersion must match the committed character catalog'
+      });
+    }
+    if (mechanics.sourceVersion !== sources.sourceVersion) {
+      context.addIssue({
+        code: 'custom',
+        path: ['mechanics', 'sourceVersion'],
+        message: 'Mechanic sourceVersion must match the committed source registry'
+      });
+    }
+    if (mechanics.knowledgeVersion !== strategies.knowledgeVersion) {
+      context.addIssue({
+        code: 'custom',
+        path: ['mechanics', 'knowledgeVersion'],
+        message: 'Mechanic knowledgeVersion must match character strategies'
       });
     }
 
@@ -796,7 +864,8 @@ export const committedAdvisorKnowledgeSetStructureSchema = z
       if (
         entry.url !== citation.url ||
         entry.reviewedAt !== citation.reviewedAt ||
-        !sameStringSet(entry.subjectCharacterIds, citation.subjectCharacterIds)
+        !sameStringSet(entry.subjectCharacterIds, citation.subjectCharacterIds) ||
+        !sameStringSet(entry.subjectMechanicIds ?? [], citation.subjectMechanicIds ?? [])
       ) {
         context.addIssue({
           code: 'custom',
@@ -818,6 +887,10 @@ export const committedAdvisorKnowledgeSetStructureSchema = z
     const factsById = new Map<
       string,
       Array<{ characterId: string; citationIds: string[]; factPath: Array<string | number> }>
+    >();
+    const mechanicFactsById = new Map<
+      string,
+      Array<{ mechanicId: string; citationIds: string[]; factPath: Array<string | number> }>
     >();
     strategies.characters.forEach(({ id: characterId, archetypes }, characterIndex) => {
       archetypes.forEach(({ facts }, archetypeIndex) => {
@@ -889,6 +962,80 @@ export const committedAdvisorKnowledgeSetStructureSchema = z
       });
     });
 
+    const committedSourcesById = new Map(sources.sources.map((source) => [source.id, source]));
+    mechanics.sourceRegistry.sources.forEach((source, sourceIndex) => {
+      const committedSource = committedSourcesById.get(source.id);
+      if (
+        committedSource === undefined ||
+        source.trust !== committedSource.trust ||
+        !sameStringSet(source.hosts, [committedSource.host])
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['mechanics', 'sourceRegistry', 'sources', sourceIndex],
+          message: 'Mechanic source must match the committed source registry'
+        });
+      }
+    });
+    const embeddedCitationsById = new Map(
+      mechanics.sourceRegistry.citations.map((citation) => [citation.id, citation])
+    );
+    mechanics.sourceRegistry.citations.forEach((citation, citationIndex) => {
+      const committedCitation = citationsById.get(citation.id);
+      if (
+        committedCitation === undefined ||
+        committedCitation.sourceId !== citation.sourceId ||
+        committedCitation.url !== citation.url ||
+        committedCitation.title !== citation.title ||
+        committedCitation.reviewedAt !== citation.reviewedAt ||
+        committedCitation.trust !== citation.trust
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['mechanics', 'sourceRegistry', 'citations', citationIndex],
+          message: 'Mechanic citation must match the committed source registry'
+        });
+      }
+    });
+    mechanics.mechanics.forEach(({ id: mechanicId, facts }, mechanicIndex) => {
+      facts.forEach(({ id: factId, citationIds: factCitationIds }, factIndex) => {
+        const factPath = ['mechanics', 'mechanics', mechanicIndex, 'facts', factIndex];
+        const owners = mechanicFactsById.get(factId) ?? [];
+        owners.push({ mechanicId, citationIds: factCitationIds, factPath });
+        mechanicFactsById.set(factId, owners);
+        factCitationIds.forEach((citationId, citationIndex) => {
+          const embeddedCitation = embeddedCitationsById.get(citationId);
+          const citation = citationsById.get(citationId);
+          if (
+            embeddedCitation === undefined ||
+            citation === undefined ||
+            !citation.subjectMechanicIds?.includes(mechanicId)
+          ) {
+            context.addIssue({
+              code: 'custom',
+              path: [...factPath, 'citationIds', citationIndex],
+              message:
+                'Trusted mechanic fact citation must resolve and declare the mechanic as a subject'
+            });
+          } else {
+            const entry = evidenceByCitationId.get(citationId);
+            const evidenceFactIds = new Set(
+              entry?.paraphrasedEvidence.flatMap(({ factBindings }) =>
+                factBindings.map(({ factId: boundFactId }) => boundFactId)
+              ) ?? []
+            );
+            if (!evidenceFactIds.has(factId)) {
+              context.addIssue({
+                code: 'custom',
+                path: [...factPath, 'citationIds', citationIndex],
+                message: 'Trusted mechanic fact must be bound by its citation review evidence'
+              });
+            }
+          }
+        });
+      });
+    });
+
     evidence.entries.forEach((entry, evidenceIndex) => {
       entry.paraphrasedEvidence.forEach(({ factBindings }, itemIndex) => {
         factBindings.forEach(({ factId }, factIndex) => {
@@ -898,7 +1045,12 @@ export const committedAdvisorKnowledgeSetStructureSchema = z
               entry.subjectCharacterIds.includes(characterId) &&
               citationIds.includes(entry.citationId)
           );
-          if (compatibleOwner === undefined) {
+          const compatibleMechanicOwner = (mechanicFactsById.get(factId) ?? []).find(
+            ({ mechanicId, citationIds }) =>
+              (entry.subjectMechanicIds ?? []).includes(mechanicId) &&
+              citationIds.includes(entry.citationId)
+          );
+          if (compatibleOwner === undefined && compatibleMechanicOwner === undefined) {
             context.addIssue({
               code: 'custom',
               path: [
@@ -927,17 +1079,35 @@ export const enemyMechanicStrategySchema = z
       .min(1)
       .max(24)
       .refine((tags) => new Set(tags).size === tags.length, 'Match tags must be unique'),
+    avoidTags: z
+      .array(z.string().trim().min(1).max(80))
+      .max(24)
+      .refine((tags) => new Set(tags).size === tags.length, 'Avoid tags must be unique'),
+    requiredCapabilities: uniqueBoundedIdsSchema,
+    preferredArchetypes: uniqueBoundedIdsSchema,
+    teamSkeletonHints: z
+      .array(
+        z
+          .object({
+            id: boundedIdSchema,
+            slots: uniqueBoundedIdsSchema.min(1).max(4)
+          })
+          .strict()
+      )
+      .max(8),
     facts: z.array(strategyFactSchema).min(1).max(32)
   })
   .strict()
-  .superRefine(({ facts }, context) => {
+  .superRefine(({ facts, teamSkeletonHints }, context) => {
     addDuplicateIdIssues(facts, ['facts'], context);
+    addDuplicateIdIssues(teamSkeletonHints, ['teamSkeletonHints'], context);
   });
 
 export const enemyMechanicStrategyBundleSchema = z
   .object({
     schemaVersion: z.literal(1),
     knowledgeVersion: z.string().trim().min(1).max(128),
+    sourceVersion: z.string().trim().min(1).max(128),
     trust: z.literal('trusted-local'),
     sourceRegistry: sourceRegistrySchema,
     mechanics: z.array(enemyMechanicStrategySchema).max(256)
@@ -1021,6 +1191,20 @@ export const trustedKnowledgeMatchSchema = z
     mechanicId: boundedIdSchema.optional(),
     archetypeId: z.string().trim().min(1).max(80).nullable().optional(),
     summary: boundedSummarySchema,
+    factStatements: z.array(boundedFactSchema).max(32).optional(),
+    requiredCapabilities: uniqueBoundedIdsSchema.optional(),
+    preferredArchetypes: uniqueBoundedIdsSchema.optional(),
+    teamSkeletonHints: z
+      .array(
+        z
+          .object({
+            id: boundedIdSchema,
+            slots: uniqueBoundedIdsSchema.min(1).max(4)
+          })
+          .strict()
+      )
+      .max(8)
+      .optional(),
     citationIds: uniqueBoundedIdsSchema.min(1)
   })
   .strict()
@@ -1042,6 +1226,9 @@ export const knowledgeGapSchema = z
   .object({
     id: boundedIdSchema,
     subjectId: boundedIdSchema,
+    kind: z
+      .enum(['missing', 'stale', 'conflict', 'build-unmatched', 'payload-truncated'])
+      .default('missing'),
     reason: z.string().trim().min(1).max(500)
   })
   .strict();

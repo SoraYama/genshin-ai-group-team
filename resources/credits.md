@@ -34,6 +34,17 @@ Reproducible review evidence:
 - Kokomi review evidence — `420f8ddbc2f4b115d1ca79c76706940382a988d9a3003e4c8e723358cb79f8a9`.
 - Furina review evidence — `55d58386fb4714ead9c9c3ccd71450063a58dbf0bb7e697b5f7aa4b46db62cd6`.
 
+Reviewed scenario-mechanic evidence, retrieved 2026-07-25:
+
+- KQM TCL, Enemy Shields and Armor — `https://library.keqingmains.com/combat-mechanics/enemy-mechanics/enemy-shields-armor`; used for conservative shield and armor capability constraints; review evidence `ef781d8f0a5dbc680dd9ee1990f07281f75c1530e396c844cbd1ac5d7ffde434`.
+- KQM TCL, Enemy Resistances — `https://library.keqingmains.com/combat-mechanics/enemy-mechanics/enemy-resistances`; used for damage-type resistance avoidance; review evidence `a905a6f402b6598ca7309b2cdb23dea011c26000e7bd919169f3f936c3ba5a02`.
+- KQM TCL, AoE Scaling — `https://library.keqingmains.com/combat-mechanics/damage/other/aoe-scaling`; used for grouping, ungroupable, and single-target constraints; review evidence `220c39048759b366ff493dc8d158e2ea323ad44bd6c77dec656ffc9dd4e7a80a`.
+- KQM TCL, Shields — `https://library.keqingmains.com/combat-mechanics/damage/shields`; used for conservative sustain and interruption-pressure constraints; review evidence `a665bc07bb751828dc085182865b41270b75ebceb621b0a2cdece85278756d5a`.
+- KQM TCL Evidence Vault, Enemy Interactions — `https://library.keqingmains.com/evidence/combat-mechanics/enemy-mechanics/enemy-interactions`; used for burrowing and mobile-window constraints; review evidence `756e2059048956bdb94db4c3198eb620110e1f3fa5b1ba1e325be6778ae5f10a`.
+- KQM TCL, Cooldowns and Energy — `https://library.keqingmains.com/combat-mechanics/cooldowns` and `https://library.keqingmains.com/combat-mechanics/energy`; used for repeatable multi-wave rotation constraints; review evidence `18bf791ccbc02fd5f3d2157542b987fbefe78af729dd5998ec8ea027984aecc2` and `cda11a4fd811ed2bb85e07f1a178f7045224fa4f58ddaaace27c3ed526f26c44`.
+- KQM TCL, Internal Cooldown — `https://library.keqingmains.com/combat-mechanics/internal-cooldown`; used for conservative elemental-application and reaction constraints; review evidence `bc3eedefde42f703d60234115c05d235db3aa61e2940cc013058789f0ebd7e8c`.
+- `resources/knowledge/enemy-mechanic-strategies.v1.json` stores capability requirements, preferred archetypes, and role-slot skeletons only. It does not hard-code four-character teams. Every mechanic policy and fact statement is bound to the same canonical-JSON / statement digest review system described above.
+
 Accepted source registry entries, reviewed 2026-07-24:
 
 - `official-genshin` — Genshin Impact official site (`genshin.hoyoverse.com`), accepted for official product and character information.

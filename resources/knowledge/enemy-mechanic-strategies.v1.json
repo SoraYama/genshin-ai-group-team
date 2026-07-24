@@ -1,0 +1,278 @@
+{
+  "schemaVersion": 1,
+  "knowledgeVersion": "2026-07-25.reviewed-2",
+  "sourceVersion": "2026-07-25",
+  "trust": "trusted-local",
+  "sourceRegistry": {
+    "sources": [
+      {
+        "id": "kqm-library",
+        "name": "KQM Theorycrafting Library",
+        "hosts": ["library.keqingmains.com"],
+        "trust": "trusted-local",
+        "homepageUrl": "https://library.keqingmains.com/"
+      }
+    ],
+    "citations": [
+      {
+        "id": "kqm-mechanics-enemy-shields",
+        "sourceId": "kqm-library",
+        "url": "https://library.keqingmains.com/combat-mechanics/enemy-mechanics/enemy-shields-armor",
+        "title": "Enemy Shields and Armor",
+        "reviewedAt": "2026-07-25T01:00:00+08:00",
+        "trust": "trusted-local"
+      },
+      {
+        "id": "kqm-mechanics-enemy-resistances",
+        "sourceId": "kqm-library",
+        "url": "https://library.keqingmains.com/combat-mechanics/enemy-mechanics/enemy-resistances",
+        "title": "Enemy Resistances",
+        "reviewedAt": "2026-07-25T01:00:00+08:00",
+        "trust": "trusted-local"
+      },
+      {
+        "id": "kqm-mechanics-aoe-scaling",
+        "sourceId": "kqm-library",
+        "url": "https://library.keqingmains.com/combat-mechanics/damage/other/aoe-scaling",
+        "title": "AoE Scaling",
+        "reviewedAt": "2026-07-25T01:00:00+08:00",
+        "trust": "trusted-local"
+      },
+      {
+        "id": "kqm-mechanics-player-shields",
+        "sourceId": "kqm-library",
+        "url": "https://library.keqingmains.com/combat-mechanics/damage/shields",
+        "title": "Shields",
+        "reviewedAt": "2026-07-25T01:00:00+08:00",
+        "trust": "trusted-local"
+      },
+      {
+        "id": "kqm-mechanics-enemy-interactions",
+        "sourceId": "kqm-library",
+        "url": "https://library.keqingmains.com/evidence/combat-mechanics/enemy-mechanics/enemy-interactions",
+        "title": "Enemy Interactions",
+        "reviewedAt": "2026-07-25T01:00:00+08:00",
+        "trust": "trusted-local"
+      },
+      {
+        "id": "kqm-mechanics-cooldowns",
+        "sourceId": "kqm-library",
+        "url": "https://library.keqingmains.com/combat-mechanics/cooldowns",
+        "title": "Cooldowns",
+        "reviewedAt": "2026-07-25T01:00:00+08:00",
+        "trust": "trusted-local"
+      },
+      {
+        "id": "kqm-mechanics-energy",
+        "sourceId": "kqm-library",
+        "url": "https://library.keqingmains.com/combat-mechanics/energy",
+        "title": "Energy",
+        "reviewedAt": "2026-07-25T01:00:00+08:00",
+        "trust": "trusted-local"
+      },
+      {
+        "id": "kqm-mechanics-internal-cooldown",
+        "sourceId": "kqm-library",
+        "url": "https://library.keqingmains.com/combat-mechanics/internal-cooldown",
+        "title": "Internal Cooldown",
+        "reviewedAt": "2026-07-25T01:00:00+08:00",
+        "trust": "trusted-local"
+      }
+    ]
+  },
+  "mechanics": [
+    {
+      "id": "shield-breaking",
+      "name": "元素盾与护甲处理",
+      "matchTags": ["elemental-shield", "elemental-armor"],
+      "avoidTags": ["shield-absent"],
+      "requiredCapabilities": ["counter-element-application"],
+      "preferredArchetypes": ["frequent-element-application", "shield-break-flex"],
+      "teamSkeletonHints": [
+        {
+          "id": "shield-response-core",
+          "slots": ["damage-core", "counter-element-application", "sustain-or-flex"]
+        }
+      ],
+      "facts": [
+        {
+          "id": "mechanic-shield-breaking-fact",
+          "statement": "敌方元素盾与元素护甲并非同一种防护；配队应先确认防护类型，再准备能稳定施加合适元素或对应破盾能力的槽位。",
+          "citationIds": ["kqm-mechanics-enemy-shields"]
+        }
+      ]
+    },
+    {
+      "id": "resistance-avoidance",
+      "name": "高抗性与免疫规避",
+      "matchTags": ["high-resistance", "elemental-immunity"],
+      "avoidTags": [],
+      "requiredCapabilities": ["alternate-damage-type"],
+      "preferredArchetypes": ["resistance-aware-carry", "resistance-shred-support"],
+      "teamSkeletonHints": [
+        {
+          "id": "resistance-safe-core",
+          "slots": ["alternate-damage-type", "compatible-amplifier", "sustain-or-flex"]
+        }
+      ],
+      "facts": [
+        {
+          "id": "mechanic-resistance-avoidance-fact",
+          "statement": "敌方抗性按伤害类型分别结算并会降低对应伤害；已知高抗性或免疫时，应优先改用不受限制的伤害轴，减抗只作为有来源支持时的补充能力。",
+          "citationIds": ["kqm-mechanics-enemy-resistances"]
+        }
+      ]
+    },
+    {
+      "id": "wave-efficient-rotation",
+      "name": "多波次循环复位",
+      "matchTags": ["multi-wave"],
+      "avoidTags": ["single-wave-only"],
+      "requiredCapabilities": ["repeatable-rotation"],
+      "preferredArchetypes": ["short-cooldown", "energy-stable", "reapplicable-setup"],
+      "teamSkeletonHints": [
+        {
+          "id": "wave-reset-core",
+          "slots": ["repeatable-rotation", "reapplicable-setup", "sustain-or-flex"]
+        }
+      ],
+      "facts": [
+        {
+          "id": "mechanic-multi-wave-fact",
+          "statement": "技能存在再次施放的冷却，元素爆发还依赖能量；多波次场景应保留能够在新一波重新施放关键效果并维持能量循环的队伍骨架。",
+          "citationIds": ["kqm-mechanics-cooldowns", "kqm-mechanics-energy"]
+        }
+      ]
+    },
+    {
+      "id": "grouping-value",
+      "name": "可聚怪场景",
+      "matchTags": ["groupable", "multi-target"],
+      "avoidTags": ["ungroupable"],
+      "requiredCapabilities": ["grouping"],
+      "preferredArchetypes": ["area-damage", "grouping-support"],
+      "teamSkeletonHints": [
+        {
+          "id": "grouped-aoe-core",
+          "slots": ["grouping", "area-damage", "sustain-or-flex"]
+        }
+      ],
+      "facts": [
+        {
+          "id": "mechanic-grouping-value-fact",
+          "statement": "许多范围攻击会随同时命中的敌人数获得更高的总伤害；敌人可被聚拢时，聚怪能力能提高范围技能的有效覆盖。",
+          "citationIds": ["kqm-mechanics-aoe-scaling"]
+        }
+      ]
+    },
+    {
+      "id": "ungroupable-pressure",
+      "name": "不可聚怪或重型目标",
+      "matchTags": ["ungroupable", "heavy-target"],
+      "avoidTags": ["groupable"],
+      "requiredCapabilities": ["grouping-independent-output"],
+      "preferredArchetypes": ["wide-area-damage", "mobile-targeting", "single-target-output"],
+      "teamSkeletonHints": [
+        {
+          "id": "ungroupable-safe-core",
+          "slots": ["grouping-independent-output", "coverage-or-mobility", "sustain-or-flex"]
+        }
+      ],
+      "facts": [
+        {
+          "id": "mechanic-ungroupable-fact",
+          "statement": "范围伤害的收益取决于实际同时命中的目标；不可聚怪时，不应把必须拉拢敌人才能成立的伤害覆盖当作确定收益。",
+          "citationIds": ["kqm-mechanics-aoe-scaling"]
+        }
+      ]
+    },
+    {
+      "id": "single-target-pressure",
+      "name": "单体压力",
+      "matchTags": ["single-target", "boss"],
+      "avoidTags": ["dense-multi-target"],
+      "requiredCapabilities": ["sustained-single-target-output"],
+      "preferredArchetypes": ["single-target-carry", "single-target-off-field"],
+      "teamSkeletonHints": [
+        {
+          "id": "single-target-core",
+          "slots": ["sustained-single-target-output", "single-target-amplifier", "sustain-or-flex"]
+        }
+      ],
+      "facts": [
+        {
+          "id": "mechanic-single-target-fact",
+          "statement": "非范围伤害不会因敌人数增加而提高单次总覆盖；面对单一高生命目标时，应优先验证持续单体输出，而不是依赖多目标缩放。",
+          "citationIds": ["kqm-mechanics-aoe-scaling"]
+        }
+      ]
+    },
+    {
+      "id": "sustain-required",
+      "name": "生存与抗打断压力",
+      "matchTags": ["survival-pressure", "interrupt-pressure", "high-incoming-damage"],
+      "avoidTags": [],
+      "requiredCapabilities": ["reliable-sustain"],
+      "preferredArchetypes": ["healer", "shielder", "interrupt-resistance"],
+      "teamSkeletonHints": [
+        {
+          "id": "survival-core",
+          "slots": ["damage-core", "reliable-sustain", "interrupt-resistance-or-flex"]
+        }
+      ],
+      "facts": [
+        {
+          "id": "mechanic-sustain-fact",
+          "statement": "角色护盾可以吸收伤害并提供抗击退价值；高生存或抗打断压力下，队伍应保留可靠治疗、护盾或其他明确的减伤与抗打断能力。",
+          "citationIds": ["kqm-mechanics-player-shields"]
+        }
+      ]
+    },
+    {
+      "id": "mobile-window-alignment",
+      "name": "移动、钻地与短输出窗口",
+      "matchTags": ["mobile-enemy", "burrow", "short-damage-window"],
+      "avoidTags": ["stationary-target"],
+      "requiredCapabilities": ["window-aligned-output"],
+      "preferredArchetypes": ["fast-setup", "mobile-output", "persistent-off-field"],
+      "teamSkeletonHints": [
+        {
+          "id": "mobile-window-core",
+          "slots": ["fast-setup", "window-aligned-output", "sustain-or-flex"]
+        }
+      ],
+      "facts": [
+        {
+          "id": "mechanic-mobile-window-fact",
+          "statement": "部分敌人会钻地并在别处重新出现；场景标记为高机动或短输出窗口时，应避免把长前置、固定位置的完整循环视为必然命中。",
+          "citationIds": ["kqm-mechanics-enemy-interactions"]
+        }
+      ]
+    },
+    {
+      "id": "reaction-constraint",
+      "name": "元素附着与反应限制",
+      "matchTags": ["elemental-aura", "reaction-restricted", "freeze-immune"],
+      "avoidTags": [],
+      "requiredCapabilities": ["restriction-compatible-damage"],
+      "preferredArchetypes": [
+        "alternative-reaction",
+        "raw-damage-fallback",
+        "frequent-application"
+      ],
+      "teamSkeletonHints": [
+        {
+          "id": "reaction-safe-core",
+          "slots": ["restriction-compatible-damage", "compatible-application", "sustain-or-flex"]
+        }
+      ],
+      "facts": [
+        {
+          "id": "mechanic-reaction-constraint-fact",
+          "statement": "元素附着频率受技能自身机制限制，敌方固有元素或防护也会改变可用反应；存在反应限制时，应准备不依赖被禁反应的伤害与附着方案。",
+          "citationIds": ["kqm-mechanics-internal-cooldown", "kqm-mechanics-enemy-shields"]
+        }
+      ]
+    }
+  ]
+}

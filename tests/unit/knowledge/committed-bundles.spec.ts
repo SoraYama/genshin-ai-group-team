@@ -8,7 +8,8 @@ import {
   committedCharacterCatalogSchema,
   committedCharacterStrategyBundleV2Schema,
   committedReviewEvidenceBundleSchema,
-  committedSourceRegistrySchema
+  committedSourceRegistrySchema,
+  enemyMechanicStrategyBundleSchema
 } from '../../../src/shared/advisor-knowledge.js';
 
 const knowledgeDirectory = resolve(process.cwd(), 'resources/knowledge');
@@ -23,15 +24,77 @@ const strategies = committedCharacterStrategyBundleV2Schema.parse(
   readJson('character-strategies.v2.json')
 );
 const evidence = committedReviewEvidenceBundleSchema.parse(readJson('review-evidence.v1.json'));
+const mechanicsInput = readJson('enemy-mechanic-strategies.v1.json');
 
 describe('committed advisor knowledge bundles', () => {
   it('parses every committed bundle with its shared strict schema', () => {
+    const mechanics = enemyMechanicStrategyBundleSchema.parse(mechanicsInput);
     expect(sources.schemaVersion).toBe(1);
     expect(catalog.schemaVersion).toBe(1);
     expect(strategies.schemaVersion).toBe(2);
+    expect(mechanics.schemaVersion).toBe(1);
     expect(() =>
-      committedAdvisorKnowledgeSetSchema.parse({ sources, catalog, strategies, evidence })
+      committedAdvisorKnowledgeSetSchema.parse({
+        sources,
+        catalog,
+        strategies,
+        mechanics,
+        evidence
+      })
     ).not.toThrow();
+  });
+
+  it('covers the required scenario tags with capability-only mechanic policies', () => {
+    const mechanics = enemyMechanicStrategyBundleSchema.parse(mechanicsInput);
+    const mechanicByTag = new Map(
+      mechanics.mechanics.flatMap((mechanic) =>
+        mechanic.matchTags.map((tag) => [tag, mechanic.id] as const)
+      )
+    );
+
+    expect(Object.fromEntries(mechanicByTag)).toMatchObject({
+      'elemental-shield': 'shield-breaking',
+      'high-resistance': 'resistance-avoidance',
+      'multi-wave': 'wave-efficient-rotation',
+      groupable: 'grouping-value',
+      'single-target': 'single-target-pressure',
+      'survival-pressure': 'sustain-required'
+    });
+    expect(mechanicByTag.get('ungroupable')).toBe('ungroupable-pressure');
+    expect(mechanicByTag.get('burrow')).toBe('mobile-window-alignment');
+    expect(mechanicByTag.get('short-damage-window')).toBe('mobile-window-alignment');
+    expect(mechanicByTag.get('reaction-restricted')).toBe('reaction-constraint');
+
+    const serialized = JSON.stringify(mechanics);
+    expect(serialized).not.toMatch(/characterIds|10000052|10000065|10000073|10000089/);
+    for (const mechanic of mechanics.mechanics) {
+      expect(mechanic.avoidTags).toBeDefined();
+      expect(mechanic.requiredCapabilities.length).toBeGreaterThan(0);
+      expect(mechanic.preferredArchetypes.length).toBeGreaterThan(0);
+      expect(mechanic.teamSkeletonHints.length).toBeGreaterThan(0);
+      expect(mechanic.facts.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('rejects mechanic bundles that smuggle an unregistered trusted source', () => {
+    const mechanics = enemyMechanicStrategyBundleSchema.parse(mechanicsInput);
+    mechanics.sourceRegistry.sources.push({
+      id: 'unregistered-source',
+      name: 'Unregistered source',
+      hosts: ['unregistered.example'],
+      trust: 'trusted-local',
+      homepageUrl: 'https://unregistered.example/'
+    });
+
+    expect(
+      committedAdvisorKnowledgeSetSchema.safeParse({
+        sources,
+        catalog,
+        strategies,
+        mechanics,
+        evidence
+      }).success
+    ).toBe(false);
   });
 
   it('indexes every upstream canonical character exactly once in catalog and strategy data', () => {
@@ -129,6 +192,7 @@ describe('committed advisor knowledge bundles', () => {
       committedAdvisorKnowledgeSetSchema.safeParse({
         sources,
         catalog,
+        mechanics: mechanicsInput,
         evidence,
         strategies: { ...strategies, sourceVersion: 'stale-source-version' }
       }).success
@@ -145,6 +209,7 @@ describe('committed advisor knowledge bundles', () => {
       committedAdvisorKnowledgeSetSchema.safeParse({
         sources,
         catalog,
+        mechanics: mechanicsInput,
         evidence,
         strategies: unsupportedStrategies
       }).success
@@ -154,6 +219,7 @@ describe('committed advisor knowledge bundles', () => {
       committedAdvisorKnowledgeSetSchema.safeParse({
         sources,
         catalog,
+        mechanics: mechanicsInput,
         evidence,
         strategies: { ...strategies, catalogVersion: 'stale-catalog-version' }
       }).success
@@ -173,6 +239,7 @@ describe('committed advisor knowledge bundles', () => {
         sources: swappedSources,
         catalog,
         strategies,
+        mechanics: mechanicsInput,
         evidence
       }).success
     ).toBe(false);

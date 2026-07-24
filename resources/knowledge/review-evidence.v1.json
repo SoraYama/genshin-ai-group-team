@@ -211,6 +211,264 @@
           ]
         }
       ]
+    },
+    {
+      "citationId": "kqm-mechanics-enemy-shields",
+      "subjectCharacterIds": [],
+      "subjectMechanicIds": ["shield-breaking", "reaction-constraint"],
+      "url": "https://library.keqingmains.com/combat-mechanics/enemy-mechanics/enemy-shields-armor",
+      "reviewedAt": "2026-07-25T01:00:00+08:00",
+      "sectionLabels": ["Elemental Shields", "Elemental Armor", "Shield Damage"],
+      "archetypeBindings": [],
+      "mechanicBindings": [
+        {
+          "mechanicId": "shield-breaking",
+          "policySha256": "d9a85493e89411a19a5b0bbaebb49dbe27b281a28cb4620bf99839c0aa2f3735"
+        },
+        {
+          "mechanicId": "reaction-constraint",
+          "policySha256": "1fab3c9f871ffaa120572994ec7dc11c362ad17cd699200bd9452c9a49e33a77"
+        }
+      ],
+      "paraphrasedEvidence": [
+        {
+          "id": "evidence-mechanic-shield-breaking",
+          "summary": "审核结论：元素盾与元素护甲的承伤规则不同，队伍应先识别防护类型并准备相符的元素附着或破盾方式。",
+          "factBindings": [
+            {
+              "factId": "mechanic-shield-breaking-fact",
+              "statementSha256": "57afcb8ca5b1b90c78474c10e9676ea6f017bf7c89993a007a142b27cfff1cac"
+            }
+          ]
+        },
+        {
+          "id": "evidence-mechanic-shield-reaction-constraint",
+          "summary": "审核结论：敌方固有元素与防护会改变可发生的元素反应，受限场景需要准备替代伤害轴。",
+          "factBindings": [
+            {
+              "factId": "mechanic-reaction-constraint-fact",
+              "statementSha256": "5c02b7fc1ed50d11f5a1365fed09f5dcaabeaf5dbf92a87b01e66f103a17a6ea"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "citationId": "kqm-mechanics-enemy-resistances",
+      "subjectCharacterIds": [],
+      "subjectMechanicIds": ["resistance-avoidance"],
+      "url": "https://library.keqingmains.com/combat-mechanics/enemy-mechanics/enemy-resistances",
+      "reviewedAt": "2026-07-25T01:00:00+08:00",
+      "sectionLabels": ["Resistance"],
+      "archetypeBindings": [],
+      "mechanicBindings": [
+        {
+          "mechanicId": "resistance-avoidance",
+          "policySha256": "ce4ba4b2f1f97a6b63f2d1fcddc3ba060f5d4e1fe37d530ff6ade96489763c75"
+        }
+      ],
+      "paraphrasedEvidence": [
+        {
+          "id": "evidence-mechanic-resistance-avoidance",
+          "summary": "审核结论：抗性按伤害类型分别降低伤害，已知高抗或免疫时应优先使用不受限制的伤害轴。",
+          "factBindings": [
+            {
+              "factId": "mechanic-resistance-avoidance-fact",
+              "statementSha256": "30b8a2af05919f6f9ba2857e2b97387376cd4a844fefad80cafbeecc296c4f7d"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "citationId": "kqm-mechanics-aoe-scaling",
+      "subjectCharacterIds": [],
+      "subjectMechanicIds": ["grouping-value", "ungroupable-pressure", "single-target-pressure"],
+      "url": "https://library.keqingmains.com/combat-mechanics/damage/other/aoe-scaling",
+      "reviewedAt": "2026-07-25T01:00:00+08:00",
+      "sectionLabels": ["Linear AoE Scaling", "Quadratic AoE Scaling", "Non-AoE Scaling"],
+      "archetypeBindings": [],
+      "mechanicBindings": [
+        {
+          "mechanicId": "grouping-value",
+          "policySha256": "a164bdb8a7061d2187b1ca3e86eeade90342d6a8aa735c24e4af6257659bebab"
+        },
+        {
+          "mechanicId": "ungroupable-pressure",
+          "policySha256": "cdc8fe8daffb9f0db9061f404aef03eacca7dc4a248b0a1c258b48ad62e07cf3"
+        },
+        {
+          "mechanicId": "single-target-pressure",
+          "policySha256": "1a49f48fd1eab0aa74ece16acc715a6982a444954d9c1a5bfa91c2bbca12a426"
+        }
+      ],
+      "paraphrasedEvidence": [
+        {
+          "id": "evidence-mechanic-grouping-value",
+          "summary": "审核结论：范围攻击的总覆盖会随实际命中的敌人数变化，可聚怪时聚拢目标能提高有效覆盖。",
+          "factBindings": [
+            {
+              "factId": "mechanic-grouping-value-fact",
+              "statementSha256": "1fcec0e3a7496c1d509ffeae5e7f5ab8f7d5159cb73e041bdf544068f4cc4b50"
+            }
+          ]
+        },
+        {
+          "id": "evidence-mechanic-ungroupable",
+          "summary": "审核结论：不可聚怪时不能把多目标同时命中视为确定收益，应采用不依赖聚拢的覆盖方式。",
+          "factBindings": [
+            {
+              "factId": "mechanic-ungroupable-fact",
+              "statementSha256": "3007c3e6e681acb90b5ea3d2e87cf0f451b535d857dd14d9f6e99d33886d7285"
+            }
+          ]
+        },
+        {
+          "id": "evidence-mechanic-single-target",
+          "summary": "审核结论：非范围伤害不随敌人数增加覆盖，单体场景应独立验证持续单体输出。",
+          "factBindings": [
+            {
+              "factId": "mechanic-single-target-fact",
+              "statementSha256": "905d549098424c631ddd08ddd47d7d912c9148928ecab880991b02380ff3d2e5"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "citationId": "kqm-mechanics-player-shields",
+      "subjectCharacterIds": [],
+      "subjectMechanicIds": ["sustain-required"],
+      "url": "https://library.keqingmains.com/combat-mechanics/damage/shields",
+      "reviewedAt": "2026-07-25T01:00:00+08:00",
+      "sectionLabels": ["Introduction", "How Shields Absorb Hits"],
+      "archetypeBindings": [],
+      "mechanicBindings": [
+        {
+          "mechanicId": "sustain-required",
+          "policySha256": "69c10a4fec93667360f1e5d9e33ba6a849076d888b484451450cefb868dc07e6"
+        }
+      ],
+      "paraphrasedEvidence": [
+        {
+          "id": "evidence-mechanic-sustain",
+          "summary": "审核结论：角色护盾能吸收伤害并提供抗击退价值，高压场景应保留可靠生存与抗打断能力。",
+          "factBindings": [
+            {
+              "factId": "mechanic-sustain-fact",
+              "statementSha256": "d8fdb27713dd52155ead6173ee5c8483de52822d1cbd6b876b38a3e4431e39f2"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "citationId": "kqm-mechanics-enemy-interactions",
+      "subjectCharacterIds": [],
+      "subjectMechanicIds": ["mobile-window-alignment"],
+      "url": "https://library.keqingmains.com/evidence/combat-mechanics/enemy-mechanics/enemy-interactions",
+      "reviewedAt": "2026-07-25T01:00:00+08:00",
+      "sectionLabels": ["Enemies Actually Burrow"],
+      "archetypeBindings": [],
+      "mechanicBindings": [
+        {
+          "mechanicId": "mobile-window-alignment",
+          "policySha256": "77e8b7e1801025de472d8b1748fc42213f57813ceea8e124676a6e4e0c848724"
+        }
+      ],
+      "paraphrasedEvidence": [
+        {
+          "id": "evidence-mechanic-mobile-window",
+          "summary": "审核结论：部分敌人会钻地并换位，长前置或固定位置的循环在这类窗口中不能视为必然命中。",
+          "factBindings": [
+            {
+              "factId": "mechanic-mobile-window-fact",
+              "statementSha256": "27b56234d10e9ff8b86d7252fec6764c67340b95da2fbe5527427aee190ab494"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "citationId": "kqm-mechanics-cooldowns",
+      "subjectCharacterIds": [],
+      "subjectMechanicIds": ["wave-efficient-rotation"],
+      "url": "https://library.keqingmains.com/combat-mechanics/cooldowns",
+      "reviewedAt": "2026-07-25T01:00:00+08:00",
+      "sectionLabels": ["Cooldowns"],
+      "archetypeBindings": [],
+      "mechanicBindings": [
+        {
+          "mechanicId": "wave-efficient-rotation",
+          "policySha256": "86f42eaca10a3bf90d7fc63e15ec9ebf0364c09550bd3b0765d7baf83ccf6937"
+        }
+      ],
+      "paraphrasedEvidence": [
+        {
+          "id": "evidence-mechanic-multi-wave-cooldown",
+          "summary": "审核结论：技能施放受冷却约束，多波次队伍需要能在新一波重新部署关键效果。",
+          "factBindings": [
+            {
+              "factId": "mechanic-multi-wave-fact",
+              "statementSha256": "024e9615e264415cfeecd07745ec70f00e768f350ea0c970d3c2dbc688da4c09"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "citationId": "kqm-mechanics-energy",
+      "subjectCharacterIds": [],
+      "subjectMechanicIds": ["wave-efficient-rotation"],
+      "url": "https://library.keqingmains.com/combat-mechanics/energy",
+      "reviewedAt": "2026-07-25T01:00:00+08:00",
+      "sectionLabels": ["What is Energy", "How to Get Energy"],
+      "archetypeBindings": [],
+      "mechanicBindings": [
+        {
+          "mechanicId": "wave-efficient-rotation",
+          "policySha256": "86f42eaca10a3bf90d7fc63e15ec9ebf0364c09550bd3b0765d7baf83ccf6937"
+        }
+      ],
+      "paraphrasedEvidence": [
+        {
+          "id": "evidence-mechanic-multi-wave-energy",
+          "summary": "审核结论：元素爆发依赖能量，多波次循环必须同时考虑下一波的能量可用性。",
+          "factBindings": [
+            {
+              "factId": "mechanic-multi-wave-fact",
+              "statementSha256": "024e9615e264415cfeecd07745ec70f00e768f350ea0c970d3c2dbc688da4c09"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "citationId": "kqm-mechanics-internal-cooldown",
+      "subjectCharacterIds": [],
+      "subjectMechanicIds": ["reaction-constraint"],
+      "url": "https://library.keqingmains.com/combat-mechanics/internal-cooldown",
+      "reviewedAt": "2026-07-25T01:00:00+08:00",
+      "sectionLabels": ["Motivation", "Intuitive Overview"],
+      "archetypeBindings": [],
+      "mechanicBindings": [
+        {
+          "mechanicId": "reaction-constraint",
+          "policySha256": "1fab3c9f871ffaa120572994ec7dc11c362ad17cd699200bd9452c9a49e33a77"
+        }
+      ],
+      "paraphrasedEvidence": [
+        {
+          "id": "evidence-mechanic-reaction-constraint",
+          "summary": "审核结论：连续命中不等于每次都施加元素，元素附着频率会影响反应与队伍职责。",
+          "factBindings": [
+            {
+              "factId": "mechanic-reaction-constraint-fact",
+              "statementSha256": "5c02b7fc1ed50d11f5a1365fed09f5dcaabeaf5dbf92a87b01e66f103a17a6ea"
+            }
+          ]
+        }
+      ]
     }
   ]
 }

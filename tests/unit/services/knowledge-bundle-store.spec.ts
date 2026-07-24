@@ -13,6 +13,7 @@ const fileNames = [
   'sources.v1.json',
   'character-catalog.v1.json',
   'character-strategies.v2.json',
+  'enemy-mechanic-strategies.v1.json',
   'review-evidence.v1.json'
 ] as const;
 
@@ -40,7 +41,7 @@ describe('KnowledgeBundleStore', () => {
   it('loads the committed bundle and exposes only requested cloned records', async () => {
     const store = await KnowledgeBundleStore.load(knowledgeDirectory);
 
-    expect(store.version).toBe('2026-07-24.reviewed-1');
+    expect(store.version).toBe('2026-07-25.reviewed-2');
     expect(store.catalogVersion).toBe('enka-2026-07-24');
     expect(store.getCatalogEntry('10000052')).toMatchObject({
       id: '10000052',
@@ -91,6 +92,49 @@ describe('KnowledgeBundleStore', () => {
     expect(first.map(({ id }) => id)).toEqual(['kqm-raiden-quickguide']);
     first[0]!.title = 'mutated outside the store';
     expect(store.citations(['kqm-raiden-quickguide'])[0]?.title).toBe('Raiden Shogun Quick Guide');
+  });
+
+  it('matches reviewed scenario mechanics by normalized tags and returns fresh clones', async () => {
+    const store = await KnowledgeBundleStore.load(knowledgeDirectory);
+
+    const matches = store.matchMechanics([
+      'elemental-shield',
+      'high-resistance',
+      'multi-wave',
+      'groupable',
+      'single-target',
+      'survival-pressure'
+    ]);
+    expect(matches.map(({ id }) => id)).toEqual([
+      'shield-breaking',
+      'resistance-avoidance',
+      'wave-efficient-rotation',
+      'grouping-value',
+      'single-target-pressure',
+      'sustain-required'
+    ]);
+
+    matches[0]!.requiredCapabilities[0] = 'mutated-outside-store';
+    expect(store.getMechanicStrategy('shield-breaking')?.requiredCapabilities).toEqual([
+      'counter-element-application'
+    ]);
+  });
+
+  it('marks mechanic knowledge stale outside the cadence of every supporting source', async () => {
+    const store = await KnowledgeBundleStore.load(knowledgeDirectory);
+
+    expect(
+      store.mechanicCoverageFor({
+        mechanicIds: ['shield-breaking'],
+        now: new Date('2026-07-26T00:00:00+08:00')
+      }).trustedMechanicIds
+    ).toEqual(['shield-breaking']);
+    expect(
+      store.mechanicCoverageFor({
+        mechanicIds: ['shield-breaking'],
+        now: new Date('2027-01-22T01:00:00+08:00')
+      }).trustedMechanicIds
+    ).toEqual([]);
   });
 
   it('reports exactly five reviewed characters as trusted without expanding gap details', async () => {
@@ -217,6 +261,18 @@ describe('KnowledgeBundleStore', () => {
       KnowledgeBundleStore.load(
         '/virtual/knowledge',
         injectedReader({ ...files, 'character-strategies.v2.json': JSON.stringify(strategies) })
+      )
+    ).rejects.toThrow();
+
+    const mechanics = JSON.parse(files['enemy-mechanic-strategies.v1.json']);
+    mechanics.mechanics[0].requiredCapabilities.push('unreviewed-capability');
+    await expect(
+      KnowledgeBundleStore.load(
+        '/virtual/knowledge',
+        injectedReader({
+          ...files,
+          'enemy-mechanic-strategies.v1.json': JSON.stringify(mechanics)
+        })
       )
     ).rejects.toThrow();
   });

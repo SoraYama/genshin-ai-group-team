@@ -4,10 +4,48 @@ import {
   buildUnknownKnowledgeContext,
   buildV2PipelineContext
 } from '../../../src/main/services/v2-agent-context.js';
+import { knowledgeContextPacketSchema } from '../../../src/shared/advisor-knowledge.js';
 import { ABYSS_CHARACTERS, validAbyssPlan } from './abyss-test-fixtures.js';
 
 function knowledgePacket(unknownCharacterIds: string[] = []) {
   return buildUnknownKnowledgeContext('knowledge-v1', unknownCharacterIds);
+}
+
+function profileFixture() {
+  return {
+    schemaVersion: 2 as const,
+    uid: '123456789',
+    source: 'merged' as const,
+    fetchedAt: '2026-07-23T00:00:00.000Z',
+    characters: ABYSS_CHARACTERS,
+    coverage: {
+      ownedCount: 10,
+      detailedCount: 6,
+      buildCount: 10,
+      statsCount: 10,
+      enkaShowcaseCount: 8,
+      missingDetailCount: 4,
+      partial: true
+    }
+  };
+}
+
+function interpretation(characterId: string, signalPrefix: string) {
+  return {
+    characterId,
+    archetypeId: null,
+    confidence: 'low' as const,
+    candidateArchetypeIds: [],
+    contextRequired: false,
+    matchedSignals: Array.from(
+      { length: 12 },
+      (_, index) => `${signalPrefix}-${index}-${'s'.repeat(120)}`
+    ),
+    conflictingSignals: [],
+    currentBuildUsable: false,
+    adjustment: 'optional' as const,
+    unknowns: []
+  };
 }
 
 describe('V2 deterministic context builder', () => {
@@ -213,5 +251,154 @@ describe('V2 deterministic context builder', () => {
         knowledge: knowledgePacket()
       })
     ).toThrow(expect.objectContaining({ name: 'V2ContextBudgetError' }));
+  });
+
+  it('trims unselected candidate interpretations before selected low-priority facts', () => {
+    const baseline = validAbyssPlan();
+    const selectedIds = [
+      ...baseline.firstHalfTeam.characterIds,
+      ...baseline.secondHalfTeam.characterIds
+    ];
+    const selectedFact = `selected-fact-${'f'.repeat(180)}`;
+    const unselectedIds = Array.from({ length: 100 }, (_, index) => String(8_000_000 + index));
+    const knowledge = knowledgeContextPacketSchema.parse({
+      knowledgeVersion: 'budget-order',
+      buildInterpretations: [
+        ...selectedIds.map((id) => interpretation(id, `selected-${id}`)),
+        ...unselectedIds.map((id) => interpretation(id, `unselected-${id}`))
+      ],
+      trustedMatches: [
+        {
+          id: 'trusted-selected',
+          characterId: selectedIds[0],
+          summary: 'Selected reviewed match.',
+          factStatements: [selectedFact],
+          citationIds: ['trusted-budget-citation']
+        }
+      ],
+      ephemeralMatches: [],
+      unknowns: [],
+      coverage: { requested: 1, trusted: 1, ephemeral: 0, unknown: 0 },
+      citations: [
+        {
+          id: 'trusted-budget-citation',
+          sourceId: 'trusted-source',
+          url: 'https://example.com/budget',
+          title: 'Budget citation',
+          reviewedAt: '2026-07-24T10:00:00+08:00',
+          trust: 'trusted-local'
+        }
+      ]
+    });
+
+    const context = buildV2PipelineContext({
+      correlationId: 'context-budget-candidates',
+      profile: profileFixture(),
+      feasibleBaseline: baseline,
+      eligibleCharacterIds: ABYSS_CHARACTERS.map(({ id }) => String(id)),
+      mechanics: [
+        {
+          target: '12-1 上半',
+          facts: ['当前目标机制必须保留'],
+          unknowns: ['当前目标未知也必须保留']
+        }
+      ],
+      interventions: { noBuildChange: true },
+      knowledge
+    });
+
+    expect(
+      context.knowledge.buildInterpretations.map(({ characterId }) => characterId).sort()
+    ).toEqual(selectedIds.sort());
+    expect(context.knowledge.trustedMatches[0]?.factStatements).toEqual([selectedFact]);
+    expect(context.mechanics).toEqual([
+      {
+        target: '12-1 上半',
+        facts: ['当前目标机制必须保留'],
+        unknowns: ['当前目标未知也必须保留']
+      }
+    ]);
+    expect(context.knowledge.unknowns).toContainEqual(
+      expect.objectContaining({ kind: 'payload-truncated' })
+    );
+  });
+
+  it('drops low-priority fact details only after candidates and preserves selected builds, citations, mechanics, and all gaps', () => {
+    const baseline = validAbyssPlan();
+    const selectedIds = [
+      ...baseline.firstHalfTeam.characterIds,
+      ...baseline.secondHalfTeam.characterIds
+    ];
+    const citation = {
+      id: 'trusted-required-citation',
+      sourceId: 'trusted-source',
+      url: 'https://example.com/required',
+      title: 'Required citation',
+      reviewedAt: '2026-07-24T10:00:00+08:00',
+      trust: 'trusted-local' as const
+    };
+    const knowledge = knowledgeContextPacketSchema.parse({
+      knowledgeVersion: 'budget-facts',
+      buildInterpretations: selectedIds.map((id) => interpretation(id, `selected-${id}`)),
+      trustedMatches: selectedIds.map((characterId, index) => ({
+        id: `trusted-selected-${index}`,
+        characterId,
+        summary: `Selected summary ${index}`,
+        factStatements: Array.from(
+          { length: 32 },
+          (_, factIndex) => `fact-${index}-${factIndex}-${'f'.repeat(560)}`
+        ),
+        citationIds: [citation.id]
+      })),
+      ephemeralMatches: [],
+      unknowns: [
+        {
+          id: 'gap-original',
+          subjectId: 'scenario:original',
+          kind: 'missing',
+          reason: 'Original unknown must remain.'
+        }
+      ],
+      coverage: { requested: 9, trusted: 8, ephemeral: 0, unknown: 1 },
+      citations: [citation]
+    });
+    const mechanics = [
+      {
+        target: '12-1 上半',
+        facts: ['元素盾'],
+        unknowns: ['精确破盾时间未知']
+      }
+    ];
+
+    const context = buildV2PipelineContext({
+      correlationId: 'context-budget-facts',
+      profile: profileFixture(),
+      feasibleBaseline: baseline,
+      eligibleCharacterIds: ABYSS_CHARACTERS.map(({ id }) => String(id)),
+      mechanics,
+      interventions: { noBuildChange: true },
+      knowledge
+    });
+
+    expect(
+      context.knowledge.buildInterpretations.map(({ characterId }) => characterId).sort()
+    ).toEqual(selectedIds.sort());
+    expect(
+      context.knowledge.trustedMatches.every((match) => match.factStatements === undefined)
+    ).toBe(true);
+    expect(context.knowledge.citations).toEqual([citation]);
+    expect(context.mechanics).toEqual(mechanics);
+    expect(context.knowledge.unknowns).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'gap-original', kind: 'missing' }),
+        expect.objectContaining({ kind: 'payload-truncated' })
+      ])
+    );
+    expect(context.knowledge.coverage).toEqual({
+      requested: 10,
+      trusted: 8,
+      ephemeral: 0,
+      unknown: 2
+    });
   });
 });

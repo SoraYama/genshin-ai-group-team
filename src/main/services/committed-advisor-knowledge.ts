@@ -7,7 +7,7 @@ import {
 
 export const committedAdvisorKnowledgeSetSchema =
   committedAdvisorKnowledgeSetStructureSchema.superRefine(
-    ({ sources, strategies, evidence }, context) => {
+    ({ sources, strategies, mechanics, evidence }, context) => {
       const factsById = new Map<
         string,
         Array<{ characterId: string; citationIds: string[]; statement: string }>
@@ -19,6 +19,7 @@ export const committedAdvisorKnowledgeSetSchema =
           archetype: (typeof strategies.characters)[number]['archetypes'][number];
         }
       >();
+      const mechanicsById = new Map(mechanics.mechanics.map((mechanic) => [mechanic.id, mechanic]));
       for (const character of strategies.characters) {
         for (const archetype of character.archetypes) {
           if (archetype.coverage === 'reviewed') {
@@ -36,6 +37,17 @@ export const committedAdvisorKnowledgeSetSchema =
             });
             factsById.set(fact.id, owners);
           }
+        }
+      }
+      for (const mechanic of mechanics.mechanics) {
+        for (const fact of mechanic.facts) {
+          const owners = factsById.get(fact.id) ?? [];
+          owners.push({
+            characterId: `mechanic:${mechanic.id}`,
+            citationIds: fact.citationIds,
+            statement: fact.statement
+          });
+          factsById.set(fact.id, owners);
         }
       }
 
@@ -89,12 +101,66 @@ export const committedAdvisorKnowledgeSetSchema =
         }
       });
 
+      const mechanicPolicyBindingCounts = new Map<string, number>();
+      evidence.entries.forEach((entry, evidenceIndex) => {
+        (entry.mechanicBindings ?? []).forEach(({ mechanicId, policySha256 }, bindingIndex) => {
+          const mechanic = mechanicsById.get(mechanicId);
+          if (mechanic === undefined || !(entry.subjectMechanicIds ?? []).includes(mechanicId)) {
+            context.addIssue({
+              code: 'custom',
+              path: [
+                'evidence',
+                'entries',
+                evidenceIndex,
+                'mechanicBindings',
+                bindingIndex,
+                'mechanicId'
+              ],
+              message: 'Review evidence mechanic binding must resolve to a subject mechanic'
+            });
+            return;
+          }
+          mechanicPolicyBindingCounts.set(
+            mechanicId,
+            (mechanicPolicyBindingCounts.get(mechanicId) ?? 0) + 1
+          );
+          const actualPolicyDigest = createHash('sha256')
+            .update(canonicalJsonStringify(mechanic), 'utf8')
+            .digest('hex');
+          if (actualPolicyDigest !== policySha256) {
+            context.addIssue({
+              code: 'custom',
+              path: [
+                'evidence',
+                'entries',
+                evidenceIndex,
+                'mechanicBindings',
+                bindingIndex,
+                'policySha256'
+              ],
+              message: 'Review evidence policy digest must match its canonical mechanic policy'
+            });
+          }
+        });
+      });
+      mechanicsById.forEach((_mechanic, mechanicId) => {
+        if ((mechanicPolicyBindingCounts.get(mechanicId) ?? 0) < 1) {
+          context.addIssue({
+            code: 'custom',
+            path: ['evidence', 'entries'],
+            message: `Mechanic ${mechanicId} must have at least one policy binding`
+          });
+        }
+      });
+
       evidence.entries.forEach((entry, evidenceIndex) => {
         entry.paraphrasedEvidence.forEach(({ factBindings }, itemIndex) => {
           factBindings.forEach(({ factId, statementSha256 }, bindingIndex) => {
             const owner = (factsById.get(factId) ?? []).find(
               ({ characterId, citationIds }) =>
-                entry.subjectCharacterIds.includes(characterId) &&
+                (entry.subjectCharacterIds.includes(characterId) ||
+                  (characterId.startsWith('mechanic:') &&
+                    (entry.subjectMechanicIds ?? []).includes(characterId.slice(9)))) &&
                 citationIds.includes(entry.citationId)
             );
             if (owner === undefined) return;
