@@ -63,7 +63,7 @@ export function privacySafeResearchUrl(value: string): string | undefined {
   if (
     canonicalPath === undefined ||
     hasSensitiveResearchMaterialWithoutLongNumber(canonicalPath) ||
-    hasUnsafeUrlPathLongNumber(canonicalPath) ||
+    hasUnsafeUrlPathLongNumber(canonicalPath, parsed.pathname, value) ||
     PRIVATE_URL_PATH_PATTERN.test(canonicalPath)
   ) {
     return undefined;
@@ -127,16 +127,50 @@ function hasSensitiveResearchMaterialWithoutLongNumber(value: string): boolean {
   );
 }
 
-function hasUnsafeUrlPathLongNumber(value: string): boolean {
-  for (const match of value.matchAll(/\p{Decimal_Number}{9,}/gu)) {
+function hasUnsafeUrlPathLongNumber(
+  canonicalPath: string,
+  rawPath: string,
+  rawUrl: string
+): boolean {
+  const matches = Array.from(canonicalPath.matchAll(/\p{Decimal_Number}{9,}/gu));
+  if (matches.length === 0) return false;
+  if (
+    canonicalPath !== rawPath ||
+    ENCODED_OCTET_PATTERN.test(rawPath) ||
+    rawUrlPathContainsEncodedOctet(rawUrl)
+  ) {
+    return true;
+  }
+  for (const match of matches) {
     const index = match.index;
     const number = match[0];
     if (index === undefined || number === undefined) return true;
-    const before = value.slice(0, index);
-    const after = value.slice(index + number.length);
-    if (!/\/articles?\/$/iu.test(before) || !/^(?:\/|$)/u.test(after)) return true;
+    const before = rawPath.slice(0, index);
+    const after = rawPath.slice(index + number.length);
+    if (
+      !/^[0-9]{9,}$/u.test(number) ||
+      !/\/articles?\/$/u.test(before) ||
+      !/^(?:\/|$)/u.test(after)
+    ) {
+      return true;
+    }
   }
   return false;
+}
+
+function rawUrlPathContainsEncodedOctet(value: string): boolean {
+  const trimmed = value.trim();
+  const authoritySeparator = trimmed.indexOf('://');
+  if (authoritySeparator < 0) return true;
+  const pathStart = trimmed.indexOf('/', authoritySeparator + 3);
+  if (pathStart < 0) return false;
+  const queryStart = trimmed.indexOf('?', pathStart);
+  const fragmentStart = trimmed.indexOf('#', pathStart);
+  const pathEnd = Math.min(
+    queryStart < 0 ? trimmed.length : queryStart,
+    fragmentStart < 0 ? trimmed.length : fragmentStart
+  );
+  return ENCODED_OCTET_PATTERN.test(trimmed.slice(pathStart, pathEnd));
 }
 
 function hasFullPanelStatShape(value: string): boolean {

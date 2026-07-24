@@ -607,6 +607,28 @@ describe('GuideResearchCache', () => {
     ).resolves.toBeDefined();
   });
 
+  it.each([
+    ['encoded digits', 'https://example.test/articles/%31%32%33%34%35%36%37%38%39'],
+    ['fullwidth digits', 'https://example.test/articles/１２３４５６７８９'],
+    ['encoded separator', 'https://example.test/articles%2F123456789'],
+    ['double-encoded label', 'https://example.test/%2561rticles/123456789'],
+    ['encoded dot segment', 'https://example.test/%2e/articles/123456789']
+  ])('does not create a cache file for an article path with %s', async (label, url) => {
+    const filePath = await makeCachePath();
+    const cache = createCacheAt(filePath, { now: () => START });
+    const candidate = value(label.replaceAll(' ', '-'));
+    candidate.citations[0]!.url = url;
+
+    await expect(
+      cache.put({
+        task: task({ key: `unsafe-article-${label.replaceAll(' ', '-')}` }),
+        knowledgeVersion: 'knowledge-v4',
+        value: candidate
+      })
+    ).rejects.toThrow();
+    await expect(fs.stat(filePath)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('rejects long decimal identifiers across every free-text field', async () => {
     const filePath = await makeCachePath();
     const cache = createCacheAt(filePath, { now: () => START });

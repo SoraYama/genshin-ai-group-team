@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { privacySafeResearchText } from '../../../src/main/services/research-privacy.js';
+import {
+  privacySafeResearchText,
+  privacySafeResearchUrl
+} from '../../../src/main/services/research-privacy.js';
 
 describe('privacySafeResearchText', () => {
   it.each([
@@ -28,6 +31,33 @@ describe('privacySafeResearchText', () => {
     encodeLayers('这份攻略适用于 123456789', 4)
   ])('rejects identity, credential, or full-panel material after canonicalization: %s', (value) => {
     expect(privacySafeResearchText(value)).toBeUndefined();
+  });
+});
+
+describe('privacySafeResearchUrl', () => {
+  it.each([
+    'https://example.test/articles/%31%32%33%34%35%36%37%38%39',
+    'https://example.test/articles/１２３４５６７８９',
+    'https://example.test/articles%2F123456789',
+    'https://example.test/%2561rticles/123456789',
+    'https://example.test/%2e/articles/123456789',
+    'https://example.test/Articles/123456789',
+    'https://example.test/articles/123456789-extra',
+    'https://example.test/not-articles/123456789',
+    'https://example.test/articlez/123456789'
+  ])(
+    'rejects a long article number unless its raw path uses exact literal ASCII segments: %s',
+    (url) => {
+      expect(privacySafeResearchUrl(url)).toBeUndefined();
+    }
+  );
+
+  it.each([
+    'https://example.test/article/123456789',
+    'https://example.test/articles/123456789',
+    'https://example.test/guides/articles/123456789/teams'
+  ])('allows literal lowercase ASCII article ID path segments: %s', (url) => {
+    expect(privacySafeResearchUrl(url)).toBe(url);
   });
 });
 
