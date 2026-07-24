@@ -11,7 +11,11 @@ import { EmptyState } from '../../components/ui/EmptyState';
 import { GtaDialog } from '../../components/ui/GtaDialog';
 import { destructiveErrorRecovery, getErrorCode, localizeError, useI18n } from '../../i18n';
 import { api } from '../../ipc';
-import { dataClearCopy, formatStorageSize } from './settings-presentation';
+import {
+  dataClearCopy,
+  formatStorageSize,
+  hasClearableChallengeCache
+} from './settings-presentation';
 import { SettingsLoadState } from './SettingsLoadState';
 
 type SaveStatus =
@@ -380,7 +384,7 @@ export function SettingsPage({
                 : '移除下载更新与临时网页攻略摘要；应用随附的可信知识库保留。'
             }
             action={isEnglish ? 'Clear challenge cache' : '清除挑战资料缓存'}
-            disabled={dataSummary.scenarios.clearableCount + dataSummary.guideResearch.count === 0}
+            disabled={!hasClearableChallengeCache(dataSummary)}
             onClear={() => void prepareClear('scenarios')}
           />
           <DataManagementRow

@@ -36,6 +36,20 @@ async function makeCachePath(): Promise<string> {
   return resolveGuideResearchCachePath(tempRoot);
 }
 
+function createCacheAt(
+  filePath: string,
+  options: {
+    fileSystem?: GuideResearchCacheFileSystem;
+    now?: () => number;
+    onDiagnostic?: (diagnostic: unknown) => void;
+  } = {}
+): GuideResearchCache {
+  return new GuideResearchCache({
+    userDataDirectory: path.dirname(path.dirname(filePath)),
+    ...options
+  } as never);
+}
+
 function task(overrides: Partial<GuideResearchTask> = {}): GuideResearchTask {
   return {
     key: 'guide-missing-example',
@@ -159,7 +173,7 @@ describe('GuideResearchCache', () => {
   it('treats exact 24-hour expiry as readable and expires at boundary plus one millisecond', async () => {
     const filePath = await makeCachePath();
     let now = START;
-    const cache = new GuideResearchCache({ filePath, now: () => now });
+    const cache = createCacheAt(filePath, { now: () => now });
     await cache.put({ task: task(), knowledgeVersion: 'knowledge-v4', value: value() });
 
     now = START + DAY_MS;
@@ -175,21 +189,20 @@ describe('GuideResearchCache', () => {
   it('rejects invalid clocks and discards entries created in the future', async () => {
     const filePath = await makeCachePath();
     let now = START + 1_000;
-    const writer = new GuideResearchCache({ filePath, now: () => now });
+    const writer = createCacheAt(filePath, { now: () => now });
     await writer.put({ task: task(), knowledgeVersion: 'knowledge-v4', value: value() });
 
     now = START;
-    const reader = new GuideResearchCache({ filePath, now: () => now });
+    const reader = createCacheAt(filePath, { now: () => now });
     await expect(
       reader.get({ task: task(), knowledgeVersion: 'knowledge-v4' })
     ).resolves.toBeUndefined();
 
-    const invalid = new GuideResearchCache({ filePath, now: () => Number.NaN });
+    const invalid = createCacheAt(filePath, { now: () => Number.NaN });
     await expect(
       invalid.get({ task: task(), knowledgeVersion: 'knowledge-v4' })
     ).rejects.toMatchObject({ code: 'GUIDE_RESEARCH_CLOCK_INVALID' });
-    const overflowing = new GuideResearchCache({
-      filePath,
+    const overflowing = createCacheAt(filePath, {
       now: () => 8_640_000_000_000_000
     });
     await expect(
@@ -203,7 +216,7 @@ describe('GuideResearchCache', () => {
 
   it('accepts only isolated ephemeral citations and rejects raw SDK or secret-shaped extras', async () => {
     const filePath = await makeCachePath();
-    const cache = new GuideResearchCache({ filePath, now: () => START });
+    const cache = createCacheAt(filePath, { now: () => START });
 
     await expect(
       cache.put({ task: task(), knowledgeVersion: 'knowledge-v4', value: value() })
@@ -261,11 +274,159 @@ describe('GuideResearchCache', () => {
         }
       })
     ).rejects.toThrow();
+    await expect(
+      cache.put({
+        task: task({ key: 'public-article-number-in-summary' }),
+        knowledgeVersion: 'knowledge-v4',
+        value: {
+          ...value('7'),
+          matches: [{ ...value('7').matches[0]!, summary: '公开攻略文章 123456789' }]
+        }
+      })
+    ).resolves.toBeDefined();
+  });
+
+  it('rejects explicit private labels across every free-text field', async () => {
+    const filePath = await makeCachePath();
+    const cache = createCacheAt(filePath, { now: () => START });
+    const sensitivePhrases = [
+      'UID: 123456789',
+      '玩家 UID=123456789',
+      '玩家UID：123456789',
+      'nickname: PRIVATE',
+      '昵称：PRIVATE',
+      '玩家名: PRIVATE',
+      'PRIVATE-NICKNAME',
+      'Cookie=ltoken_v2=secret',
+      'ltoken_v2=secret',
+      'ltuid_v2=123',
+      'Authorization: Bearer secret',
+      'Bearer secret',
+      'API key: secret',
+      'token=secret',
+      'prompt: private request',
+      'system prompt',
+      'raw SDK message',
+      'tool payload',
+      'full stats',
+      '完整面板'
+    ];
+    for (const [index, phrase] of sensitivePhrases.entries()) {
+      await expect(
+        cache.put({
+          task: task({ key: `private-summary-${index}` }),
+          knowledgeVersion: 'knowledge-v4',
+          value: {
+            ...value(`private-${index}`),
+            matches: [{ ...value(`private-${index}`).matches[0]!, summary: phrase }]
+          }
+        })
+      ).rejects.toThrow();
+    }
+
+    const fieldCases: Array<[string, EphemeralGuideCacheValue]> = [
+      [
+        'characterNames',
+        {
+          ...value('field-character'),
+          applicability: {
+            ...value('field-character').applicability,
+            characterNames: ['PRIVATE-NICKNAME']
+          }
+        }
+      ],
+      [
+        'scenarioTags',
+        {
+          ...value('field-scenario'),
+          applicability: {
+            ...value('field-scenario').applicability,
+            scenarioTags: ['Authorization:Bearer-secret']
+          }
+        }
+      ],
+      [
+        'buildSignals',
+        {
+          ...value('field-build'),
+          applicability: {
+            ...value('field-build').applicability,
+            buildSignals: ['完整面板']
+          }
+        }
+      ],
+      ['conflicts', { ...value('field-conflict'), conflicts: ['Cookie=secret'] }],
+      [
+        'citation title',
+        {
+          ...value('field-title'),
+          citations: [{ ...value('field-title').citations[0]!, title: 'raw SDK message: private' }]
+        }
+      ],
+      [
+        'match subject',
+        {
+          ...value('field-subject'),
+          matches: [{ ...value('field-subject').matches[0]!, subjectId: 'PRIVATE-NICKNAME' }]
+        }
+      ]
+    ];
+    for (const [field, candidate] of fieldCases) {
+      await expect(
+        cache.put({
+          task: task({ key: `private-field-${field}` }),
+          knowledgeVersion: 'knowledge-v4',
+          value: candidate
+        })
+      ).rejects.toThrow();
+    }
+  });
+
+  it('rejects credential-bearing and user-identity URL components without blocking article IDs', async () => {
+    const filePath = await makeCachePath();
+    const cache = createCacheAt(filePath, { now: () => START });
+    const unsafeUrls = [
+      'https://user:password@example.test/guide',
+      'https://example.test/uid/123456789',
+      'https://example.test/%2575id/123456789',
+      'https://example.test/user/PRIVATE-NICKNAME',
+      'https://example.test/guide?uid=123456789',
+      'https://example.test/guide?next=Authorization%3A%20Bearer%20secret',
+      'https://example.test/guide#token=secret',
+      'https://example.test/guide#user/PRIVATE-NICKNAME'
+    ];
+    for (const [index, url] of unsafeUrls.entries()) {
+      await expect(
+        cache.put({
+          task: task({ key: `unsafe-url-${index}` }),
+          knowledgeVersion: 'knowledge-v4',
+          value: {
+            ...value(`url-${index}`),
+            citations: [{ ...value(`url-${index}`).citations[0]!, url }]
+          }
+        })
+      ).rejects.toThrow();
+    }
+    await expect(
+      cache.put({
+        task: task({ key: 'safe-article-url' }),
+        knowledgeVersion: 'knowledge-v4',
+        value: {
+          ...value('safe-article-url'),
+          citations: [
+            {
+              ...value('safe-article-url').citations[0]!,
+              url: 'https://example.test/articles/123456789'
+            }
+          ]
+        }
+      })
+    ).resolves.toBeDefined();
   });
 
   it('parses and clones on put/get so callers cannot mutate cached values', async () => {
     const filePath = await makeCachePath();
-    const cache = new GuideResearchCache({ filePath, now: () => START });
+    const cache = createCacheAt(filePath, { now: () => START });
     const input = value();
     const stored = await cache.put({
       task: task(),
@@ -284,7 +445,7 @@ describe('GuideResearchCache', () => {
 
   it('stores only the anonymous task digest, never task labels or UID-like input', async () => {
     const filePath = await makeCachePath();
-    const cache = new GuideResearchCache({ filePath, now: () => START });
+    const cache = createCacheAt(filePath, { now: () => START });
     const privateTask = task({
       key: 'PRIVATE-NICKNAME-123456789',
       character: {
@@ -314,12 +475,14 @@ describe('GuideResearchCache', () => {
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     const diagnostics: unknown[] = [];
     await fs.writeFile(filePath, '{"Authorization":"Bearer disk-secret",', 'utf8');
-    const corrupt = new GuideResearchCache({
-      filePath,
+    const corrupt = createCacheAt(filePath, {
       now: () => START,
       onDiagnostic: (diagnostic) => diagnostics.push(diagnostic)
     });
-    await expect(corrupt.getSummary()).resolves.toMatchObject({ count: 0 });
+    await expect(corrupt.getDataManagementSnapshot()).resolves.toMatchObject({
+      count: 0,
+      clearableCount: 1
+    });
     expect(JSON.stringify(diagnostics)).not.toContain('disk-secret');
     expect(diagnostics).toEqual([
       { code: 'GUIDE_RESEARCH_CACHE_INVALID', file: GUIDE_RESEARCH_CACHE_FILENAME }
@@ -350,10 +513,10 @@ describe('GuideResearchCache', () => {
       writeFile: fs.writeFile,
       rename: fs.rename,
       unlink: fs.unlink,
-      stat: fs.stat
+      lstat: fs.lstat,
+      realpath: fs.realpath
     };
-    const cache = new GuideResearchCache({
-      filePath,
+    const cache = createCacheAt(filePath, {
       fileSystem,
       now: () => START,
       onDiagnostic: (diagnostic) => diagnostics.push(diagnostic)
@@ -382,9 +545,10 @@ describe('GuideResearchCache', () => {
         await fs.rename(from, to);
       },
       unlink: fs.unlink,
-      stat: fs.stat
+      lstat: fs.lstat,
+      realpath: fs.realpath
     };
-    const cache = new GuideResearchCache({ filePath, fileSystem, now: () => START });
+    const cache = createCacheAt(filePath, { fileSystem, now: () => START });
     await cache.put({ task: task(), knowledgeVersion: 'knowledge-v4', value: value() });
 
     expect(writes).toHaveLength(1);
@@ -398,7 +562,7 @@ describe('GuideResearchCache', () => {
 
   it('preserves the previous cache and removes the temporary file when rename fails', async () => {
     const filePath = await makeCachePath();
-    const initial = new GuideResearchCache({ filePath, now: () => START });
+    const initial = createCacheAt(filePath, { now: () => START });
     await initial.put({ task: task(), knowledgeVersion: 'knowledge-v4', value: value() });
     const previous = await fs.readFile(filePath, 'utf8');
     const fileSystem: GuideResearchCacheFileSystem = {
@@ -409,9 +573,10 @@ describe('GuideResearchCache', () => {
         throw new Error('disk failure with Authorization: Bearer secret');
       }),
       unlink: fs.unlink,
-      stat: fs.stat
+      lstat: fs.lstat,
+      realpath: fs.realpath
     };
-    const failing = new GuideResearchCache({ filePath, fileSystem, now: () => START + 1 });
+    const failing = createCacheAt(filePath, { fileSystem, now: () => START + 1 });
 
     await expect(
       failing.put({
@@ -429,7 +594,7 @@ describe('GuideResearchCache', () => {
   it('serializes concurrent puts without losing updates', async () => {
     const filePath = await makeCachePath();
     let now = START;
-    const cache = new GuideResearchCache({ filePath, now: () => now++ });
+    const cache = createCacheAt(filePath, { now: () => now++ });
     await Promise.all(
       Array.from({ length: 24 }, (_, index) =>
         cache.put({
@@ -456,7 +621,7 @@ describe('GuideResearchCache', () => {
   it('evicts oldest entries deterministically at 100 items and removes expired entries on write', async () => {
     const filePath = await makeCachePath();
     let now = START;
-    const cache = new GuideResearchCache({ filePath, now: () => now });
+    const cache = createCacheAt(filePath, { now: () => now });
     const boundedTasks: GuideResearchTask[] = [];
     for (let index = 0; index < 101; index += 1) {
       const boundedTask = task({ key: `bounded-${String(index).padStart(3, '0')}` });
@@ -490,7 +655,7 @@ describe('GuideResearchCache', () => {
   it('evicts by the 2 MiB file limit and rejects an oversized single item without damaging data', async () => {
     const filePath = await makeCachePath();
     let now = START;
-    const cache = new GuideResearchCache({ filePath, now: () => now });
+    const cache = createCacheAt(filePath, { now: () => now });
     await cache.put({
       task: task({ key: 'small-safe-entry' }),
       knowledgeVersion: 'knowledge-v4',
@@ -521,7 +686,7 @@ describe('GuideResearchCache', () => {
     expect(summary.count).toBeGreaterThan(0);
   });
 
-  it('accepts only the absolute user-data cache path and never writes trusted resources', async () => {
+  it('derives its only target from an absolute user-data authority and never accepts raw paths', async () => {
     tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'gta-guide-isolation-'));
     const root = tempRoot;
     const filePath = resolveGuideResearchCachePath(root);
@@ -530,14 +695,46 @@ describe('GuideResearchCache', () => {
     expect(
       () =>
         new GuideResearchCache({
-          filePath: path.join(root, 'resources', 'knowledge', GUIDE_RESEARCH_CACHE_FILENAME)
-        })
+          userDataDirectory: 'relative-user-data'
+        } as never)
+    ).toThrow();
+    expect(
+      () =>
+        new GuideResearchCache({
+          userDataDirectory: path.join(root, 'Resources', 'Knowledge')
+        } as never)
     ).toThrow();
 
     const trustedResource = path.join(root, 'resources', 'knowledge', 'sentinel.json');
     await fs.mkdir(path.dirname(trustedResource), { recursive: true });
     await fs.writeFile(trustedResource, 'trusted-sentinel', 'utf8');
-    const cache = new GuideResearchCache({ filePath, now: () => START });
+    expect(
+      () =>
+        new GuideResearchCache({
+          userDataDirectory: path.dirname(trustedResource)
+        } as never)
+    ).toThrow();
+    expect(
+      () =>
+        new GuideResearchCache({
+          userDataDirectory: path.join(
+            path.dirname(trustedResource),
+            'nested',
+            'resources',
+            'other'
+          )
+        } as never)
+    ).toThrow();
+    expect(
+      () =>
+        new GuideResearchCache({
+          userDataDirectory: root,
+          filePath: path.join(path.dirname(trustedResource), GUIDE_RESEARCH_CACHE_FILENAME)
+        } as never)
+    ).toThrow();
+
+    const cache = createCacheAt(filePath, { now: () => START });
+    expect(cache.filePath).toBe(filePath);
     await cache.put({ task: task(), knowledgeVersion: 'knowledge-v4', value: value() });
     await expect(fs.readFile(trustedResource, 'utf8')).resolves.toBe('trusted-sentinel');
     await expect(fs.readdir(path.dirname(filePath))).resolves.toEqual([
@@ -545,13 +742,68 @@ describe('GuideResearchCache', () => {
     ]);
   });
 
+  it('rejects a cache-directory symlink before reading, writing, or clearing its target', async () => {
+    tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'gta-guide-symlink-'));
+    const userDataDirectory = path.join(tempRoot, 'user-data');
+    const trustedKnowledge = path.join(tempRoot, 'resources', 'knowledge');
+    const redirectedFile = path.join(trustedKnowledge, GUIDE_RESEARCH_CACHE_FILENAME);
+    await fs.mkdir(userDataDirectory, { recursive: true });
+    await fs.mkdir(trustedKnowledge, { recursive: true });
+    await fs.writeFile(redirectedFile, 'trusted-sentinel', 'utf8');
+    await fs.symlink(trustedKnowledge, path.join(userDataDirectory, 'cache'), 'dir');
+    const cache = new GuideResearchCache({ userDataDirectory, now: () => START } as never);
+
+    await expect(cache.getSummary()).rejects.toMatchObject({
+      code: 'GUIDE_RESEARCH_PATH_UNSAFE'
+    });
+    await expect(
+      cache.put({ task: task(), knowledgeVersion: 'knowledge-v4', value: value() })
+    ).rejects.toMatchObject({ code: 'GUIDE_RESEARCH_PATH_UNSAFE' });
+    await expect(
+      cache.clearAll({ clearableCount: 0, fingerprint: 'does-not-matter' })
+    ).rejects.toMatchObject({ code: 'GUIDE_RESEARCH_PATH_UNSAFE' });
+    await expect(fs.readFile(redirectedFile, 'utf8')).resolves.toBe('trusted-sentinel');
+  });
+
+  it('rejects a target-file symlink and a user-data realpath under trusted resources', async () => {
+    tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'gta-guide-file-symlink-'));
+    const userDataDirectory = path.join(tempRoot, 'user-data');
+    const trustedKnowledge = path.join(tempRoot, 'resources', 'knowledge');
+    const trustedFile = path.join(trustedKnowledge, 'sentinel.json');
+    await fs.mkdir(path.join(userDataDirectory, 'cache'), { recursive: true });
+    await fs.mkdir(trustedKnowledge, { recursive: true });
+    await fs.writeFile(trustedFile, 'trusted-sentinel', 'utf8');
+    await fs.symlink(trustedFile, resolveGuideResearchCachePath(userDataDirectory), 'file');
+    const fileLinkCache = new GuideResearchCache({
+      userDataDirectory,
+      now: () => START
+    } as never);
+    await expect(fileLinkCache.getSummary()).rejects.toMatchObject({
+      code: 'GUIDE_RESEARCH_PATH_UNSAFE'
+    });
+
+    const linkedUserData = path.join(tempRoot, 'linked-user-data');
+    await fs.symlink(trustedKnowledge, linkedUserData, 'dir');
+    const rootLinkCache = new GuideResearchCache({
+      userDataDirectory: linkedUserData,
+      now: () => START
+    } as never);
+    await expect(rootLinkCache.getSummary()).rejects.toMatchObject({
+      code: 'GUIDE_RESEARCH_PATH_UNSAFE'
+    });
+    await expect(fs.readFile(trustedFile, 'utf8')).resolves.toBe('trusted-sentinel');
+  });
+
   it('summarizes only count/bytes/timestamp and clears the isolated file with selection safety', async () => {
     const filePath = await makeCachePath();
-    const cache = new GuideResearchCache({ filePath, now: () => START });
+    const cache = createCacheAt(filePath, { now: () => START });
     const missing = await cache.getDataManagementSnapshot();
-    expect(missing).toMatchObject({ count: 0, sizeBytes: 0 });
+    expect(missing).toMatchObject({ count: 0, clearableCount: 0, sizeBytes: 0 });
     await expect(
-      cache.clearAll({ count: missing.count, fingerprint: missing.fingerprint })
+      cache.clearAll({
+        clearableCount: missing.clearableCount,
+        fingerprint: missing.fingerprint
+      })
     ).resolves.toBe(0);
 
     await cache.put({ task: task(), knowledgeVersion: 'knowledge-v4', value: value() });
@@ -559,6 +811,7 @@ describe('GuideResearchCache', () => {
 
     expect(snapshot).toMatchObject({
       count: 1,
+      clearableCount: 1,
       sizeBytes: expect.any(Number),
       updatedAt: '2026-07-25T00:00:00.000Z',
       fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/)
@@ -566,13 +819,19 @@ describe('GuideResearchCache', () => {
     expect(JSON.stringify(snapshot)).not.toContain('https://');
     expect(JSON.stringify(snapshot)).not.toContain('攻略摘要');
     await expect(
-      cache.clearAll({ count: snapshot.count, fingerprint: snapshot.fingerprint })
+      cache.clearAll({
+        clearableCount: snapshot.clearableCount,
+        fingerprint: snapshot.fingerprint
+      })
     ).resolves.toBe(1);
     await expect(fs.stat(filePath)).rejects.toMatchObject({ code: 'ENOENT' });
     const empty = await cache.getDataManagementSnapshot();
-    expect(empty).toMatchObject({ count: 0, sizeBytes: 0 });
+    expect(empty).toMatchObject({ count: 0, clearableCount: 0, sizeBytes: 0 });
     await expect(
-      cache.clearAll({ count: empty.count, fingerprint: empty.fingerprint })
+      cache.clearAll({
+        clearableCount: empty.clearableCount,
+        fingerprint: empty.fingerprint
+      })
     ).resolves.toBe(0);
   });
 });

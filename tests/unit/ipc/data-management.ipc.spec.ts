@@ -61,6 +61,7 @@ describe('data management IPC', () => {
       history: { count: 0, fingerprint: 'private-history-fingerprint' },
       guideResearch: {
         count: 3,
+        clearableCount: 3,
         sizeBytes: 96,
         fingerprint: 'private-guide-fingerprint',
         privateContents: 'https://secret.example/raw-guide'

@@ -64,10 +64,7 @@ import {
 } from './services/knowledge-bundle-store.js';
 import { DataManagementService } from './services/data-management-service.js';
 import { registerDataManagementIpc } from './ipc/data-management.ipc.js';
-import {
-  GuideResearchCache,
-  resolveGuideResearchCachePath
-} from './services/guide-research-cache.js';
+import { GuideResearchCache } from './services/guide-research-cache.js';
 
 const isolatedUserDataDir = process.env.GTA_E2E_USER_DATA_DIR;
 if (isolatedUserDataDir) {
@@ -241,7 +238,7 @@ async function bootstrapServices(): Promise<void> {
   await scenarioStore.init();
   scenarioRefresher = new ScenarioRefresher(scenarioStore);
   const guideResearch = new GuideResearchCache({
-    filePath: resolveGuideResearchCachePath(app.getPath('userData'))
+    userDataDirectory: app.getPath('userData')
   });
   const dataManagement = new DataManagementService({
     profiles,

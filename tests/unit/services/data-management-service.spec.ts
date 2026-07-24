@@ -1,5 +1,24 @@
-import { describe, expect, it, vi } from 'vitest';
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DataManagementService } from '../../../src/main/services/data-management-service.js';
+import {
+  GUIDE_RESEARCH_CACHE_MAX_BYTES,
+  GuideResearchCache,
+  resolveGuideResearchCachePath
+} from '../../../src/main/services/guide-research-cache.js';
+
+const temporaryDirectories: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(
+    temporaryDirectories
+      .splice(0)
+      .map((directory) => fs.rm(directory, { recursive: true, force: true }))
+  );
+});
 
 function createDeps() {
   const state = {
@@ -20,6 +39,7 @@ function createDeps() {
     historyToken: 'h1',
     guideResearch: {
       count: 2,
+      clearableCount: 2,
       sizeBytes: 768,
       updatedAt: '2026-07-24T00:00:00.000Z',
       fingerprint: 'g1'
@@ -46,6 +66,16 @@ function createDeps() {
           fingerprint: 's0'
         };
         return 2;
+      }),
+      clearDownloadedCacheWithRelated: vi.fn(async (_expected, relatedClear) => {
+        const scenarioRemoved = state.scenarios.clearableCount;
+        state.scenarios = {
+          ...state.scenarios,
+          clearableCount: 0,
+          sizeBytes: 0,
+          fingerprint: 's0'
+        };
+        return { scenarioRemoved, relatedRemoved: await relatedClear() };
       })
     },
     history: {
@@ -70,6 +100,7 @@ function createDeps() {
         const removed = state.guideResearch.count;
         state.guideResearch = {
           count: 0,
+          clearableCount: 0,
           sizeBytes: 0,
           fingerprint: 'g0'
         } as typeof state.guideResearch;
@@ -170,12 +201,12 @@ describe('DataManagementService', () => {
       confirmationToken: confirmation.confirmationToken
     });
 
-    expect(deps.scenarios.clearDownloadedCache).toHaveBeenCalledWith({
-      count: 2,
-      fingerprint: 's1'
-    });
+    expect(deps.scenarios.clearDownloadedCacheWithRelated).toHaveBeenCalledWith(
+      { count: 2, fingerprint: 's1' },
+      expect.any(Function)
+    );
     expect(deps.guideResearch.clearAll).toHaveBeenCalledWith({
-      count: 2,
+      clearableCount: 2,
       fingerprint: 'g1'
     });
   });
@@ -209,6 +240,7 @@ describe('DataManagementService', () => {
     const deps = createDeps();
     deps.state.guideResearch = {
       count: 0,
+      clearableCount: 0,
       sizeBytes: 0,
       fingerprint: 'guide-cache-missing'
     } as typeof deps.state.guideResearch;
@@ -224,10 +256,83 @@ describe('DataManagementService', () => {
       })
     ).resolves.toMatchObject({ removed: 2 });
     expect(deps.guideResearch.clearAll).toHaveBeenCalledWith({
-      count: 0,
+      clearableCount: 0,
       fingerprint: 'guide-cache-missing'
     });
   });
+
+  it.each(['invalid', 'oversize', 'expired'] as const)(
+    'clears a physical %s guide cache even when it has zero live entries and no scenarios',
+    async (kind) => {
+      const userDataDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'gta-guide-clearable-'));
+      temporaryDirectories.push(userDataDirectory);
+      const filePath = resolveGuideResearchCachePath(userDataDirectory);
+      await fs.mkdir(path.dirname(filePath), { recursive: true });
+      let now = Date.parse('2026-07-25T00:00:00.000Z');
+      const guideResearch = new GuideResearchCache({ userDataDirectory, now: () => now });
+      if (kind === 'invalid') {
+        await fs.writeFile(filePath, '{"schemaVersion":', 'utf8');
+      } else if (kind === 'oversize') {
+        await fs.writeFile(filePath, 'x'.repeat(GUIDE_RESEARCH_CACHE_MAX_BYTES + 1), 'utf8');
+      } else {
+        await guideResearch.put({
+          task: { key: 'expired-guide', reason: 'stale', scenarioTags: [] },
+          knowledgeVersion: 'knowledge-v4',
+          value: {
+            trust: 'ephemeral-web',
+            matches: [
+              {
+                id: 'expired-match',
+                subjectId: 'expired-subject',
+                summary: '匿名攻略摘要',
+                citationIds: ['expired-citation']
+              }
+            ],
+            citations: [
+              {
+                id: 'expired-citation',
+                sourceId: 'web-guide',
+                url: 'https://example.test/guides/expired',
+                title: 'Expired guide',
+                reviewedAt: '2026-07-25T00:00:00.000Z',
+                trust: 'ephemeral-web'
+              }
+            ],
+            applicability: { characterNames: [], scenarioTags: [], buildSignals: [] },
+            conflicts: [],
+            researchedAt: '2026-07-25T00:00:00.000Z'
+          }
+        });
+        now += 24 * 60 * 60 * 1_000 + 1;
+      }
+      const deps = createDeps();
+      deps.state.scenarios = {
+        ...deps.state.scenarios,
+        clearableCount: 0,
+        sizeBytes: 0,
+        fingerprint: 'scenario-empty'
+      };
+      const service = new DataManagementService({ ...deps, guideResearch });
+
+      const summary = await service.getSummary();
+      expect(summary.guideResearch.count).toBe(0);
+      expect(summary.guideResearch.sizeBytes).toBeGreaterThan(0);
+      expect(summary.guideResearch).not.toHaveProperty('clearableCount');
+      const confirmation = await service.prepareClear('scenarios');
+      expect(confirmation.count).toBe(1);
+      await expect(
+        service.clear({
+          scope: 'scenarios',
+          expectedCount: confirmation.count,
+          confirmationToken: confirmation.confirmationToken
+        })
+      ).resolves.toMatchObject({
+        removed: 1,
+        summary: { guideResearch: { count: 0, sizeBytes: 0 } }
+      });
+      await expect(fs.stat(filePath)).rejects.toMatchObject({ code: 'ENOENT' });
+    }
+  );
 
   it('does not prepare scenario deletion when any managed file is unreadable', async () => {
     const deps = createDeps();
@@ -244,7 +349,7 @@ describe('DataManagementService', () => {
     const deps = createDeps();
     const service = new DataManagementService(deps);
     const confirmation = await service.prepareClear('scenarios');
-    deps.scenarios.clearDownloadedCache.mockRejectedValueOnce(
+    deps.scenarios.clearDownloadedCacheWithRelated.mockRejectedValueOnce(
       Object.assign(new Error('Scenario fingerprint changed at /private/cache'), {
         code: 'SCENARIO_SELECTION_CHANGED'
       })

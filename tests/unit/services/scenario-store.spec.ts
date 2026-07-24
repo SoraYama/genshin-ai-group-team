@@ -5,6 +5,11 @@ import { promises as fs } from 'node:fs';
 import { createHash } from 'node:crypto';
 import type { ScenarioEnvelope, SpiralAbyssScenario } from '../../../src/shared/domain.js';
 import { runScenarioDataFilesExclusive } from '../../../src/main/scenario-publication/file-coordinator.js';
+import {
+  GuideResearchCache,
+  type GuideResearchCacheFileSystem
+} from '../../../src/main/services/guide-research-cache.js';
+import type { ScenarioStore } from '../../../src/main/services/scenario-store.js';
 
 async function makeTempDirs() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'gta-scenario-'));
@@ -41,6 +46,60 @@ async function writeBundled(dir: string) {
       JSON.stringify(abyssEnvelope(`bundled-${mode}`))
     );
   }
+}
+
+async function putGuide(cache: GuideResearchCache, key = 'guide-task') {
+  return cache.put({
+    task: {
+      key,
+      reason: 'missing',
+      scenarioTags: ['single-target']
+    },
+    knowledgeVersion: 'knowledge-v4',
+    value: {
+      trust: 'ephemeral-web',
+      matches: [
+        {
+          id: `match-${key}`,
+          subjectId: `subject-${key}`,
+          summary: `匿名攻略摘要 ${key}`,
+          citationIds: [`citation-${key}`]
+        }
+      ],
+      citations: [
+        {
+          id: `citation-${key}`,
+          sourceId: 'web-guide',
+          url: `https://example.test/guides/${key}`,
+          title: `Guide ${key}`,
+          reviewedAt: '2026-07-25T00:00:00.000Z',
+          trust: 'ephemeral-web'
+        }
+      ],
+      applicability: {
+        characterNames: [],
+        scenarioTags: ['single-target'],
+        buildSignals: []
+      },
+      conflicts: [],
+      researchedAt: '2026-07-25T00:00:00.000Z'
+    }
+  });
+}
+
+async function clearWithRelated(
+  store: ScenarioStore,
+  expected: { count: number; fingerprint: string },
+  relatedClear: () => Promise<number>
+): Promise<{ scenarioRemoved: number; relatedRemoved: number }> {
+  return (
+    store as ScenarioStore & {
+      clearDownloadedCacheWithRelated(
+        expected: { count: number; fingerprint: string },
+        relatedClear: () => Promise<number>
+      ): Promise<{ scenarioRemoved: number; relatedRemoved: number }>;
+    }
+  ).clearDownloadedCacheWithRelated(expected, relatedClear);
 }
 
 let tempRoot: string | undefined;
@@ -179,6 +238,195 @@ describe('ScenarioStore', () => {
 
     await expect(clear).rejects.toThrow(/changed/i);
     await expect(fs.readFile(target, 'utf8')).resolves.toContain('replacement');
+  });
+
+  it('rolls staged scenario files back when the related guide fingerprint changed', async () => {
+    const { root, bundled, cache } = await makeTempDirs();
+    tempRoot = root;
+    await writeBundled(bundled);
+    const scenarioFile = path.join(cache, 'spiral-abyss.json');
+    await fs.writeFile(scenarioFile, JSON.stringify(abyssEnvelope('cached-newer')));
+    const userDataDirectory = path.join(root, 'user-data');
+    await fs.mkdir(userDataDirectory, { recursive: true });
+    let now = Date.parse('2026-07-25T00:00:00.000Z');
+    const guides = new GuideResearchCache({ userDataDirectory, now: () => now++ });
+    await putGuide(guides, 'first');
+    const guideSnapshot = await guides.getDataManagementSnapshot();
+    const { ScenarioStore } = await import('../../../src/main/services/scenario-store.js');
+    const store = new ScenarioStore({ bundledDir: bundled, cacheDir: cache });
+    await store.init();
+    const scenarioSnapshot = await store.getDataManagementSnapshot();
+    await putGuide(guides, 'replacement');
+
+    await expect(
+      clearWithRelated(
+        store,
+        {
+          count: scenarioSnapshot.clearableCount,
+          fingerprint: scenarioSnapshot.fingerprint
+        },
+        () =>
+          guides.clearAll({
+            clearableCount: guideSnapshot.clearableCount,
+            fingerprint: guideSnapshot.fingerprint
+          })
+      )
+    ).rejects.toMatchObject({ code: 'GUIDE_RESEARCH_SELECTION_CHANGED' });
+    await expect(fs.readFile(scenarioFile, 'utf8')).resolves.toContain('cached-newer');
+    expect(store.getScenario('spiral-abyss').meta.sourceVersion).toBe('cached-newer');
+    await expect(guides.getSummary()).resolves.toMatchObject({ count: 2 });
+    expect((await fs.readdir(cache)).some((name) => name.includes('clear-tombstone'))).toBe(false);
+  });
+
+  it('rolls staged scenario files back when guide unlink fails', async () => {
+    const { root, bundled, cache } = await makeTempDirs();
+    tempRoot = root;
+    await writeBundled(bundled);
+    const scenarioFile = path.join(cache, 'spiral-abyss.json');
+    await fs.writeFile(scenarioFile, JSON.stringify(abyssEnvelope('cached-newer')));
+    const userDataDirectory = path.join(root, 'user-data');
+    await fs.mkdir(userDataDirectory, { recursive: true });
+    const writer = new GuideResearchCache({
+      userDataDirectory,
+      now: () => Date.parse('2026-07-25T00:00:00.000Z')
+    });
+    await putGuide(writer);
+    const guideSnapshot = await writer.getDataManagementSnapshot();
+    const fileSystem: GuideResearchCacheFileSystem = {
+      readFile: fs.readFile,
+      mkdir: fs.mkdir,
+      writeFile: fs.writeFile,
+      rename: fs.rename,
+      unlink: async (target) => {
+        if (target === writer.filePath)
+          throw Object.assign(new Error('unlink failed'), { code: 'EACCES' });
+        await fs.unlink(target);
+      },
+      lstat: fs.lstat,
+      realpath: fs.realpath
+    };
+    const failingGuides = new GuideResearchCache({
+      userDataDirectory,
+      fileSystem,
+      now: () => Date.parse('2026-07-25T00:00:00.000Z')
+    });
+    const { ScenarioStore } = await import('../../../src/main/services/scenario-store.js');
+    const store = new ScenarioStore({ bundledDir: bundled, cacheDir: cache });
+    await store.init();
+    const scenarioSnapshot = await store.getDataManagementSnapshot();
+
+    await expect(
+      clearWithRelated(
+        store,
+        {
+          count: scenarioSnapshot.clearableCount,
+          fingerprint: scenarioSnapshot.fingerprint
+        },
+        () =>
+          failingGuides.clearAll({
+            clearableCount: guideSnapshot.clearableCount,
+            fingerprint: guideSnapshot.fingerprint
+          })
+      )
+    ).rejects.toMatchObject({ code: 'GUIDE_RESEARCH_WRITE_FAILED' });
+    await expect(fs.readFile(scenarioFile, 'utf8')).resolves.toContain('cached-newer');
+    await expect(fs.stat(writer.filePath)).resolves.toBeDefined();
+  });
+
+  it('keeps the guide cache when scenario staging fails and removes neither live scenario', async () => {
+    const { root, bundled, cache } = await makeTempDirs();
+    tempRoot = root;
+    await writeBundled(bundled);
+    const firstScenario = path.join(cache, 'spiral-abyss.json');
+    const secondScenario = path.join(cache, 'stygian-onslaught.json');
+    await fs.writeFile(firstScenario, JSON.stringify(abyssEnvelope('cached-first')));
+    await fs.writeFile(secondScenario, JSON.stringify(abyssEnvelope('cached-second')));
+    const userDataDirectory = path.join(root, 'user-data');
+    await fs.mkdir(userDataDirectory, { recursive: true });
+    const guides = new GuideResearchCache({
+      userDataDirectory,
+      now: () => Date.parse('2026-07-25T00:00:00.000Z')
+    });
+    await putGuide(guides);
+    const guideSnapshot = await guides.getDataManagementSnapshot();
+    let stageRenameCount = 0;
+    const dataManagementFileSystem = {
+      rename: vi.fn(async (from: string, to: string) => {
+        if (!from.includes('clear-tombstone')) {
+          stageRenameCount += 1;
+          if (stageRenameCount === 2) throw new Error('injected stage failure');
+        }
+        await fs.rename(from, to);
+      }),
+      unlink: fs.unlink
+    };
+    const { ScenarioStore } = await import('../../../src/main/services/scenario-store.js');
+    const store = new ScenarioStore({
+      bundledDir: bundled,
+      cacheDir: cache,
+      dataManagementFileSystem
+    } as never);
+    await store.init();
+    const scenarioSnapshot = await store.getDataManagementSnapshot();
+    const relatedClear = vi.fn(() =>
+      guides.clearAll({
+        clearableCount: guideSnapshot.clearableCount,
+        fingerprint: guideSnapshot.fingerprint
+      })
+    );
+
+    await expect(
+      clearWithRelated(
+        store,
+        {
+          count: scenarioSnapshot.clearableCount,
+          fingerprint: scenarioSnapshot.fingerprint
+        },
+        relatedClear
+      )
+    ).rejects.toThrow('injected stage failure');
+    expect(relatedClear).not.toHaveBeenCalled();
+    await expect(fs.readFile(firstScenario, 'utf8')).resolves.toContain('cached-first');
+    await expect(fs.readFile(secondScenario, 'utf8')).resolves.toContain('cached-second');
+    await expect(fs.stat(guides.filePath)).resolves.toBeDefined();
+  });
+
+  it('commits a coordinated clear only after both scenario staging and guide clear succeed', async () => {
+    const { root, bundled, cache } = await makeTempDirs();
+    tempRoot = root;
+    await writeBundled(bundled);
+    const scenarioFile = path.join(cache, 'spiral-abyss.json');
+    await fs.writeFile(scenarioFile, JSON.stringify(abyssEnvelope('cached-newer')));
+    const userDataDirectory = path.join(root, 'user-data');
+    await fs.mkdir(userDataDirectory, { recursive: true });
+    const guides = new GuideResearchCache({
+      userDataDirectory,
+      now: () => Date.parse('2026-07-25T00:00:00.000Z')
+    });
+    await putGuide(guides);
+    const guideSnapshot = await guides.getDataManagementSnapshot();
+    const { ScenarioStore } = await import('../../../src/main/services/scenario-store.js');
+    const store = new ScenarioStore({ bundledDir: bundled, cacheDir: cache });
+    await store.init();
+    const scenarioSnapshot = await store.getDataManagementSnapshot();
+
+    await expect(
+      clearWithRelated(
+        store,
+        {
+          count: scenarioSnapshot.clearableCount,
+          fingerprint: scenarioSnapshot.fingerprint
+        },
+        () =>
+          guides.clearAll({
+            clearableCount: guideSnapshot.clearableCount,
+            fingerprint: guideSnapshot.fingerprint
+          })
+      )
+    ).resolves.toEqual({ scenarioRemoved: 1, relatedRemoved: 1 });
+    await expect(fs.stat(scenarioFile)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(fs.stat(guides.filePath)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(store.getScenario('spiral-abyss').meta.sourceVersion).toBe('bundled-spiral-abyss');
   });
 
   it('loads bundled JSON on first init and exposes meta via list()', async () => {

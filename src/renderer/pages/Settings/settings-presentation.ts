@@ -1,4 +1,4 @@
-import type { DataManagementScope } from '../../../shared/domain';
+import type { DataManagementScope, DataManagementSummary } from '../../../shared/domain';
 
 export function settingsLoadPresentation(failure: string, locale: 'zh' | 'en') {
   return failure
@@ -19,6 +19,15 @@ export function formatStorageSize(value: number | undefined, locale: 'zh' | 'en'
   return `${trimDecimal(value / (1024 * 1024))} MB`;
 }
 
+export function hasClearableChallengeCache(
+  summary: Pick<DataManagementSummary, 'scenarios' | 'guideResearch'>
+): boolean {
+  return (
+    summary.scenarios.clearableCount > 0 ||
+    (summary.guideResearch.sizeBytes !== undefined && summary.guideResearch.sizeBytes > 0)
+  );
+}
+
 export function dataClearCopy(
   scope: DataManagementScope,
   count: number,
@@ -37,7 +46,7 @@ export function dataClearCopy(
       case 'scenarios':
         return {
           title: `Clear ${count} downloaded challenge ${count === 1 ? 'file' : 'files'}?`,
-          effect: 'This clears the downloaded challenge-data cache.',
+          effect: 'This clears downloaded challenge data and temporary guide-research summaries.',
           preserves:
             'Character data, recommendation history, and service settings stay. Current-cycle plans may be unavailable until verifiable challenge data is downloaded again.',
           action: `Clear ${count} downloaded ${count === 1 ? 'file' : 'files'}`
@@ -69,7 +78,7 @@ export function dataClearCopy(
     case 'scenarios':
       return {
         title: `清除 ${count} 份已下载挑战资料？`,
-        effect: '这会清除已下载的挑战资料缓存。',
+        effect: '这会清除已下载的挑战资料缓存和临时攻略研究摘要。',
         preserves:
           '不会删除角色资料、推荐记录或智能服务设置。重新取得可验证挑战资料前，可能无法生成本期方案。',
         action: `清除 ${count} 份已下载资料`

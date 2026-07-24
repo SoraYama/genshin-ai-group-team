@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { request } from 'undici';
 import {
   ALL_SCENARIO_MODES,
@@ -22,6 +22,12 @@ export interface ScenarioStoreOptions {
   manifestUrl?: string;
   manifestTimeoutMs?: number;
   fetchImpl?: typeof request;
+  dataManagementFileSystem?: ScenarioDataManagementFileSystem;
+}
+
+export interface ScenarioDataManagementFileSystem {
+  rename(from: string, to: string): Promise<void>;
+  unlink(filePath: string): Promise<void>;
 }
 
 interface RemoteManifest {
@@ -101,6 +107,7 @@ export class ScenarioStore {
   private readonly manifestTimeoutMs: number;
   private readonly cache = new Map<ScenarioMode, ScenarioEnvelope<ScenarioPayload>>();
   private readonly fetchImpl: typeof request;
+  private readonly dataManagementFileSystem: ScenarioDataManagementFileSystem;
   private manifestFailureCount = 0;
   private fileOperationTail: Promise<void> = Promise.resolve();
 
@@ -111,6 +118,10 @@ export class ScenarioStore {
     this.manifestUrl = options.manifestUrl ?? DEFAULT_MANIFEST_URL;
     this.manifestTimeoutMs = options.manifestTimeoutMs ?? 3_000;
     this.fetchImpl = options.fetchImpl ?? request;
+    this.dataManagementFileSystem = options.dataManagementFileSystem ?? {
+      rename: fs.rename,
+      unlink: fs.unlink
+    };
   }
 
   /**
@@ -122,13 +133,22 @@ export class ScenarioStore {
   }
 
   private async initOnce(): Promise<void> {
+    const loaded = await this.loadScenarioCacheFromDisk();
+    this.cache.clear();
+    loaded.forEach((envelope, mode) => this.cache.set(mode, envelope));
+  }
+
+  private async loadScenarioCacheFromDisk(): Promise<
+    Map<ScenarioMode, ScenarioEnvelope<ScenarioPayload>>
+  > {
     await fs.mkdir(this.cacheDir, { recursive: true });
-    await Promise.all(
+    const entries = await Promise.all(
       ALL_SCENARIO_MODES.map(async (mode) => {
         const envelope = await this.loadFromDisk(mode);
-        this.cache.set(mode, envelope);
+        return [mode, envelope] as const;
       })
     );
+    return new Map(entries);
   }
 
   list(): ScenarioListItem[] {
@@ -278,6 +298,14 @@ export class ScenarioStore {
   }
 
   async clearDownloadedCache(expected: { count: number; fingerprint: string }): Promise<number> {
+    const result = await this.clearDownloadedCacheWithRelated(expected, async () => 0);
+    return result.scenarioRemoved;
+  }
+
+  async clearDownloadedCacheWithRelated(
+    expected: { count: number; fingerprint: string },
+    relatedClear: () => Promise<number>
+  ): Promise<{ scenarioRemoved: number; relatedRemoved: number }> {
     return this.runScenarioFilesExclusive(async () => {
       const files = await this.inspectDataManagementFiles();
       if (files.some(({ state }) => state === 'unknown')) {
@@ -296,19 +324,54 @@ export class ScenarioStore {
           'Scenario data selection changed; confirm again'
         );
       }
-      let removed = 0;
-      for (const file of files) {
-        if (file.state !== 'present') continue;
-        try {
-          await fs.unlink(file.filePath);
-          removed += 1;
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+
+      const staged: Array<{ livePath: string; tombstonePath: string }> = [];
+      let clearedScenarioCache: Map<ScenarioMode, ScenarioEnvelope<ScenarioPayload>>;
+      try {
+        for (const file of files) {
+          if (file.state !== 'present') continue;
+          const tombstonePath = path.join(
+            path.dirname(file.filePath),
+            `.${path.basename(file.filePath)}.${randomUUID()}.clear-tombstone`
+          );
+          await this.dataManagementFileSystem.rename(file.filePath, tombstonePath);
+          staged.push({ livePath: file.filePath, tombstonePath });
         }
+        clearedScenarioCache = await this.loadScenarioCacheFromDisk();
+      } catch (error) {
+        await this.rollbackStagedScenarioFiles(staged);
+        throw error;
       }
-      await this.initOnce();
-      return removed;
+
+      let relatedRemoved: number;
+      try {
+        relatedRemoved = await relatedClear();
+      } catch (error) {
+        await this.rollbackStagedScenarioFiles(staged);
+        throw error;
+      }
+
+      this.cache.clear();
+      clearedScenarioCache.forEach((envelope, mode) => this.cache.set(mode, envelope));
+      await Promise.all(
+        staged.map(async ({ tombstonePath }) => {
+          try {
+            await this.dataManagementFileSystem.unlink(tombstonePath);
+          } catch {
+            // Both live selections are already committed as cleared. Tombstone cleanup is best-effort.
+          }
+        })
+      );
+      return { scenarioRemoved: staged.length, relatedRemoved };
     });
+  }
+
+  private async rollbackStagedScenarioFiles(
+    staged: Array<{ livePath: string; tombstonePath: string }>
+  ): Promise<void> {
+    for (const { livePath, tombstonePath } of [...staged].reverse()) {
+      await this.dataManagementFileSystem.rename(tombstonePath, livePath);
+    }
   }
 
   private dataManagementCacheFiles(): Array<{ key: string; filePath: string }> {

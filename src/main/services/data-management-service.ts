@@ -12,7 +12,7 @@ interface Snapshot {
 
 interface ScenarioClearSnapshot extends Snapshot {
   scenario: Snapshot;
-  guideResearch: Snapshot;
+  guideResearch: { clearableCount: number; fingerprint: string };
 }
 
 interface ProfileDataManager {
@@ -33,7 +33,10 @@ interface ScenarioDataManager {
     updatedAt?: string;
     fingerprint: string;
   }>;
-  clearDownloadedCache(expected: { count: number; fingerprint: string }): Promise<number>;
+  clearDownloadedCacheWithRelated(
+    expected: { count: number; fingerprint: string },
+    relatedClear: () => Promise<number>
+  ): Promise<{ scenarioRemoved: number; relatedRemoved: number }>;
 }
 
 interface HistoryDataManager {
@@ -59,11 +62,12 @@ interface ConfigDataManager {
 interface GuideResearchDataManager {
   getDataManagementSnapshot(): Promise<{
     count: number;
+    clearableCount: number;
     sizeBytes?: number;
     updatedAt?: string;
     fingerprint: string;
   }>;
-  clearAll(expected: { count: number; fingerprint: string }): Promise<number>;
+  clearAll(expected: { clearableCount: number; fingerprint: string }): Promise<number>;
 }
 
 export interface DataManagementDeps {
@@ -111,7 +115,7 @@ export class DataManagementService {
       profiles: withoutFingerprint(profiles),
       scenarios: withoutFingerprint(scenarios),
       history,
-      guideResearch: withoutFingerprint(guideResearch),
+      guideResearch: publicDataArea(guideResearch),
       serviceKey: { count: this.deps.config.getPublicView().hasApiKey ? 1 : 0 }
     };
   }
@@ -158,8 +162,11 @@ export class DataManagementService {
         );
       }
       try {
-        removed = await this.deps.scenarios.clearDownloadedCache(snapshot.scenario);
-        removed += await this.deps.guideResearch.clearAll(snapshot.guideResearch);
+        const result = await this.deps.scenarios.clearDownloadedCacheWithRelated(
+          snapshot.scenario,
+          () => this.deps.guideResearch.clearAll(snapshot.guideResearch)
+        );
+        removed = result.scenarioRemoved + result.relatedRemoved;
       } catch (error) {
         const code =
           typeof error === 'object' && error !== null && 'code' in error
@@ -236,11 +243,11 @@ export class DataManagementService {
           );
         }
         return {
-          count: scenario.clearableCount + guideResearch.count,
+          count: scenario.clearableCount + guideResearch.clearableCount,
           fingerprint: `${scenario.fingerprint}:${guideResearch.fingerprint}`,
           scenario: { count: scenario.clearableCount, fingerprint: scenario.fingerprint },
           guideResearch: {
-            count: guideResearch.count,
+            clearableCount: guideResearch.clearableCount,
             fingerprint: guideResearch.fingerprint
           }
         };
@@ -269,4 +276,16 @@ function withoutFingerprint<
 
 function isScenarioClearSnapshot(snapshot: Snapshot): snapshot is ScenarioClearSnapshot {
   return 'scenario' in snapshot && 'guideResearch' in snapshot;
+}
+
+function publicDataArea(value: { count: number; sizeBytes?: number; updatedAt?: string }): {
+  count: number;
+  sizeBytes?: number;
+  updatedAt?: string;
+} {
+  return {
+    count: value.count,
+    ...(value.sizeBytes === undefined ? {} : { sizeBytes: value.sizeBytes }),
+    ...(value.updatedAt === undefined ? {} : { updatedAt: value.updatedAt })
+  };
 }

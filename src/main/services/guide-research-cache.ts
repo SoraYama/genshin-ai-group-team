@@ -119,7 +119,12 @@ export interface GuideResearchCacheFileSystem {
   writeFile(filePath: string, contents: string, encoding: 'utf8'): Promise<unknown>;
   rename(from: string, to: string): Promise<void>;
   unlink(filePath: string): Promise<void>;
-  stat(filePath: string): Promise<{ size: number }>;
+  lstat(filePath: string): Promise<{
+    isSymbolicLink(): boolean;
+    isDirectory(): boolean;
+    isFile(): boolean;
+  }>;
+  realpath(filePath: string): Promise<string>;
 }
 
 export type GuideResearchCacheDiagnosticCode =
@@ -134,6 +139,7 @@ export interface GuideResearchCacheDiagnostic {
 export type GuideResearchCacheErrorCode =
   | 'GUIDE_RESEARCH_CLOCK_INVALID'
   | 'GUIDE_RESEARCH_ENTRY_TOO_LARGE'
+  | 'GUIDE_RESEARCH_PATH_UNSAFE'
   | 'GUIDE_RESEARCH_SELECTION_CHANGED'
   | 'GUIDE_RESEARCH_WRITE_FAILED';
 
@@ -149,7 +155,7 @@ export class GuideResearchCacheError extends Error {
 }
 
 export interface GuideResearchCacheOptions {
-  filePath: string;
+  userDataDirectory: string;
   fileSystem?: GuideResearchCacheFileSystem;
   now?: () => number;
   onDiagnostic?: (diagnostic: GuideResearchCacheDiagnostic) => void;
@@ -166,6 +172,7 @@ export interface GuideResearchCachePut extends GuideResearchCacheLookup {
 
 export interface GuideResearchCacheSnapshot {
   count: number;
+  clearableCount: number;
   sizeBytes?: number;
   updatedAt?: string;
   fingerprint: string;
@@ -173,6 +180,7 @@ export interface GuideResearchCacheSnapshot {
 
 interface LoadedCache {
   document: CacheDocument;
+  selectionCount: number;
   sizeBytes?: number;
   fingerprint: string;
 }
@@ -188,7 +196,11 @@ export function resolveGuideResearchCachePath(userDataDirectory: string): string
   if (!path.isAbsolute(userDataDirectory)) {
     throw new Error('Guide research userData directory must be absolute');
   }
-  return path.join(userDataDirectory, 'cache', GUIDE_RESEARCH_CACHE_FILENAME);
+  const normalized = path.normalize(userDataDirectory);
+  if (isTrustedKnowledgePath(normalized)) {
+    throw new Error('Trusted knowledge resources cannot be a userData authority');
+  }
+  return path.join(normalized, 'cache', GUIDE_RESEARCH_CACHE_FILENAME);
 }
 
 export function computeGuideResearchCacheKey(task: unknown, knowledgeVersion: unknown): string {
@@ -202,14 +214,18 @@ export function computeGuideResearchCacheKey(task: unknown, knowledgeVersion: un
 export class GuideResearchCache {
   readonly filePath: string;
 
+  private readonly userDataDirectory: string;
   private readonly fileSystem: GuideResearchCacheFileSystem;
   private readonly now: () => number;
   private readonly onDiagnostic?: (diagnostic: GuideResearchCacheDiagnostic) => void;
   private writeQueue: Promise<void> = Promise.resolve();
 
   constructor(options: GuideResearchCacheOptions) {
-    assertIsolatedCachePath(options.filePath);
-    this.filePath = options.filePath;
+    if ('filePath' in options) {
+      throw new Error('Guide research cache accepts only a userData directory authority');
+    }
+    this.userDataDirectory = path.normalize(options.userDataDirectory);
+    this.filePath = resolveGuideResearchCachePath(this.userDataDirectory);
     this.fileSystem = options.fileSystem ?? nodeFileSystem;
     this.now = options.now ?? Date.now;
     this.onDiagnostic = options.onDiagnostic;
@@ -259,11 +275,17 @@ export class GuideResearchCache {
     });
   }
 
-  async getSummary(): Promise<Omit<GuideResearchCacheSnapshot, 'fingerprint'>> {
+  async getSummary(): Promise<{
+    count: number;
+    sizeBytes?: number;
+    updatedAt?: string;
+  }> {
     const snapshot = await this.getDataManagementSnapshot();
-    const summary = { ...snapshot } as Partial<GuideResearchCacheSnapshot>;
-    delete summary.fingerprint;
-    return summary as Omit<GuideResearchCacheSnapshot, 'fingerprint'>;
+    return {
+      count: snapshot.count,
+      ...(snapshot.sizeBytes === undefined ? {} : { sizeBytes: snapshot.sizeBytes }),
+      ...(snapshot.updatedAt === undefined ? {} : { updatedAt: snapshot.updatedAt })
+    };
   }
 
   async getDataManagementSnapshot(): Promise<GuideResearchCacheSnapshot> {
@@ -273,18 +295,19 @@ export class GuideResearchCache {
     const updatedAt = newestCreatedAt(loaded.document.entries);
     return {
       count: loaded.document.entries.length,
+      clearableCount: loaded.selectionCount,
       ...(loaded.sizeBytes === undefined ? {} : { sizeBytes: loaded.sizeBytes }),
       ...(updatedAt === undefined ? {} : { updatedAt }),
       fingerprint: loaded.fingerprint
     };
   }
 
-  async clearAll(expected: { count: number; fingerprint: string }): Promise<number> {
+  async clearAll(expected: { clearableCount: number; fingerprint: string }): Promise<number> {
     return this.enqueueWrite(async () => {
       const now = this.currentTime();
       const loaded = await this.load(now);
       if (
-        expected.count !== loaded.document.entries.length ||
+        expected.clearableCount !== loaded.selectionCount ||
         expected.fingerprint !== loaded.fingerprint
       ) {
         throw new GuideResearchCacheError(
@@ -292,6 +315,7 @@ export class GuideResearchCache {
           'Ephemeral guide research cache changed; confirm again'
         );
       }
+      await this.assertSafePath();
       try {
         await this.fileSystem.unlink(this.filePath);
       } catch (error) {
@@ -302,7 +326,7 @@ export class GuideResearchCache {
           );
         }
       }
-      return loaded.document.entries.length;
+      return loaded.selectionCount;
     });
   }
 
@@ -322,6 +346,7 @@ export class GuideResearchCache {
   }
 
   private async load(now: number): Promise<LoadedCache> {
+    await this.assertSafePath();
     let raw: string;
     try {
       raw = await this.fileSystem.readFile(this.filePath, 'utf8');
@@ -329,27 +354,37 @@ export class GuideResearchCache {
       if (hasErrorCode(error, 'ENOENT')) {
         return {
           document: documentWith([]),
+          selectionCount: 0,
           sizeBytes: 0,
           fingerprint: MISSING_FINGERPRINT
         };
       }
       this.diagnostic('GUIDE_RESEARCH_CACHE_UNREADABLE');
-      return { document: documentWith([]), fingerprint: UNREADABLE_FINGERPRINT };
+      return {
+        document: documentWith([]),
+        selectionCount: 1,
+        fingerprint: UNREADABLE_FINGERPRINT
+      };
     }
 
     const sizeBytes = Buffer.byteLength(raw, 'utf8');
     const fingerprint = createHash('sha256').update(raw).digest('hex');
     if (sizeBytes > GUIDE_RESEARCH_CACHE_MAX_BYTES) {
       this.diagnostic('GUIDE_RESEARCH_CACHE_INVALID');
-      return { document: documentWith([]), sizeBytes, fingerprint };
+      return { document: documentWith([]), selectionCount: 1, sizeBytes, fingerprint };
     }
     try {
       const parsed = cacheDocumentSchema.parse(JSON.parse(raw));
       const entries = parsed.entries.filter((entry) => isEntryCurrent(entry, now));
-      return { document: documentWith(entries), sizeBytes, fingerprint };
+      return {
+        document: documentWith(entries),
+        selectionCount: Math.max(1, parsed.entries.length),
+        sizeBytes,
+        fingerprint
+      };
     } catch {
       this.diagnostic('GUIDE_RESEARCH_CACHE_INVALID');
-      return { document: documentWith([]), sizeBytes, fingerprint };
+      return { document: documentWith([]), selectionCount: 1, sizeBytes, fingerprint };
     }
   }
 
@@ -361,14 +396,21 @@ export class GuideResearchCache {
     );
     const contents = JSON.stringify(document);
     try {
+      await this.assertSafePath();
       await this.fileSystem.mkdir(directory, { recursive: true });
+      await this.assertSafePath();
       await this.fileSystem.writeFile(temporaryPath, contents, 'utf8');
+      await this.assertSafeTemporaryFile(temporaryPath);
+      await this.assertSafePath();
       await this.fileSystem.rename(temporaryPath, this.filePath);
-    } catch {
+    } catch (error) {
       try {
         await this.fileSystem.unlink(temporaryPath);
       } catch {
         // Cleanup is best-effort; errors remain redacted behind the stable write error below.
+      }
+      if (error instanceof GuideResearchCacheError && error.code === 'GUIDE_RESEARCH_PATH_UNSAFE') {
+        throw error;
       }
       throw new GuideResearchCacheError(
         'GUIDE_RESEARCH_WRITE_FAILED',
@@ -379,6 +421,82 @@ export class GuideResearchCache {
 
   private diagnostic(code: GuideResearchCacheDiagnosticCode): void {
     this.onDiagnostic?.({ code, file: GUIDE_RESEARCH_CACHE_FILENAME });
+  }
+
+  private async assertSafePath(): Promise<void> {
+    let realRoot: string;
+    try {
+      realRoot = path.normalize(await this.fileSystem.realpath(this.userDataDirectory));
+    } catch {
+      throw unsafePathError();
+    }
+    if (isTrustedKnowledgePath(realRoot)) throw unsafePathError();
+
+    const cacheDirectory = path.dirname(this.filePath);
+    const cacheStat = await this.safeLstat(cacheDirectory);
+    if (cacheStat === undefined) return;
+    if (cacheStat.isSymbolicLink() || !cacheStat.isDirectory()) throw unsafePathError();
+
+    let realCacheDirectory: string;
+    try {
+      realCacheDirectory = path.normalize(await this.fileSystem.realpath(cacheDirectory));
+    } catch {
+      throw unsafePathError();
+    }
+    if (realCacheDirectory !== path.join(realRoot, 'cache')) throw unsafePathError();
+
+    const targetStat = await this.safeLstat(this.filePath);
+    if (targetStat === undefined) return;
+    if (targetStat.isSymbolicLink() || !targetStat.isFile()) throw unsafePathError();
+
+    let realTarget: string;
+    try {
+      realTarget = path.normalize(await this.fileSystem.realpath(this.filePath));
+    } catch {
+      throw unsafePathError();
+    }
+    if (realTarget !== path.join(realRoot, 'cache', GUIDE_RESEARCH_CACHE_FILENAME)) {
+      throw unsafePathError();
+    }
+  }
+
+  private async assertSafeTemporaryFile(temporaryPath: string): Promise<void> {
+    const temporaryStat = await this.safeLstat(temporaryPath);
+    if (temporaryStat === undefined || temporaryStat.isSymbolicLink() || !temporaryStat.isFile()) {
+      throw unsafePathError();
+    }
+    let realTemporaryPath: string;
+    let realRoot: string;
+    try {
+      [realTemporaryPath, realRoot] = await Promise.all([
+        this.fileSystem.realpath(temporaryPath),
+        this.fileSystem.realpath(this.userDataDirectory)
+      ]);
+    } catch {
+      throw unsafePathError();
+    }
+    if (
+      path.dirname(path.normalize(realTemporaryPath)) !==
+      path.join(path.normalize(realRoot), 'cache')
+    ) {
+      throw unsafePathError();
+    }
+  }
+
+  private async safeLstat(targetPath: string): Promise<
+    | {
+        isSymbolicLink(): boolean;
+        isDirectory(): boolean;
+        isFile(): boolean;
+      }
+    | undefined
+  > {
+    try {
+      return await this.fileSystem.lstat(targetPath);
+    } catch (error) {
+      if (hasErrorCode(error, 'ENOENT')) return undefined;
+      throw unsafePathError();
+    }
   }
 
   private enqueueWrite<T>(operation: () => Promise<T>): Promise<T> {
@@ -470,22 +588,19 @@ function canonicalJson(value: unknown): string {
   throw new Error('Canonical JSON supports only JSON-compatible values');
 }
 
-function assertIsolatedCachePath(filePath: string): void {
-  if (!path.isAbsolute(filePath)) {
-    throw new Error('Guide research cache path must be absolute');
-  }
-  const normalized = path.normalize(filePath);
-  if (
-    path.basename(normalized) !== GUIDE_RESEARCH_CACHE_FILENAME ||
-    path.basename(path.dirname(normalized)) !== 'cache'
-  ) {
-    throw new Error('Guide research cache path must target the userData cache directory');
-  }
-  const pathSegments = normalized.split(path.sep);
-  const resourcesIndex = pathSegments.lastIndexOf('resources');
-  if (resourcesIndex >= 0 && pathSegments[resourcesIndex + 1] === 'knowledge') {
-    throw new Error('Trusted knowledge resources cannot be used as an ephemeral cache directory');
-  }
+function isTrustedKnowledgePath(targetPath: string): boolean {
+  const normalized = path.normalize(targetPath);
+  const pathSegments = normalized.split(path.sep).map((segment) => segment.toLocaleLowerCase('en'));
+  return pathSegments.some(
+    (segment, index) => segment === 'resources' && pathSegments[index + 1] === 'knowledge'
+  );
+}
+
+function unsafePathError(): GuideResearchCacheError {
+  return new GuideResearchCacheError(
+    'GUIDE_RESEARCH_PATH_UNSAFE',
+    'Guide research cache path is unsafe'
+  );
 }
 
 function addDuplicateIssues(
@@ -515,22 +630,63 @@ function containsForbiddenSensitiveText(value: EphemeralGuideCacheValue): boolea
     ...value.applicability.buildSignals,
     ...value.conflicts
   ];
-  if (
-    privateText.some(
-      (text) =>
-        /(?:authorization|cookie|api[-_ ]?key|raw[-_ ]?message|sdk[-_ ]?message)\s*[:=]/iu.test(
-          text
-        ) || /(?:^|[^0-9])[1-9][0-9]{8}(?:[^0-9]|$)/u.test(text)
-    )
-  ) {
-    return true;
-  }
+  if (privateText.some(isSensitiveFreeText)) return true;
   return value.citations.some(({ url }) => {
     const parsed = new URL(url);
-    return Array.from(parsed.searchParams.keys()).some((key) =>
-      /^(?:authorization|cookie|api[-_]?key|token|uid|user[-_]?id)$/iu.test(key)
+    if (parsed.username.length > 0 || parsed.password.length > 0) return true;
+    if (
+      Array.from(parsed.searchParams.entries()).some(
+        ([key, parameterValue]) =>
+          isSensitiveFreeText(key) ||
+          isSensitiveFreeText(safelyDecode(parameterValue)) ||
+          /^(?:user|users|account|player|profile)(?:[-_]?id)?$/iu.test(key)
+      )
+    ) {
+      return true;
+    }
+    const decodedPath = safelyDecode(parsed.pathname);
+    if (
+      isSensitiveFreeText(decodedPath) ||
+      /\/(?:uid|user|users|account|player|profile)(?:\/|$)/iu.test(decodedPath)
+    ) {
+      return true;
+    }
+    const decodedFragment = safelyDecode(parsed.hash.slice(1));
+    return (
+      isSensitiveFreeText(decodedFragment) ||
+      /(?:^|[/#&])(?:uid|user|users|account|player|profile)(?:[=/:]|$)/iu.test(decodedFragment)
     );
   });
+}
+
+function isSensitiveFreeText(text: string): boolean {
+  return [
+    /private[-_ ]nickname/iu,
+    /(?:玩家|用户)\s*uid/iu,
+    /(?:^|[^\p{L}\p{N}_])uid(?:[^\p{L}\p{N}_]|$)/iu,
+    /(?:^|[^\p{L}\p{N}_])nickname(?:[^\p{L}\p{N}_]|$)/iu,
+    /昵称|玩家名/iu,
+    /(?:^|[^\p{L}\p{N}_])cookie(?:[^\p{L}\p{N}_]|$)|ltoken(?:_v\d+)?|ltuid(?:_v\d+)?/iu,
+    /(?:^|[^\p{L}\p{N}_])authorization(?:[^\p{L}\p{N}_]|$)|(?:^|[^\p{L}\p{N}_])bearer(?:[^\p{L}\p{N}_]|$)/iu,
+    /(?:^|[^\p{L}\p{N}_])api[-_ ]?key(?:[^\p{L}\p{N}_]|$)|(?:^|[^\p{L}\p{N}_])token(?:[^\p{L}\p{N}_]|$)/iu,
+    /(?:^|[^\p{L}\p{N}_])prompt(?:[^\p{L}\p{N}_]|$)|system[-_ ]prompt/iu,
+    /raw[-_ ]sdk[-_ ]message|sdk[-_ ]message|tool[-_ ]payload/iu,
+    /full[-_ ]stats|完整面板/iu
+  ].some((pattern) => pattern.test(text));
+}
+
+function safelyDecode(value: string): string {
+  let decoded = value;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const next = decodeURIComponent(decoded);
+      if (next === decoded) return decoded;
+      decoded = next;
+    } catch {
+      return decoded;
+    }
+  }
+  return decoded;
 }
 
 function hasErrorCode(error: unknown, code: string): boolean {
