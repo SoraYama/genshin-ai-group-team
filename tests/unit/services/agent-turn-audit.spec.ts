@@ -4,6 +4,7 @@ import {
   AGENT_TURN_FINAL_TEXT_MAX_CHARS,
   AGENT_TURN_RAW_SUMMARY_MAX_MESSAGES,
   AGENT_TURN_RAW_SUMMARY_PREVIEW_MAX_CHARS,
+  AGENT_TURN_WEB_SEARCH_EVIDENCE_MAX_ATTEMPTS,
   AgentTurnError,
   runAuditedAgentTurn,
   type AuditedAgentRunner
@@ -11,6 +12,162 @@ import {
 import type { AgentSdkRunOptions } from '../../../src/main/services/agent-sdk-adapter.js';
 
 describe('runAuditedAgentTurn', () => {
+  it('derives bounded privacy-safe WebSearch evidence from SDK-shaped tool messages', async () => {
+    const runner: AuditedAgentRunner = {
+      async *run() {
+        yield {
+          type: 'assistant',
+          message: {
+            content: [
+              {
+                type: 'tool_use',
+                id: 'search-1',
+                name: 'WebSearch',
+                input: { query: '原神 雷电将军 配队 攻略' }
+              }
+            ]
+          }
+        };
+        yield {
+          type: 'user',
+          tool_use_result: { raw: 'provider-secret-result-must-not-be-retained' },
+          message: {
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'search-1',
+                is_error: false,
+                content: 'provider-secret-result-must-not-be-retained'
+              }
+            ]
+          }
+        };
+        yield { type: 'result', subtype: 'success', result: '{}', usage: {} };
+      }
+    };
+
+    const result = await runAuditedAgentTurn({
+      runner,
+      prompt: '{}',
+      sdkOptions: sdkOptions(),
+      systemPrompt: 'test'
+    });
+
+    expect(result.webSearchEvidence).toEqual({
+      attempts: [
+        {
+          toolUseId: 'search-1',
+          query: '原神 雷电将军 配队 攻略',
+          status: 'resolved'
+        }
+      ],
+      truncated: false
+    });
+    expect(JSON.stringify(result.webSearchEvidence)).not.toContain('provider-secret');
+  });
+
+  it.each([
+    ['error', true, true, 'error'],
+    ['unresolved', false, false, 'unresolved']
+  ])(
+    'records a WebSearch %s without treating it as resolved',
+    async (_label, includeResult, isError, expectedStatus) => {
+      const runner: AuditedAgentRunner = {
+        async *run() {
+          yield {
+            type: 'assistant',
+            message: {
+              content: [
+                {
+                  type: 'tool_use',
+                  id: 'search-state',
+                  name: 'WebSearch',
+                  input: { query: '原神 纳西妲 配队 攻略' }
+                }
+              ]
+            }
+          };
+          if (includeResult) {
+            yield {
+              type: 'user',
+              message: {
+                content: [
+                  {
+                    type: 'tool_result',
+                    tool_use_id: 'search-state',
+                    is_error: isError,
+                    content: 'not retained'
+                  }
+                ]
+              }
+            };
+          }
+          yield { type: 'result', subtype: 'success', result: '{}', usage: {} };
+        }
+      };
+
+      const result = await runAuditedAgentTurn({
+        runner,
+        prompt: '{}',
+        sdkOptions: sdkOptions(),
+        systemPrompt: 'test'
+      });
+
+      expect(result.webSearchEvidence.attempts).toEqual([
+        expect.objectContaining({ toolUseId: 'search-state', status: expectedStatus })
+      ]);
+    }
+  );
+
+  it('bounds WebSearch evidence and marks overflow instead of retaining extra attempts', async () => {
+    const runner: AuditedAgentRunner = {
+      async *run() {
+        for (let index = 0; index < AGENT_TURN_WEB_SEARCH_EVIDENCE_MAX_ATTEMPTS + 1; index += 1) {
+          const id = `search-${index}`;
+          yield {
+            type: 'assistant',
+            message: {
+              content: [
+                {
+                  type: 'tool_use',
+                  id,
+                  name: 'WebSearch',
+                  input: { query: `原神 雷电将军 配队 攻略 ${index}` }
+                }
+              ]
+            }
+          };
+          yield {
+            type: 'user',
+            message: {
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: id,
+                  is_error: false,
+                  content: 'not retained'
+                }
+              ]
+            }
+          };
+        }
+        yield { type: 'result', subtype: 'success', result: '{}', usage: {} };
+      }
+    };
+
+    const result = await runAuditedAgentTurn({
+      runner,
+      prompt: '{}',
+      sdkOptions: sdkOptions(),
+      systemPrompt: 'test'
+    });
+
+    expect(result.webSearchEvidence.attempts).toHaveLength(
+      AGENT_TURN_WEB_SEARCH_EVIDENCE_MAX_ATTEMPTS
+    );
+    expect(result.webSearchEvidence.truncated).toBe(true);
+  });
+
   it('attributes every tool record to one correlation and one independent round', async () => {
     const runner: AuditedAgentRunner = {
       async *run() {
@@ -202,6 +359,49 @@ describe('runAuditedAgentTurn', () => {
     await expect(turn).rejects.toMatchObject({ cause: sdkResultError });
   });
 
+  it.each(['error_during_execution', 'error_max_turns'])(
+    'reports sanitized usage exactly once before throwing for %s',
+    async (subtype) => {
+      const onUsageDelta = vi.fn();
+      const runner: AuditedAgentRunner = {
+        async *run() {
+          yield {
+            type: 'result',
+            subtype,
+            errors: ['provider-secret-error'],
+            usage: { input_tokens: 23, output_tokens: 11 },
+            total_cost_usd: 0.07
+          };
+        }
+      };
+
+      const turn = runAuditedAgentTurn({
+        runner,
+        prompt: '{}',
+        sdkOptions: sdkOptions(),
+        systemPrompt: 'test',
+        onUsageDelta
+      });
+
+      await expect(turn).rejects.toMatchObject({
+        code: 'AGENT_TURN_RESULT_ERROR',
+        message: 'Agent turn returned an error result',
+        usage: {
+          inputTokens: 23,
+          outputTokens: 11,
+          estimatedCostUsd: 0.07
+        }
+      });
+      await expect(turn).rejects.not.toThrow('provider-secret-error');
+      expect(onUsageDelta).toHaveBeenCalledOnce();
+      expect(onUsageDelta).toHaveBeenCalledWith({
+        inputTokens: 23,
+        outputTokens: 11,
+        estimatedCostUsd: 0.07
+      });
+    }
+  );
+
   it.each([
     ['missing subtype', { type: 'result', result: '{}', usage: {} }],
     ['non-string subtype', { type: 'result', subtype: 7, result: '{}', usage: {} }],
@@ -254,6 +454,123 @@ describe('runAuditedAgentTurn', () => {
 
     expect(turn.text).toBe('assistant fallback');
     expect(turn.finalRawText).toBe('assistant fallback');
+  });
+
+  it('returns assistant text when the stream ends cleanly without a result message', async () => {
+    const runner: AuditedAgentRunner = {
+      async *run() {
+        yield {
+          type: 'assistant',
+          message: { content: [{ type: 'text', text: 'assistant-only fallback' }] }
+        };
+      }
+    };
+
+    await expect(
+      runAuditedAgentTurn({
+        runner,
+        prompt: '{}',
+        sdkOptions: sdkOptions(),
+        systemPrompt: 'test'
+      })
+    ).resolves.toMatchObject({
+      text: 'assistant-only fallback',
+      finalRawText: 'assistant-only fallback'
+    });
+  });
+
+  it('fails with a stable incomplete code when a clean stream has no result or assistant text', async () => {
+    const runner: AuditedAgentRunner = {
+      async *run() {
+        yield { type: 'status', subtype: 'finished-without-output' };
+      }
+    };
+
+    await expect(
+      runAuditedAgentTurn({
+        runner,
+        prompt: '{}',
+        sdkOptions: sdkOptions(),
+        systemPrompt: 'test'
+      })
+    ).rejects.toMatchObject({
+      code: 'AGENT_TURN_INCOMPLETE',
+      message: 'Agent turn ended without a result'
+    });
+  });
+
+  it('does not invoke the runner when the turn is already cancelled', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const run = vi.fn();
+    const runner: AuditedAgentRunner = {
+      run
+    };
+
+    await expect(
+      runAuditedAgentTurn({
+        runner,
+        prompt: '{}',
+        sdkOptions: { ...sdkOptions(), abortController: controller },
+        systemPrompt: 'test'
+      })
+    ).rejects.toMatchObject({
+      code: 'AGENT_TURN_CANCELLED',
+      message: 'Agent turn was cancelled'
+    });
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('maps a runner failure after cancellation to the stable cancelled code', async () => {
+    const controller = new AbortController();
+    const runner: AuditedAgentRunner = {
+      async *run() {
+        yield {
+          type: 'assistant',
+          message: { content: [{ type: 'text', text: 'partial' }] }
+        };
+        controller.abort();
+        throw new Error('provider-secret-abort-detail');
+      }
+    };
+
+    const turn = runAuditedAgentTurn({
+      runner,
+      prompt: '{}',
+      sdkOptions: { ...sdkOptions(), abortController: controller },
+      systemPrompt: 'test'
+    });
+
+    await expect(turn).rejects.toMatchObject({
+      code: 'AGENT_TURN_CANCELLED',
+      message: 'Agent turn was cancelled'
+    });
+    await expect(turn).rejects.not.toThrow('provider-secret-abort-detail');
+  });
+
+  it('checks cancellation again after a clean EOF', async () => {
+    const controller = new AbortController();
+    const runner: AuditedAgentRunner = {
+      async *run() {
+        yield {
+          type: 'assistant',
+          message: { content: [{ type: 'text', text: 'partial' }] }
+        };
+        controller.abort();
+      }
+    };
+
+    await expect(
+      runAuditedAgentTurn({
+        runner,
+        prompt: '{}',
+        sdkOptions: { ...sdkOptions(), abortController: controller },
+        systemPrompt: 'test'
+      })
+    ).rejects.toMatchObject({
+      code: 'AGENT_TURN_CANCELLED',
+      message: 'Agent turn was cancelled'
+    });
   });
 
   it('rejects an oversized final value instead of returning a non-verbatim truncation', async () => {

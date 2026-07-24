@@ -1,3 +1,7 @@
+import { promises as fs } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -7,8 +11,9 @@ import {
 } from '../../../src/main/services/guide-research-agent.js';
 import type {
   EphemeralGuideCacheValue,
-  GuideResearchCache
+  GuideResearchCache as GuideResearchCacheType
 } from '../../../src/main/services/guide-research-cache.js';
+import { GuideResearchCache } from '../../../src/main/services/guide-research-cache.js';
 import type { GuideResearchTask } from '../../../src/main/services/knowledge-coverage-gate.js';
 import type { AuditedAgentRunner } from '../../../src/main/services/agent-turn-audit.js';
 import type { AgentSdkRunOptions } from '../../../src/main/services/agent-sdk-adapter.js';
@@ -97,9 +102,62 @@ function successRunner(
   return {
     async *run(prompt, options) {
       onRun?.(prompt, options);
-      yield { type: 'result', subtype: 'success', result: output, usage: {} };
+      for (const message of sdkWebSearchTurn(prompt, output)) yield message;
     }
   };
+}
+
+function sdkWebSearchTurn(
+  prompt: string,
+  output: string,
+  options: {
+    status?: 'resolved' | 'error' | 'unresolved';
+    toolName?: string;
+    searchCount?: number;
+    query?: string;
+  } = {}
+): unknown[] {
+  const payload = JSON.parse(prompt) as { searchQueries?: string[] };
+  const queries = payload.searchQueries ?? [];
+  const toolName = options.toolName ?? 'WebSearch';
+  const searchCount = options.searchCount ?? 1;
+  const messages: unknown[] = [];
+  for (let index = 0; index < searchCount; index += 1) {
+    const id = `search-${index + 1}`;
+    messages.push({
+      type: 'assistant',
+      message: {
+        content: [
+          {
+            type: 'tool_use',
+            id,
+            name: toolName,
+            input: {
+              query:
+                options.query ?? queries[index % Math.max(queries.length, 1)] ?? '原神 配队 攻略'
+            }
+          }
+        ]
+      }
+    });
+    if (options.status !== 'unresolved') {
+      messages.push({
+        type: 'user',
+        message: {
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: id,
+              is_error: options.status === 'error',
+              content: options.status === 'error' ? 'search failed' : 'search resolved'
+            }
+          ]
+        }
+      });
+    }
+  }
+  messages.push({ type: 'result', subtype: 'success', result: output, usage: {} });
+  return messages;
 }
 
 function sdkOptions(): AgentSdkRunOptions {
@@ -117,8 +175,8 @@ function sourceRegistry() {
   return {
     getSourceRegistry: () => ({
       sources: [
-        { id: 'kqm-guides', host: 'keqingmains.com' },
-        { id: 'kqm-library', host: 'library.keqingmains.com' }
+        { id: 'kqm-guides', host: 'keqingmains.com', trust: 'trusted-local' as const },
+        { id: 'kqm-library', host: 'library.keqingmains.com', trust: 'trusted-local' as const }
       ]
     })
   };
@@ -127,9 +185,11 @@ function sourceRegistry() {
 function cache(
   overrides: {
     get?: (
-      input: Parameters<GuideResearchCache['get']>[0]
+      input: Parameters<GuideResearchCacheType['get']>[0]
     ) => Promise<EphemeralGuideCacheValue | undefined>;
-    put?: (input: Parameters<GuideResearchCache['put']>[0]) => Promise<EphemeralGuideCacheValue>;
+    put?: (
+      input: Parameters<GuideResearchCacheType['put']>[0]
+    ) => Promise<EphemeralGuideCacheValue>;
   } = {}
 ) {
   return {
@@ -274,12 +334,9 @@ describe('GuideResearchAgent', () => {
           };
           const projected = payload.tasks[0]!;
           expect(projected.key).toBeUndefined();
-          yield {
-            type: 'result',
-            subtype: 'success',
-            result: modelOutput(projected.taskRef),
-            usage: {}
-          };
+          for (const message of sdkWebSearchTurn(prompt, modelOutput(projected.taskRef))) {
+            yield message;
+          }
         }
       };
       const agent = new GuideResearchAgent({
@@ -303,6 +360,103 @@ describe('GuideResearchAgent', () => {
       ]);
     }
   );
+
+  it.each([
+    ['zero WebSearch calls', { searchCount: 0 }],
+    ['only another tool', { toolName: 'Read' }],
+    ['an errored WebSearch', { status: 'error' as const }],
+    ['an unresolved WebSearch', { status: 'unresolved' as const }]
+  ])('does not cache provider JSON backed by %s', async (_label, turnOptions) => {
+    const researchTask = task('guide-search-evidence-missing');
+    const researchCache = cache();
+    const runner: AuditedAgentRunner = {
+      async *run(prompt) {
+        for (const message of sdkWebSearchTurn(prompt, modelOutput('ref-1'), turnOptions)) {
+          yield message;
+        }
+      }
+    };
+    const agent = new GuideResearchAgent({
+      runner,
+      cache: researchCache,
+      sourceRegistry: sourceRegistry(),
+      sdkOptions: sdkOptions(),
+      canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
+      now: () => NOW
+    });
+
+    const result = await agent.research({
+      tasks: [researchTask],
+      knowledgeVersion: 'knowledge-v2'
+    });
+
+    expect(researchCache.put).not.toHaveBeenCalled();
+    expect(result.entries).toEqual([]);
+    expect(result.gaps).toEqual([{ taskKey: researchTask.key, code: 'SEARCH_OUTPUT_INVALID' }]);
+  });
+
+  it.each([1, 2, 3])(
+    'accepts provider JSON backed by %i resolved WebSearch calls',
+    async (count) => {
+      const researchTask = task(`guide-search-evidence-${count}`);
+      const agent = new GuideResearchAgent({
+        runner: {
+          async *run(prompt) {
+            for (const message of sdkWebSearchTurn(prompt, modelOutput('ref-1'), {
+              searchCount: count
+            })) {
+              yield message;
+            }
+          }
+        },
+        cache: cache(),
+        sourceRegistry: sourceRegistry(),
+        sdkOptions: sdkOptions(),
+        canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
+        now: () => NOW
+      });
+
+      const result = await agent.research({
+        tasks: [researchTask],
+        knowledgeVersion: 'knowledge-v2'
+      });
+
+      expect(result.entries).toHaveLength(1);
+    }
+  );
+
+  it.each([
+    ['more than three resolved searches', { searchCount: 4 }],
+    ['a query outside the generated allowlist', { query: '原神 私自替换的查询' }]
+  ])('rejects provider JSON backed by %s', async (_label, turnOptions) => {
+    const researchTask = task('guide-search-evidence-invalid');
+    const researchCache = cache();
+    const agent = new GuideResearchAgent({
+      runner: {
+        async *run(prompt) {
+          for (const message of sdkWebSearchTurn(prompt, modelOutput('ref-1'), turnOptions)) {
+            yield message;
+          }
+        }
+      },
+      cache: researchCache,
+      sourceRegistry: sourceRegistry(),
+      sdkOptions: sdkOptions(),
+      canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
+      now: () => NOW
+    });
+
+    const result = await agent.research({
+      tasks: [researchTask],
+      knowledgeVersion: 'knowledge-v2'
+    });
+
+    expect(researchCache.put).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      entries: [],
+      gaps: [{ taskKey: researchTask.key, code: 'SEARCH_OUTPUT_INVALID' }]
+    });
+  });
 
   it.each([
     [
@@ -619,6 +773,68 @@ describe('GuideResearchAgent', () => {
     }
   });
 
+  it('allows trusted sources to share a host and selects a deterministic source ID', async () => {
+    const researchTask = task('guide-shared-source-host');
+    const agent = new GuideResearchAgent({
+      runner: successRunner(modelOutput('ref-1')),
+      cache: cache(),
+      sourceRegistry: {
+        getSourceRegistry: () => ({
+          sources: [
+            { id: 'z-source', host: 'keqingmains.com', trust: 'trusted-local' as const },
+            { id: 'a-source', host: 'keqingmains.com', trust: 'trusted-local' as const }
+          ]
+        })
+      },
+      sdkOptions: sdkOptions(),
+      canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
+      now: () => NOW
+    });
+
+    const result = await agent.research({
+      tasks: [researchTask],
+      knowledgeVersion: 'knowledge-v2'
+    });
+
+    expect(result.entries[0]?.value.citations[0]?.sourceId).toBe('a-source');
+  });
+
+  it.each([
+    ['missing trusted-local marker', [{ id: 'kqm-guides', host: 'keqingmains.com' }]],
+    ['non-local trust', [{ id: 'kqm-guides', host: 'keqingmains.com', trust: 'ephemeral-web' }]],
+    [
+      'duplicate source ID',
+      [
+        { id: 'duplicate', host: 'keqingmains.com', trust: 'trusted-local' },
+        { id: 'duplicate', host: 'library.keqingmains.com', trust: 'trusted-local' }
+      ]
+    ]
+  ])('rejects a source projection with %s', async (_label, sources) => {
+    const run = vi.fn(() => {
+      throw new Error('runner must not be reached');
+    });
+    const agent = new GuideResearchAgent({
+      runner: { run },
+      cache: cache(),
+      sourceRegistry: {
+        getSourceRegistry: () => ({ sources })
+      } as never,
+      sdkOptions: sdkOptions(),
+      canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
+      now: () => NOW
+    });
+
+    await expect(
+      agent.research({
+        tasks: [task('guide-invalid-source-projection')],
+        knowledgeVersion: 'knowledge-v2'
+      })
+    ).rejects.toMatchObject({
+      code: 'RESEARCH_TASK_INVALID'
+    });
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it.each(['applicability', 'source.timelineClue', 'conflicts'])(
     'rejects research output missing %s',
     async (missingField) => {
@@ -808,7 +1024,188 @@ describe('GuideResearchAgent', () => {
     });
 
     expect(researchCache.put).not.toHaveBeenCalled();
-    expect(result.gaps).toEqual([{ taskKey: researchTask.key, code: 'SEARCH_NO_VALID_RESULTS' }]);
+    expect(result.gaps).toEqual([{ taskKey: researchTask.key, code: 'SEARCH_OUTPUT_INVALID' }]);
+  });
+
+  it.each([
+    ['summary', { summary: '私人账号 123456789 的配队结论' }],
+    [
+      'source title',
+      {
+        source: {
+          url: 'https://keqingmains.com/q/raiden-quickguide/',
+          title: '账号 ١٢٣٤\u200b٥٦٧٨٩ 的攻略',
+          timelineClue: '页面时间线索存在'
+        }
+      }
+    ],
+    [
+      'source timeline',
+      {
+        source: {
+          url: 'https://keqingmains.com/q/raiden-quickguide/',
+          title: 'Boundary Guide',
+          timelineClue: 'Authorization: Bearer private-token'
+        }
+      }
+    ],
+    ['conflicts', { conflicts: ['critRate: 88 时有冲突'] }],
+    [
+      'source URL path',
+      {
+        source: {
+          url: 'https://keqingmains.com/q/123456789/',
+          title: 'Boundary Guide',
+          timelineClue: '页面时间线索存在'
+        }
+      }
+    ],
+    [
+      'source URL query',
+      {
+        source: {
+          url: 'https://keqingmains.com/q/raiden/?ref=%31%32%33%34%35%36%37%38%39',
+          title: 'Boundary Guide',
+          timelineClue: '页面时间线索存在'
+        }
+      }
+    ],
+    [
+      'source URL fragment',
+      {
+        source: {
+          url: 'https://keqingmains.com/q/raiden/#١٢٣٤\u200b٥٦٧٨٩',
+          title: 'Boundary Guide',
+          timelineClue: '页面时间线索存在'
+        }
+      }
+    ]
+  ])('rejects privacy-sensitive provider-controlled %s', async (_label, overrides) => {
+    const researchTask = task('guide-sensitive-provider-output');
+    const researchCache = cache();
+    const agent = new GuideResearchAgent({
+      runner: successRunner(modelOutput('ref-1', overrides)),
+      cache: researchCache,
+      sourceRegistry: sourceRegistry(),
+      sdkOptions: sdkOptions(),
+      canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
+      now: () => NOW
+    });
+
+    const result = await agent.research({
+      tasks: [researchTask],
+      knowledgeVersion: 'knowledge-v2'
+    });
+
+    expect(researchCache.put).not.toHaveBeenCalled();
+    expect(result.entries).toEqual([]);
+    expect(JSON.stringify(result)).not.toMatch(/123456789|١٢٣٤|private-token|critRate|%31%32%33/iu);
+  });
+
+  it('validates but retains the semantics of a privacy-safe encoded guide URL', async () => {
+    const researchTask = task('guide-safe-encoded-url');
+    const encodedUrl = 'https://keqingmains.com/q/raiden/?topic=%E9%9B%B7%E7%A5%9E#guide';
+    const agent = new GuideResearchAgent({
+      runner: successRunner(
+        modelOutput('ref-1', {
+          source: {
+            url: encodedUrl,
+            title: 'Raiden Guide',
+            timelineClue: '页面时间线索存在'
+          }
+        })
+      ),
+      cache: cache(),
+      sourceRegistry: sourceRegistry(),
+      sdkOptions: sdkOptions(),
+      canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
+      now: () => NOW
+    });
+
+    const result = await agent.research({
+      tasks: [researchTask],
+      knowledgeVersion: 'knowledge-v2'
+    });
+
+    expect(result.entries[0]?.value.citations[0]?.url).toBe(encodedUrl);
+  });
+
+  it('does not write rejected provider output through the real guide cache', async () => {
+    const userDataDirectory = await fs.mkdtemp(path.join(tmpdir(), 'guide-research-agent-'));
+    try {
+      const researchTask = task('guide-real-cache-sensitive-output');
+      const researchCache = new GuideResearchCache({
+        userDataDirectory,
+        now: () => NOW
+      });
+      const agent = new GuideResearchAgent({
+        runner: successRunner(
+          modelOutput('ref-1', {
+            summary: '私人账号 123456789 的配队结论'
+          })
+        ),
+        cache: researchCache,
+        sourceRegistry: sourceRegistry(),
+        sdkOptions: sdkOptions(),
+        canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
+        now: () => NOW
+      });
+
+      const result = await agent.research({
+        tasks: [researchTask],
+        knowledgeVersion: 'knowledge-v2'
+      });
+
+      expect(result.entries).toEqual([]);
+      await expect(
+        researchCache.get({ task: researchTask, knowledgeVersion: 'knowledge-v2' })
+      ).resolves.toBeUndefined();
+      await expect(fs.readFile(researchCache.filePath, 'utf8')).rejects.toMatchObject({
+        code: 'ENOENT'
+      });
+    } finally {
+      await fs.rm(userDataDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps successful cache writes when a later task write fails with a stable gap', async () => {
+    const firstTask = task('guide-cache-write-first');
+    const secondTask = task('guide-cache-write-second');
+    const output = JSON.stringify({
+      schemaVersion: 1,
+      results: [
+        JSON.parse(modelOutput('ref-1')).results[0],
+        JSON.parse(modelOutput('ref-2')).results[0]
+      ]
+    });
+    let putAttempt = 0;
+    const researchCache = cache({
+      put: async ({ value }) => {
+        putAttempt += 1;
+        if (putAttempt === 2) throw new Error('disk-provider-secret-detail');
+        return value;
+      }
+    });
+    const agent = new GuideResearchAgent({
+      runner: successRunner(output),
+      cache: researchCache,
+      sourceRegistry: sourceRegistry(),
+      sdkOptions: sdkOptions(),
+      canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
+      now: () => NOW
+    });
+
+    const result = await agent.research({
+      tasks: [firstTask, secondTask],
+      knowledgeVersion: 'knowledge-v2'
+    });
+
+    expect(researchCache.put).toHaveBeenCalledTimes(2);
+    expect(result.entries).toEqual([
+      expect.objectContaining({ taskKey: firstTask.key, origin: 'research' })
+    ]);
+    expect(result.gaps).toEqual([{ taskKey: secondTask.key, code: 'SEARCH_CACHE_UNAVAILABLE' }]);
+    expect(JSON.stringify(result)).not.toContain('disk-provider-secret-detail');
   });
 
   it.each([

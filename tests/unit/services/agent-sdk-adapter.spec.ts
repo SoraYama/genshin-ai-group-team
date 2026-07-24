@@ -8,6 +8,8 @@ import {
   resolvePackagedClaudeExecutable
 } from '../../../src/main/services/agent-sdk-adapter.js';
 
+const RESEARCH_QUERY = '原神 雷电将军 配队 攻略';
+
 const preToolInput = (
   toolName: string,
   toolUseId: string,
@@ -237,7 +239,8 @@ describe('buildAgentSdkOptions', () => {
         purpose: 'research',
         allowed: ['WebSearch'],
         maxSearches: 3
-      }
+      },
+      researchAllowedQueries: [RESEARCH_QUERY]
     });
 
     expect(options.allowedTools).toEqual(['WebSearch']);
@@ -252,7 +255,7 @@ describe('buildAgentSdkOptions', () => {
     const hook = options.hooks?.PreToolUse?.[0]?.hooks[0];
     if (!hook) throw new Error('Expected research permission hook');
     const allowed = await hook(
-      preToolInput('WebSearch', 'search-1', { query: '原神 雷电将军 配队 攻略' }),
+      preToolInput('WebSearch', 'search-1', { query: RESEARCH_QUERY }),
       'search-1',
       { signal: new AbortController().signal }
     );
@@ -265,14 +268,17 @@ describe('buildAgentSdkOptions', () => {
   });
 
   it('denies the fourth WebSearch call with the stable budget reason', async () => {
-    const gate = createResearchToolGate({ maxSearches: 3 });
+    const gate = createResearchToolGate({
+      maxSearches: 3,
+      allowedQueries: [RESEARCH_QUERY]
+    });
     const signal = new AbortController().signal;
 
     for (const attempt of [1, 2, 3]) {
       await expect(
         gate(
           preToolInput('WebSearch', `search-${attempt}`, {
-            query: `原神 配队 攻略 尝试 ${['一', '二', '三'][attempt - 1]}`
+            query: RESEARCH_QUERY
           }),
           `search-${attempt}`,
           { signal }
@@ -282,7 +288,7 @@ describe('buildAgentSdkOptions', () => {
       });
     }
     await expect(
-      gate(preToolInput('WebSearch', 'search-4', { query: '原神 配队 攻略 第四次' }), 'search-4', {
+      gate(preToolInput('WebSearch', 'search-4', { query: RESEARCH_QUERY }), 'search-4', {
         signal
       })
     ).resolves.toMatchObject({
@@ -313,7 +319,10 @@ describe('buildAgentSdkOptions', () => {
     ],
     [{ query: '原神攻略', extra: 'not-supported' }, 'unexpected input field']
   ])('rejects a WebSearch input containing %s (%s)', async (toolInput, _label) => {
-    const gate = createResearchToolGate({ maxSearches: 3 });
+    const gate = createResearchToolGate({
+      maxSearches: 3,
+      allowedQueries: [RESEARCH_QUERY]
+    });
     const input = {
       ...preToolInput('WebSearch', 'unsafe-search'),
       tool_input: toolInput
@@ -330,12 +339,17 @@ describe('buildAgentSdkOptions', () => {
   });
 
   it('allows canonical research terms and a bounded non-UID article number', async () => {
-    const gate = createResearchToolGate({ maxSearches: 3 });
+    const query =
+      '原神 雷电将军 electro polearm single-target build-match-present article-20240725';
+    const gate = createResearchToolGate({
+      maxSearches: 3,
+      allowedQueries: [query]
+    });
 
     await expect(
       gate(
         preToolInput('WebSearch', 'safe-search', {
-          query: '原神 雷电将军 electro polearm single-target build-match-present article-20240725'
+          query
         }),
         'safe-search',
         { signal: new AbortController().signal }
@@ -344,6 +358,169 @@ describe('buildAgentSdkOptions', () => {
       hookSpecificOutput: {
         permissionDecision: 'allow'
       }
+    });
+  });
+
+  it('rejects a privacy-safe query that was not generated for this research run', async () => {
+    const gate = createResearchToolGate({
+      maxSearches: 3,
+      allowedQueries: [RESEARCH_QUERY]
+    });
+
+    await expect(
+      gate(
+        preToolInput('WebSearch', 'outside-allowlist', {
+          query: '原神 纳西妲 配队 攻略'
+        }),
+        'outside-allowlist',
+        { signal: new AbortController().signal }
+      )
+    ).resolves.toMatchObject({
+      hookSpecificOutput: {
+        permissionDecision: 'deny',
+        permissionDecisionReason: 'SEARCH_QUERY_REJECTED'
+      }
+    });
+  });
+
+  it('counts malformed and rejected unique WebSearch attempts against the budget', async () => {
+    const gate = createResearchToolGate({
+      maxSearches: 3,
+      allowedQueries: [RESEARCH_QUERY]
+    });
+    const signal = new AbortController().signal;
+
+    for (const [id, toolInput] of [
+      ['malformed-1', {}],
+      ['sensitive-2', { query: 'UID 123456789' }],
+      ['outside-3', { query: '原神 纳西妲 配队 攻略' }]
+    ] as const) {
+      await expect(
+        gate(preToolInput('WebSearch', id, toolInput), id, { signal })
+      ).resolves.toMatchObject({
+        hookSpecificOutput: {
+          permissionDecision: 'deny',
+          permissionDecisionReason: 'SEARCH_QUERY_REJECTED'
+        }
+      });
+    }
+
+    await expect(
+      gate(
+        preToolInput('WebSearch', 'valid-but-fourth', { query: RESEARCH_QUERY }),
+        'valid-but-fourth',
+        { signal }
+      )
+    ).resolves.toMatchObject({
+      hookSpecificOutput: {
+        permissionDecision: 'deny',
+        permissionDecisionReason: 'SEARCH_BUDGET_EXCEEDED'
+      }
+    });
+  });
+
+  it('returns the cached decision for a valid tool-use ID replay without consuming budget', async () => {
+    const gate = createResearchToolGate({
+      maxSearches: 3,
+      allowedQueries: [RESEARCH_QUERY]
+    });
+    const signal = new AbortController().signal;
+    const first = await gate(
+      preToolInput('WebSearch', 'replayed-search', { query: RESEARCH_QUERY }),
+      'replayed-search',
+      { signal }
+    );
+    const replay = await gate(
+      preToolInput('WebSearch', 'replayed-search', { query: '原神 纳西妲 配队 攻略' }),
+      'replayed-search',
+      { signal }
+    );
+
+    expect(replay).toEqual(first);
+    for (const id of ['search-2', 'search-3']) {
+      await expect(
+        gate(preToolInput('WebSearch', id, { query: RESEARCH_QUERY }), id, { signal })
+      ).resolves.toMatchObject({
+        hookSpecificOutput: { permissionDecision: 'allow' }
+      });
+    }
+    await expect(
+      gate(preToolInput('WebSearch', 'search-4', { query: RESEARCH_QUERY }), 'search-4', {
+        signal
+      })
+    ).resolves.toMatchObject({
+      hookSpecificOutput: {
+        permissionDecision: 'deny',
+        permissionDecisionReason: 'SEARCH_BUDGET_EXCEEDED'
+      }
+    });
+  });
+
+  it('fails closed and consumes attempts for missing or invalid tool-use IDs without replay caching', async () => {
+    const gate = createResearchToolGate({
+      maxSearches: 3,
+      allowedQueries: [RESEARCH_QUERY]
+    });
+    const signal = new AbortController().signal;
+    const invalidRequests = [
+      {
+        ...preToolInput('WebSearch', 'placeholder', { query: RESEARCH_QUERY }),
+        tool_use_id: undefined
+      },
+      preToolInput('WebSearch', 'invalid id', { query: RESEARCH_QUERY }),
+      preToolInput('WebSearch', 'invalid id', { query: RESEARCH_QUERY })
+    ];
+
+    for (const request of invalidRequests) {
+      await expect(
+        gate(request as Parameters<typeof gate>[0], 'callback-id', { signal })
+      ).resolves.toMatchObject({
+        hookSpecificOutput: {
+          permissionDecision: 'deny',
+          permissionDecisionReason: 'SEARCH_QUERY_REJECTED'
+        }
+      });
+    }
+    await expect(
+      gate(preToolInput('WebSearch', 'valid-fourth', { query: RESEARCH_QUERY }), 'valid-fourth', {
+        signal
+      })
+    ).resolves.toMatchObject({
+      hookSpecificOutput: {
+        permissionDecision: 'deny',
+        permissionDecisionReason: 'SEARCH_BUDGET_EXCEEDED'
+      }
+    });
+  });
+
+  it('copies the generated query allowlist when SDK options are built', async () => {
+    const researchAllowedQueries = [RESEARCH_QUERY];
+    const options = buildAgentSdkOptions({
+      apiKey: 'test-key',
+      baseUrl: 'https://llm.example.test',
+      model: 'test-model',
+      systemPrompt: 'system',
+      cwd: '/tmp/genshin-advisor',
+      abortController: new AbortController(),
+      nativeToolPolicy: {
+        purpose: 'research',
+        allowed: ['WebSearch'],
+        maxSearches: 3
+      },
+      researchAllowedQueries
+    });
+    researchAllowedQueries[0] = '原神 纳西妲 配队 攻略';
+
+    const hook = options.hooks?.PreToolUse?.[0]?.hooks[0];
+    if (!hook) throw new Error('Expected research permission hook');
+    await expect(
+      hook(
+        preToolInput('WebSearch', 'immutable-query', { query: RESEARCH_QUERY }),
+        'immutable-query',
+        { signal: new AbortController().signal }
+      )
+    ).resolves.toMatchObject({
+      hookSpecificOutput: { permissionDecision: 'allow' }
     });
   });
 
@@ -367,7 +544,8 @@ describe('buildAgentSdkOptions', () => {
       expect(() =>
         buildAgentSdkOptions({
           ...base,
-          nativeToolPolicy
+          nativeToolPolicy,
+          researchAllowedQueries: [RESEARCH_QUERY]
         } as Parameters<typeof buildAgentSdkOptions>[0])
       ).toThrow();
     }
@@ -380,6 +558,7 @@ describe('buildAgentSdkOptions', () => {
           allowed: ['WebSearch'],
           maxSearches: 3
         },
+        researchAllowedQueries: [RESEARCH_QUERY],
         allowedBusinessTools: ['mcp__genshin__query_genshin_db']
       })
     ).toThrow();
@@ -391,8 +570,54 @@ describe('buildAgentSdkOptions', () => {
           allowed: ['WebSearch'],
           maxSearches: 3
         },
+        researchAllowedQueries: [RESEARCH_QUERY],
         mcpServers: { genshin: { type: 'sdk', name: 'genshin', instance: {} as never } }
       })
     ).toThrow();
+  });
+
+  it('requires a bounded safe query allowlist exactly for research runs', () => {
+    const base = {
+      apiKey: 'test-key',
+      baseUrl: 'https://llm.example.test',
+      model: 'test-model',
+      systemPrompt: 'system',
+      cwd: '/tmp/genshin-advisor',
+      abortController: new AbortController()
+    };
+    expect(() =>
+      buildAgentSdkOptions({
+        ...base,
+        nativeToolPolicy: {
+          purpose: 'research',
+          allowed: ['WebSearch'],
+          maxSearches: 3
+        }
+      })
+    ).toThrow();
+    expect(() =>
+      buildAgentSdkOptions({
+        ...base,
+        researchAllowedQueries: [RESEARCH_QUERY]
+      })
+    ).toThrow();
+    for (const researchAllowedQueries of [
+      [],
+      [RESEARCH_QUERY, RESEARCH_QUERY],
+      [RESEARCH_QUERY, 'UID 123456789'],
+      [RESEARCH_QUERY, '原神 纳西妲 配队', '原神 深渊 配队', '原神 Boss 配队']
+    ]) {
+      expect(() =>
+        buildAgentSdkOptions({
+          ...base,
+          nativeToolPolicy: {
+            purpose: 'research',
+            allowed: ['WebSearch'],
+            maxSearches: 3
+          },
+          researchAllowedQueries
+        })
+      ).toThrow();
+    }
   });
 });

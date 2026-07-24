@@ -1,8 +1,10 @@
 import type { AgentSdkRunOptions } from './agent-sdk-adapter.js';
+import { privacySafeResearchText } from './research-privacy.js';
 
 export const AGENT_TURN_RAW_SUMMARY_MAX_MESSAGES = 64;
 export const AGENT_TURN_RAW_SUMMARY_PREVIEW_MAX_CHARS = 500;
 export const AGENT_TURN_FINAL_TEXT_MAX_CHARS = 100_000;
+export const AGENT_TURN_WEB_SEARCH_EVIDENCE_MAX_ATTEMPTS = 4;
 
 export interface AuditedAgentRunner {
   run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown>;
@@ -23,21 +25,37 @@ export interface ToolAudit {
   round: 'compose' | 'repair' | 'single';
 }
 
+export type WebSearchEvidenceStatus = 'resolved' | 'error' | 'unresolved' | 'invalid';
+
+export interface WebSearchEvidenceAttempt {
+  toolUseId: string;
+  query?: string;
+  status: WebSearchEvidenceStatus;
+}
+
+export interface WebSearchEvidence {
+  attempts: WebSearchEvidenceAttempt[];
+  truncated: boolean;
+}
+
 export type AgentTurnErrorCode =
   | 'AGENT_TURN_CANCELLED'
+  | 'AGENT_TURN_INCOMPLETE'
   | 'AGENT_TURN_STREAM_FAILED'
   | 'AGENT_TURN_RESULT_ERROR'
   | 'AGENT_TURN_OUTPUT_TOO_LARGE';
 
 export class AgentTurnError extends Error {
   override readonly name = 'AgentTurnError';
+  readonly usage: AgentUsage | undefined;
 
   constructor(
     readonly code: AgentTurnErrorCode,
     message: string,
-    options?: { cause?: unknown }
+    options?: { cause?: unknown; usage?: AgentUsage }
   ) {
     super(message, options);
+    this.usage = options?.usage;
   }
 }
 
@@ -59,6 +77,7 @@ export interface AuditedAgentTurn {
   finalRawText: string;
   rawMessagesSummary: RawAgentMessagesSummary;
   tools: ToolAudit[];
+  webSearchEvidence: WebSearchEvidence;
   usage: AgentUsage;
 }
 
@@ -75,7 +94,11 @@ export async function runAuditedAgentTurn(options: {
 }): Promise<AuditedAgentTurn> {
   let resultText = '';
   let assistantText = '';
+  let sawSuccessResult = false;
   const tools = new Map<string, ToolAudit>();
+  const webSearchById = new Map<string, WebSearchEvidenceAttempt>();
+  const webSearchAttempts: WebSearchEvidenceAttempt[] = [];
+  let webSearchEvidenceTruncated = false;
   let usage: AgentUsage = { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 };
   const rawMessagesSummary: RawAgentMessagesSummary = {
     totalMessages: 0,
@@ -88,6 +111,9 @@ export async function runAuditedAgentTurn(options: {
       : (options.sdkOptions.allowedBusinessTools?.length ?? 0) > 0
         ? Math.min(Math.max(options.sdkOptions.maxTurns ?? 4, 3), 5)
         : 1;
+  if (options.sdkOptions.abortController.signal.aborted) {
+    throw new AgentTurnError('AGENT_TURN_CANCELLED', 'Agent turn was cancelled');
+  }
   try {
     for await (const message of options.runner.run(options.prompt, {
       ...options.sdkOptions,
@@ -100,15 +126,6 @@ export async function runAuditedAgentTurn(options: {
       addRawMessageSummary(rawMessagesSummary, message);
       if (!isRecord(message)) continue;
       if (message['type'] === 'result') {
-        if (message['subtype'] !== 'success' || typeof message['result'] !== 'string') {
-          throw new AgentTurnError(
-            'AGENT_TURN_RESULT_ERROR',
-            'Agent turn returned an error result',
-            { cause: message }
-          );
-        }
-        assertBoundedFinalText(message['result']);
-        resultText = message['result'];
         const sdkUsage = isRecord(message['usage']) ? message['usage'] : {};
         const delta = {
           inputTokens: numberValue(sdkUsage['input_tokens']),
@@ -123,6 +140,16 @@ export async function runAuditedAgentTurn(options: {
         ) {
           options.onUsageDelta?.(delta);
         }
+        if (message['subtype'] !== 'success' || typeof message['result'] !== 'string') {
+          throw new AgentTurnError(
+            'AGENT_TURN_RESULT_ERROR',
+            'Agent turn returned an error result',
+            { cause: message, usage }
+          );
+        }
+        assertBoundedFinalText(message['result']);
+        resultText = message['result'];
+        sawSuccessResult = true;
       }
       if (message['type'] === 'assistant' && isRecord(message['message'])) {
         const content = message['message']['content'];
@@ -146,6 +173,29 @@ export async function runAuditedAgentTurn(options: {
               correlationId: options.auditContext?.correlationId ?? 'unscoped',
               round: options.auditContext?.round ?? 'single'
             });
+            if (block['name'] === 'WebSearch') {
+              const id = webSearchToolUseId(block['id']);
+              const query =
+                isRecord(block['input']) && typeof block['input']['query'] === 'string'
+                  ? boundedResearchQuery(block['input']['query'])
+                  : undefined;
+              if (webSearchAttempts.length >= AGENT_TURN_WEB_SEARCH_EVIDENCE_MAX_ATTEMPTS) {
+                webSearchEvidenceTruncated = true;
+              } else if (id === undefined || query === undefined || webSearchById.has(id)) {
+                webSearchAttempts.push({
+                  toolUseId: id ?? 'invalid',
+                  status: 'invalid'
+                });
+              } else {
+                const evidence: WebSearchEvidenceAttempt = {
+                  toolUseId: id,
+                  query,
+                  status: 'unresolved'
+                };
+                webSearchById.set(id, evidence);
+                webSearchAttempts.push(evidence);
+              }
+            }
           }
         }
       }
@@ -160,14 +210,32 @@ export async function runAuditedAgentTurn(options: {
           ) {
             const use = tools.get(block['tool_use_id']);
             if (use) use.succeeded = block['is_error'] !== true;
+            const search = webSearchById.get(block['tool_use_id']);
+            if (search) search.status = block['is_error'] === true ? 'error' : 'resolved';
           }
         }
       }
     }
   } catch (error) {
+    if (options.sdkOptions.abortController.signal.aborted) {
+      if (error instanceof AgentTurnError && error.code === 'AGENT_TURN_CANCELLED') throw error;
+      throw new AgentTurnError('AGENT_TURN_CANCELLED', 'Agent turn was cancelled', {
+        cause: error,
+        usage
+      });
+    }
     if (error instanceof AgentTurnError) throw error;
     throw new AgentTurnError('AGENT_TURN_STREAM_FAILED', 'Agent turn stream failed', {
-      cause: error
+      cause: error,
+      usage
+    });
+  }
+  if (options.sdkOptions.abortController.signal.aborted) {
+    throw new AgentTurnError('AGENT_TURN_CANCELLED', 'Agent turn was cancelled', { usage });
+  }
+  if (!sawSuccessResult && assistantText.length === 0) {
+    throw new AgentTurnError('AGENT_TURN_INCOMPLETE', 'Agent turn ended without a result', {
+      usage
     });
   }
   const finalRawText = resultText || assistantText;
@@ -176,6 +244,10 @@ export async function runAuditedAgentTurn(options: {
     finalRawText,
     rawMessagesSummary,
     tools: [...tools.values()],
+    webSearchEvidence: {
+      attempts: webSearchAttempts.map((attempt) => ({ ...attempt })),
+      truncated: webSearchEvidenceTruncated
+    },
     usage
   };
 }
@@ -246,4 +318,14 @@ function assertBoundedFinalText(value: string): void {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function webSearchToolUseId(value: string): string | undefined {
+  return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(value) ? value : undefined;
+}
+
+function boundedResearchQuery(value: string): string | undefined {
+  if (value.length > 300) return undefined;
+  const query = privacySafeResearchText(value);
+  return query === undefined || query.length === 0 ? undefined : query;
 }

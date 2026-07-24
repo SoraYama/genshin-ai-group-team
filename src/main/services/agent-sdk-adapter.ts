@@ -46,20 +46,38 @@ const nativeToolPolicySchema = z
     maxSearches: z.literal(3)
   })
   .strict();
-const researchSearchInputSchema = z
-  .object({
-    query: z.string().trim().min(1).max(300)
-  })
-  .strict()
-  .superRefine(({ query }, context) => {
+const researchQueryTextSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(300)
+  .superRefine((query, context) => {
     if (privacySafeResearchText(query) === undefined) {
       context.addIssue({
         code: 'custom',
-        path: ['query'],
         message: 'Research query contains account, credential, or panel material'
       });
     }
   });
+const researchSearchInputSchema = z
+  .object({
+    query: researchQueryTextSchema
+  })
+  .strict();
+const researchAllowedQueriesSchema = z
+  .array(researchQueryTextSchema)
+  .min(1)
+  .max(3)
+  .superRefine((queries, context) => {
+    const normalized = queries.map(privacySafeResearchText);
+    if (new Set(normalized).size !== normalized.length) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Research query allowlist entries must be unique'
+      });
+    }
+  })
+  .transform((queries) => queries.map((query) => privacySafeResearchText(query)!));
 
 export interface ResearchNativeToolPolicy {
   purpose: 'research';
@@ -67,45 +85,70 @@ export interface ResearchNativeToolPolicy {
   maxSearches: 3;
 }
 
-export function createResearchToolGate(input: { maxSearches: 3 }): HookCallback {
-  let searches = 0;
+type ResearchGateDecision = {
+  hookSpecificOutput: {
+    hookEventName: 'PreToolUse';
+    permissionDecision: 'allow' | 'deny';
+    permissionDecisionReason?: string;
+  };
+};
+
+export function createResearchToolGate(input: {
+  maxSearches: 3;
+  allowedQueries: readonly string[];
+}): HookCallback {
+  const allowedQueries = new Set(researchAllowedQueriesSchema.parse(input.allowedQueries));
+  const decisionsByToolUseId = new Map<string, ResearchGateDecision>();
+  let searchAttempts = 0;
   return async (hookInput) => {
     if (hookInput.hook_event_name !== 'PreToolUse') return { continue: true };
     if (hookInput.tool_name !== 'WebSearch') {
-      return {
-        hookSpecificOutput: {
-          hookEventName: 'PreToolUse',
-          permissionDecision: 'deny',
-          permissionDecisionReason: 'RESEARCH_TOOL_NOT_ALLOWED'
-        }
-      };
+      return denyResearchTool('RESEARCH_TOOL_NOT_ALLOWED');
     }
-    if (!researchSearchInputSchema.safeParse(hookInput.tool_input).success) {
-      return {
-        hookSpecificOutput: {
-          hookEventName: 'PreToolUse',
-          permissionDecision: 'deny',
-          permissionDecisionReason: 'SEARCH_QUERY_REJECTED'
-        }
-      };
+    const toolUseId = validToolUseId(hookInput.tool_use_id);
+    if (toolUseId !== undefined) {
+      const replay = decisionsByToolUseId.get(toolUseId);
+      if (replay !== undefined) return replay;
     }
-    searches += 1;
-    if (searches > input.maxSearches) {
-      return {
-        hookSpecificOutput: {
-          hookEventName: 'PreToolUse',
-          permissionDecision: 'deny',
-          permissionDecisionReason: 'SEARCH_BUDGET_EXCEEDED'
-        }
-      };
+
+    searchAttempts += 1;
+    if (searchAttempts > input.maxSearches) {
+      const decision = denyResearchTool('SEARCH_BUDGET_EXCEEDED');
+      if (toolUseId !== undefined) decisionsByToolUseId.set(toolUseId, decision);
+      return decision;
     }
-    return {
+    const parsedInput = researchSearchInputSchema.safeParse(hookInput.tool_input);
+    const query = parsedInput.success ? privacySafeResearchText(parsedInput.data.query) : undefined;
+    if (toolUseId === undefined || query === undefined || !allowedQueries.has(query)) {
+      const decision = denyResearchTool('SEARCH_QUERY_REJECTED');
+      if (toolUseId !== undefined) decisionsByToolUseId.set(toolUseId, decision);
+      return decision;
+    }
+    const decision: ResearchGateDecision = {
       hookSpecificOutput: {
         hookEventName: 'PreToolUse',
         permissionDecision: 'allow'
       }
     };
+    decisionsByToolUseId.set(toolUseId, decision);
+    return decision;
   };
+}
+
+function denyResearchTool(reason: string): ResearchGateDecision {
+  return {
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason: reason
+    }
+  };
+}
+
+function validToolUseId(value: unknown): string | undefined {
+  return typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(value)
+    ? value
+    : undefined;
 }
 
 export interface AgentSdkRunOptions {
@@ -123,6 +166,7 @@ export interface AgentSdkRunOptions {
   mcpServers?: SdkOptions['mcpServers'];
   allowedBusinessTools?: string[];
   nativeToolPolicy?: ResearchNativeToolPolicy;
+  researchAllowedQueries?: readonly string[];
 }
 
 function serializeCustomHeaders(headers: Record<string, string> | undefined): string | undefined {
@@ -163,6 +207,13 @@ export function buildAgentSdkOptions(input: AgentSdkRunOptions): SdkOptions {
     input.nativeToolPolicy === undefined
       ? undefined
       : nativeToolPolicySchema.parse(input.nativeToolPolicy);
+  const researchAllowedQueries =
+    nativeToolPolicy === undefined
+      ? undefined
+      : researchAllowedQueriesSchema.parse(input.researchAllowedQueries);
+  if (nativeToolPolicy === undefined && input.researchAllowedQueries !== undefined) {
+    throw new Error('Research query allowlists require the native research policy');
+  }
   if (
     nativeToolPolicy !== undefined &&
     (allowedBusinessTools.length > 0 || input.mcpServers !== undefined)
@@ -175,7 +226,10 @@ export function buildAgentSdkOptions(input: AgentSdkRunOptions): SdkOptions {
     ? DENIED_NATIVE_TOOLS.filter((tool) => tool !== 'WebSearch')
     : [...DENIED_NATIVE_TOOLS];
   const toolGate = isResearch
-    ? createResearchToolGate({ maxSearches: nativeToolPolicy.maxSearches })
+    ? createResearchToolGate({
+        maxSearches: nativeToolPolicy.maxSearches,
+        allowedQueries: researchAllowedQueries!
+      })
     : businessToolGate(new Set(allowedBusinessTools));
   return {
     systemPrompt: input.systemPrompt,
