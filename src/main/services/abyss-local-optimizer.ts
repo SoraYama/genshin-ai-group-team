@@ -169,6 +169,13 @@ export function buildLocalAbyssPlan({
     issues: [],
     warnings,
     assumptions,
+    knowledgeSummary: summarizeKnowledgeCoverage(
+      [
+        ...validation.plan.firstHalfTeam.characterIds,
+        ...validation.plan.secondHalfTeam.characterIds
+      ],
+      knowledge
+    ),
     narrative: renderLocalPlanNarrative(validation.plan, input.locale),
     plan: validation.plan
   });
@@ -343,6 +350,13 @@ function buildPartialPlan({
     issues: [],
     warnings,
     assumptions,
+    knowledgeSummary: summarizeKnowledgeCoverage(
+      [
+        ...validation.plan.firstHalfTeam.characterIds,
+        ...validation.plan.secondHalfTeam.characterIds
+      ],
+      knowledge
+    ),
     narrative: renderLocalPlanNarrative(validation.plan, input.locale),
     plan: validation.plan
   });
@@ -1048,8 +1062,31 @@ function blocked(issues: AbyssPlanIssue[]): AbyssAdvisorResult {
     source: 'local-rules',
     issues,
     warnings: [],
-    assumptions: []
+    assumptions: [],
+    knowledgeSummary: { trusted: 0, ephemeral: 0, unknown: 0, searched: false }
   });
+}
+
+function summarizeKnowledgeCoverage(
+  characterIds: string[],
+  knowledge: CharacterKnowledgeReader | undefined
+) {
+  const uniqueIds = [...new Set(characterIds)];
+  if (!knowledge) {
+    return {
+      trusted: 0,
+      ephemeral: 0,
+      unknown: uniqueIds.length,
+      searched: false
+    };
+  }
+  const coverage = knowledge.coverageFor(uniqueIds);
+  return {
+    trusted: coverage.known,
+    ephemeral: 0,
+    unknown: coverage.unknownCharacterIds.length,
+    searched: false
+  };
 }
 
 function issue(

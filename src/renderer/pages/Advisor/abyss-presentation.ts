@@ -26,6 +26,9 @@ const ELEMENT_LABELS: Record<string, string> = {
 
 const PROGRESS_LABELS: Record<AbyssAdvisorProgressStep, string> = {
   'reading-roster': '读取角色',
+  'interpreting-builds': '理解当前配装',
+  'checking-knowledge': '核对可信知识',
+  'researching-guides': '检索临时攻略',
   'analyzing-rules': '分析挑战规则',
   'generating-teams': '生成双队',
   'checking-conflicts': '检查冲突',
@@ -34,6 +37,9 @@ const PROGRESS_LABELS: Record<AbyssAdvisorProgressStep, string> = {
 
 const EN_PROGRESS_LABELS: Record<AbyssAdvisorProgressStep, string> = {
   'reading-roster': 'Reading roster',
+  'interpreting-builds': 'Interpreting builds',
+  'checking-knowledge': 'Checking trusted knowledge',
+  'researching-guides': 'Researching current guides',
   'analyzing-rules': 'Analyzing challenge rules',
   'generating-teams': 'Building both teams',
   'checking-conflicts': 'Checking conflicts',

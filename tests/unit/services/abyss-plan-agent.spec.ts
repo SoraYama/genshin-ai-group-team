@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import { AbyssPlanAgent } from '../../../src/main/services/abyss-plan-agent.js';
 import type { AgentSdkRunOptions } from '../../../src/main/services/agent-sdk-adapter.js';
-import { buildV2PipelineContext } from '../../../src/main/services/v2-agent-context.js';
+import {
+  buildUnknownKnowledgeContext,
+  buildV2PipelineContext
+} from '../../../src/main/services/v2-agent-context.js';
 import {
   ABYSS_CHARACTERS,
   abyssInput,
@@ -170,10 +173,10 @@ function pipelineContext(feasibleBaseline = validAbyssPlan()) {
     eligibleCharacterIds: ABYSS_CHARACTERS.map(({ id }) => String(id)),
     mechanics: [{ target: '12 层所选房间', facts: ['上下半固定双队'], unknowns: ['精确输出未知'] }],
     interventions: { noBuildChange: true },
-    knowledge: {
-      version: 'unavailable',
-      unknownCharacterIds: ABYSS_CHARACTERS.map(({ id }) => String(id))
-    }
+    knowledge: buildUnknownKnowledgeContext(
+      'unavailable',
+      ABYSS_CHARACTERS.map(({ id }) => String(id))
+    )
   });
 }
 

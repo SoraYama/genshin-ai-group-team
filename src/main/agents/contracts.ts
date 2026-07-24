@@ -5,6 +5,7 @@ import {
   advisorLocaleSchema,
   advisorNarrativeReasonCodeSchema
 } from '../../shared/advisor-narrative.js';
+import { knowledgeContextPacketSchema } from '../../shared/advisor-knowledge.js';
 
 export const dataCuratorOutputSchema = z.object({
   usableCharacterIds: z.array(z.number().int()).min(4),
@@ -355,12 +356,7 @@ export const v2PipelineContextSchema = z
       )
       .max(32),
     interventions: v2InterventionsSchema,
-    knowledge: z
-      .object({
-        version: z.string().trim().min(1).max(128),
-        unknownCharacterIds: boundedCharacterIdsSchema
-      })
-      .strict()
+    knowledge: knowledgeContextPacketSchema
   })
   .strict()
   .superRefine(({ mode, scenarioId, dataVersion, candidate }, context) => {

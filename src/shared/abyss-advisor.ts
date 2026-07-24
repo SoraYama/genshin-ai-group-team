@@ -201,6 +201,14 @@ const resultCommonShape = {
   issues: z.array(abyssPlanIssueSchema),
   warnings: z.array(z.string().trim().min(1)),
   assumptions: z.array(z.string().trim().min(1)),
+  knowledgeSummary: z
+    .object({
+      trusted: z.number().int().nonnegative(),
+      ephemeral: z.number().int().nonnegative(),
+      unknown: z.number().int().nonnegative(),
+      searched: z.boolean()
+    })
+    .strict(),
   narrative: advisorNarrativeSchema.default(defaultAdvisorNarrative('spiral-abyss')),
   teamRisks: z.array(abyssTeamRiskSchema).max(16).default([])
 };
@@ -223,6 +231,9 @@ export const abyssAdvisorResultSchema = z.discriminatedUnion('status', [
 
 export const abyssAdvisorProgressStepSchema = z.enum([
   'reading-roster',
+  'interpreting-builds',
+  'checking-knowledge',
+  'researching-guides',
   'analyzing-rules',
   'generating-teams',
   'checking-conflicts',

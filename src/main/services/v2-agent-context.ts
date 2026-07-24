@@ -1,5 +1,9 @@
 import type { PersistedProfile } from '../../shared/domain.js';
 import type { PlayerPreferences, RecommendationPlan } from '../../shared/scenario-v2.js';
+import {
+  knowledgeContextPacketSchema,
+  type KnowledgeContextPacket
+} from '../../shared/advisor-knowledge.js';
 import { v2PipelineContextSchema, type V2PipelineContext } from '../agents/contracts.js';
 import { buildAdvisorProfileView, toAdvisorCharacter } from './advisor-profile-serializer.js';
 import {
@@ -29,6 +33,31 @@ export interface BuildV2PipelineContextOptions {
   interventions: Record<string, unknown>;
   knowledge: V2PipelineContext['knowledge'];
   locale?: 'zh-CN' | 'en-US';
+}
+
+export function buildUnknownKnowledgeContext(
+  knowledgeVersion: string,
+  unknownSubjectIds: string[]
+): KnowledgeContextPacket {
+  const subjectIds = uniqueBoundedIds(unknownSubjectIds);
+  return knowledgeContextPacketSchema.parse({
+    knowledgeVersion,
+    buildInterpretations: [],
+    trustedMatches: [],
+    ephemeralMatches: [],
+    unknowns: subjectIds.map((subjectId, index) => ({
+      id: `gap-${index + 1}`,
+      subjectId,
+      reason: 'No trusted local or ephemeral guide match is available.'
+    })),
+    coverage: {
+      requested: subjectIds.length,
+      trusted: 0,
+      ephemeral: 0,
+      unknown: subjectIds.length
+    },
+    citations: []
+  });
 }
 
 export function buildV2PipelineContext(options: BuildV2PipelineContextOptions): V2PipelineContext {
@@ -90,10 +119,7 @@ export function buildV2PipelineContext(options: BuildV2PipelineContextOptions): 
     },
     mechanics: options.mechanics,
     interventions: boundedInterventions(options.interventions, options.locale ?? 'zh-CN'),
-    knowledge: {
-      version: options.knowledge.version,
-      unknownCharacterIds: uniqueBoundedIds(options.knowledge.unknownCharacterIds)
-    }
+    knowledge: options.knowledge
   };
   try {
     stringifyAgentPayload(baseContext, 'pipeline-context', MAX_V2_AGENT_CONTEXT_BYTES);

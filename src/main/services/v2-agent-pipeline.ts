@@ -332,7 +332,7 @@ function firstGroundingError(
   context: V2PipelineContext
 ): string | undefined {
   const eligibleIds = new Set(context.candidate.eligibleCharacterIds);
-  const unknownKnowledgeIds = new Set(context.knowledge.unknownCharacterIds);
+  const unknownKnowledgeIds = new Set(context.knowledge.unknowns.map(({ subjectId }) => subjectId));
   const detailedProfiles = new Map(
     context.profile.detailedProfiles.map((profile) => [String(profile.id), profile])
   );

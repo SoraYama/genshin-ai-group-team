@@ -11,6 +11,7 @@ import type {
   V2ExplainOutput,
   V2RotationOutput
 } from '../../../src/main/agents/contracts.js';
+import { buildUnknownKnowledgeContext } from '../../../src/main/services/v2-agent-context.js';
 import { validAbyssPlan } from './abyss-test-fixtures.js';
 import { validStygianPlan } from './stygian-test-fixtures.js';
 import { validTheaterPlan } from './theater-test-fixtures.js';
@@ -167,10 +168,7 @@ function context(plan: RecommendationPlan): V2PipelineContext {
         noBuildChange: true
       }
     },
-    knowledge: {
-      version: 'test-knowledge',
-      unknownCharacterIds: ['9999']
-    }
+    knowledge: buildUnknownKnowledgeContext('test-knowledge', ['9999'])
   };
 }
 
@@ -298,7 +296,9 @@ describe.each([
     expect(JSON.stringify(composePayload)).toContain('"kind":"feasibleBaseline"');
     expect(JSON.stringify(composePayload)).toContain('"missingFields":["talents"]');
     expect(JSON.stringify(composePayload)).toContain('"profileRef":{"uid":"123456789"}');
-    expect(JSON.stringify(composePayload)).toContain('"unknownCharacterIds":["9999"]');
+    expect(JSON.stringify(composePayload)).toContain(
+      '"unknowns":[{"id":"gap-1","subjectId":"9999"'
+    );
     expect(runner.calls[0]!.options.allowedBusinessTools).toEqual([
       'mcp__genshin__read_profile_cache'
     ]);
@@ -639,7 +639,10 @@ describe('V2 agent pipeline repair and grounding', () => {
     const baseline = validAbyssPlan();
     const pipelineContext = structuredClone(context(baseline));
     const characterId = String(pipelineContext.profile.detailedProfiles[0]!.id);
-    pipelineContext.knowledge.unknownCharacterIds = [characterId];
+    pipelineContext.knowledge = buildUnknownKnowledgeContext(
+      pipelineContext.knowledge.knowledgeVersion,
+      [characterId]
+    );
     const explanation = explainOutput(baseline);
     explanation.explanations = explanation.explanations.map((item, index) =>
       index === 0

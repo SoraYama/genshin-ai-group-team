@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { StygianPlanAgent } from '../../../src/main/services/stygian-plan-agent.js';
 import type { AgentSdkRunOptions } from '../../../src/main/services/agent-sdk-adapter.js';
-import { buildV2PipelineContext } from '../../../src/main/services/v2-agent-context.js';
+import {
+  buildUnknownKnowledgeContext,
+  buildV2PipelineContext
+} from '../../../src/main/services/v2-agent-context.js';
 import type { V2AgentStage } from '../../../src/main/services/v2-agent-pipeline.js';
 import {
   STYGIAN_CHARACTERS,
@@ -169,10 +172,10 @@ function pipelineContext(feasibleBaseline = validStygianPlan()) {
     eligibleCharacterIds: STYGIAN_CHARACTERS.map(({ id }) => String(id)),
     mechanics: [{ target: '三阶段', facts: ['跨队角色不可复用'], unknowns: ['精确伤害未知'] }],
     interventions: { target: 'dire-challenge' },
-    knowledge: {
-      version: 'unavailable',
-      unknownCharacterIds: STYGIAN_CHARACTERS.map(({ id }) => String(id))
-    }
+    knowledge: buildUnknownKnowledgeContext(
+      'unavailable',
+      STYGIAN_CHARACTERS.map(({ id }) => String(id))
+    )
   });
 }
 

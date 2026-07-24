@@ -22,7 +22,10 @@ import {
 } from './stygian-local-optimizer.js';
 import { StygianPlanAgent, type StygianPlanAgentRunner } from './stygian-plan-agent.js';
 import type { V2CritiqueOutput, V2ExplainOutput, V2RotationOutput } from '../agents/contracts.js';
-import { buildV2PipelineContext } from './v2-agent-context.js';
+import {
+  buildUnknownKnowledgeContext,
+  buildV2PipelineContext
+} from './v2-agent-context.js';
 import type { V2AgentStage } from './v2-agent-pipeline.js';
 import { renderV2Narrative } from './v2-narrative.js';
 
@@ -264,12 +267,11 @@ export class StygianAdvisorService {
               excludedCharacterIds: input.excludedCharacterIds,
               preferences: input.preferences
             },
-            knowledge: {
-              version: this.options.knowledge?.version ?? 'unavailable',
-              unknownCharacterIds:
-                this.options.knowledge?.coverageFor(eligibleCharacterIds).unknownCharacterIds ??
+            knowledge: buildUnknownKnowledgeContext(
+              this.options.knowledge?.version ?? 'unavailable',
+              this.options.knowledge?.coverageFor(eligibleCharacterIds).unknownCharacterIds ??
                 eligibleCharacterIds
-            }
+            )
           });
           const sdkOptionsForStage = (stage: V2AgentStage) => {
             if (stage === 'critique' || stage === 'rotation' || stage === 'explain') {

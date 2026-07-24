@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildV2PipelineContext } from '../../../src/main/services/v2-agent-context.js';
+import {
+  buildUnknownKnowledgeContext,
+  buildV2PipelineContext
+} from '../../../src/main/services/v2-agent-context.js';
 import { ABYSS_CHARACTERS, validAbyssPlan } from './abyss-test-fixtures.js';
+
+function knowledgePacket(unknownCharacterIds: string[] = []) {
+  return buildUnknownKnowledgeContext('knowledge-v1', unknownCharacterIds);
+}
 
 describe('V2 deterministic context builder', () => {
   it('joins the safe full profile, feasible baseline, mechanics, interventions, and knowledge gaps', () => {
@@ -29,10 +36,7 @@ describe('V2 deterministic context builder', () => {
       eligibleCharacterIds: ABYSS_CHARACTERS.map(({ id }) => String(id)),
       mechanics: [{ target: '12-1 上半', facts: ['水元素护盾'], unknowns: ['精确破盾时长未知'] }],
       interventions: { lockedCharacterIds: ['1001'], noBuildChange: true },
-      knowledge: {
-        version: 'knowledge-v1',
-        unknownCharacterIds: ['1009', '1010']
-      }
+      knowledge: knowledgePacket(['1009', '1010'])
     });
 
     expect(context.candidate).toMatchObject({
@@ -52,7 +56,13 @@ describe('V2 deterministic context builder', () => {
     expect(context.profile.detailedProfiles[6]).toMatchObject({
       missingFields: ['weapon', 'artifacts', 'talents']
     });
-    expect(context.knowledge.unknownCharacterIds).toHaveLength(2);
+    expect(context.knowledge.unknowns).toHaveLength(2);
+    expect(context.knowledge.coverage).toEqual({
+      requested: 2,
+      trusted: 0,
+      ephemeral: 0,
+      unknown: 2
+    });
     expect(JSON.stringify(context)).not.toMatch(
       /imageUrl|iconUrl|subStats|private\.example|cookie|apiKey|Authorization|https?:\/\//
     );
@@ -89,7 +99,7 @@ describe('V2 deterministic context builder', () => {
         eligibleCharacterIds: orderedCharacters.map(({ id }) => String(id)),
         mechanics: [{ target: '12-1 上半', facts: ['水元素护盾'], unknowns: ['精确破盾时长未知'] }],
         interventions: { lockedCharacterIds: ['1008'], noBuildChange: true },
-        knowledge: { version: 'knowledge-v1', unknownCharacterIds: [] }
+        knowledge: knowledgePacket()
       });
 
     const first = build(characters);
@@ -156,7 +166,7 @@ describe('V2 deterministic context builder', () => {
         selectedCharacterIds: [String(priorityIds[9])],
         noBuildChange: true
       },
-      knowledge: { version: 'knowledge-v1', unknownCharacterIds: [] }
+      knowledge: knowledgePacket()
     });
     const detailedIds = context.profile.detailedProfiles.map(({ id }) => id);
 
@@ -200,7 +210,7 @@ describe('V2 deterministic context builder', () => {
           }
         ],
         interventions: { lockedCharacterIds: [], noBuildChange: true },
-        knowledge: { version: 'knowledge-v1', unknownCharacterIds: [] }
+        knowledge: knowledgePacket()
       })
     ).toThrow(expect.objectContaining({ name: 'V2ContextBudgetError' }));
   });

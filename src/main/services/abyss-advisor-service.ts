@@ -20,7 +20,10 @@ import {
 } from './abyss-business-tools.js';
 import { buildLocalAbyssPlan } from './abyss-local-optimizer.js';
 import { AbyssPlanAgent, type AbyssPlanAgentRunner } from './abyss-plan-agent.js';
-import { buildV2PipelineContext } from './v2-agent-context.js';
+import {
+  buildUnknownKnowledgeContext,
+  buildV2PipelineContext
+} from './v2-agent-context.js';
 import type { V2AgentStage } from './v2-agent-pipeline.js';
 import { renderAbyssTeamRisks, renderV2Narrative } from './v2-narrative.js';
 
@@ -237,12 +240,11 @@ export class AbyssAdvisorService {
               preferences: input.preferences,
               ...(input.recomputeHalf ? { recomputeHalf: input.recomputeHalf } : {})
             },
-            knowledge: {
-              version: this.options.knowledge?.version ?? 'unavailable',
-              unknownCharacterIds:
-                this.options.knowledge?.coverageFor(eligibleCharacterIds).unknownCharacterIds ??
+            knowledge: buildUnknownKnowledgeContext(
+              this.options.knowledge?.version ?? 'unavailable',
+              this.options.knowledge?.coverageFor(eligibleCharacterIds).unknownCharacterIds ??
                 eligibleCharacterIds
-            }
+            )
           });
           const baseSdkOptions = {
             apiKey,
@@ -302,6 +304,12 @@ export class AbyssAdvisorService {
               issues: [],
               warnings: agent.plan.warnings,
               assumptions: checkedPlan.assumptions,
+              knowledgeSummary: {
+                trusted: pipelineContext.knowledge.coverage.trusted,
+                ephemeral: pipelineContext.knowledge.coverage.ephemeral,
+                unknown: pipelineContext.knowledge.coverage.unknown,
+                searched: false
+              },
               plan: checkedPlan,
               narrative: renderV2Narrative({
                 mode: 'spiral-abyss',
@@ -463,7 +471,8 @@ function blocked(issues: AbyssPlanIssue[]): AbyssAdvisorResult {
     source: 'local-rules',
     issues,
     warnings: [],
-    assumptions: []
+    assumptions: [],
+    knowledgeSummary: { trusted: 0, ephemeral: 0, unknown: 0, searched: false }
   });
 }
 

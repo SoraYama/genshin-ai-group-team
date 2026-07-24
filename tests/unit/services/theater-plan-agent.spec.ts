@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import { TheaterPlanAgent } from '../../../src/main/services/theater-plan-agent.js';
 import type { AgentSdkRunOptions } from '../../../src/main/services/agent-sdk-adapter.js';
-import { buildV2PipelineContext } from '../../../src/main/services/v2-agent-context.js';
+import {
+  buildUnknownKnowledgeContext,
+  buildV2PipelineContext
+} from '../../../src/main/services/v2-agent-context.js';
 import type { CharacterKnowledgeReader } from '../../../src/shared/character-knowledge.js';
 import {
   THEATER_CHARACTERS,
@@ -211,10 +214,10 @@ function pipelineContext(feasibleBaseline = validTheaterPlan()) {
     eligibleCharacterIds: [...new Set(eligibleCharacterIds)],
     mechanics: [{ target: '所选幕次', facts: ['活力按幕次扣除'], unknowns: ['随机路径结果未知'] }],
     interventions: { target: 'safe-clear' },
-    knowledge: {
-      version: groupingKnowledge.version,
-      unknownCharacterIds: THEATER_CHARACTERS.slice(1).map(({ id }) => String(id))
-    }
+    knowledge: buildUnknownKnowledgeContext(
+      groupingKnowledge.version,
+      THEATER_CHARACTERS.slice(1).map(({ id }) => String(id))
+    )
   });
 }
 

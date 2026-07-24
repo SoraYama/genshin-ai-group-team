@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   abyssAdvisorPlanInputSchema,
+  abyssAdvisorProgressStepSchema,
   abyssAdvisorResultSchema,
   abyssScenarioViewSchema
 } from '../../../src/shared/abyss-advisor.js';
@@ -177,7 +178,7 @@ describe('abyss advisor v2 contracts', () => {
   });
 
   it('requires structured blocked issues instead of an invalid plan', () => {
-    const result = abyssAdvisorResultSchema.parse({
+    const withoutKnowledgeSummary = {
       status: 'blocked',
       source: 'local-rules',
       issues: [
@@ -190,8 +191,24 @@ describe('abyss advisor v2 contracts', () => {
       ],
       warnings: [],
       assumptions: []
+    };
+    expect(abyssAdvisorResultSchema.safeParse(withoutKnowledgeSummary).success).toBe(false);
+
+    const result = abyssAdvisorResultSchema.parse({
+      ...withoutKnowledgeSummary,
+      knowledgeSummary: { trusted: 0, ephemeral: 0, unknown: 7, searched: false }
     });
     expect(result.status).toBe('blocked');
     expect('plan' in result).toBe(false);
+  });
+
+  it('exposes build interpretation and knowledge research progress steps', () => {
+    expect(
+      [
+        'interpreting-builds',
+        'checking-knowledge',
+        'researching-guides'
+      ].map((step) => abyssAdvisorProgressStepSchema.parse(step))
+    ).toEqual(['interpreting-builds', 'checking-knowledge', 'researching-guides']);
   });
 });
