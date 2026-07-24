@@ -341,6 +341,68 @@ describe('advisor knowledge contracts', () => {
     ).toBe(false);
   });
 
+  it('allows 512 business entries plus one payload truncation marker', () => {
+    const citation = sourceRegistry().citations[0]!;
+    const trustedMatches = Array.from({ length: 256 }, (_, index) => ({
+      id: `trusted-boundary-${index}`,
+      mechanicId: `mechanic-boundary-${index}`,
+      summary: 'Reviewed.',
+      citationIds: [citation.id]
+    }));
+    const normalGaps = Array.from({ length: 256 }, (_, index) => ({
+      id: `gap-boundary-${index}`,
+      subjectId: `scenario:boundary-${index}`,
+      kind: 'missing' as const,
+      reason: 'Unresolved.'
+    }));
+    const marker = {
+      id: 'gap-payload-truncated',
+      subjectId: 'payload:knowledge-context',
+      kind: 'payload-truncated' as const,
+      reason: 'Knowledge details were removed to fit the bounded agent context.'
+    };
+
+    expect(
+      knowledgeContextPacketSchema.safeParse({
+        knowledgeVersion: 'business-boundary-v1',
+        buildInterpretations: [],
+        trustedMatches,
+        ephemeralMatches: [],
+        unknowns: [...normalGaps, marker],
+        coverage: { requested: 513, trusted: 256, ephemeral: 0, unknown: 257 },
+        citations: [citation]
+      }).success
+    ).toBe(true);
+  });
+
+  it('rejects 513 business entries without a payload truncation marker', () => {
+    const citation = sourceRegistry().citations[0]!;
+    const trustedMatches = Array.from({ length: 257 }, (_, index) => ({
+      id: `trusted-overflow-${index}`,
+      mechanicId: `mechanic-overflow-${index}`,
+      summary: 'Reviewed.',
+      citationIds: [citation.id]
+    }));
+    const normalGaps = Array.from({ length: 256 }, (_, index) => ({
+      id: `gap-overflow-${index}`,
+      subjectId: `scenario:overflow-${index}`,
+      kind: 'missing' as const,
+      reason: 'Unresolved.'
+    }));
+
+    expect(
+      knowledgeContextPacketSchema.safeParse({
+        knowledgeVersion: 'business-overflow-v1',
+        buildInterpretations: [],
+        trustedMatches,
+        ephemeralMatches: [],
+        unknowns: normalGaps,
+        coverage: { requested: 513, trusted: 257, ephemeral: 0, unknown: 256 },
+        citations: [citation]
+      }).success
+    ).toBe(false);
+  });
+
   it('requires source registry URL hosts to match declared hosts', () => {
     const registry = sourceRegistry();
     registry.citations[0]!.url = 'https://unreviewed.example.net/characters/raiden';
@@ -621,6 +683,13 @@ describe('advisor knowledge contracts', () => {
   it('rejects mechanic policies whose match and avoid tags overlap', () => {
     const bundle = mechanicBundleForInvariants();
     bundle.mechanics[0]!.avoidTags = ['elemental-shield'];
+
+    expect(enemyMechanicStrategyBundleSchema.safeParse(bundle).success).toBe(false);
+  });
+
+  it.each(['matchTags', 'avoidTags'] as const)('rejects noncanonical mechanic %s', (field) => {
+    const bundle = mechanicBundleForInvariants();
+    bundle.mechanics[0]![field] = ['future-unreachable-tag'];
 
     expect(enemyMechanicStrategyBundleSchema.safeParse(bundle).success).toBe(false);
   });

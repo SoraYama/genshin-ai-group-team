@@ -23,8 +23,8 @@ const RAIDEN: CommittedCharacterCatalogEntry = {
 function mechanic(
   id: string,
   name: string,
-  matchTags: string[],
-  avoidTags: string[]
+  matchTags: EnemyMechanicStrategy['matchTags'],
+  avoidTags: EnemyMechanicStrategy['avoidTags']
 ): EnemyMechanicStrategy {
   return {
     id,

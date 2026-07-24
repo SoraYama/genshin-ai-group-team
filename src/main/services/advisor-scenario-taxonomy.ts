@@ -1,29 +1,6 @@
-export const CANONICAL_SCENARIO_MECHANIC_TAGS = [
-  'elemental-shield',
-  'elemental-armor',
-  'shield-absent',
-  'high-resistance',
-  'elemental-immunity',
-  'multi-wave',
-  'single-wave-only',
-  'groupable',
-  'multi-target',
-  'ungroupable',
-  'heavy-target',
-  'single-target',
-  'boss',
-  'dense-multi-target',
-  'survival-pressure',
-  'interrupt-pressure',
-  'high-incoming-damage',
-  'mobile-enemy',
-  'burrow',
-  'short-damage-window',
-  'stationary-target',
-  'elemental-aura',
-  'reaction-restricted',
-  'freeze-immune'
-] as const;
+import { CANONICAL_SCENARIO_MECHANIC_TAGS } from '../../shared/advisor-scenario-taxonomy.js';
+
+export { CANONICAL_SCENARIO_MECHANIC_TAGS } from '../../shared/advisor-scenario-taxonomy.js';
 
 const canonicalTags = new Set<string>(CANONICAL_SCENARIO_MECHANIC_TAGS);
 const aliases: Readonly<Record<string, string>> = {
@@ -32,7 +9,6 @@ const aliases: Readonly<Record<string, string>> = {
   immunity: 'elemental-immunity',
   waves: 'multi-wave',
   grouping: 'groupable',
-  boss: 'single-target',
   sustain: 'survival-pressure',
   mobile: 'mobile-enemy',
   'short-window': 'short-damage-window',

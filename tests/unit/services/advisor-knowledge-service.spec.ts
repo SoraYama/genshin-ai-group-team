@@ -7,6 +7,10 @@ import {
   advisorScenarioTargetSchema,
   boundedKnowledgeSummary
 } from '../../../src/main/services/advisor-knowledge-service.js';
+import {
+  CANONICAL_SCENARIO_MECHANIC_TAGS,
+  normalizeScenarioMechanicTag
+} from '../../../src/main/services/advisor-scenario-taxonomy.js';
 import { KnowledgeBundleStore } from '../../../src/main/services/knowledge-bundle-store.js';
 import type {
   ArtifactMainStatKey,
@@ -241,6 +245,12 @@ describe('AdvisorKnowledgeService', () => {
 
     expect(packet.trustedMatches.map(({ mechanicId }) => mechanicId)).toEqual(['shield-breaking']);
     expect(packet.unknowns).toEqual([]);
+  });
+
+  it('normalizes every canonical mechanic tag idempotently', () => {
+    expect(CANONICAL_SCENARIO_MECHANIC_TAGS.map(normalizeScenarioMechanicTag)).toEqual(
+      CANONICAL_SCENARIO_MECHANIC_TAGS
+    );
   });
 
   it.each([

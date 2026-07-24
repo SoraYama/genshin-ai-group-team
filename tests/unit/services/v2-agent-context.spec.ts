@@ -463,6 +463,66 @@ describe('V2 deterministic context builder', () => {
     });
   });
 
+  it('preserves 512 business entries plus one marker when fact compaction fits the budget', () => {
+    const citation = {
+      id: 'c',
+      sourceId: 's',
+      url: 'https://e.co/x',
+      title: 't',
+      reviewedAt: '2026-07-24T10:00:00+08:00',
+      trust: 'trusted-local' as const
+    };
+    const trustedMatches = Array.from({ length: 256 }, (_, index) => ({
+      id: `t${index}`,
+      mechanicId: `m${index}`,
+      summary: 's',
+      factStatements: [`fact-${index}-${'f'.repeat(180)}`],
+      citationIds: [citation.id]
+    }));
+    const normalGaps = Array.from({ length: 256 }, (_, index) => ({
+      id: `g${index}`,
+      subjectId: `u${index}`,
+      kind: 'missing' as const,
+      reason: 'u'
+    }));
+    const knowledge = knowledgeContextPacketSchema.parse({
+      knowledgeVersion: 'v',
+      buildInterpretations: [],
+      trustedMatches,
+      ephemeralMatches: [],
+      unknowns: normalGaps,
+      coverage: { requested: 512, trusted: 256, ephemeral: 0, unknown: 256 },
+      citations: [citation]
+    });
+    const originalKnowledge = structuredClone(knowledge);
+
+    const context = buildV2PipelineContext({
+      correlationId: 'context-business-boundary',
+      profile: profileFixture(),
+      feasibleBaseline: validAbyssPlan(),
+      eligibleCharacterIds: ABYSS_CHARACTERS.map(({ id }) => String(id)),
+      mechanics: [{ target: '12-1 上半', facts: ['元素盾'], unknowns: [] }],
+      interventions: { noBuildChange: true },
+      knowledge
+    });
+
+    expect(context.knowledge.trustedMatches).toHaveLength(256);
+    expect(
+      context.knowledge.trustedMatches.every((match) => match.factStatements === undefined)
+    ).toBe(true);
+    expect(context.knowledge.unknowns.slice(0, 256)).toEqual(normalGaps);
+    expect(
+      context.knowledge.unknowns.filter(({ kind }) => kind === 'payload-truncated')
+    ).toHaveLength(1);
+    expect(context.knowledge.coverage).toEqual({
+      requested: 513,
+      trusted: 256,
+      ephemeral: 0,
+      unknown: 257
+    });
+    expect(knowledge).toEqual(originalKnowledge);
+  });
+
   it('does not claim knowledge truncation when profile detail compaction alone fits the budget', () => {
     const characters = Array.from({ length: 24 }, (_, index) => {
       const source = structuredClone(ABYSS_CHARACTERS[index % ABYSS_CHARACTERS.length]!);

@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { scenarioMechanicTagSchema } from './advisor-scenario-taxonomy.js';
+
 const boundedIdSchema = z
   .string()
   .trim()
@@ -1078,12 +1080,12 @@ export const enemyMechanicStrategySchema = z
     id: boundedIdSchema,
     name: boundedNameSchema,
     matchTags: z
-      .array(z.string().trim().min(1).max(80))
+      .array(scenarioMechanicTagSchema)
       .min(1)
       .max(24)
       .refine((tags) => new Set(tags).size === tags.length, 'Match tags must be unique'),
     avoidTags: z
-      .array(z.string().trim().min(1).max(80))
+      .array(scenarioMechanicTagSchema)
       .max(24)
       .refine((tags) => new Set(tags).size === tags.length, 'Avoid tags must be unique'),
     requiredCapabilities: uniqueBoundedIdsSchema.min(1),
@@ -1287,7 +1289,7 @@ const knowledgeGapsSchema = z
 
 const knowledgeCoverageSchema = z
   .object({
-    requested: z.number().int().nonnegative().max(512),
+    requested: z.number().int().nonnegative().max(513),
     trusted: z.number().int().nonnegative().max(512),
     ephemeral: z.number().int().nonnegative().max(512),
     unknown: z.number().int().nonnegative().max(512)
@@ -1321,6 +1323,17 @@ export const knowledgeContextPacketSchema = z
       addDuplicateIdIssues(ephemeralMatches, ['ephemeralMatches'], context);
       addDuplicateIdIssues(unknowns, ['unknowns'], context);
       addCrossKnowledgeIdIssues({ trustedMatches, ephemeralMatches, unknowns }, context);
+
+      const normalUnknownCount = unknowns.filter(({ kind }) => kind !== 'payload-truncated').length;
+      const businessEntryCount =
+        trustedMatches.length + ephemeralMatches.length + normalUnknownCount;
+      if (businessEntryCount > 512) {
+        context.addIssue({
+          code: 'custom',
+          path: ['coverage', 'requested'],
+          message: 'Knowledge packets support at most 512 business entries'
+        });
+      }
 
       if (coverage.requested !== coverage.trusted + coverage.ephemeral + coverage.unknown) {
         context.addIssue({
