@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "reviewEvidenceVersion": "paraphrased-evidence-v1",
+  "sourceRegistrySha256": "dcee0ba3eb2661cd0155e8962884c4058f61e8f60b6f26ba7405b6b897e9346a",
   "entries": [
     {
       "citationId": "kqm-raiden-quickguide",

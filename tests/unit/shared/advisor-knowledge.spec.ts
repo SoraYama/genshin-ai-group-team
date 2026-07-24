@@ -76,6 +76,40 @@ function characterStrategyBundle() {
   };
 }
 
+function mechanicBundleForInvariants() {
+  return {
+    schemaVersion: 1 as const,
+    knowledgeVersion: '2026.07.reviewed-1',
+    sourceVersion: '2026-07-24',
+    trust: 'trusted-local' as const,
+    sourceRegistrySha256: '0'.repeat(64),
+    sourceRegistry: sourceRegistry(),
+    mechanics: [
+      {
+        id: 'shield-breaking',
+        name: '元素盾处理',
+        matchTags: ['elemental-shield'],
+        avoidTags: ['shield-absent'],
+        requiredCapabilities: ['counter-element-application'],
+        preferredArchetypes: ['frequent-element-application'],
+        teamSkeletonHints: [
+          {
+            id: 'shield-response-core',
+            slots: ['counter-element-application', 'damage-core', 'sustain-or-flex']
+          }
+        ],
+        facts: [
+          {
+            id: 'shield-reaction-fact',
+            statement: '元素盾需要按实际盾类型准备可持续的克制元素附着。',
+            citationIds: ['citation-raiden']
+          }
+        ]
+      }
+    ]
+  };
+}
+
 describe('advisor knowledge contracts', () => {
   it('returns validation failures instead of throwing for malformed URLs', () => {
     const malformedUrl = 'https://[';
@@ -164,36 +198,7 @@ describe('advisor knowledge contracts', () => {
   });
 
   it('models enemy mechanics as capability constraints rather than fixed four-character teams', () => {
-    const bundle = {
-      schemaVersion: 1 as const,
-      knowledgeVersion: '2026.07.reviewed-1',
-      sourceVersion: '2026-07-24',
-      trust: 'trusted-local' as const,
-      sourceRegistry: sourceRegistry(),
-      mechanics: [
-        {
-          id: 'shield-breaking',
-          name: '元素盾处理',
-          matchTags: ['elemental-shield'],
-          avoidTags: ['shield-absent'],
-          requiredCapabilities: ['counter-element-application'],
-          preferredArchetypes: ['frequent-element-application'],
-          teamSkeletonHints: [
-            {
-              id: 'shield-response-core',
-              slots: ['counter-element-application', 'damage-core', 'sustain-or-flex']
-            }
-          ],
-          facts: [
-            {
-              id: 'shield-reaction-fact',
-              statement: '元素盾需要按实际盾类型准备可持续的克制元素附着。',
-              citationIds: ['citation-raiden']
-            }
-          ]
-        }
-      ]
-    };
+    const bundle = mechanicBundleForInvariants();
 
     expect(enemyMechanicStrategyBundleSchema.parse(bundle).mechanics[0]).toMatchObject({
       avoidTags: ['shield-absent'],
@@ -284,6 +289,54 @@ describe('advisor knowledge contracts', () => {
       knowledgeContextPacketSchema.safeParse({
         ...packet,
         coverage: { requested: 3, trusted: 2, ephemeral: 1, unknown: 1 }
+      }).success
+    ).toBe(false);
+  });
+
+  it('allows 256 normal gaps plus exactly one payload truncation marker', () => {
+    const normalGaps = Array.from({ length: 256 }, (_, index) => ({
+      id: `gap-normal-${index}`,
+      subjectId: `scenario:normal-${index}`,
+      kind: 'missing' as const,
+      reason: 'Normal unresolved knowledge.'
+    }));
+    const marker = {
+      id: 'gap-payload-truncated',
+      subjectId: 'payload:knowledge-context',
+      kind: 'payload-truncated' as const,
+      reason: 'Knowledge details were removed to fit the bounded agent context.'
+    };
+    const base = {
+      knowledgeVersion: 'boundary-v1',
+      buildInterpretations: [],
+      trustedMatches: [],
+      ephemeralMatches: [],
+      citations: []
+    };
+
+    expect(
+      knowledgeContextPacketSchema.safeParse({
+        ...base,
+        unknowns: [...normalGaps, marker],
+        coverage: { requested: 257, trusted: 0, ephemeral: 0, unknown: 257 }
+      }).success
+    ).toBe(true);
+    expect(
+      knowledgeContextPacketSchema.safeParse({
+        ...base,
+        unknowns: [...normalGaps, { ...marker, id: 'gap-payload-truncated-2' }],
+        coverage: { requested: 258, trusted: 0, ephemeral: 0, unknown: 258 }
+      }).success
+    ).toBe(false);
+    expect(
+      knowledgeContextPacketSchema.safeParse({
+        ...base,
+        unknowns: [
+          ...normalGaps.slice(0, 255),
+          marker,
+          { ...marker, id: 'gap-payload-truncated-2' }
+        ],
+        coverage: { requested: 257, trusted: 0, ephemeral: 0, unknown: 257 }
       }).success
     ).toBe(false);
   });
@@ -564,4 +617,40 @@ describe('advisor knowledge contracts', () => {
 
     expect(characterStrategyBundleSchema.safeParse(bundle).success).toBe(false);
   });
+
+  it('rejects mechanic policies whose match and avoid tags overlap', () => {
+    const bundle = mechanicBundleForInvariants();
+    bundle.mechanics[0]!.avoidTags = ['elemental-shield'];
+
+    expect(enemyMechanicStrategyBundleSchema.safeParse(bundle).success).toBe(false);
+  });
+
+  it('rejects duplicate fact IDs across different mechanic policies', () => {
+    const bundle = mechanicBundleForInvariants();
+    bundle.mechanics.push({
+      ...structuredClone(bundle.mechanics[0]!),
+      id: 'second-mechanic',
+      name: '第二机制',
+      matchTags: ['multi-wave'],
+      avoidTags: ['single-wave-only'],
+      teamSkeletonHints: [
+        {
+          id: 'second-skeleton',
+          slots: ['repeatable-rotation']
+        }
+      ]
+    });
+
+    expect(enemyMechanicStrategyBundleSchema.safeParse(bundle).success).toBe(false);
+  });
+
+  it.each(['requiredCapabilities', 'preferredArchetypes', 'teamSkeletonHints'] as const)(
+    'requires non-empty mechanic %s',
+    (field) => {
+      const bundle = mechanicBundleForInvariants();
+      bundle.mechanics[0]![field] = [];
+
+      expect(enemyMechanicStrategyBundleSchema.safeParse(bundle).success).toBe(false);
+    }
+  );
 });

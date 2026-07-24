@@ -124,24 +124,30 @@ export function buildV2PipelineContext(options: BuildV2PipelineContextOptions): 
   };
   let budgetError = contextBudgetError(baseContext);
   if (budgetError !== undefined) {
-    addPayloadTruncationGap(baseContext.knowledge);
-    baseContext.profile.detailedProfiles = baseContext.profile.detailedProfiles.filter(({ id }) =>
-      selectedCharacterIds.has(String(id))
+    compactProfileDetails(
+      baseContext.profile as V2PipelineContext['profile'],
+      selectedCharacterIds
     );
-    baseContext.knowledge.buildInterpretations = baseContext.knowledge.buildInterpretations.filter(
-      ({ characterId }) => selectedCharacterIds.has(characterId)
-    );
-    baseContext.knowledge.trustedMatches = baseContext.knowledge.trustedMatches.filter(
-      ({ characterId }) => characterId === undefined || selectedCharacterIds.has(characterId)
-    );
-    removeUnreferencedCitations(baseContext.knowledge);
-    synchronizeCoverage(baseContext.knowledge);
     budgetError = contextBudgetError(baseContext);
   }
   if (budgetError !== undefined) {
-    baseContext.knowledge.trustedMatches = baseContext.knowledge.trustedMatches.map(
-      ({ factStatements: _factStatements, ...match }) => match
-    );
+    if (compactUnselectedKnowledge(baseContext.knowledge, selectedCharacterIds)) {
+      addPayloadTruncationGap(
+        baseContext.knowledge,
+        'Knowledge entries or citations were removed to fit the bounded agent context.'
+      );
+      synchronizeCoverage(baseContext.knowledge);
+    }
+    budgetError = contextBudgetError(baseContext);
+  }
+  if (budgetError !== undefined) {
+    if (removeFactStatements(baseContext.knowledge)) {
+      addPayloadTruncationGap(
+        baseContext.knowledge,
+        'Knowledge fact details were removed to fit the bounded agent context.'
+      );
+      synchronizeCoverage(baseContext.knowledge);
+    }
     budgetError = contextBudgetError(baseContext);
   }
   if (budgetError !== undefined) {
@@ -162,8 +168,78 @@ function contextBudgetError(value: unknown): V2ContextBudgetError | undefined {
   }
 }
 
-function addPayloadTruncationGap(knowledge: KnowledgeContextPacket): void {
-  if (knowledge.unknowns.some(({ kind }) => kind === 'payload-truncated')) return;
+function compactProfileDetails(
+  profile: V2PipelineContext['profile'],
+  selectedCharacterIds: ReadonlySet<string>
+): boolean {
+  const previousProfiles = profile.detailedProfiles;
+  const retainedOldIndexes = previousProfiles.flatMap(({ id }, oldIndex) =>
+    selectedCharacterIds.has(String(id)) ? [oldIndex] : []
+  );
+  if (retainedOldIndexes.length === previousProfiles.length) return false;
+  const newIndexByOldIndex = new Map(
+    retainedOldIndexes.map((oldIndex, newIndex) => [oldIndex, newIndex])
+  );
+  profile.detailedProfiles = retainedOldIndexes.map((oldIndex) => previousProfiles[oldIndex]!);
+  profile.provenanceSummaries = profile.provenanceSummaries.flatMap(
+    ({ characterIndexes, ...provenance }) => {
+      const remappedIndexes = characterIndexes.flatMap((oldIndex) => {
+        const newIndex = newIndexByOldIndex.get(oldIndex);
+        return newIndex === undefined ? [] : [newIndex];
+      });
+      return remappedIndexes.length === 0
+        ? []
+        : [{ ...provenance, characterIndexes: remappedIndexes }];
+    }
+  );
+  return true;
+}
+
+function compactUnselectedKnowledge(
+  knowledge: KnowledgeContextPacket,
+  selectedCharacterIds: ReadonlySet<string>
+): boolean {
+  let removed = false;
+  const buildInterpretations = knowledge.buildInterpretations.filter(({ characterId }) =>
+    selectedCharacterIds.has(characterId)
+  );
+  removed ||= buildInterpretations.length !== knowledge.buildInterpretations.length;
+  knowledge.buildInterpretations = buildInterpretations;
+
+  const trustedMatches = knowledge.trustedMatches.filter(
+    ({ characterId }) => characterId === undefined || selectedCharacterIds.has(characterId)
+  );
+  removed ||= trustedMatches.length !== knowledge.trustedMatches.length;
+  knowledge.trustedMatches = trustedMatches;
+
+  const ephemeralMatches = knowledge.ephemeralMatches.filter(
+    ({ subjectId }) => !/^[1-9]\d*$/.test(subjectId) || selectedCharacterIds.has(subjectId)
+  );
+  removed ||= ephemeralMatches.length !== knowledge.ephemeralMatches.length;
+  knowledge.ephemeralMatches = ephemeralMatches;
+
+  removed = removeUnreferencedCitations(knowledge) || removed;
+  return removed;
+}
+
+function removeFactStatements(knowledge: KnowledgeContextPacket): boolean {
+  let removed = false;
+  knowledge.trustedMatches = knowledge.trustedMatches.map(({ factStatements, ...match }) => {
+    removed ||= factStatements !== undefined;
+    return match;
+  });
+  return removed;
+}
+
+function addPayloadTruncationGap(knowledge: KnowledgeContextPacket, reason: string): void {
+  const existingMarker = knowledge.unknowns.find(({ kind }) => kind === 'payload-truncated');
+  if (existingMarker !== undefined) {
+    if (existingMarker.reason !== reason) {
+      existingMarker.reason =
+        'Knowledge entries or citations and fact details were removed to fit the bounded agent context.';
+    }
+    return;
+  }
   const ids = new Set([
     ...knowledge.trustedMatches.map(({ id }) => id),
     ...knowledge.ephemeralMatches.map(({ id }) => id),
@@ -179,16 +255,19 @@ function addPayloadTruncationGap(knowledge: KnowledgeContextPacket): void {
     id,
     subjectId: 'payload:knowledge-context',
     kind: 'payload-truncated',
-    reason: 'Low-priority knowledge details were removed to fit the bounded agent context.'
+    reason
   });
 }
 
-function removeUnreferencedCitations(knowledge: KnowledgeContextPacket): void {
+function removeUnreferencedCitations(knowledge: KnowledgeContextPacket): boolean {
   const referenced = new Set([
     ...knowledge.trustedMatches.flatMap(({ citationIds }) => citationIds),
     ...knowledge.ephemeralMatches.flatMap(({ citationIds }) => citationIds)
   ]);
-  knowledge.citations = knowledge.citations.filter(({ id }) => referenced.has(id));
+  const citations = knowledge.citations.filter(({ id }) => referenced.has(id));
+  const removed = citations.length !== knowledge.citations.length;
+  knowledge.citations = citations;
+  return removed;
 }
 
 function synchronizeCoverage(knowledge: KnowledgeContextPacket): void {

@@ -7,6 +7,7 @@ import {
 import {
   knowledgeContextPacketSchema,
   type CommittedCharacterCatalogEntry,
+  type EnemyMechanicStrategy,
   type KnowledgeContextPacket,
   type KnowledgeGap
 } from '../../../src/shared/advisor-knowledge.js';
@@ -19,7 +20,44 @@ const RAIDEN: CommittedCharacterCatalogEntry = {
   weaponType: 'polearm'
 };
 
-const trustedCatalog = {
+function mechanic(
+  id: string,
+  name: string,
+  matchTags: string[],
+  avoidTags: string[]
+): EnemyMechanicStrategy {
+  return {
+    id,
+    name,
+    matchTags,
+    avoidTags,
+    requiredCapabilities: ['safe-capability'],
+    preferredArchetypes: ['safe-archetype'],
+    teamSkeletonHints: [{ id: `${id}-skeleton`, slots: ['safe-slot'] }],
+    facts: [
+      {
+        id: `${id}-fact`,
+        statement: 'Trusted local mechanic fact.',
+        citationIds: ['trusted-citation']
+      }
+    ]
+  };
+}
+
+const SHIELD_MECHANIC = mechanic(
+  'shield-breaking',
+  '元素盾处理',
+  ['elemental-shield', 'elemental-armor'],
+  ['shield-absent']
+);
+const RESISTANCE_MECHANIC = mechanic(
+  'resistance-avoidance',
+  '抗性规避',
+  ['high-resistance', 'elemental-immunity'],
+  []
+);
+
+const trustedKnowledge = {
   getCatalogEntry(characterId: string): CommittedCharacterCatalogEntry | undefined {
     if (characterId === RAIDEN.id) return structuredClone(RAIDEN);
     if (characterId === '123456789') {
@@ -32,11 +70,16 @@ const trustedCatalog = {
       };
     }
     return undefined;
+  },
+  getMechanicStrategy(mechanicId: string): EnemyMechanicStrategy | undefined {
+    if (mechanicId === SHIELD_MECHANIC.id) return structuredClone(SHIELD_MECHANIC);
+    if (mechanicId === RESISTANCE_MECHANIC.id) return structuredClone(RESISTANCE_MECHANIC);
+    return undefined;
   }
 };
 
 function gate(): KnowledgeCoverageGate {
-  return new KnowledgeCoverageGate(trustedCatalog);
+  return new KnowledgeCoverageGate(trustedKnowledge);
 }
 
 function packet(unknowns: KnowledgeGap[]): KnowledgeContextPacket {
@@ -150,6 +193,10 @@ describe('guideResearchTaskSchema', () => {
 });
 
 describe('KnowledgeCoverageGate', () => {
+  it('requires an explicit trusted knowledge resolver', () => {
+    expect(() => Reflect.construct(KnowledgeCoverageGate, [])).toThrow(/trusted knowledge/i);
+  });
+
   it('evaluates complete local coverage without research', () => {
     const complete = knowledgeContextPacketSchema.parse({
       knowledgeVersion: 'complete',
@@ -305,5 +352,38 @@ describe('KnowledgeCoverageGate', () => {
     });
 
     expect(reordered).toEqual(first);
+  });
+
+  it.each([{ scenarioTags: [] as string[] }, { scenarioTags: ['shield'] }])(
+    'derives a canonical mechanic topic for stale mechanism gaps with context tags %j',
+    ({ scenarioTags }) => {
+      const evaluation = gate().evaluate(packet([gap(1, 'stale', 'mechanic:shield-breaking')]), {
+        characters: [],
+        scenarioTags
+      });
+
+      expect(evaluation.tasks).toHaveLength(1);
+      expect(evaluation.tasks[0]?.scenarioTags).toEqual(
+        expect.arrayContaining(['elemental-shield'])
+      );
+      expect(JSON.stringify(evaluation)).not.toContain('mechanic:shield-breaking');
+    }
+  );
+
+  it('keeps same-reason canonical mechanism topics as distinct anonymous tasks', () => {
+    const evaluation = gate().evaluate(
+      packet([
+        gap(1, 'stale', 'mechanic:shield-breaking'),
+        gap(2, 'stale', 'mechanic:resistance-avoidance')
+      ]),
+      { characters: [], scenarioTags: [] }
+    );
+
+    expect(evaluation.tasks).toHaveLength(2);
+    expect(new Set(evaluation.tasks.map(({ key }) => key)).size).toBe(2);
+    expect(evaluation.tasks.map(({ scenarioTags }) => scenarioTags)).toEqual([
+      expect.arrayContaining(['elemental-shield']),
+      expect.arrayContaining(['high-resistance'])
+    ]);
   });
 });

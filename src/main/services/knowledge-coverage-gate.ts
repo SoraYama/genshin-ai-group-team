@@ -4,10 +4,12 @@ import { z } from 'zod';
 
 import type {
   CommittedCharacterCatalogEntry,
+  EnemyMechanicStrategy,
   KnowledgeContextPacket,
   KnowledgeGap
 } from '../../shared/advisor-knowledge.js';
 import { weaponTypeSchema } from '../../shared/character-knowledge.js';
+import { safeScenarioMechanicTags } from './advisor-scenario-taxonomy.js';
 
 const researchReasonSchema = z.enum(['missing', 'stale', 'conflict', 'build-unmatched']);
 const guideResearchTextSchema = z.string().trim().min(1).max(120);
@@ -51,43 +53,24 @@ export interface KnowledgeCoverageEvaluation {
   tasks: GuideResearchTask[];
 }
 
-export interface KnowledgeCoverageCatalog {
+export interface KnowledgeCoverageKnowledge {
   getCatalogEntry(characterId: string): CommittedCharacterCatalogEntry | undefined;
+  getMechanicStrategy(mechanicId: string): EnemyMechanicStrategy | undefined;
 }
 
-const NO_CATALOG: KnowledgeCoverageCatalog = {
-  getCatalogEntry: () => undefined
-};
-
-const SAFE_SCENARIO_TAGS = new Set([
-  'elemental-shield',
-  'elemental-armor',
-  'shield-absent',
-  'high-resistance',
-  'elemental-immunity',
-  'multi-wave',
-  'single-wave-only',
-  'groupable',
-  'multi-target',
-  'ungroupable',
-  'heavy-target',
-  'single-target',
-  'boss',
-  'dense-multi-target',
-  'survival-pressure',
-  'interrupt-pressure',
-  'high-incoming-damage',
-  'mobile-enemy',
-  'burrow',
-  'short-damage-window',
-  'stationary-target',
-  'elemental-aura',
-  'reaction-restricted',
-  'freeze-immune'
-]);
-
 export class KnowledgeCoverageGate {
-  constructor(private readonly catalog: KnowledgeCoverageCatalog = NO_CATALOG) {}
+  private readonly knowledge: KnowledgeCoverageKnowledge;
+
+  constructor(knowledge: KnowledgeCoverageKnowledge) {
+    if (
+      knowledge === undefined ||
+      typeof knowledge.getCatalogEntry !== 'function' ||
+      typeof knowledge.getMechanicStrategy !== 'function'
+    ) {
+      throw new Error('KnowledgeCoverageGate requires an explicit trusted knowledge resolver');
+    }
+    this.knowledge = knowledge;
+  }
 
   evaluate(
     packet: KnowledgeContextPacket,
@@ -116,21 +99,27 @@ export class KnowledgeCoverageGate {
         interpretation
       ])
     );
-    const scenarioTags = safeScenarioTags(context.scenarioTags);
+    const contextScenarioTags = safeScenarioMechanicTags(context.scenarioTags);
     const tasksByKey = new Map<string, GuideResearchTask>();
 
     for (const knowledgeGap of packet.unknowns) {
       if (!isResearchReason(knowledgeGap.kind)) continue;
       const catalogCharacter = this.catalogCharacter(knowledgeGap.subjectId, candidateIds);
+      const mechanic = this.mechanicForGap(knowledgeGap.subjectId);
       const interpretation =
         catalogCharacter === undefined ? undefined : interpretationsById.get(catalogCharacter.id);
       const character =
         catalogCharacter === undefined
           ? undefined
           : safeCharacterContext(catalogCharacter, interpretation);
+      const scenarioTags = safeScenarioMechanicTags([
+        ...contextScenarioTags,
+        ...(mechanic?.matchTags ?? [])
+      ]);
       const key = anonymousTaskKey({
         reason: knowledgeGap.kind,
         characterId: catalogCharacter?.id,
+        mechanicId: mechanic?.id,
         character,
         scenarioTags
       });
@@ -151,9 +140,16 @@ export class KnowledgeCoverageGate {
     candidateIds: ReadonlySet<string>
   ): CommittedCharacterCatalogEntry | undefined {
     if (!candidateIds.has(subjectId) || !isCanonicalCharacterId(subjectId)) return undefined;
-    const entry = this.catalog.getCatalogEntry(subjectId);
+    const entry = this.knowledge.getCatalogEntry(subjectId);
     if (entry === undefined || entry.id !== subjectId) return undefined;
     return entry;
+  }
+
+  private mechanicForGap(subjectId: string): EnemyMechanicStrategy | undefined {
+    const match = /^mechanic:([A-Za-z0-9][A-Za-z0-9._-]{0,127})$/.exec(subjectId);
+    if (match === null) return undefined;
+    const mechanic = this.knowledge.getMechanicStrategy(match[1]!);
+    return mechanic?.id === match[1] ? mechanic : undefined;
   }
 }
 
@@ -163,16 +159,6 @@ function isResearchReason(kind: KnowledgeGap['kind']): kind is GuideResearchTask
 
 function isCanonicalCharacterId(value: string): boolean {
   return /^1\d{7}$/.test(value);
-}
-
-function safeScenarioTags(values: readonly string[]): string[] {
-  const tags = new Set<string>();
-  for (const value of values) {
-    if (typeof value !== 'string' || !SAFE_SCENARIO_TAGS.has(value)) continue;
-    tags.add(value);
-    if (tags.size === 24) break;
-  }
-  return Array.from(tags).sort();
 }
 
 function safeCharacterContext(
@@ -205,6 +191,7 @@ function buildSignalSummary(
 function anonymousTaskKey(input: {
   reason: GuideResearchTask['reason'];
   characterId?: string;
+  mechanicId?: string;
   character?: GuideResearchTask['character'];
   scenarioTags: readonly string[];
 }): string {
@@ -213,6 +200,7 @@ function anonymousTaskKey(input: {
       JSON.stringify({
         reason: input.reason,
         characterId: input.characterId ?? null,
+        mechanicId: input.mechanicId ?? null,
         buildSignals: input.character?.buildSignals ?? [],
         scenarioTags: input.scenarioTags
       })

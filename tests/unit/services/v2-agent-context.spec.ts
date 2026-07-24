@@ -4,6 +4,7 @@ import {
   buildUnknownKnowledgeContext,
   buildV2PipelineContext
 } from '../../../src/main/services/v2-agent-context.js';
+import { toAdvisorCharacter } from '../../../src/main/services/advisor-profile-serializer.js';
 import { knowledgeContextPacketSchema } from '../../../src/shared/advisor-knowledge.js';
 import { ABYSS_CHARACTERS, validAbyssPlan } from './abyss-test-fixtures.js';
 
@@ -321,6 +322,15 @@ describe('V2 deterministic context builder', () => {
     expect(context.knowledge.unknowns).toContainEqual(
       expect.objectContaining({ kind: 'payload-truncated' })
     );
+    for (const provenance of context.profile.provenanceSummaries) {
+      const { characterIndexes, ...actualProvenance } = provenance;
+      for (const characterIndex of characterIndexes) {
+        expect(characterIndex).toBeLessThan(context.profile.detailedProfiles.length);
+        const retained = context.profile.detailedProfiles[characterIndex]!;
+        const source = profileFixture().characters.find(({ id }) => id === retained.id)!;
+        expect(actualProvenance).toEqual(toAdvisorCharacter(source).provenanceSummary);
+      }
+    }
   });
 
   it('drops low-priority fact details only after candidates and preserves selected builds, citations, mechanics, and all gaps', () => {
@@ -329,6 +339,7 @@ describe('V2 deterministic context builder', () => {
       ...baseline.firstHalfTeam.characterIds,
       ...baseline.secondHalfTeam.characterIds
     ];
+    const unselectedIds = Array.from({ length: 20 }, (_, index) => String(8_200_000 + index));
     const citation = {
       id: 'trusted-required-citation',
       sourceId: 'trusted-source',
@@ -339,7 +350,10 @@ describe('V2 deterministic context builder', () => {
     };
     const knowledge = knowledgeContextPacketSchema.parse({
       knowledgeVersion: 'budget-facts',
-      buildInterpretations: selectedIds.map((id) => interpretation(id, `selected-${id}`)),
+      buildInterpretations: [
+        ...selectedIds.map((id) => interpretation(id, `selected-${id}`)),
+        ...unselectedIds.map((id) => interpretation(id, `unselected-${id}`))
+      ],
       trustedMatches: selectedIds.map((characterId, index) => ({
         id: `trusted-selected-${index}`,
         characterId,
@@ -391,7 +405,10 @@ describe('V2 deterministic context builder', () => {
     expect(context.knowledge.unknowns).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: 'gap-original', kind: 'missing' }),
-        expect.objectContaining({ kind: 'payload-truncated' })
+        expect.objectContaining({
+          kind: 'payload-truncated',
+          reason: expect.stringMatching(/entries.*fact details/i)
+        })
       ])
     );
     expect(context.knowledge.coverage).toEqual({
@@ -400,5 +417,107 @@ describe('V2 deterministic context builder', () => {
       ephemeral: 0,
       unknown: 2
     });
+  });
+
+  it('preserves 256 normal gaps and adds one marker after removing oversized unselected knowledge', () => {
+    const baseline = validAbyssPlan();
+    const originalUnknowns = Array.from({ length: 256 }, (_, index) => ({
+      id: `gap-boundary-${index}`,
+      subjectId: `scenario:boundary-${index}`,
+      kind: 'missing' as const,
+      reason: 'Unresolved.'
+    }));
+    const unselectedIds = Array.from({ length: 100 }, (_, index) => String(8_100_000 + index));
+    const knowledge = knowledgeContextPacketSchema.parse({
+      knowledgeVersion: 'boundary-compaction',
+      buildInterpretations: unselectedIds.map((id) => interpretation(id, `unselected-${id}`)),
+      trustedMatches: [],
+      ephemeralMatches: [],
+      unknowns: originalUnknowns,
+      coverage: { requested: 256, trusted: 0, ephemeral: 0, unknown: 256 },
+      citations: []
+    });
+
+    const context = buildV2PipelineContext({
+      correlationId: 'context-boundary-gaps',
+      profile: profileFixture(),
+      feasibleBaseline: baseline,
+      eligibleCharacterIds: ABYSS_CHARACTERS.map(({ id }) => String(id)),
+      mechanics: [{ target: '12-1 上半', facts: ['元素盾'], unknowns: [] }],
+      interventions: { noBuildChange: true },
+      knowledge
+    });
+
+    expect(context.knowledge.buildInterpretations).toEqual([]);
+    expect(context.knowledge.unknowns).toHaveLength(257);
+    expect(context.knowledge.unknowns.slice(0, 256)).toEqual(originalUnknowns);
+    expect(context.knowledge.unknowns.at(-1)).toMatchObject({
+      kind: 'payload-truncated',
+      reason: expect.stringContaining('Knowledge')
+    });
+    expect(context.knowledge.coverage).toEqual({
+      requested: 257,
+      trusted: 0,
+      ephemeral: 0,
+      unknown: 257
+    });
+  });
+
+  it('does not claim knowledge truncation when profile detail compaction alone fits the budget', () => {
+    const characters = Array.from({ length: 24 }, (_, index) => {
+      const source = structuredClone(ABYSS_CHARACTERS[index % ABYSS_CHARACTERS.length]!);
+      source.id = index < ABYSS_CHARACTERS.length ? source.id : 30_000 + index;
+      source.name = `${'角'.repeat(70)}-${index}`;
+      if (source.build?.weapon) source.build.weapon.name = '武'.repeat(100);
+      if (source.build?.artifacts) {
+        source.build.artifacts = source.build.artifacts.map((artifact, artifactIndex) => ({
+          ...artifact,
+          setName: `${'套'.repeat(100)}-${artifactIndex}`
+        }));
+      }
+      return source;
+    });
+    const profile = {
+      ...profileFixture(),
+      characters,
+      coverage: {
+        ownedCount: 24,
+        detailedCount: 24,
+        buildCount: 24,
+        statsCount: 24,
+        enkaShowcaseCount: 8,
+        missingDetailCount: 0,
+        partial: false
+      }
+    };
+
+    const context = buildV2PipelineContext({
+      correlationId: 'profile-only-compaction',
+      profile,
+      feasibleBaseline: validAbyssPlan(),
+      eligibleCharacterIds: characters.map(({ id }) => String(id)),
+      mechanics: [
+        {
+          target: '12-1 上半',
+          facts: Array.from({ length: 16 }, () => '机'.repeat(240)),
+          unknowns: []
+        },
+        {
+          target: '12-1 下半',
+          facts: Array.from({ length: 16 }, () => '制'.repeat(240)),
+          unknowns: []
+        },
+        {
+          target: '12-2 上半',
+          facts: Array.from({ length: 16 }, () => '压'.repeat(240)),
+          unknowns: []
+        }
+      ],
+      interventions: { noBuildChange: true },
+      knowledge: knowledgePacket()
+    });
+
+    expect(context.profile.detailedProfiles).toHaveLength(8);
+    expect(context.knowledge.unknowns).toEqual([]);
   });
 });

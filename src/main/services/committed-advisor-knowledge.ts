@@ -8,6 +8,24 @@ import {
 export const committedAdvisorKnowledgeSetSchema =
   committedAdvisorKnowledgeSetStructureSchema.superRefine(
     ({ sources, strategies, mechanics, evidence }, context) => {
+      const sourceRegistrySha256 = createHash('sha256')
+        .update(canonicalJsonStringify(sources), 'utf8')
+        .digest('hex');
+      if (evidence.sourceRegistrySha256 !== sourceRegistrySha256) {
+        context.addIssue({
+          code: 'custom',
+          path: ['evidence', 'sourceRegistrySha256'],
+          message: 'Review evidence must bind the complete canonical source registry'
+        });
+      }
+      if (mechanics.sourceRegistrySha256 !== sourceRegistrySha256) {
+        context.addIssue({
+          code: 'custom',
+          path: ['mechanics', 'sourceRegistrySha256'],
+          message: 'Mechanic knowledge must bind the complete canonical source registry'
+        });
+      }
+
       const factsById = new Map<
         string,
         Array<{ characterId: string; citationIds: string[]; statement: string }>

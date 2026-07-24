@@ -13,6 +13,7 @@ import {
 import type { PersistedProfile } from '../../shared/domain.js';
 import { playerPreferencesSchema, type PlayerPreferences } from '../../shared/scenario-v2.js';
 import { toAdvisorCharacter } from './advisor-profile-serializer.js';
+import { scenarioMechanicTagsForTarget } from './advisor-scenario-taxonomy.js';
 import { BuildInterpreter } from './build-interpreter.js';
 import { KnowledgeBundleStore } from './knowledge-bundle-store.js';
 
@@ -80,6 +81,7 @@ export class AdvisorKnowledgeService {
     const scenarioTarget = advisorScenarioTargetSchema.parse(input.scenarioTarget);
     const candidateIds = candidateIdsSchema.parse(input.candidateIds);
     playerPreferencesSchema.parse(input.preferences);
+    const evaluatedAt = this.now();
     const trustedMatches: TrustedKnowledgeMatch[] = [];
     const unknowns: KnowledgeGap[] = [];
     const citationIds = new Set<string>();
@@ -102,7 +104,8 @@ export class AdvisorKnowledgeService {
       }
 
       const interpretation = this.interpreter.interpret(toAdvisorCharacter(character), {
-        allowRequiredAdjustment: false
+        allowRequiredAdjustment: false,
+        now: evaluatedAt
       });
       const gapKind = interpretationGapKind(interpretation);
       if (gapKind !== undefined) {
@@ -140,25 +143,32 @@ export class AdvisorKnowledgeService {
         id: `trusted-character-${characterId}`,
         characterId,
         archetypeId,
-        summary: archetype.facts.map(({ statement }) => statement).join(' '),
+        summary: boundedKnowledgeSummary(archetype.facts.map(({ statement }) => statement)),
         factStatements: archetype.facts.map(({ statement }) => statement),
         citationIds: archetypeCitationIds
       });
       return [interpretation];
     });
 
-    const normalizedTags = normalizeScenarioTags(scenarioTarget);
-    const mechanicMatches = this.knowledge.matchMechanics(normalizedTags);
+    const normalizedTags = scenarioMechanicTagsForTarget(scenarioTarget);
+    const mechanicAnalysis = this.knowledge.analyzeMechanics(normalizedTags);
+    const mechanicMatches = mechanicAnalysis.matched;
     const mechanicCoverage = this.knowledge.mechanicCoverageFor({
       mechanicIds: mechanicMatches.map(({ id }) => id),
-      now: this.now()
+      now: evaluatedAt
     });
     const trustedMechanicIds = new Set(mechanicCoverage.trustedMechanicIds);
-    const knownMatchTags = new Set(
-      mechanicMatches.flatMap(({ matchTags }) =>
-        matchTags.filter((tag) => normalizedTags.includes(tag))
-      )
-    );
+
+    mechanicAnalysis.conflicts.forEach(({ mechanicId }) => {
+      unknowns.push(
+        gap(
+          `gap-mechanic-conflict-${mechanicId}`,
+          `mechanic:${mechanicId}`,
+          'conflict',
+          'The scenario contains contradictory tags for this reviewed mechanic policy.'
+        )
+      );
+    });
 
     mechanicMatches.forEach((mechanic) => {
       const subjectId = `mechanic:${mechanic.id}`;
@@ -180,7 +190,7 @@ export class AdvisorKnowledgeService {
       trustedMatches.push({
         id: `trusted-mechanic-${mechanic.id}`,
         mechanicId: mechanic.id,
-        summary: mechanic.facts.map(({ statement }) => statement).join(' '),
+        summary: boundedKnowledgeSummary(mechanic.facts.map(({ statement }) => statement)),
         factStatements: mechanic.facts.map(({ statement }) => statement),
         requiredCapabilities: mechanic.requiredCapabilities,
         preferredArchetypes: mechanic.preferredArchetypes,
@@ -189,18 +199,16 @@ export class AdvisorKnowledgeService {
       });
     });
 
-    normalizedTags
-      .filter((tag) => !knownMatchTags.has(tag))
-      .forEach((tag, index) => {
-        unknowns.push(
-          gap(
-            `gap-scenario-${index + 1}`,
-            `scenario:${safeIdFragment(tag)}`,
-            'missing',
-            'No reviewed local mechanic policy matches this scenario tag.'
-          )
-        );
-      });
+    mechanicAnalysis.unknownTags.forEach((tag, index) => {
+      unknowns.push(
+        gap(
+          `gap-scenario-${index + 1}`,
+          `scenario:${safeIdFragment(tag)}`,
+          'missing',
+          'No reviewed local mechanic policy matches this scenario tag.'
+        )
+      );
+    });
 
     const citations = this.knowledge.citations(Array.from(citationIds)).map(toContextCitation);
     return knowledgeContextPacketSchema.parse({
@@ -218,36 +226,6 @@ export class AdvisorKnowledgeService {
       citations
     });
   }
-}
-
-function normalizeScenarioTags(target: AdvisorScenarioTarget): string[] {
-  const tags = new Set(target.tags.map((tag) => normalizeTag(tag)));
-  if (target.shields.length > 0) tags.add('elemental-shield');
-  if (target.resistances.some(({ percent }) => percent >= 40)) tags.add('high-resistance');
-  if (target.immunities.length > 0) {
-    tags.add('elemental-immunity');
-    tags.add('reaction-restricted');
-  }
-  if ((target.waveCount ?? 1) > 1) tags.add('multi-wave');
-  if (target.enemyCount === 1) tags.add('single-target');
-  return Array.from(tags);
-}
-
-function normalizeTag(value: string): string {
-  const normalized = value.trim().toLowerCase().replaceAll('_', '-').replaceAll(' ', '-');
-  const aliases: Readonly<Record<string, string>> = {
-    shield: 'elemental-shield',
-    resistance: 'high-resistance',
-    immunity: 'elemental-immunity',
-    waves: 'multi-wave',
-    grouping: 'groupable',
-    boss: 'single-target',
-    sustain: 'survival-pressure',
-    mobile: 'mobile-enemy',
-    'short-window': 'short-damage-window',
-    'reaction-limit': 'reaction-restricted'
-  };
-  return aliases[normalized] ?? normalized;
 }
 
 function interpretationGapKind(
@@ -311,6 +289,12 @@ function toContextCitation(citation: {
 
 function unique(values: readonly string[]): string[] {
   return Array.from(new Set(values));
+}
+
+export function boundedKnowledgeSummary(statements: readonly string[]): string {
+  const combined = statements.join(' ');
+  if (combined.length <= 1_000) return combined;
+  return `${combined.slice(0, 999).trimEnd()}…`;
 }
 
 function safeIdFragment(value: string): string {

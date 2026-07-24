@@ -25,6 +25,19 @@ const COMMITTED_FILE_NAMES = {
 
 type KnowledgeBundleFileName = (typeof COMMITTED_FILE_NAMES)[keyof typeof COMMITTED_FILE_NAMES];
 
+export interface MechanicConflict {
+  mechanicId: string;
+  matchTags: string[];
+  avoidTags: string[];
+}
+
+export interface MechanicAnalysis {
+  matched: EnemyMechanicStrategy[];
+  recognizedNeutralTags: string[];
+  conflicts: MechanicConflict[];
+  unknownTags: string[];
+}
+
 export class KnowledgeBundleLoadError extends Error {
   override readonly name = 'KnowledgeBundleLoadError';
 
@@ -145,14 +158,40 @@ export class KnowledgeBundleStore implements AdvisorKnowledgeReader {
   }
 
   matchMechanics(tags: readonly string[]): EnemyMechanicStrategy[] {
+    return this.analyzeMechanics(tags).matched;
+  }
+
+  analyzeMechanics(tags: readonly string[]): MechanicAnalysis {
     const requestedTags = new Set(tags);
-    return this.bundle.mechanics.mechanics
-      .filter(
-        ({ matchTags, avoidTags }) =>
-          matchTags.some((tag) => requestedTags.has(tag)) &&
-          !avoidTags.some((tag) => requestedTags.has(tag))
-      )
-      .map((mechanic) => structuredClone(mechanic));
+    const matched: EnemyMechanicStrategy[] = [];
+    const conflicts: MechanicConflict[] = [];
+    const recognizedTags = new Set<string>();
+    const consumedTags = new Set<string>();
+
+    for (const mechanic of this.bundle.mechanics.mechanics) {
+      mechanic.matchTags.forEach((tag) => recognizedTags.add(tag));
+      mechanic.avoidTags.forEach((tag) => recognizedTags.add(tag));
+      const matchTags = mechanic.matchTags.filter((tag) => requestedTags.has(tag));
+      const avoidTags = mechanic.avoidTags.filter((tag) => requestedTags.has(tag));
+      if (matchTags.length > 0 && avoidTags.length > 0) {
+        matchTags.forEach((tag) => consumedTags.add(tag));
+        avoidTags.forEach((tag) => consumedTags.add(tag));
+        conflicts.push({ mechanicId: mechanic.id, matchTags, avoidTags });
+      } else if (matchTags.length > 0) {
+        matchTags.forEach((tag) => consumedTags.add(tag));
+        matched.push(structuredClone(mechanic));
+      }
+    }
+
+    const uniqueTags = Array.from(requestedTags);
+    return {
+      matched,
+      recognizedNeutralTags: uniqueTags.filter(
+        (tag) => recognizedTags.has(tag) && !consumedTags.has(tag)
+      ),
+      conflicts,
+      unknownTags: uniqueTags.filter((tag) => !recognizedTags.has(tag))
+    };
   }
 
   mechanicCoverageFor(input: { mechanicIds: readonly string[]; now: Date }): {

@@ -26,6 +26,16 @@ const strategies = committedCharacterStrategyBundleV2Schema.parse(
 const evidence = committedReviewEvidenceBundleSchema.parse(readJson('review-evidence.v1.json'));
 const mechanicsInput = readJson('enemy-mechanic-strategies.v1.json');
 
+function clonedKnowledgeSet() {
+  return {
+    sources: structuredClone(sources),
+    catalog: structuredClone(catalog),
+    strategies: structuredClone(strategies),
+    mechanics: enemyMechanicStrategyBundleSchema.parse(structuredClone(mechanicsInput)),
+    evidence: structuredClone(evidence)
+  };
+}
+
 describe('committed advisor knowledge bundles', () => {
   it('parses every committed bundle with its shared strict schema', () => {
     const mechanics = enemyMechanicStrategyBundleSchema.parse(mechanicsInput);
@@ -95,6 +105,120 @@ describe('committed advisor knowledge bundles', () => {
         evidence
       }).success
     ).toBe(false);
+  });
+
+  it.each([
+    [
+      'source id',
+      (bundle: ReturnType<typeof clonedKnowledgeSet>) => {
+        bundle.sources.sources[0]!.id = 'tampered-official-source';
+      }
+    ],
+    [
+      'source display name',
+      (bundle: ReturnType<typeof clonedKnowledgeSet>) => {
+        bundle.sources.sources[0]!.displayName += ' tampered';
+      }
+    ],
+    [
+      'source host',
+      (bundle: ReturnType<typeof clonedKnowledgeSet>) => {
+        bundle.sources.sources[0]!.host = 'tampered.hoyoverse.com';
+      }
+    ],
+    [
+      'source trust',
+      (bundle: ReturnType<typeof clonedKnowledgeSet>) => {
+        (bundle.sources.sources[0] as { trust: string }).trust = 'ephemeral-web';
+      }
+    ],
+    [
+      'source review cadence',
+      (bundle: ReturnType<typeof clonedKnowledgeSet>) => {
+        bundle.sources.sources[0]!.reviewCadenceDays += 1;
+      }
+    ],
+    [
+      'citation id',
+      (bundle: ReturnType<typeof clonedKnowledgeSet>) => {
+        bundle.sources.citations[0]!.id += '-tampered';
+      }
+    ],
+    [
+      'citation source id',
+      (bundle: ReturnType<typeof clonedKnowledgeSet>) => {
+        bundle.sources.citations[0]!.sourceId = 'hoyolab-wiki';
+      }
+    ],
+    [
+      'citation URL',
+      (bundle: ReturnType<typeof clonedKnowledgeSet>) => {
+        bundle.sources.citations[0]!.url += '?tampered=1';
+      }
+    ],
+    [
+      'citation title',
+      (bundle: ReturnType<typeof clonedKnowledgeSet>) => {
+        bundle.sources.citations[0]!.title += ' tampered';
+      }
+    ],
+    [
+      'citation reviewedAt',
+      (bundle: ReturnType<typeof clonedKnowledgeSet>) => {
+        bundle.sources.citations[0]!.reviewedAt = '2026-07-25T00:00:00Z';
+      }
+    ],
+    [
+      'citation retrievedAt',
+      (bundle: ReturnType<typeof clonedKnowledgeSet>) => {
+        bundle.sources.citations[0]!.retrievedAt = '2026-07-25T00:00:00Z';
+      }
+    ],
+    [
+      'citation trust',
+      (bundle: ReturnType<typeof clonedKnowledgeSet>) => {
+        (bundle.sources.citations[0] as { trust: string }).trust = 'ephemeral-web';
+      }
+    ],
+    [
+      'citation character subjects',
+      (bundle: ReturnType<typeof clonedKnowledgeSet>) => {
+        bundle.sources.citations[0]!.subjectCharacterIds = ['10000089'];
+      }
+    ],
+    [
+      'citation mechanic subjects',
+      (bundle: ReturnType<typeof clonedKnowledgeSet>) => {
+        bundle.sources.citations.at(-1)!.subjectMechanicIds = ['shield-breaking'];
+      }
+    ],
+    [
+      'citation evidence version',
+      (bundle: ReturnType<typeof clonedKnowledgeSet>) => {
+        (bundle.sources.citations[0] as { reviewEvidenceVersion: string }).reviewEvidenceVersion =
+          'tampered-evidence-v1';
+      }
+    ],
+    [
+      'citation evidence digest',
+      (bundle: ReturnType<typeof clonedKnowledgeSet>) => {
+        bundle.sources.citations[0]!.reviewEvidenceSha256 = '0'.repeat(64);
+      }
+    ]
+  ])('rejects a single-field %s trust-policy mutation', (_label, mutate) => {
+    const bundle = clonedKnowledgeSet();
+    mutate(bundle);
+
+    expect(committedAdvisorKnowledgeSetSchema.safeParse(bundle).success).toBe(false);
+  });
+
+  it('rejects a coordinated mechanic citation title mutation across top-level and embedded registries', () => {
+    const bundle = clonedKnowledgeSet();
+    const citationId = bundle.mechanics.sourceRegistry.citations[0]!.id;
+    bundle.mechanics.sourceRegistry.citations[0]!.title += ' tampered';
+    bundle.sources.citations.find(({ id }) => id === citationId)!.title += ' tampered';
+
+    expect(committedAdvisorKnowledgeSetSchema.safeParse(bundle).success).toBe(false);
   });
 
   it('indexes every upstream canonical character exactly once in catalog and strategy data', () => {

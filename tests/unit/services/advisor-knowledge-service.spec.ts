@@ -4,7 +4,8 @@ import { beforeAll, describe, expect, it } from 'vitest';
 
 import {
   AdvisorKnowledgeService,
-  advisorScenarioTargetSchema
+  advisorScenarioTargetSchema,
+  boundedKnowledgeSummary
 } from '../../../src/main/services/advisor-knowledge-service.js';
 import { KnowledgeBundleStore } from '../../../src/main/services/knowledge-bundle-store.js';
 import type {
@@ -113,6 +114,37 @@ function build(
 }
 
 describe('AdvisorKnowledgeService', () => {
+  it('samples one trusted evaluation time for every character and mechanism decision', () => {
+    let clockCalls = 0;
+    const service = new AdvisorKnowledgeService(store, () => {
+      clockCalls += 1;
+      return clockCalls === 1
+        ? new Date('2026-07-25T12:00:00+08:00')
+        : new Date('2027-02-01T00:00:00+08:00');
+    });
+
+    const packet = service.buildPacket({
+      profile: profile([
+        character(10000052, ['elementalMastery', 'elementalMastery', 'elementalMastery'])
+      ]),
+      scenarioTarget: { id: 'single-clock', tags: ['elemental-shield'] },
+      candidateIds: ['10000052'],
+      preferences
+    });
+
+    expect(clockCalls).toBe(1);
+    expect(
+      packet.trustedMatches.map(({ characterId, mechanicId }) => ({
+        characterId,
+        mechanicId
+      }))
+    ).toEqual([
+      { characterId: '10000052', mechanicId: undefined },
+      { characterId: undefined, mechanicId: 'shield-breaking' }
+    ]);
+    expect(packet.unknowns).toEqual([]);
+  });
+
   it('combines build interpretation and all six required scenario mappings into one trusted packet', () => {
     const packet = build({
       profile: profile([
@@ -197,6 +229,18 @@ describe('AdvisorKnowledgeService', () => {
         cookie: 'ltoken_v2=secret'
       }).success
     ).toBe(false);
+  });
+
+  it('normalizes the shield alias to the same canonical mechanism topic', () => {
+    const packet = build({
+      profile: profile([]),
+      scenarioTarget: { id: 'alias-target', tags: ['shield'] },
+      candidateIds: [],
+      preferences
+    });
+
+    expect(packet.trustedMatches.map(({ mechanicId }) => mechanicId)).toEqual(['shield-breaking']);
+    expect(packet.unknowns).toEqual([]);
   });
 
   it.each([
@@ -306,5 +350,68 @@ describe('AdvisorKnowledgeService', () => {
         kind: 'missing'
       })
     ]);
+  });
+
+  it.each(['shield-absent', 'single-wave-only', 'stationary-target'])(
+    'treats recognized-neutral avoid tag %s as covered without research',
+    (tag) => {
+      const packet = build({
+        profile: profile([]),
+        scenarioTarget: { id: `neutral-${tag}`, tags: [tag] },
+        candidateIds: [],
+        preferences
+      });
+
+      expect(packet.trustedMatches).toEqual([]);
+      expect(packet.unknowns).toEqual([]);
+      expect(packet.coverage).toEqual({
+        requested: 0,
+        trusted: 0,
+        ephemeral: 0,
+        unknown: 0
+      });
+    }
+  );
+
+  it.each([
+    [['elemental-shield', 'shield-absent'], ['mechanic:shield-breaking']],
+    [['multi-wave', 'single-wave-only'], ['mechanic:wave-efficient-rotation']],
+    [
+      ['groupable', 'ungroupable'],
+      ['mechanic:grouping-value', 'mechanic:ungroupable-pressure']
+    ]
+  ])('emits canonical conflict gaps for contradictory mechanic tags %j', (tags, subjects) => {
+    const packet = build({
+      profile: profile([]),
+      scenarioTarget: { id: 'conflicting-mechanics', tags },
+      candidateIds: [],
+      preferences
+    });
+
+    expect(packet.trustedMatches).toEqual([]);
+    expect(packet.unknowns.map(({ subjectId, kind }) => ({ subjectId, kind }))).toEqual(
+      subjects.map((subjectId) => ({ subjectId, kind: 'conflict' }))
+    );
+    expect(packet.coverage).toEqual({
+      requested: subjects.length,
+      trusted: 0,
+      ephemeral: 0,
+      unknown: subjects.length
+    });
+  });
+});
+
+describe('boundedKnowledgeSummary', () => {
+  it('deterministically bounds the summary of 32 legal maximum-length facts', () => {
+    const facts = Array.from({ length: 32 }, (_, index) => `事实${index}-${'界'.repeat(590)}`);
+
+    const first = boundedKnowledgeSummary(facts);
+    const second = boundedKnowledgeSummary(facts);
+
+    expect(first).toBe(second);
+    expect(first.length).toBeLessThanOrEqual(1_000);
+    expect(first.endsWith('…')).toBe(true);
+    expect(facts).toHaveLength(32);
+    expect(facts.every((fact) => fact.length <= 600)).toBe(true);
   });
 });

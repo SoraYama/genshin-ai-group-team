@@ -120,6 +120,44 @@ describe('KnowledgeBundleStore', () => {
     ]);
   });
 
+  it('classifies avoid-only tags as recognized neutral and leaves only unregistered tags unknown', async () => {
+    const store = await KnowledgeBundleStore.load(knowledgeDirectory);
+
+    expect(
+      store.analyzeMechanics([
+        'shield-absent',
+        'single-wave-only',
+        'stationary-target',
+        'future-unknown-mechanic'
+      ])
+    ).toMatchObject({
+      matched: [],
+      conflicts: [],
+      recognizedNeutralTags: ['shield-absent', 'single-wave-only', 'stationary-target'],
+      unknownTags: ['future-unknown-mechanic']
+    });
+  });
+
+  it.each([
+    [['elemental-shield', 'shield-absent'], ['shield-breaking']],
+    [['multi-wave', 'single-wave-only'], ['wave-efficient-rotation']],
+    [
+      ['groupable', 'ungroupable'],
+      ['grouping-value', 'ungroupable-pressure']
+    ]
+  ])('classifies contradictory tags %j as canonical mechanic conflicts', async (tags, ids) => {
+    const store = await KnowledgeBundleStore.load(knowledgeDirectory);
+    const analysis = store.analyzeMechanics(tags);
+
+    expect(analysis.matched).toEqual([]);
+    expect(analysis.unknownTags).toEqual([]);
+    expect(analysis.conflicts.map(({ mechanicId }) => mechanicId)).toEqual(ids);
+    for (const conflict of analysis.conflicts) {
+      expect(conflict.matchTags.length).toBeGreaterThan(0);
+      expect(conflict.avoidTags.length).toBeGreaterThan(0);
+    }
+  });
+
   it('marks mechanic knowledge stale outside the cadence of every supporting source', async () => {
     const store = await KnowledgeBundleStore.load(knowledgeDirectory);
 

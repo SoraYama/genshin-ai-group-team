@@ -735,6 +735,7 @@ export const committedReviewEvidenceBundleSchema = z
   .object({
     schemaVersion: z.literal(1),
     reviewEvidenceVersion: z.literal('paraphrased-evidence-v1'),
+    sourceRegistrySha256: sha256Schema,
     entries: z.array(reviewEvidenceEntrySchema).min(1).max(512)
   })
   .strict()
@@ -967,8 +968,10 @@ export const committedAdvisorKnowledgeSetStructureSchema = z
       const committedSource = committedSourcesById.get(source.id);
       if (
         committedSource === undefined ||
+        source.name !== committedSource.displayName ||
         source.trust !== committedSource.trust ||
-        !sameStringSet(source.hosts, [committedSource.host])
+        !sameStringSet(source.hosts, [committedSource.host]) ||
+        source.homepageUrl !== `https://${committedSource.host}/`
       ) {
         context.addIssue({
           code: 'custom',
@@ -1083,8 +1086,8 @@ export const enemyMechanicStrategySchema = z
       .array(z.string().trim().min(1).max(80))
       .max(24)
       .refine((tags) => new Set(tags).size === tags.length, 'Avoid tags must be unique'),
-    requiredCapabilities: uniqueBoundedIdsSchema,
-    preferredArchetypes: uniqueBoundedIdsSchema,
+    requiredCapabilities: uniqueBoundedIdsSchema.min(1),
+    preferredArchetypes: uniqueBoundedIdsSchema.min(1),
     teamSkeletonHints: z
       .array(
         z
@@ -1094,13 +1097,24 @@ export const enemyMechanicStrategySchema = z
           })
           .strict()
       )
+      .min(1)
       .max(8),
     facts: z.array(strategyFactSchema).min(1).max(32)
   })
   .strict()
-  .superRefine(({ facts, teamSkeletonHints }, context) => {
+  .superRefine(({ matchTags, avoidTags, facts, teamSkeletonHints }, context) => {
     addDuplicateIdIssues(facts, ['facts'], context);
     addDuplicateIdIssues(teamSkeletonHints, ['teamSkeletonHints'], context);
+    const matchTagSet = new Set(matchTags);
+    avoidTags.forEach((tag, index) => {
+      if (matchTagSet.has(tag)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['avoidTags', index],
+          message: 'Mechanic match and avoid tags must be disjoint'
+        });
+      }
+    });
   });
 
 export const enemyMechanicStrategyBundleSchema = z
@@ -1109,12 +1123,26 @@ export const enemyMechanicStrategyBundleSchema = z
     knowledgeVersion: z.string().trim().min(1).max(128),
     sourceVersion: z.string().trim().min(1).max(128),
     trust: z.literal('trusted-local'),
+    sourceRegistrySha256: sha256Schema,
     sourceRegistry: sourceRegistrySchema,
     mechanics: z.array(enemyMechanicStrategySchema).max(256)
   })
   .strict()
   .superRefine(({ sourceRegistry, mechanics }, context) => {
     addDuplicateIdIssues(mechanics, ['mechanics'], context);
+    const factIds = new Set<string>();
+    mechanics.forEach(({ facts }, mechanicIndex) => {
+      facts.forEach(({ id }, factIndex) => {
+        if (factIds.has(id)) {
+          context.addIssue({
+            code: 'custom',
+            path: ['mechanics', mechanicIndex, 'facts', factIndex, 'id'],
+            message: 'Mechanic fact IDs must be globally unique'
+          });
+        }
+        factIds.add(id);
+      });
+    });
     ensureTrustedRegistry(sourceRegistry, ['sourceRegistry'], context);
     ensureFactCitationsResolve(
       mechanics.flatMap(({ facts }, mechanicIndex) =>
@@ -1235,6 +1263,28 @@ export const knowledgeGapSchema = z
 
 export const citationSchema = sourceCitationSchema;
 
+const knowledgeGapsSchema = z
+  .array(knowledgeGapSchema)
+  .max(257)
+  .superRefine((gaps, context) => {
+    const payloadMarkers = gaps.filter(({ kind }) => kind === 'payload-truncated');
+    const normalGaps = gaps.length - payloadMarkers.length;
+    if (normalGaps > 256) {
+      context.addIssue({
+        code: 'custom',
+        path: [],
+        message: 'Knowledge packets support at most 256 non-truncation gaps'
+      });
+    }
+    if (payloadMarkers.length > 1) {
+      context.addIssue({
+        code: 'custom',
+        path: [],
+        message: 'Knowledge packets support at most one payload truncation marker'
+      });
+    }
+  });
+
 const knowledgeCoverageSchema = z
   .object({
     requested: z.number().int().nonnegative().max(512),
@@ -1250,7 +1300,7 @@ export const knowledgeContextPacketSchema = z
     buildInterpretations: z.array(buildInterpretationSchema).max(256),
     trustedMatches: z.array(trustedKnowledgeMatchSchema).max(512),
     ephemeralMatches: z.array(ephemeralGuideMatchSchema).max(256),
-    unknowns: z.array(knowledgeGapSchema).max(256),
+    unknowns: knowledgeGapsSchema,
     coverage: knowledgeCoverageSchema,
     citations: z.array(citationSchema).max(768)
   })
