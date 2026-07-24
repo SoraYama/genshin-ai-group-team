@@ -5,13 +5,13 @@
   "provenance": [
     {
       "id": "enka-characters",
-      "url": "https://raw.githubusercontent.com/EnkaNetwork/API-docs/master/store/characters.json",
+      "url": "https://raw.githubusercontent.com/EnkaNetwork/API-docs/2b9d23b334306f5845551ae7571d1165cdf096e5/store/characters.json",
       "retrievedAt": "2026-07-24T23:08:06+08:00",
       "sha256": "51dbaef256968a41dab3429d60f88f77f29645c4b79bf606fc93d4fbf3be33e4"
     },
     {
       "id": "enka-localization",
-      "url": "https://raw.githubusercontent.com/EnkaNetwork/API-docs/master/store/loc.json",
+      "url": "https://raw.githubusercontent.com/EnkaNetwork/API-docs/2b9d23b334306f5845551ae7571d1165cdf096e5/store/loc.json",
       "retrievedAt": "2026-07-24T23:08:06+08:00",
       "sha256": "ee8a58105be0595b386d035377711d7aa0859d09550241b291459372bbd38976"
     }
@@ -33,13 +33,14 @@
       "id": "10000903",
       "name": "伊涅芙",
       "kind": "alternate-variant",
+      "canonicalId": "10000116",
       "reason": "该替代 ID 与 canonical 伊涅芙 10000116 重复，不作为独立角色收录。"
     },
     {
       "id": "10000904",
       "name": "哥伦比娅",
-      "kind": "alternate-variant",
-      "reason": "100009xx 替代范围不是玩家名册 canonical ID，保留为审计排除项。"
+      "kind": "provisional",
+      "reason": "该上游条目的身份与技能元数据尚未形成可核验的 canonical 映射，保守列为 provisional 排除项。"
     },
     {
       "id": "11000046",

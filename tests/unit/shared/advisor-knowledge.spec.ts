@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   canonicalCharacterIdSchema,
+  characterCatalogExclusionSchema,
   characterStrategyBundleSchema,
   enemyMechanicStrategyBundleSchema,
   knowledgeContextPacketSchema,
@@ -56,7 +57,9 @@ function characterStrategyBundle() {
                 field: 'energyRecharge',
                 operator: 'gte',
                 value: 200,
-                description: '充能效率达到站场循环阈值'
+                description: '充能效率达到站场循环阈值',
+                required: true,
+                weight: 5
               }
             ],
             facts: [
@@ -105,6 +108,34 @@ describe('advisor knowledge contracts', () => {
     expect(canonicalCharacterIdSchema.safeParse('9'.repeat(20)).success).toBe(true);
     expect(canonicalCharacterIdSchema.safeParse('9'.repeat(21)).success).toBe(false);
     expect(canonicalCharacterIdSchema.safeParse('9'.repeat(100_000)).success).toBe(false);
+  });
+
+  it('requires canonical targets only for true alternate catalog exclusions', () => {
+    const common = {
+      id: '10000903',
+      name: 'Alternate',
+      reason: 'Audited upstream non-roster row'
+    };
+    expect(
+      characterCatalogExclusionSchema.safeParse({
+        ...common,
+        kind: 'alternate-variant',
+        canonicalId: '10000116'
+      }).success
+    ).toBe(true);
+    expect(
+      characterCatalogExclusionSchema.safeParse({
+        ...common,
+        kind: 'alternate-variant'
+      }).success
+    ).toBe(false);
+    expect(
+      characterCatalogExclusionSchema.safeParse({
+        ...common,
+        kind: 'provisional',
+        canonicalId: '10000116'
+      }).success
+    ).toBe(false);
   });
 
   it('bounds reviewed-at ISO datetimes', () => {
@@ -300,7 +331,12 @@ describe('advisor knowledge contracts', () => {
   });
 
   it('rejects impossible signal field, operator, and value combinations', () => {
-    const common = { id: 'signal', description: 'Invalid signal' };
+    const common = {
+      id: 'signal',
+      description: 'Invalid signal',
+      required: false,
+      weight: 1
+    };
 
     expect(
       signalPredicateSchema.safeParse({
@@ -316,6 +352,77 @@ describe('advisor knowledge contracts', () => {
         field: 'hp',
         operator: 'includes',
         value: 'foo'
+      }).success
+    ).toBe(false);
+  });
+
+  it('accepts only canonical artifact main stats and complete artifact-set semantics', () => {
+    expect(
+      signalPredicateSchema.safeParse({
+        id: 'display-weapon',
+        description: 'Display weapon names are not interoperable',
+        field: 'weapon',
+        operator: 'eq',
+        value: 'The Catch',
+        required: false,
+        weight: 2
+      }).success
+    ).toBe(false);
+    expect(
+      signalPredicateSchema.safeParse({
+        id: 'canonical-main-stat',
+        description: 'Canonical main stat',
+        field: 'sandsMainStat',
+        operator: 'eq',
+        value: 'energyRecharge',
+        required: true,
+        weight: 5
+      }).success
+    ).toBe(true);
+    expect(
+      signalPredicateSchema.safeParse({
+        id: 'display-main-stat',
+        description: 'Display main stat',
+        field: 'sandsMainStat',
+        operator: 'eq',
+        value: 'Energy Recharge',
+        required: true,
+        weight: 5
+      }).success
+    ).toBe(false);
+    expect(
+      signalPredicateSchema.safeParse({
+        id: 'canonical-artifact-set',
+        description: 'Canonical artifact set',
+        field: 'artifactSet',
+        operator: 'eq',
+        setId: 15020,
+        pieceCount: 4,
+        required: false,
+        weight: 2
+      }).success
+    ).toBe(true);
+    expect(
+      signalPredicateSchema.safeParse({
+        id: 'one-piece-artifact-set',
+        description: 'One piece is insufficient',
+        field: 'artifactSet',
+        operator: 'eq',
+        setId: 15020,
+        pieceCount: 1,
+        required: false,
+        weight: 2
+      }).success
+    ).toBe(false);
+    expect(
+      signalPredicateSchema.safeParse({
+        id: 'display-artifact-set',
+        description: 'Display set names are not interoperable',
+        field: 'artifactSet',
+        operator: 'includes',
+        value: 'Emblem of Severed Fate',
+        required: false,
+        weight: 2
       }).success
     ).toBe(false);
   });

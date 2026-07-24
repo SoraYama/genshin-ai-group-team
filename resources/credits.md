@@ -19,9 +19,18 @@ The versioned files under `resources/knowledge/` are developer-reviewed source a
 
 Catalog provenance, retrieved 2026-07-24:
 
-- EnkaNetwork API Docs `store/characters.json` — `https://raw.githubusercontent.com/EnkaNetwork/API-docs/master/store/characters.json`; used for upstream canonical IDs, element and weapon metadata; SHA-256 `51dbaef256968a41dab3429d60f88f77f29645c4b79bf606fc93d4fbf3be33e4`.
-- EnkaNetwork API Docs `store/loc.json` — `https://raw.githubusercontent.com/EnkaNetwork/API-docs/master/store/loc.json`; used for Simplified Chinese names; SHA-256 `ee8a58105be0595b386d035377711d7aa0859d09550241b291459372bbd38976`.
-- The snapshot exposes 114 populated numeric rows, but five are not canonical player-roster characters: trial IDs `10000901` and `10000902`, alternate IDs `10000903` and `10000904`, and test ID `11000046`. They are recorded in the catalog's bounded `exclusions` audit list, leaving 109 canonical entries. This is a documented upstream discrepancy from the original 112-character acceptance floor.
+- EnkaNetwork API Docs revision `2b9d23b334306f5845551ae7571d1165cdf096e5`, `store/characters.json` — `https://raw.githubusercontent.com/EnkaNetwork/API-docs/2b9d23b334306f5845551ae7571d1165cdf096e5/store/characters.json`; used for upstream canonical IDs, element and weapon metadata; SHA-256 `51dbaef256968a41dab3429d60f88f77f29645c4b79bf606fc93d4fbf3be33e4`.
+- EnkaNetwork API Docs revision `2b9d23b334306f5845551ae7571d1165cdf096e5`, `store/loc.json` — `https://raw.githubusercontent.com/EnkaNetwork/API-docs/2b9d23b334306f5845551ae7571d1165cdf096e5/store/loc.json`; used for Simplified Chinese names; SHA-256 `ee8a58105be0595b386d035377711d7aa0859d09550241b291459372bbd38976`.
+- The snapshot exposes 114 populated numeric rows, but five are not canonical player-roster characters: trial IDs `10000901` and `10000902`, alternate ID `10000903` (mapped to canonical `10000116`), provisional ID `10000904`, and test ID `11000046`. They are recorded in the catalog's bounded `exclusions` audit list, leaving 109 canonical entries. This is a documented upstream discrepancy from the original 112-character acceptance floor.
+
+Knowledge page integrity, retrieved 2026-07-24:
+
+- Citation `contentSha256` is the SHA-256 of the final HTTPS response body after redirects and HTTP content decoding, exactly as saved by `curl -fL --compressed` with the project knowledge-review user agent. It is snapshot evidence, not a claim that third-party pages are immutable.
+- Raiden Shogun Quick Guide — `95e6ce3312a53f81d933cd246b50f1b7b94bf3840842e25a2d9facee8df90923`.
+- Kuki Shinobu Quick Guide — `0fd7391528ba84cd91dfc622cb3fc2ce85ca49517b97e0130ee2037b4520290c`.
+- Nahida Quick Guide — `0922afe7918c019227edc392fc424020745ee1bcfcf077c41c7f8a5e3550ab9e`.
+- Kokomi Quick Guide — `656c5eeec552c8c9a08b49dff657989bbf489115a24c013c07921cd642e45353`.
+- Furina Quick Guide — `ba02542cec1daff3357a3f177a533ade8dc564fd08d873d3e6709b9b54647105`.
 
 Accepted source registry entries, reviewed 2026-07-24:
 

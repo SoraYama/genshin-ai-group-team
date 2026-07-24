@@ -83,6 +83,18 @@ export const sourceCitationSchema = z
   })
   .strict();
 
+export const committedSourceCitationSchema = sourceCitationSchema
+  .extend({
+    subjectCharacterIds: z
+      .array(canonicalCharacterIdSchema)
+      .min(1)
+      .max(16)
+      .refine((ids) => new Set(ids).size === ids.length, 'Subject character IDs must be unique'),
+    retrievedAt: reviewedAtSchema,
+    contentSha256: sha256Schema
+  })
+  .strict();
+
 export const sourceRegistrySchema = z
   .object({
     sources: z.array(sourceRegistryEntrySchema).max(128),
@@ -137,7 +149,7 @@ export const committedSourceRegistrySchema = z
     schemaVersion: z.literal(1),
     sourceVersion: z.string().trim().min(1).max(128),
     sources: z.array(committedSourceRegistryEntrySchema).min(1).max(128),
-    citations: z.array(sourceCitationSchema).min(1).max(512)
+    citations: z.array(committedSourceCitationSchema).min(1).max(512)
   })
   .strict()
   .superRefine(({ sources, citations }, context) => {
@@ -232,14 +244,36 @@ export const committedCharacterCatalogEntrySchema = z
   })
   .strict();
 
-export const characterCatalogExclusionSchema = z
+const characterCatalogExclusionCommonShape = {
+  id: canonicalCharacterIdSchema,
+  name: boundedNameSchema,
+  reason: z.string().trim().min(1).max(500)
+};
+
+const characterCatalogAlternateExclusionSchema = z
   .object({
-    id: canonicalCharacterIdSchema,
-    name: boundedNameSchema,
-    kind: z.enum(['trial-variant', 'alternate-variant', 'test-variant']),
-    reason: z.string().trim().min(1).max(500)
+    ...characterCatalogExclusionCommonShape,
+    kind: z.literal('alternate-variant'),
+    canonicalId: canonicalCharacterIdSchema
   })
   .strict();
+
+const characterCatalogStandaloneExclusionSchema = (
+  kind: 'trial-variant' | 'test-variant' | 'provisional'
+) =>
+  z
+    .object({
+      ...characterCatalogExclusionCommonShape,
+      kind: z.literal(kind)
+    })
+    .strict();
+
+export const characterCatalogExclusionSchema = z.discriminatedUnion('kind', [
+  characterCatalogAlternateExclusionSchema,
+  characterCatalogStandaloneExclusionSchema('trial-variant'),
+  characterCatalogStandaloneExclusionSchema('test-variant'),
+  characterCatalogStandaloneExclusionSchema('provisional')
+]);
 
 export const committedCharacterCatalogSchema = z
   .object({
@@ -257,7 +291,8 @@ export const committedCharacterCatalogSchema = z
     addDuplicateIdIssues(characters, ['characters'], context);
 
     const characterIds = new Set(characters.map(({ id }) => id));
-    exclusions.forEach(({ id }, index) => {
+    exclusions.forEach((exclusion, index) => {
+      const { id } = exclusion;
       if (characterIds.has(id)) {
         context.addIssue({
           code: 'custom',
@@ -265,20 +300,60 @@ export const committedCharacterCatalogSchema = z
           message: 'Excluded upstream IDs cannot also appear in the canonical catalog'
         });
       }
+      if (exclusion.kind === 'alternate-variant' && !characterIds.has(exclusion.canonicalId)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['exclusions', index, 'canonicalId'],
+          message: 'Alternate exclusions must resolve to a character in the canonical catalog'
+        });
+      }
     });
   });
 
 const signalPredicateCommonShape = {
   id: boundedIdSchema,
-  description: z.string().trim().min(1).max(240)
+  description: z.string().trim().min(1).max(240),
+  required: z.boolean(),
+  weight: z.number().int().min(1).max(5)
 };
 
-const categoricalSignalPredicateSchema = z
+export const artifactMainStatKeySchema = z.enum([
+  'hpPct',
+  'atkPct',
+  'defPct',
+  'elementalMastery',
+  'energyRecharge',
+  'critRate',
+  'critDmg',
+  'healingBonus',
+  'pyroDmg',
+  'hydroDmg',
+  'electroDmg',
+  'cryoDmg',
+  'anemoDmg',
+  'geoDmg',
+  'dendroDmg',
+  'physicalDmg'
+]);
+
+export type ArtifactMainStatKey = z.infer<typeof artifactMainStatKeySchema>;
+
+const artifactSetSignalPredicateSchema = z
   .object({
     ...signalPredicateCommonShape,
-    field: z.enum(['weapon', 'artifactSet', 'sandsMainStat', 'gobletMainStat', 'circletMainStat']),
-    operator: z.enum(['eq', 'includes']),
-    value: z.string().trim().min(1).max(160)
+    field: z.literal('artifactSet'),
+    operator: z.literal('eq'),
+    setId: z.number().int().positive().max(999_999),
+    pieceCount: z.union([z.literal(2), z.literal(4)])
+  })
+  .strict();
+
+const artifactMainStatSignalPredicateSchema = z
+  .object({
+    ...signalPredicateCommonShape,
+    field: z.enum(['sandsMainStat', 'gobletMainStat', 'circletMainStat']),
+    operator: z.literal('eq'),
+    value: artifactMainStatKeySchema
   })
   .strict();
 
@@ -300,7 +375,8 @@ const numericSignalPredicateSchema = z
   .strict();
 
 export const signalPredicateSchema = z.discriminatedUnion('field', [
-  categoricalSignalPredicateSchema,
+  artifactSetSignalPredicateSchema,
+  artifactMainStatSignalPredicateSchema,
   numericSignalPredicateSchema
 ]);
 
@@ -414,10 +490,31 @@ const committedReviewedArchetypeV2Schema = z
       .refine((environments) => new Set(environments).size === environments.length),
     teammateSlots: z.array(committedTeammateSlotSchema).min(1).max(4),
     signals: z.array(signalPredicateSchema).min(1).max(24),
+    requiredMode: z.literal('all'),
+    minimumSupportingWeight: z.number().int().min(0).max(120),
     facts: z.array(strategyFactSchema).min(1).max(32),
     unknowns: z.array(committedUnknownSchema).max(16)
   })
-  .strict();
+  .strict()
+  .superRefine(({ signals, minimumSupportingWeight }, context) => {
+    if (signals.every(({ required }) => !required) && minimumSupportingWeight === 0) {
+      context.addIssue({
+        code: 'custom',
+        path: ['minimumSupportingWeight'],
+        message: 'An optional-only signal policy must require positive supporting weight'
+      });
+    }
+    const availableSupportingWeight = signals
+      .filter(({ required }) => !required)
+      .reduce((total, { weight }) => total + weight, 0);
+    if (minimumSupportingWeight > availableSupportingWeight) {
+      context.addIssue({
+        code: 'custom',
+        path: ['minimumSupportingWeight'],
+        message: 'Minimum supporting weight cannot exceed the available supporting signal weight'
+      });
+    }
+  });
 
 const committedGapArchetypeV2Schema = z
   .object({
@@ -497,6 +594,7 @@ export const committedCharacterStrategyBundleV2Schema = z
     schemaVersion: z.literal(2),
     knowledgeVersion: z.string().trim().min(1).max(128),
     sourceVersion: z.string().trim().min(1).max(128),
+    catalogVersion: z.string().trim().min(1).max(128),
     reviewedAt: reviewedAtSchema,
     trust: z.literal('trusted-local'),
     characters: z.array(committedCharacterStrategyV2Schema).min(1).max(256)
@@ -520,6 +618,13 @@ export const committedAdvisorKnowledgeSetSchema = z
         code: 'custom',
         path: ['strategies', 'sourceVersion'],
         message: 'Strategy sourceVersion must match the committed source registry'
+      });
+    }
+    if (strategies.catalogVersion !== catalog.catalogVersion) {
+      context.addIssue({
+        code: 'custom',
+        path: ['strategies', 'catalogVersion'],
+        message: 'Strategy catalogVersion must match the committed character catalog'
       });
     }
 
@@ -553,12 +658,13 @@ export const committedAdvisorKnowledgeSetSchema = z
       }
     });
 
-    const citationIds = new Set(sources.citations.map(({ id }) => id));
-    strategies.characters.forEach(({ archetypes }, characterIndex) => {
+    const citationsById = new Map(sources.citations.map((citation) => [citation.id, citation]));
+    strategies.characters.forEach(({ id: characterId, archetypes }, characterIndex) => {
       archetypes.forEach(({ facts }, archetypeIndex) => {
         facts.forEach(({ citationIds: factCitationIds }, factIndex) => {
           factCitationIds.forEach((citationId, citationIndex) => {
-            if (!citationIds.has(citationId)) {
+            const citation = citationsById.get(citationId);
+            if (citation === undefined) {
               context.addIssue({
                 code: 'custom',
                 path: [
@@ -573,6 +679,23 @@ export const committedAdvisorKnowledgeSetSchema = z
                   citationIndex
                 ],
                 message: 'Trusted strategy fact citation must resolve in the committed registry'
+              });
+            } else if (!citation.subjectCharacterIds.includes(characterId)) {
+              context.addIssue({
+                code: 'custom',
+                path: [
+                  'strategies',
+                  'characters',
+                  characterIndex,
+                  'archetypes',
+                  archetypeIndex,
+                  'facts',
+                  factIndex,
+                  'citationIds',
+                  citationIndex
+                ],
+                message:
+                  'Trusted strategy fact citation must declare the fact character as a subject'
               });
             }
           });

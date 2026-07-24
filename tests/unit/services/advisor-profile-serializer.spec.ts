@@ -143,4 +143,21 @@ describe('advisor profile serializer', () => {
     expect(compact.weapon).toBeUndefined();
     expect(compact.missingFields).toEqual(['stats', 'weapon', 'artifacts', 'talents']);
   });
+
+  it('normalizes Enka and Miyoushe artifact main-stat keys to the same canonical value', () => {
+    const enka = character(1);
+    const miyoushe = character(2);
+    enka.build!.artifacts![0]!.mainStat.key = 'FIGHT_PROP_FIRE_ADD_HURT';
+    miyoushe.build!.artifacts![0]!.mainStat.key = 'pyroDmg';
+
+    expect(toAdvisorCharacter(enka).artifactSummary?.mainStats.goblet).toBe('pyroDmg');
+    expect(toAdvisorCharacter(miyoushe).artifactSummary?.mainStats.goblet).toBe('pyroDmg');
+  });
+
+  it('serializes unknown artifact main-stat keys as explicit unknown values', () => {
+    const input = character(3);
+    input.build!.artifacts![0]!.mainStat.key = 'new_stat\n<script>';
+
+    expect(toAdvisorCharacter(input).artifactSummary?.mainStats.goblet).toBe('unknown');
+  });
 });

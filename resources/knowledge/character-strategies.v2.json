@@ -2,6 +2,7 @@
   "schemaVersion": 2,
   "knowledgeVersion": "2026-07-24.reviewed-1",
   "sourceVersion": "2026-07-24",
+  "catalogVersion": "enka-2026-07-24",
   "reviewedAt": "2026-07-24T23:08:06+08:00",
   "trust": "trusted-local",
   "characters": [
@@ -1182,31 +1183,32 @@
               "id": "raiden-hb-sands-em",
               "field": "sandsMainStat",
               "operator": "eq",
-              "value": "Elemental Mastery",
-              "description": "时之沙主词条为元素精通"
+              "value": "elementalMastery",
+              "description": "时之沙主词条为元素精通",
+              "required": true,
+              "weight": 5
             },
             {
               "id": "raiden-hb-goblet-em",
               "field": "gobletMainStat",
               "operator": "eq",
-              "value": "Elemental Mastery",
-              "description": "空之杯主词条为元素精通"
+              "value": "elementalMastery",
+              "description": "空之杯主词条为元素精通",
+              "required": true,
+              "weight": 5
             },
             {
               "id": "raiden-hb-circlet-em",
               "field": "circletMainStat",
               "operator": "eq",
-              "value": "Elemental Mastery",
-              "description": "理之冠主词条为元素精通"
-            },
-            {
-              "id": "raiden-hb-reaction-set",
-              "field": "artifactSet",
-              "operator": "includes",
-              "value": "Flower of Paradise Lost",
-              "description": "圣遗物包含乐园遗落之花套装"
+              "value": "elementalMastery",
+              "description": "理之冠主词条为元素精通",
+              "required": true,
+              "weight": 5
             }
           ],
+          "requiredMode": "all",
+          "minimumSupportingWeight": 0,
           "facts": [
             {
               "id": "raiden-hb-role",
@@ -1249,27 +1251,26 @@
           ],
           "signals": [
             {
-              "id": "raiden-onfield-emblem",
-              "field": "artifactSet",
-              "operator": "includes",
-              "value": "Emblem of Severed Fate",
-              "description": "圣遗物包含绝缘之旗印套装"
-            },
-            {
               "id": "raiden-onfield-er",
               "field": "energyRecharge",
               "operator": "gte",
               "value": 130,
-              "description": "充能效率达到攻略列出的双雷队最低区间线索"
+              "description": "充能效率达到攻略列出的双雷队最低区间线索",
+              "required": true,
+              "weight": 5
             },
             {
               "id": "raiden-onfield-er-sands",
               "field": "sandsMainStat",
-              "operator": "includes",
-              "value": "Energy Recharge",
-              "description": "时之沙使用充能效率主词条"
+              "operator": "eq",
+              "value": "energyRecharge",
+              "description": "时之沙使用充能效率主词条",
+              "required": false,
+              "weight": 2
             }
           ],
+          "requiredMode": "all",
+          "minimumSupportingWeight": 2,
           "facts": [
             {
               "id": "raiden-onfield-role",
@@ -1354,24 +1355,23 @@
               "id": "kokomi-bloom-sands-em",
               "field": "sandsMainStat",
               "operator": "eq",
-              "value": "Elemental Mastery",
-              "description": "时之沙主词条为元素精通"
+              "value": "elementalMastery",
+              "description": "时之沙主词条为元素精通",
+              "required": false,
+              "weight": 3
             },
             {
               "id": "kokomi-bloom-goblet-em",
               "field": "gobletMainStat",
               "operator": "eq",
-              "value": "Elemental Mastery",
-              "description": "空之杯主词条为元素精通"
-            },
-            {
-              "id": "kokomi-bloom-set",
-              "field": "artifactSet",
-              "operator": "includes",
-              "value": "Flower of Paradise Lost",
-              "description": "圣遗物包含乐园遗落之花套装"
+              "value": "elementalMastery",
+              "description": "空之杯主词条为元素精通",
+              "required": false,
+              "weight": 3
             }
           ],
+          "requiredMode": "all",
+          "minimumSupportingWeight": 3,
           "facts": [
             {
               "id": "kokomi-bloom-role",
@@ -1408,27 +1408,26 @@
           ],
           "signals": [
             {
-              "id": "kokomi-offfield-totm",
-              "field": "artifactSet",
-              "operator": "includes",
-              "value": "Tenacity of the Millelith",
-              "description": "圣遗物包含千岩牢固套装"
-            },
-            {
               "id": "kokomi-offfield-hp-sands",
               "field": "sandsMainStat",
               "operator": "eq",
-              "value": "HP%",
-              "description": "时之沙主词条为生命值百分比"
+              "value": "hpPct",
+              "description": "时之沙主词条为生命值百分比",
+              "required": false,
+              "weight": 3
             },
             {
               "id": "kokomi-offfield-healing-circlet",
               "field": "circletMainStat",
-              "operator": "includes",
-              "value": "Healing Bonus",
-              "description": "理之冠使用治疗加成主词条"
+              "operator": "eq",
+              "value": "healingBonus",
+              "description": "理之冠使用治疗加成主词条",
+              "required": true,
+              "weight": 5
             }
           ],
+          "requiredMode": "all",
+          "minimumSupportingWeight": 3,
           "facts": [
             {
               "id": "kokomi-offfield-role",
@@ -1465,27 +1464,26 @@
           ],
           "signals": [
             {
-              "id": "kokomi-onfield-clam",
-              "field": "artifactSet",
-              "operator": "includes",
-              "value": "Ocean-Hued Clam",
-              "description": "圣遗物包含海染砗磲套装"
-            },
-            {
               "id": "kokomi-onfield-hydro-goblet",
               "field": "gobletMainStat",
-              "operator": "includes",
-              "value": "Hydro DMG Bonus",
-              "description": "空之杯使用水元素伤害加成主词条"
+              "operator": "eq",
+              "value": "hydroDmg",
+              "description": "空之杯使用水元素伤害加成主词条",
+              "required": false,
+              "weight": 3
             },
             {
               "id": "kokomi-onfield-healing-circlet",
               "field": "circletMainStat",
-              "operator": "includes",
-              "value": "Healing Bonus",
-              "description": "理之冠使用治疗加成主词条"
+              "operator": "eq",
+              "value": "healingBonus",
+              "description": "理之冠使用治疗加成主词条",
+              "required": true,
+              "weight": 5
             }
           ],
+          "requiredMode": "all",
+          "minimumSupportingWeight": 3,
           "facts": [
             {
               "id": "kokomi-onfield-role",
@@ -1840,31 +1838,32 @@
               "id": "shinobu-hb-sands-em",
               "field": "sandsMainStat",
               "operator": "eq",
-              "value": "Elemental Mastery",
-              "description": "时之沙主词条为元素精通"
+              "value": "elementalMastery",
+              "description": "时之沙主词条为元素精通",
+              "required": true,
+              "weight": 5
             },
             {
               "id": "shinobu-hb-goblet-em",
               "field": "gobletMainStat",
               "operator": "eq",
-              "value": "Elemental Mastery",
-              "description": "空之杯主词条为元素精通"
+              "value": "elementalMastery",
+              "description": "空之杯主词条为元素精通",
+              "required": true,
+              "weight": 5
             },
             {
               "id": "shinobu-hb-circlet-em",
               "field": "circletMainStat",
               "operator": "eq",
-              "value": "Elemental Mastery",
-              "description": "理之冠主词条为元素精通"
-            },
-            {
-              "id": "shinobu-hb-set",
-              "field": "artifactSet",
-              "operator": "includes",
-              "value": "Gilded Dreams",
-              "description": "圣遗物包含饰金之梦套装"
+              "value": "elementalMastery",
+              "description": "理之冠主词条为元素精通",
+              "required": true,
+              "weight": 5
             }
           ],
+          "requiredMode": "all",
+          "minimumSupportingWeight": 0,
           "facts": [
             {
               "id": "shinobu-hb-role",
@@ -1907,27 +1906,26 @@
           ],
           "signals": [
             {
-              "id": "shinobu-quicken-totm",
-              "field": "artifactSet",
-              "operator": "includes",
-              "value": "Tenacity of the Millelith",
-              "description": "圣遗物包含千岩牢固套装"
-            },
-            {
               "id": "shinobu-quicken-healing-circlet",
               "field": "circletMainStat",
-              "operator": "includes",
-              "value": "Healing Bonus",
-              "description": "理之冠使用治疗加成主词条"
+              "operator": "eq",
+              "value": "healingBonus",
+              "description": "理之冠使用治疗加成主词条",
+              "required": false,
+              "weight": 4
             },
             {
               "id": "shinobu-quicken-hp-sands",
               "field": "sandsMainStat",
               "operator": "eq",
-              "value": "HP%",
-              "description": "时之沙主词条为生命值百分比"
+              "value": "hpPct",
+              "description": "时之沙主词条为生命值百分比",
+              "required": false,
+              "weight": 4
             }
           ],
+          "requiredMode": "all",
+          "minimumSupportingWeight": 4,
           "facts": [
             {
               "id": "shinobu-quicken-role",
@@ -2191,18 +2189,33 @@
             {
               "id": "nahida-onfield-dendro-goblet",
               "field": "gobletMainStat",
-              "operator": "includes",
-              "value": "Dendro DMG Bonus",
-              "description": "空之杯使用草元素伤害加成主词条"
+              "operator": "eq",
+              "value": "dendroDmg",
+              "description": "空之杯使用草元素伤害加成主词条",
+              "required": false,
+              "weight": 4
             },
             {
               "id": "nahida-onfield-crit-circlet",
               "field": "circletMainStat",
-              "operator": "includes",
-              "value": "CRIT",
-              "description": "理之冠使用暴击相关主词条"
+              "operator": "eq",
+              "value": "critRate",
+              "description": "理之冠使用暴击率主词条",
+              "required": false,
+              "weight": 3
+            },
+            {
+              "id": "nahida-onfield-crit-dmg-circlet",
+              "field": "circletMainStat",
+              "operator": "eq",
+              "value": "critDmg",
+              "description": "理之冠使用暴击伤害主词条",
+              "required": false,
+              "weight": 3
             }
           ],
+          "requiredMode": "all",
+          "minimumSupportingWeight": 3,
           "facts": [
             {
               "id": "nahida-onfield-role",
@@ -2245,27 +2258,26 @@
           ],
           "signals": [
             {
-              "id": "nahida-offfield-deepwood",
-              "field": "artifactSet",
-              "operator": "includes",
-              "value": "Deepwood Memories",
-              "description": "圣遗物包含深林的记忆套装"
-            },
-            {
               "id": "nahida-offfield-em",
               "field": "elementalMastery",
               "operator": "gte",
               "value": 900,
-              "description": "元素精通达到攻略建议的后台共享区间下沿"
+              "description": "元素精通达到攻略建议的后台共享区间下沿",
+              "required": true,
+              "weight": 5
             },
             {
               "id": "nahida-offfield-em-sands",
               "field": "sandsMainStat",
               "operator": "eq",
-              "value": "Elemental Mastery",
-              "description": "时之沙主词条为元素精通"
+              "value": "elementalMastery",
+              "description": "时之沙主词条为元素精通",
+              "required": false,
+              "weight": 3
             }
           ],
+          "requiredMode": "all",
+          "minimumSupportingWeight": 3,
           "facts": [
             {
               "id": "nahida-offfield-role",
@@ -2767,34 +2779,35 @@
           ],
           "signals": [
             {
-              "id": "furina-golden-troupe",
-              "field": "artifactSet",
-              "operator": "includes",
-              "value": "Golden Troupe",
-              "description": "圣遗物包含黄金剧团套装"
-            },
-            {
               "id": "furina-er-sands",
               "field": "sandsMainStat",
-              "operator": "includes",
-              "value": "Energy Recharge",
-              "description": "时之沙使用充能效率主词条"
+              "operator": "eq",
+              "value": "energyRecharge",
+              "description": "时之沙使用充能效率主词条",
+              "required": false,
+              "weight": 3
             },
             {
               "id": "furina-hp-goblet",
               "field": "gobletMainStat",
               "operator": "eq",
-              "value": "HP%",
-              "description": "空之杯主词条为生命值百分比"
+              "value": "hpPct",
+              "description": "空之杯主词条为生命值百分比",
+              "required": false,
+              "weight": 3
             },
             {
               "id": "furina-high-er",
               "field": "energyRecharge",
               "operator": "gte",
               "value": 160,
-              "description": "充能效率达到攻略举例的高需求配装区间"
+              "description": "充能效率达到攻略举例的高需求配装区间",
+              "required": false,
+              "weight": 2
             }
           ],
+          "requiredMode": "all",
+          "minimumSupportingWeight": 3,
           "facts": [
             {
               "id": "furina-fanfare-role",

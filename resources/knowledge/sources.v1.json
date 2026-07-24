@@ -45,7 +45,10 @@
       "url": "https://keqingmains.com/q/raiden-quickguide/",
       "title": "Raiden Shogun Quick Guide",
       "reviewedAt": "2026-07-24T23:08:06+08:00",
-      "trust": "trusted-local"
+      "trust": "trusted-local",
+      "subjectCharacterIds": ["10000052"],
+      "retrievedAt": "2026-07-24T15:48:09Z",
+      "contentSha256": "95e6ce3312a53f81d933cd246b50f1b7b94bf3840842e25a2d9facee8df90923"
     },
     {
       "id": "kqm-shinobu-quickguide",
@@ -53,7 +56,10 @@
       "url": "https://keqingmains.com/q/shinobu-quickguide/",
       "title": "Kuki Shinobu Quick Guide",
       "reviewedAt": "2026-07-24T23:08:06+08:00",
-      "trust": "trusted-local"
+      "trust": "trusted-local",
+      "subjectCharacterIds": ["10000065"],
+      "retrievedAt": "2026-07-24T15:48:09Z",
+      "contentSha256": "0fd7391528ba84cd91dfc622cb3fc2ce85ca49517b97e0130ee2037b4520290c"
     },
     {
       "id": "kqm-nahida-quickguide",
@@ -61,7 +67,10 @@
       "url": "https://keqingmains.com/q/nahida-quickguide/",
       "title": "Nahida Quick Guide",
       "reviewedAt": "2026-07-24T23:08:06+08:00",
-      "trust": "trusted-local"
+      "trust": "trusted-local",
+      "subjectCharacterIds": ["10000073"],
+      "retrievedAt": "2026-07-24T15:48:09Z",
+      "contentSha256": "0922afe7918c019227edc392fc424020745ee1bcfcf077c41c7f8a5e3550ab9e"
     },
     {
       "id": "kqm-kokomi-quickguide",
@@ -69,7 +78,10 @@
       "url": "https://keqingmains.com/q/kokomi-quickguide/",
       "title": "Kokomi Quick Guide",
       "reviewedAt": "2026-07-24T23:08:06+08:00",
-      "trust": "trusted-local"
+      "trust": "trusted-local",
+      "subjectCharacterIds": ["10000054"],
+      "retrievedAt": "2026-07-24T15:48:09Z",
+      "contentSha256": "656c5eeec552c8c9a08b49dff657989bbf489115a24c013c07921cd642e45353"
     },
     {
       "id": "kqm-furina-quickguide",
@@ -77,7 +89,10 @@
       "url": "https://keqingmains.com/q/furina-quickguide/",
       "title": "Furina Quick Guide",
       "reviewedAt": "2026-07-24T23:08:06+08:00",
-      "trust": "trusted-local"
+      "trust": "trusted-local",
+      "subjectCharacterIds": ["10000089"],
+      "retrievedAt": "2026-07-24T15:48:09Z",
+      "contentSha256": "ba02542cec1daff3357a3f177a533ade8dc564fd08d873d3e6709b9b54647105"
     }
   ]
 }

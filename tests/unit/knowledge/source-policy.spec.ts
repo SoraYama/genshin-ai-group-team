@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
@@ -47,6 +47,11 @@ describe('committed advisor source policy', () => {
 
   it('commits citations for exactly the five reviewed character guides', () => {
     expect(registry.citations.map(({ url }) => url).sort()).toEqual(reviewedGuideUrls);
+    for (const citation of registry.citations) {
+      expect(citation.subjectCharacterIds).toHaveLength(1);
+      expect(citation.retrievedAt).toMatch(/^2026-07-2[45]T/);
+      expect(citation.contentSha256).toMatch(/^[0-9a-f]{64}$/);
+    }
   });
 
   it('credits every source and declares the paraphrase-only policy', () => {
@@ -70,5 +75,18 @@ describe('committed advisor source policy', () => {
     );
 
     expect(knowledgeResource?.filter).toContain('**/*.json');
+  });
+
+  it('wires the deterministic manual Enka provenance gate', () => {
+    const packageJson = JSON.parse(
+      readFileSync(resolve(repositoryRoot, 'package.json'), 'utf8')
+    ) as { scripts: Record<string, string> };
+
+    expect(packageJson.scripts['gate:knowledge-provenance']).toBe(
+      'node tests/external/knowledge-provenance-gate.mjs'
+    );
+    expect(
+      existsSync(resolve(repositoryRoot, 'tests/external/knowledge-provenance-gate.mjs'))
+    ).toBe(true);
   });
 });

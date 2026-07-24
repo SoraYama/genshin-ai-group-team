@@ -339,12 +339,15 @@ function statKeyFromProperty(
   propertyMap?: Record<string, RawPropertyInfo>
 ): string {
   if (!prop) return 'unknown';
-  if (prop.name) return prop.name;
   if (prop.property_type !== undefined) {
+    const canonical = STAT_KEY_BY_PROPERTY_TYPE[prop.property_type];
+    if (canonical) return canonical;
+    if (prop.name) return prop.name;
     const mapped = propertyMap?.[String(prop.property_type)]?.name;
     if (mapped) return mapped;
-    return STAT_KEY_BY_PROPERTY_TYPE[prop.property_type] ?? `prop_${prop.property_type}`;
+    return `prop_${prop.property_type}`;
   }
+  if (prop.name) return prop.name;
   return 'unknown';
 }
 
@@ -949,13 +952,7 @@ export class MiyousheGameRecordClient {
     }
     const token = signDsV2({ query, body, clientType: CLIENT_TYPE_WEB });
     const url = `${this.resolveBase(region)}${path}${query ? `?${query}` : ''}`;
-    const headers = this.buildHeaders(
-      method,
-      region,
-      effectiveCookie,
-      token.header,
-      extraHeaders
-    );
+    const headers = this.buildHeaders(method, region, effectiveCookie, token.header, extraHeaders);
 
     const requestMaterial = `${query}\n${body}`;
     logInfo(

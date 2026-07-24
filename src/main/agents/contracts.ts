@@ -5,7 +5,10 @@ import {
   advisorLocaleSchema,
   advisorNarrativeReasonCodeSchema
 } from '../../shared/advisor-narrative.js';
-import { knowledgeContextPacketSchema } from '../../shared/advisor-knowledge.js';
+import {
+  artifactMainStatKeySchema,
+  knowledgeContextPacketSchema
+} from '../../shared/advisor-knowledge.js';
 
 export const dataCuratorOutputSchema = z.object({
   usableCharacterIds: z.array(z.number().int()).min(4),
@@ -168,9 +171,9 @@ const advisorCharacterContextSchema = z
           .max(5),
         mainStats: z
           .object({
-            sands: z.string().trim().min(1).optional(),
-            goblet: z.string().trim().min(1).optional(),
-            circlet: z.string().trim().min(1).optional()
+            sands: artifactMainStatKeySchema.or(z.literal('unknown')).optional(),
+            goblet: artifactMainStatKeySchema.or(z.literal('unknown')).optional(),
+            circlet: artifactMainStatKeySchema.or(z.literal('unknown')).optional()
           })
           .strict()
       })

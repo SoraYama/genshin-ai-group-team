@@ -5,17 +5,55 @@ import type {
   FieldSource,
   PersistedProfile
 } from '../../shared/domain.js';
-import {
-  MAX_AGENT_PAYLOAD_BYTES,
-  assertAgentPayloadSize
-} from './agent-payload-budget.js';
+import type { ArtifactMainStatKey } from '../../shared/advisor-knowledge.js';
+import { MAX_AGENT_PAYLOAD_BYTES, assertAgentPayloadSize } from './agent-payload-budget.js';
 
 export const MAX_ADVISOR_PROFILE_BYTES = MAX_AGENT_PAYLOAD_BYTES;
 export const MAX_ADVISOR_PROFILE_CHARACTERS = 100;
 
 interface AdvisorArtifactSummary {
   sets: Array<{ name: string; count: number }>;
-  mainStats: Partial<Record<'sands' | 'goblet' | 'circlet', string>>;
+  mainStats: Partial<Record<'sands' | 'goblet' | 'circlet', ArtifactMainStatKey | 'unknown'>>;
+}
+
+const artifactMainStatAliases: Readonly<Record<string, ArtifactMainStatKey>> = {
+  hpPct: 'hpPct',
+  atkPct: 'atkPct',
+  defPct: 'defPct',
+  elementalMastery: 'elementalMastery',
+  energyRecharge: 'energyRecharge',
+  critRate: 'critRate',
+  critDmg: 'critDmg',
+  healingBonus: 'healingBonus',
+  pyroDmg: 'pyroDmg',
+  hydroDmg: 'hydroDmg',
+  electroDmg: 'electroDmg',
+  cryoDmg: 'cryoDmg',
+  anemoDmg: 'anemoDmg',
+  geoDmg: 'geoDmg',
+  dendroDmg: 'dendroDmg',
+  physicalDmg: 'physicalDmg',
+  physDmg: 'physicalDmg',
+  FIGHT_PROP_HP_PERCENT: 'hpPct',
+  FIGHT_PROP_ATTACK_PERCENT: 'atkPct',
+  FIGHT_PROP_DEFENSE_PERCENT: 'defPct',
+  FIGHT_PROP_ELEMENT_MASTERY: 'elementalMastery',
+  FIGHT_PROP_CHARGE_EFFICIENCY: 'energyRecharge',
+  FIGHT_PROP_CRITICAL: 'critRate',
+  FIGHT_PROP_CRITICAL_HURT: 'critDmg',
+  FIGHT_PROP_HEAL_ADD: 'healingBonus',
+  FIGHT_PROP_FIRE_ADD_HURT: 'pyroDmg',
+  FIGHT_PROP_WATER_ADD_HURT: 'hydroDmg',
+  FIGHT_PROP_ELEC_ADD_HURT: 'electroDmg',
+  FIGHT_PROP_ICE_ADD_HURT: 'cryoDmg',
+  FIGHT_PROP_WIND_ADD_HURT: 'anemoDmg',
+  FIGHT_PROP_ROCK_ADD_HURT: 'geoDmg',
+  FIGHT_PROP_GRASS_ADD_HURT: 'dendroDmg',
+  FIGHT_PROP_PHYSICAL_ADD_HURT: 'physicalDmg'
+};
+
+function normalizeArtifactMainStat(key: string): ArtifactMainStatKey | 'unknown' {
+  return artifactMainStatAliases[key] ?? 'unknown';
 }
 
 export interface AdvisorCharacterInput {
@@ -66,7 +104,7 @@ function summarizeArtifacts(
     const setName = artifact.setName || `set-${artifact.setId}`;
     setCounts.set(setName, (setCounts.get(setName) ?? 0) + 1);
     if (artifact.slot === 'sands' || artifact.slot === 'goblet' || artifact.slot === 'circlet') {
-      mainStats[artifact.slot] = artifact.mainStat.key;
+      mainStats[artifact.slot] = normalizeArtifactMainStat(artifact.mainStat.key);
     }
   }
   return {

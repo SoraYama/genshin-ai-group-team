@@ -49,6 +49,13 @@ describe('committed advisor knowledge bundles', () => {
     for (const exclusion of catalog.exclusions) {
       expect(exclusion.reason.length).toBeGreaterThan(0);
     }
+    expect(catalog.exclusions.find(({ id }) => id === '10000903')).toMatchObject({
+      kind: 'alternate-variant',
+      canonicalId: '10000116'
+    });
+    expect(catalog.exclusions.find(({ id }) => id === '10000904')).toMatchObject({
+      kind: 'provisional'
+    });
   });
 
   it('keeps conservative indexed gaps structurally complete without inflating review coverage', () => {
@@ -69,6 +76,23 @@ describe('committed advisor knowledge bundles', () => {
         expect(character.archetypes.every(({ facts }) => facts.length === 0)).toBe(true);
       } else {
         expect(character.archetypes.every(({ facts }) => facts.length > 0)).toBe(true);
+        for (const archetype of character.archetypes) {
+          if (archetype.coverage !== 'reviewed') {
+            throw new Error('Reviewed character archetypes must be reviewed');
+          }
+          expect(archetype.requiredMode).toBe('all');
+          expect(archetype.minimumSupportingWeight).toBeGreaterThanOrEqual(0);
+          expect(
+            archetype.signals.every(
+              ({ required, weight }) =>
+                typeof required === 'boolean' &&
+                Number.isInteger(weight) &&
+                weight >= 1 &&
+                weight <= 5
+            )
+          ).toBe(true);
+          expect(archetype.signals.every(({ field }) => field !== 'artifactSet')).toBe(true);
+        }
       }
     }
 
@@ -120,6 +144,72 @@ describe('committed advisor knowledge bundles', () => {
         strategies: unsupportedStrategies
       }).success
     ).toBe(false);
+
+    expect(
+      committedAdvisorKnowledgeSetSchema.safeParse({
+        sources,
+        catalog,
+        strategies: { ...strategies, catalogVersion: 'stale-catalog-version' }
+      }).success
+    ).toBe(false);
+  });
+
+  it('rejects citations whose declared subject does not include the fact character', () => {
+    const swappedSources = structuredClone(sources);
+    const raidenCitation = swappedSources.citations.find(
+      ({ id }) => id === 'kqm-raiden-quickguide'
+    );
+    if (raidenCitation === undefined) throw new Error('Raiden citation is required');
+    raidenCitation.subjectCharacterIds = ['10000089'];
+
+    expect(
+      committedAdvisorKnowledgeSetSchema.safeParse({
+        sources: swappedSources,
+        catalog,
+        strategies
+      }).success
+    ).toBe(false);
+  });
+
+  it('rejects incomplete signal matching policies', () => {
+    const invalidStrategies = structuredClone(strategies);
+    const reviewedCharacter = invalidStrategies.characters.find(
+      ({ reviewState }) => reviewState === 'reviewed'
+    );
+    if (reviewedCharacter === undefined) throw new Error('reviewed fixture is required');
+    const reviewedArchetype = reviewedCharacter.archetypes.find(
+      ({ coverage }) => coverage === 'reviewed'
+    );
+    if (reviewedArchetype === undefined) throw new Error('reviewed archetype is required');
+    if (reviewedArchetype.coverage !== 'reviewed') {
+      throw new Error('reviewed archetype coverage is required');
+    }
+    reviewedArchetype.minimumSupportingWeight = 99;
+
+    expect(committedCharacterStrategyBundleV2Schema.safeParse(invalidStrategies).success).toBe(
+      false
+    );
+
+    const matchEverythingStrategies = structuredClone(strategies);
+    const matchEverythingCharacter = matchEverythingStrategies.characters.find(
+      ({ reviewState }) => reviewState === 'reviewed'
+    );
+    if (matchEverythingCharacter === undefined) throw new Error('reviewed fixture is required');
+    const matchEverythingArchetype = matchEverythingCharacter.archetypes.find(
+      ({ coverage }) => coverage === 'reviewed'
+    );
+    if (matchEverythingArchetype?.coverage !== 'reviewed') {
+      throw new Error('reviewed archetype is required');
+    }
+    matchEverythingArchetype.signals = matchEverythingArchetype.signals.map((signal) => ({
+      ...signal,
+      required: false
+    }));
+    matchEverythingArchetype.minimumSupportingWeight = 0;
+
+    expect(
+      committedCharacterStrategyBundleV2Schema.safeParse(matchEverythingStrategies).success
+    ).toBe(false);
   });
 
   it('rejects reviewed characters whose base role remains unclassified', () => {
@@ -137,12 +227,12 @@ describe('committed advisor knowledge bundles', () => {
 
   it('records immutable upstream provenance hashes for the catalog snapshot', () => {
     expect(catalog.provenance).toHaveLength(2);
-    expect(catalog.provenance.map(({ url }) => url).sort()).toEqual(
-      [
-        'https://raw.githubusercontent.com/EnkaNetwork/API-docs/master/store/characters.json',
-        'https://raw.githubusercontent.com/EnkaNetwork/API-docs/master/store/loc.json'
-      ].sort()
-    );
+    for (const { url } of catalog.provenance) {
+      expect(url).toMatch(
+        /^https:\/\/raw\.githubusercontent\.com\/EnkaNetwork\/API-docs\/[0-9a-f]{40}\/store\/(?:characters|loc)\.json$/
+      );
+      expect(url).not.toContain('/master/');
+    }
     expect(Object.fromEntries(catalog.provenance.map(({ id, sha256 }) => [id, sha256]))).toEqual({
       'enka-characters': '51dbaef256968a41dab3429d60f88f77f29645c4b79bf606fc93d4fbf3be33e4',
       'enka-localization': 'ee8a58105be0595b386d035377711d7aa0859d09550241b291459372bbd38976'

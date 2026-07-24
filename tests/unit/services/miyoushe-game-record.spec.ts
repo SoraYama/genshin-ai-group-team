@@ -158,9 +158,7 @@ describe('Chromium transport fallback', () => {
     );
     const browserTransport = vi
       .fn()
-      .mockResolvedValueOnce(
-        mockBrowserJson(200, { retcode: 1034, message: 'captcha required' })
-      )
+      .mockResolvedValueOnce(mockBrowserJson(200, { retcode: 1034, message: 'captcha required' }))
       .mockResolvedValueOnce(mockBrowserJson(200, indexSuccess));
     const verificationProvider = vi.fn().mockResolvedValue({
       ok: true,
@@ -1212,7 +1210,8 @@ describe('MiyousheGameRecordClient.fetchDetailedRoster', () => {
           data: {
             property_map: {
               '20': { property_type: 20, name: 'CRIT Rate' },
-              '22': { property_type: 22, name: 'CRIT DMG' }
+              '22': { property_type: 22, name: 'CRIT DMG' },
+              '23': { property_type: 23, name: 'Energy Recharge' }
             },
             list: [
               {
