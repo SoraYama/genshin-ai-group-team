@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -316,12 +317,13 @@ describe('DataManagementService', () => {
     await expect(fs.stat(filePath)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  it.each(['invalid', 'oversize', 'expired'] as const)(
+  it.each(['invalid', 'oversize', 'expired', 'temporary'] as const)(
     'clears a physical %s guide cache even when it has zero live entries and no scenarios',
     async (kind) => {
       const userDataDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'gta-guide-clearable-'));
       temporaryDirectories.push(userDataDirectory);
       const filePath = resolveGuideResearchCachePath(userDataDirectory);
+      let managedPath = filePath;
       await fs.mkdir(path.dirname(filePath), { recursive: true });
       let now = Date.parse('2026-07-25T00:00:00.000Z');
       const guideResearch = new GuideResearchCache({ userDataDirectory, now: () => now });
@@ -329,6 +331,9 @@ describe('DataManagementService', () => {
         await fs.writeFile(filePath, '{"schemaVersion":', 'utf8');
       } else if (kind === 'oversize') {
         await fs.writeFile(filePath, 'x'.repeat(GUIDE_RESEARCH_CACHE_MAX_BYTES + 1), 'utf8');
+      } else if (kind === 'temporary') {
+        managedPath = path.join(path.dirname(filePath), `.guide-research.json.${randomUUID()}.tmp`);
+        await fs.writeFile(managedPath, 'interrupted atomic write', 'utf8');
       } else {
         await guideResearch.put({
           task: { key: 'expired-guide', reason: 'stale', scenarioTags: [] },
@@ -385,7 +390,7 @@ describe('DataManagementService', () => {
         removed: 1,
         summary: { guideResearch: { count: 0 } }
       });
-      await expect(fs.stat(filePath)).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(fs.stat(managedPath)).rejects.toMatchObject({ code: 'ENOENT' });
     }
   );
 

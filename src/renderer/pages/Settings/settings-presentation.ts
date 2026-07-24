@@ -19,6 +19,13 @@ export function formatStorageSize(value: number | undefined, locale: 'zh' | 'en'
   return `${trimDecimal(value / (1024 * 1024))} MB`;
 }
 
+export function sumKnownStorageBytes(
+  first: number | undefined,
+  second: number | undefined
+): number | undefined {
+  return first === undefined || second === undefined ? undefined : first + second;
+}
+
 export function hasClearableChallengeCache(
   summary: Pick<DataManagementSummary, 'scenarios' | 'guideResearch'>
 ): boolean {
@@ -42,11 +49,11 @@ export function dataClearCopy(
         };
       case 'scenarios':
         return {
-          title: `Clear ${count} downloaded challenge ${count === 1 ? 'file' : 'files'}?`,
+          title: `Clear ${count} challenge cache ${count === 1 ? 'item' : 'items'}?`,
           effect: 'This clears downloaded challenge data and temporary guide-research summaries.',
           preserves:
             'Character data, recommendation history, and service settings stay. Current-cycle plans may be unavailable until verifiable challenge data is downloaded again.',
-          action: `Clear ${count} downloaded ${count === 1 ? 'file' : 'files'}`
+          action: `Clear ${count} cache ${count === 1 ? 'item' : 'items'}`
         };
       case 'history':
         return {
@@ -74,11 +81,11 @@ export function dataClearCopy(
       };
     case 'scenarios':
       return {
-        title: `清除 ${count} 份已下载挑战资料？`,
+        title: `清除 ${count} 个挑战缓存项？`,
         effect: '这会清除已下载的挑战资料缓存和临时攻略研究摘要。',
         preserves:
           '不会删除角色资料、推荐记录或智能服务设置。重新取得可验证挑战资料前，可能无法生成本期方案。',
-        action: `清除 ${count} 份已下载资料`
+        action: `清除 ${count} 个缓存项`
       };
     case 'history':
       return {

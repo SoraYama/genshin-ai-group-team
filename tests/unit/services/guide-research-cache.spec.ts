@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GuideResearchTask } from '../../../src/main/services/knowledge-coverage-gate.js';
 import {
   GUIDE_RESEARCH_CACHE_FILENAME,
+  GUIDE_RESEARCH_CACHE_MAX_BYTES,
   GuideResearchCache,
   GuideResearchCacheError,
   computeGuideResearchCacheKey,
@@ -142,6 +143,16 @@ function withFreeTextAt(
     case 'conflicts':
       return { ...candidate, conflicts: [text] };
   }
+}
+
+function encodeLayers(text: string, layers: number): string {
+  let encoded = Array.from(Buffer.from(text, 'utf8'), (byte) => {
+    return `%${byte.toString(16).padStart(2, '0')}`;
+  }).join('');
+  for (let index = 1; index < layers; index += 1) {
+    encoded = encodeURIComponent(encoded);
+  }
+  return encoded;
 }
 
 function largeValue(seed: number, size = 180): EphemeralGuideCacheValue {
@@ -465,6 +476,31 @@ describe('GuideResearchCache', () => {
     await expect(fs.stat(filePath)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('canonicalizes Unicode and recursively decoded free text before privacy checks', async () => {
+    const filePath = await makeCachePath();
+    const cache = createCacheAt(filePath, { now: () => START });
+    const sensitivePayloads = [
+      'U\u200bID: 123456789',
+      'U\ufeffID: 123456789',
+      'ＵＩＤ：１２３４５６７８９',
+      'Ｃｒｅｄｅｎｔｉａｌｓ：secret',
+      encodeLayers('UID: 123456789', 4),
+      encodeLayers('credentials: secret', 8),
+      encodeLayers('ordinary public guide:', 9)
+    ];
+
+    for (const [index, payload] of sensitivePayloads.entries()) {
+      await expect(
+        cache.put({
+          task: task({ key: `canonical-private-${index}` }),
+          knowledgeVersion: 'knowledge-v4',
+          value: withFreeTextAt(value(`canonical-private-${index}`), 'match.summary', payload)
+        }),
+        `accepted canonicalized private payload ${payload}`
+      ).rejects.toThrow();
+    }
+  });
+
   it('keeps public article numbers and individual build thresholds persistable', async () => {
     const filePath = await makeCachePath();
     const cache = createCacheAt(filePath, { now: () => START });
@@ -489,11 +525,17 @@ describe('GuideResearchCache', () => {
       'https://user:password@example.test/guide',
       'https://example.test/uid/123456789',
       'https://example.test/%2575id/123456789',
+      `https://example.test/${encodeLayers('UiD', 4)}/123456789`,
       'https://example.test/user/PRIVATE-NICKNAME',
       'https://example.test/guide?uid=123456789',
+      'https://example.test/guide?%2575id=123456789',
+      `https://example.test/guide?${encodeLayers('UID', 4)}=123456789`,
       'https://example.test/guide?next=Authorization%3A%20Bearer%20secret',
+      `https://example.test/guide?next=${encodeLayers('credentials: secret', 4)}`,
+      `https://example.test/guide?next=${encodeLayers('ordinary public guide', 10)}`,
       'https://example.test/guide#token=secret',
-      'https://example.test/guide#user/PRIVATE-NICKNAME'
+      'https://example.test/guide#user/PRIVATE-NICKNAME',
+      `https://example.test/articles/${encodeLayers('ordinary-public-guide:', 9)}`
     ];
     for (const [index, url] of unsafeUrls.entries()) {
       await expect(
@@ -696,6 +738,268 @@ describe('GuideResearchCache', () => {
     ]);
   });
 
+  it('keeps failed atomic-write temporary files visible and retryable when cleanup also fails', async () => {
+    const filePath = await makeCachePath();
+    const fileSystem: GuideResearchCacheFileSystem = {
+      readFile: fs.readFile,
+      mkdir: fs.mkdir,
+      writeFile: fs.writeFile,
+      rename: vi.fn(async () => {
+        throw Object.assign(new Error('injected rename failure'), { code: 'EACCES' });
+      }),
+      unlink: vi.fn(async (target) => {
+        if (target.endsWith('.tmp')) {
+          throw Object.assign(new Error('injected temporary cleanup failure'), {
+            code: 'EACCES'
+          });
+        }
+        await fs.unlink(target);
+      }),
+      lstat: fs.lstat,
+      realpath: fs.realpath,
+      readdir: fs.readdir
+    };
+    const failing = createCacheAt(filePath, { fileSystem, now: () => START });
+
+    await expect(
+      failing.put({
+        task: task({ key: 'orphaned-temporary' }),
+        knowledgeVersion: 'knowledge-v4',
+        value: value('orphaned-temporary')
+      })
+    ).rejects.toMatchObject({ code: 'GUIDE_RESEARCH_WRITE_FAILED' });
+    const names = await fs.readdir(path.dirname(filePath));
+    expect(names).toEqual([expect.stringMatching(/^\.guide-research\.json\.[a-f0-9-]+\.tmp$/)]);
+
+    const recovered = createCacheAt(filePath, { now: () => START + 1 });
+    const snapshot = await recovered.getDataManagementSnapshot();
+    expect(snapshot).toMatchObject({
+      count: 0,
+      clearableCount: 1,
+      physicalFilePresent: true,
+      sizeBytes: expect.any(Number)
+    });
+    await expect(
+      recovered.clearAll({
+        clearableCount: snapshot.clearableCount,
+        fingerprint: snapshot.fingerprint
+      })
+    ).resolves.toBe(1);
+    await expect(fs.readdir(path.dirname(filePath))).resolves.toEqual([]);
+  });
+
+  it('clears only exact managed temporary artifacts and leaves unknown hidden files untouched', async () => {
+    const filePath = await makeCachePath();
+    const directory = path.dirname(filePath);
+    await fs.mkdir(directory, { recursive: true });
+    const managedTemporary = path.join(
+      directory,
+      `.${GUIDE_RESEARCH_CACHE_FILENAME}.${randomUUID()}.tmp`
+    );
+    const similarUnknown = path.join(directory, `.${GUIDE_RESEARCH_CACHE_FILENAME}.not-a-uuid.tmp`);
+    const unrelatedHidden = path.join(directory, '.user-owned');
+    await fs.writeFile(managedTemporary, 'managed', 'utf8');
+    await fs.writeFile(similarUnknown, 'unknown', 'utf8');
+    await fs.writeFile(unrelatedHidden, 'user-owned', 'utf8');
+    const cache = createCacheAt(filePath, { now: () => START });
+
+    const snapshot = await cache.getDataManagementSnapshot();
+    expect(snapshot).toMatchObject({
+      count: 0,
+      clearableCount: 1,
+      physicalFilePresent: true,
+      sizeBytes: Buffer.byteLength('managed')
+    });
+    await expect(
+      cache.clearAll({
+        clearableCount: snapshot.clearableCount,
+        fingerprint: snapshot.fingerprint
+      })
+    ).resolves.toBe(1);
+    expect(new Set(await fs.readdir(directory))).toEqual(
+      new Set([path.basename(similarUnknown), '.user-owned'])
+    );
+  });
+
+  it('stats oversized single and cumulative managed sets before reading any content', async () => {
+    const filePath = await makeCachePath();
+    const directory = path.dirname(filePath);
+    await fs.mkdir(directory, { recursive: true });
+    const readFile = vi.fn(async () => {
+      throw new Error('readFile must not run for an oversized managed set');
+    });
+    const fileSystem: GuideResearchCacheFileSystem = {
+      readFile,
+      mkdir: fs.mkdir,
+      writeFile: fs.writeFile,
+      rename: fs.rename,
+      unlink: fs.unlink,
+      lstat: fs.lstat,
+      realpath: fs.realpath,
+      readdir: fs.readdir
+    };
+    const cache = createCacheAt(filePath, { fileSystem, now: () => START });
+
+    await fs.writeFile(filePath, Buffer.alloc(GUIDE_RESEARCH_CACHE_MAX_BYTES + 1));
+    await expect(cache.getDataManagementSnapshot()).resolves.toMatchObject({
+      count: 0,
+      clearableCount: 1,
+      sizeBytes: GUIDE_RESEARCH_CACHE_MAX_BYTES + 1
+    });
+    expect(readFile).not.toHaveBeenCalled();
+
+    await fs.unlink(filePath);
+    const tombstonePath = path.join(
+      directory,
+      `.${GUIDE_RESEARCH_CACHE_FILENAME}.${randomUUID()}.clear-tombstone`
+    );
+    await fs.writeFile(tombstonePath, Buffer.alloc(GUIDE_RESEARCH_CACHE_MAX_BYTES + 1));
+    await expect(cache.getDataManagementSnapshot()).resolves.toMatchObject({
+      count: 0,
+      clearableCount: 1,
+      sizeBytes: GUIDE_RESEARCH_CACHE_MAX_BYTES + 1
+    });
+    expect(readFile).not.toHaveBeenCalled();
+
+    await fs.unlink(tombstonePath);
+    const cumulativePartSize = GUIDE_RESEARCH_CACHE_MAX_BYTES / 2 + 1;
+    await Promise.all(
+      Array.from({ length: 2 }, async () => {
+        const temporaryPath = path.join(
+          directory,
+          `.${GUIDE_RESEARCH_CACHE_FILENAME}.${randomUUID()}.tmp`
+        );
+        await fs.writeFile(temporaryPath, Buffer.alloc(cumulativePartSize));
+      })
+    );
+    await expect(cache.getDataManagementSnapshot()).resolves.toMatchObject({
+      count: 0,
+      clearableCount: 2,
+      sizeBytes: GUIDE_RESEARCH_CACHE_MAX_BYTES + 2
+    });
+    expect(readFile).not.toHaveBeenCalled();
+  });
+
+  it('caps managed-file stat concurrency and performs no reads after the count limit is exceeded', async () => {
+    const filePath = await makeCachePath();
+    const directory = path.dirname(filePath);
+    const names = Array.from(
+      { length: 513 },
+      (_, index) =>
+        `.${GUIDE_RESEARCH_CACHE_FILENAME}.00000000-0000-4000-8000-${String(index).padStart(12, '0')}.clear-tombstone`
+    );
+    const managedNames = new Set(names);
+    let activeStats = 0;
+    let maxActiveStats = 0;
+    const readFile = vi.fn(async () => {
+      throw new Error('readFile must not run after the managed-file count limit');
+    });
+    const fileSystem: GuideResearchCacheFileSystem = {
+      readFile,
+      mkdir: fs.mkdir,
+      writeFile: fs.writeFile,
+      rename: fs.rename,
+      unlink: fs.unlink,
+      lstat: async (target) => {
+        if (target === directory) {
+          return {
+            size: 0,
+            isSymbolicLink: () => false,
+            isDirectory: () => true,
+            isFile: () => false
+          };
+        }
+        if (target === filePath) {
+          throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+        }
+        if (!managedNames.has(path.basename(target))) {
+          throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+        }
+        activeStats += 1;
+        maxActiveStats = Math.max(maxActiveStats, activeStats);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        activeStats -= 1;
+        return {
+          size: 1,
+          isSymbolicLink: () => false,
+          isDirectory: () => false,
+          isFile: () => true
+        };
+      },
+      realpath: async (target) => target,
+      readdir: async () => names
+    };
+    const cache = createCacheAt(filePath, { fileSystem, now: () => START });
+
+    await expect(cache.getDataManagementSnapshot()).resolves.toMatchObject({
+      count: 0,
+      clearableCount: 513,
+      physicalFilePresent: true,
+      sizeBytes: 513
+    });
+    expect(readFile).not.toHaveBeenCalled();
+    expect(maxActiveStats).toBeLessThanOrEqual(8);
+  });
+
+  it('bounds content-read concurrency for managed files within the limits', async () => {
+    const filePath = await makeCachePath();
+    const directory = path.dirname(filePath);
+    const names = Array.from(
+      { length: 32 },
+      (_, index) =>
+        `.${GUIDE_RESEARCH_CACHE_FILENAME}.10000000-0000-4000-8000-${String(index).padStart(12, '0')}.tmp`
+    );
+    const managedNames = new Set(names);
+    let activeReads = 0;
+    let maxActiveReads = 0;
+    const fileSystem: GuideResearchCacheFileSystem = {
+      readFile: async () => {
+        activeReads += 1;
+        maxActiveReads = Math.max(maxActiveReads, activeReads);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        activeReads -= 1;
+        return 'x';
+      },
+      mkdir: fs.mkdir,
+      writeFile: fs.writeFile,
+      rename: fs.rename,
+      unlink: fs.unlink,
+      lstat: async (target) => {
+        if (target === directory) {
+          return {
+            size: 0,
+            isSymbolicLink: () => false,
+            isDirectory: () => true,
+            isFile: () => false
+          };
+        }
+        if (target === filePath) {
+          throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+        }
+        if (!managedNames.has(path.basename(target))) {
+          throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+        }
+        return {
+          size: 1,
+          isSymbolicLink: () => false,
+          isDirectory: () => false,
+          isFile: () => true
+        };
+      },
+      realpath: async (target) => target,
+      readdir: async () => names
+    };
+    const cache = createCacheAt(filePath, { fileSystem, now: () => START });
+
+    await expect(cache.getDataManagementSnapshot()).resolves.toMatchObject({
+      count: 0,
+      clearableCount: 32,
+      sizeBytes: 32
+    });
+    expect(maxActiveReads).toBeLessThanOrEqual(8);
+    expect(maxActiveReads).toBeGreaterThan(1);
+  });
+
   it('serializes concurrent puts without losing updates', async () => {
     const filePath = await makeCachePath();
     let now = START;
@@ -720,6 +1024,97 @@ describe('GuideResearchCache', () => {
           })
         ).resolves.toBeDefined()
       )
+    );
+  });
+
+  it('serializes concurrent puts across cache instances for the same canonical path', async () => {
+    const filePath = await makeCachePath();
+    const initial = createCacheAt(filePath, { now: () => START });
+    await initial.put({
+      task: task({ key: 'cross-instance-initial' }),
+      knowledgeVersion: 'knowledge-v4',
+      value: value('cross-instance-initial')
+    });
+
+    const fileSystem: GuideResearchCacheFileSystem = {
+      readFile: async (target, encoding) => {
+        const contents = await fs.readFile(target, encoding);
+        if (target === filePath) {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        return contents;
+      },
+      mkdir: fs.mkdir,
+      writeFile: fs.writeFile,
+      rename: fs.rename,
+      unlink: fs.unlink,
+      lstat: fs.lstat,
+      realpath: fs.realpath,
+      readdir: fs.readdir
+    };
+    let now = START + 1;
+    const first = createCacheAt(filePath, { fileSystem, now: () => now++ });
+    const second = createCacheAt(filePath, { fileSystem, now: () => now++ });
+
+    await Promise.all([
+      first.put({
+        task: task({ key: 'cross-instance-first' }),
+        knowledgeVersion: 'knowledge-v4',
+        value: value('cross-instance-first')
+      }),
+      second.put({
+        task: task({ key: 'cross-instance-second' }),
+        knowledgeVersion: 'knowledge-v4',
+        value: value('cross-instance-second')
+      })
+    ]);
+
+    await expect(first.getSummary()).resolves.toMatchObject({ count: 3 });
+  });
+
+  it('blocks writes from another cache instance while a clear transaction is active', async () => {
+    const filePath = await makeCachePath();
+    const first = createCacheAt(filePath, { now: () => START });
+    const second = createCacheAt(filePath, { now: () => START + 1 });
+    await first.put({ task: task(), knowledgeVersion: 'knowledge-v4', value: value() });
+    const snapshot = await first.getDataManagementSnapshot();
+    const transaction = await first.beginClear({
+      clearableCount: snapshot.clearableCount,
+      fingerprint: snapshot.fingerprint
+    });
+
+    await expect(
+      second.put({
+        task: task({ key: 'blocked-during-clear' }),
+        knowledgeVersion: 'knowledge-v4',
+        value: value('blocked-during-clear')
+      })
+    ).rejects.toMatchObject({ code: 'GUIDE_RESEARCH_WRITE_FAILED' });
+    await transaction.commit();
+    await expect(fs.stat(filePath)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('never overwrites a new live file when a clear rollback observes an external race', async () => {
+    const filePath = await makeCachePath();
+    const cache = createCacheAt(filePath, { now: () => START });
+    await cache.put({ task: task(), knowledgeVersion: 'knowledge-v4', value: value() });
+    const snapshot = await cache.getDataManagementSnapshot();
+    const transaction = await cache.beginClear({
+      clearableCount: snapshot.clearableCount,
+      fingerprint: snapshot.fingerprint
+    });
+    const externalLive = '{"external":"new-live"}';
+    await fs.writeFile(filePath, externalLive, 'utf8');
+
+    await expect(transaction.rollback()).rejects.toMatchObject({
+      code: 'GUIDE_RESEARCH_CLEAR_INCOMPLETE'
+    });
+    await expect(fs.readFile(filePath, 'utf8')).resolves.toBe(externalLive);
+    expect(await fs.readdir(path.dirname(filePath))).toEqual(
+      expect.arrayContaining([
+        GUIDE_RESEARCH_CACHE_FILENAME,
+        expect.stringMatching(/^\.guide-research\.json\.[a-f0-9-]+\.clear-tombstone$/)
+      ])
     );
   });
 

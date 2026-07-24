@@ -65,6 +65,7 @@ import {
 import { DataManagementService } from './services/data-management-service.js';
 import { registerDataManagementIpc } from './ipc/data-management.ipc.js';
 import { GuideResearchCache } from './services/guide-research-cache.js';
+import { configureSingleInstance } from './single-instance.js';
 
 const isolatedUserDataDir = process.env.GTA_E2E_USER_DATA_DIR;
 if (isolatedUserDataDir) {
@@ -80,6 +81,16 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let mainWindow: BrowserWindow | undefined;
 let scenarioRefresher: ScenarioRefresher | undefined;
+const applicationOwnsSingleInstanceSlot = configureSingleInstance({
+  app,
+  env: process.env,
+  focusPrimaryWindow: () => {
+    if (mainWindow === undefined) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  }
+});
 
 function resolveBundledScenarioDir(): string {
   if (app.isPackaged) {
@@ -449,29 +460,31 @@ async function runPackagedSdkSmoke(baseUrl: string): Promise<void> {
   }
 }
 
-void app
-  .whenReady()
-  .then(async () => {
-    if (packagedSdkSmokeUrl) {
-      await runPackagedSdkSmoke(packagedSdkSmokeUrl);
-      return;
-    }
-    const iconProxy = new IconProxyService();
-    await iconProxy.init();
-    await bootstrapServices();
-    applyContentSecurityPolicy();
-    createWindow();
-
-    app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) {
-        createWindow();
+if (applicationOwnsSingleInstanceSlot) {
+  void app
+    .whenReady()
+    .then(async () => {
+      if (packagedSdkSmokeUrl) {
+        await runPackagedSdkSmoke(packagedSdkSmokeUrl);
+        return;
       }
+      const iconProxy = new IconProxyService();
+      await iconProxy.init();
+      await bootstrapServices();
+      applyContentSecurityPolicy();
+      createWindow();
+
+      app.on('activate', () => {
+        if (BrowserWindow.getAllWindows().length === 0) {
+          createWindow();
+        }
+      });
+    })
+    .catch((error) => {
+      console.error('[bootstrap] application startup failed', bootstrapErrorSummary(error));
+      app.exit(1);
     });
-  })
-  .catch((error) => {
-    console.error('[bootstrap] application startup failed', bootstrapErrorSummary(error));
-    app.exit(1);
-  });
+}
 
 app.on('before-quit', () => {
   scenarioRefresher?.stop();

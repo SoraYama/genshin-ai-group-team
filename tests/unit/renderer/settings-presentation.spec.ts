@@ -3,13 +3,17 @@ import {
   dataClearCopy,
   formatStorageSize,
   hasClearableChallengeCache,
-  settingsLoadPresentation
+  settingsLoadPresentation,
+  sumKnownStorageBytes
 } from '../../../src/renderer/pages/Settings/settings-presentation.js';
 
 describe('settings presentation', () => {
   it('never invents a storage size', () => {
     expect(formatStorageSize(undefined, 'zh')).toBe('暂未统计');
     expect(formatStorageSize(1536, 'zh')).toBe('1.5 KB');
+    expect(sumKnownStorageBytes(1024, 512)).toBe(1536);
+    expect(sumKnownStorageBytes(undefined, 512)).toBeUndefined();
+    expect(sumKnownStorageBytes(1024, undefined)).toBeUndefined();
   });
 
   it('keeps challenge clearing available for a zero-entry physical guide cache', () => {
@@ -40,14 +44,18 @@ describe('settings presentation', () => {
     });
     expect(dataClearCopy('scenarios', 3, 'zh').effect).toContain('下载');
     expect(dataClearCopy('scenarios', 3, 'zh')).toMatchObject({
+      title: '清除 3 个挑战缓存项？',
       effect: expect.stringContaining('临时攻略'),
-      preserves: expect.stringContaining('重新取得可验证挑战资料前，可能无法生成本期方案')
+      preserves: expect.stringContaining('重新取得可验证挑战资料前，可能无法生成本期方案'),
+      action: '清除 3 个缓存项'
     });
     expect(dataClearCopy('scenarios', 3, 'en')).toMatchObject({
+      title: 'Clear 3 challenge cache items?',
       effect: expect.stringContaining('temporary guide'),
       preserves: expect.stringContaining(
         'Current-cycle plans may be unavailable until verifiable challenge data is downloaded again'
-      )
+      ),
+      action: 'Clear 3 cache items'
     });
     expect(dataClearCopy('history', 4, 'zh').effect).toContain('4 条');
     expect(dataClearCopy('service-key', 1, 'en').title).toBe('Clear the saved service key?');

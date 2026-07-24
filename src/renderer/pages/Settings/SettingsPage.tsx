@@ -14,7 +14,8 @@ import { api } from '../../ipc';
 import {
   dataClearCopy,
   formatStorageSize,
-  hasClearableChallengeCache
+  hasClearableChallengeCache,
+  sumKnownStorageBytes
 } from './settings-presentation';
 import { SettingsLoadState } from './SettingsLoadState';
 
@@ -375,8 +376,8 @@ export function SettingsPage({
             title={isEnglish ? 'Challenge cache' : '挑战资料缓存'}
             meta={
               isEnglish
-                ? `${dataSummary.scenarios.clearableCount} downloaded + ${dataSummary.guideResearch.count} temporary guides · ${formatStorageSize((dataSummary.scenarios.sizeBytes ?? 0) + (dataSummary.guideResearch.sizeBytes ?? 0), language)}`
-                : `${dataSummary.scenarios.clearableCount} 份已下载 + ${dataSummary.guideResearch.count} 条临时攻略 · ${formatStorageSize((dataSummary.scenarios.sizeBytes ?? 0) + (dataSummary.guideResearch.sizeBytes ?? 0), language)}`
+                ? `${dataSummary.scenarios.clearableCount} downloaded + ${dataSummary.guideResearch.count} temporary guides · ${formatStorageSize(sumKnownStorageBytes(dataSummary.scenarios.sizeBytes, dataSummary.guideResearch.sizeBytes), language)}`
+                : `${dataSummary.scenarios.clearableCount} 份已下载 + ${dataSummary.guideResearch.count} 条临时攻略 · ${formatStorageSize(sumKnownStorageBytes(dataSummary.scenarios.sizeBytes, dataSummary.guideResearch.sizeBytes), language)}`
             }
             impact={
               isEnglish
