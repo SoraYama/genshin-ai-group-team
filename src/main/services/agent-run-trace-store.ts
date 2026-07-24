@@ -454,18 +454,6 @@ function buildSensitiveRegistry(
 }
 
 function redactPrivateTraceText(value: string, sensitiveValues: readonly string[]): string {
-  const canonical = canonicalTracePrivacyText(value);
-  if (
-    !/(?:^|[^\p{L}\p{N}_])(?:(?:uid|game_uid)\s*(?:[:=：]|-)|(?:nickname|private[-_ ]?profile)\s*[:=：])/iu.test(
-      value
-    ) &&
-    canonical !== value &&
-    /(?:^|[^\p{L}\p{N}_])(?:(?:uid|game_uid)\s*(?:[:=：]|-)|(?:nickname|private[-_ ]?profile)\s*[:=：])/iu.test(
-      canonical
-    )
-  ) {
-    return REDACTION_MARKER;
-  }
   let redacted = value
     .replace(
       /("(?:uid|game_uid|nickname|privateProfile|private_profile)"\s*:\s*)"(?:\\.|[^"\\])*(?:"|$)/giu,
@@ -474,11 +462,23 @@ function redactPrivateTraceText(value: string, sensitiveValues: readonly string[
     .replace(
       /((?:^|[\s,{;；，])(?:(?:uid|game_uid)\s*(?:[:=：]|-)|(?:nickname|private[-_ ]?profile)\s*[:=：])\s*)[^\r\n,;}；，]+/gimu,
       '$1[REDACTED]'
-    );
+    )
+    .replace(
+      /("(?:apiKey|ANTHROPIC_AUTH_TOKEN|Authorization|Cookie)"\s*:\s*)"(?:\\.|[^"\\])*(?:"|$)/giu,
+      '$1"[REDACTED]"'
+    )
+    .replace(/((?<!")\b(?:Authorization|Cookie)\b\s*[:=：]\s*)[^\r\n]*/giu, '$1[REDACTED]')
+    .replace(
+      /((?<!")\b(?:apiKey|ANTHROPIC_AUTH_TOKEN)\b\s*[:=：]\s*)(?:"(?:\\.|[^"\\])*(?:"|$)|'(?:\\.|[^'\\])*(?:'|$)|[^\s,;}]+)/giu,
+      '$1[REDACTED]'
+    )
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/giu, 'Bearer [REDACTED]');
   for (const secret of sensitiveValues) {
     redacted = redacted.replace(sensitiveValuePattern(secret), REDACTION_MARKER);
   }
-  return redacted;
+  return containsCanonicalPrivacyLeak(canonicalTracePrivacyText(redacted))
+    ? REDACTION_MARKER
+    : redacted;
 }
 
 function sensitiveValuePattern(value: string): RegExp {
@@ -497,15 +497,36 @@ function sensitiveValuePattern(value: string): RegExp {
 function canonicalTracePrivacyText(value: string): string {
   let canonical = value.normalize('NFKC').replace(/\p{Default_Ignorable_Code_Point}/gu, '');
   for (let round = 0; round < 8 && /%[0-9a-f]{2}/iu.test(canonical); round += 1) {
-    try {
-      canonical = decodeURIComponent(canonical)
-        .normalize('NFKC')
-        .replace(/\p{Default_Ignorable_Code_Point}/gu, '');
-    } catch {
-      return REDACTION_MARKER;
-    }
+    const decoded = decodePercentRuns(canonical);
+    if (decoded === canonical) break;
+    canonical = decoded.normalize('NFKC').replace(/\p{Default_Ignorable_Code_Point}/gu, '');
   }
   return canonical;
+}
+
+function decodePercentRuns(value: string): string {
+  return value.replace(/(?:%[0-9a-f]{2})+/giu, (encoded) => {
+    try {
+      return decodeURIComponent(encoded);
+    } catch {
+      return encoded.replace(/%([0-7][0-9a-f])/giu, (_, byte: string) =>
+        String.fromCodePoint(Number.parseInt(byte, 16))
+      );
+    }
+  });
+}
+
+function containsCanonicalPrivacyLeak(value: string): boolean {
+  return (
+    /(?:^|[^\p{L}\p{N}_])(?:uid|game_uid)\s*(?:[:=：]|-)\s*\p{Decimal_Number}{9,}/imu.test(value) ||
+    /(?:^|[^\p{L}\p{N}_])(?:nickname|private[-_ ]?profile)\s*[:=：](?!\s*\[REDACTED\](?:$|[\s,;}；，]))\s*[^\r\n,;}；，]+/imu.test(
+      value
+    ) ||
+    /(?:^|[^\p{L}\p{N}_])(?:apiKey|ANTHROPIC_AUTH_TOKEN|Authorization|Cookie)\s*[:=：](?!\s*(?:Bearer\s+)?\[REDACTED\](?:$|[\s,;}；，]))\s*[^\r\n,;}；，]+/imu.test(
+      value
+    ) ||
+    /\bBearer\s+(?!\[REDACTED\](?:$|\s))[A-Za-z0-9._~+/=-]+/imu.test(value)
+  );
 }
 
 function sanitizeUsage(usage: AgentUsage | undefined): AgentUsage {

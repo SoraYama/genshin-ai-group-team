@@ -324,6 +324,60 @@ describe('AgentRunTraceStore privacy boundary', () => {
     expect(raw).toContain('UID: [REDACTED]');
   });
 
+  it.each([
+    {
+      name: 'fullwidth UID after an ASCII UID',
+      raw: 'UID: 234567890\nＵＩＤ：３４５６７８９０１'
+    },
+    {
+      name: 'zero-width UID after an ASCII UID',
+      raw: 'UID: 234567890\nU\u200bID:456789012'
+    },
+    {
+      name: 'percent-encoded UID after an ASCII UID',
+      raw: 'UID: 234567890\nUID%3A%20567890123'
+    },
+    {
+      name: 'percent-encoded UID mixed with an unrelated literal percent sign',
+      raw: '100% uptime\nUID: 234567890\nUID%3A%20678901234'
+    },
+    {
+      name: 'ASCII UID after a hidden UID',
+      raw: 'ＵＩＤ：３４５６７８９０１\nUID: 234567890'
+    },
+    {
+      name: 'multiple hidden UIDs mixed with an ASCII UID',
+      raw: 'U\u200bID:456789012\nUID: 234567890\nUID%253A%2520567890123\nＵＩＤ：３４５６７８９０１'
+    },
+    {
+      name: 'hidden credential semantics after an ASCII credential',
+      raw: 'apiKey=plain-secret\nＡＰＩＫｅｙ：hidden-secret'
+    }
+  ])('fails closed for $name', ({ raw }) => {
+    const store = new AgentRunTraceStore();
+    const lease = store.start(run('mixed-obfuscated-uid'));
+    store.startStage(lease, { stage: 'compose' });
+    store.completeStage(lease, completedStage('compose', { rawOutput: raw }));
+
+    expect(store.latest()?.stages[0]?.rawOutput).toBe('[REDACTED]');
+  });
+
+  it('redacts multiple ordinary ASCII UID fields without hiding unrelated large numbers', () => {
+    const store = new AgentRunTraceStore();
+    const lease = store.start(run('ordinary-uid-fields'));
+    store.startStage(lease, { stage: 'compose' });
+    store.completeStage(
+      lease,
+      completedStage('compose', {
+        rawOutput: '伤害 1234567890\nUID: 234567890\n累计 9876543210\ngame_uid=345678901'
+      })
+    );
+
+    expect(store.latest()?.stages[0]?.rawOutput).toBe(
+      '伤害 1234567890\nUID: [REDACTED]\n累计 9876543210\ngame_uid=[REDACTED]'
+    );
+  });
+
   it('redacts more than 32 production-sized secrets without exposing the registry', () => {
     const secrets = Array.from(
       { length: 40 },
