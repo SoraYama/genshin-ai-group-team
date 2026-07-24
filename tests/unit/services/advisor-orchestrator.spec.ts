@@ -25,7 +25,7 @@ class FixtureRunner implements AgentQueryRunner {
   async *run(prompt: string, options: { systemPrompt: string }): AsyncIterable<unknown> {
     this.prompts.push({ prompt, systemPrompt: options.systemPrompt });
     const output = this.outputs.shift();
-    yield { type: 'result', result: JSON.stringify(output) };
+    yield { type: 'result', subtype: 'success', result: JSON.stringify(output) };
   }
 }
 

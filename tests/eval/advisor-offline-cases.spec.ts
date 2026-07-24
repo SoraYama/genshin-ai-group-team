@@ -46,7 +46,7 @@ class EvalRunner implements AgentQueryRunner {
   constructor(private readonly outputs: unknown[]) {}
   async *run(): AsyncIterable<unknown> {
     this.calls += 1;
-    yield { type: 'result', result: JSON.stringify(this.outputs.shift()) };
+    yield { type: 'result', subtype: 'success', result: JSON.stringify(this.outputs.shift()) };
   }
 }
 

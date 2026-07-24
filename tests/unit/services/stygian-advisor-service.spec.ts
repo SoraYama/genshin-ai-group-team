@@ -40,7 +40,7 @@ class InvalidAgentRunner {
   calls = 0;
   async *run(): AsyncIterable<unknown> {
     this.calls += 1;
-    yield { type: 'result', result: JSON.stringify({ invalid: true }) };
+    yield { type: 'result', subtype: 'success', result: JSON.stringify({ invalid: true }) };
   }
 }
 
@@ -86,6 +86,7 @@ class SuccessfulStageRunner implements StygianPlanAgentRunner {
     if (options.systemPrompt.includes('CritiqueAgent v2')) {
       yield {
         type: 'result',
+        subtype: 'success',
         result: JSON.stringify({
           decision: 'accept',
           issues: [
@@ -103,6 +104,7 @@ class SuccessfulStageRunner implements StygianPlanAgentRunner {
     if (options.systemPrompt.includes('RotationCoachAgent v2')) {
       yield {
         type: 'result',
+        subtype: 'success',
         result: JSON.stringify({
           rotations: [1, 2, 3].map((phase) => directive({ kind: 'stygian-phase', phase }))
         })
@@ -112,6 +114,7 @@ class SuccessfulStageRunner implements StygianPlanAgentRunner {
     if (options.systemPrompt.includes('ExplainAgent v2')) {
       yield {
         type: 'result',
+        subtype: 'success',
         result: JSON.stringify({
           explanations: [1, 2, 3].map((phase) => directive({ kind: 'stygian-phase', phase }))
         })
@@ -159,6 +162,7 @@ class SuccessfulStageRunner implements StygianPlanAgentRunner {
     };
     yield {
       type: 'result',
+      subtype: 'success',
       result: JSON.stringify(validStygianPlan()),
       usage: { input_tokens: 10, output_tokens: 5 },
       total_cost_usd: 0.01
@@ -217,7 +221,7 @@ class ComposeToolsOnlyRepairRunner implements StygianPlanAgentRunner {
         phase.team.characterIds = ['1001', '1002', '1003', '1004'];
       });
     }
-    yield { type: 'result', result: JSON.stringify(plan) };
+    yield { type: 'result', subtype: 'success', result: JSON.stringify(plan) };
   }
 }
 

@@ -100,30 +100,28 @@ export async function runAuditedAgentTurn(options: {
       addRawMessageSummary(rawMessagesSummary, message);
       if (!isRecord(message)) continue;
       if (message['type'] === 'result') {
-        if (typeof message['subtype'] === 'string' && message['subtype'] !== 'success') {
+        if (message['subtype'] !== 'success' || typeof message['result'] !== 'string') {
           throw new AgentTurnError(
             'AGENT_TURN_RESULT_ERROR',
             'Agent turn returned an error result',
             { cause: message }
           );
         }
-        if (typeof message['result'] === 'string') {
-          assertBoundedFinalText(message['result']);
-          resultText = message['result'];
-          const sdkUsage = isRecord(message['usage']) ? message['usage'] : {};
-          const delta = {
-            inputTokens: numberValue(sdkUsage['input_tokens']),
-            outputTokens: numberValue(sdkUsage['output_tokens']),
-            estimatedCostUsd: numberValue(message['total_cost_usd'])
-          };
-          usage = addAgentUsage(usage, delta);
-          if (
-            typeof sdkUsage['input_tokens'] === 'number' ||
-            typeof sdkUsage['output_tokens'] === 'number' ||
-            typeof message['total_cost_usd'] === 'number'
-          ) {
-            options.onUsageDelta?.(delta);
-          }
+        assertBoundedFinalText(message['result']);
+        resultText = message['result'];
+        const sdkUsage = isRecord(message['usage']) ? message['usage'] : {};
+        const delta = {
+          inputTokens: numberValue(sdkUsage['input_tokens']),
+          outputTokens: numberValue(sdkUsage['output_tokens']),
+          estimatedCostUsd: numberValue(message['total_cost_usd'])
+        };
+        usage = addAgentUsage(usage, delta);
+        if (
+          typeof sdkUsage['input_tokens'] === 'number' ||
+          typeof sdkUsage['output_tokens'] === 'number' ||
+          typeof message['total_cost_usd'] === 'number'
+        ) {
+          options.onUsageDelta?.(delta);
         }
       }
       if (message['type'] === 'assistant' && isRecord(message['message'])) {

@@ -22,6 +22,7 @@ class StageRunner {
     this.calls.push({ prompt, options });
     yield {
       type: 'result',
+      subtype: 'success',
       result: JSON.stringify(this.outputs.shift()),
       usage: { input_tokens: 10, output_tokens: 5 },
       total_cost_usd: 0.01

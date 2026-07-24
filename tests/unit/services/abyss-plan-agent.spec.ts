@@ -31,12 +31,17 @@ class FixtureRunner {
   async *run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown> {
     this.calls.push({ prompt, options });
     if (options.systemPrompt.includes('CritiqueAgent v2')) {
-      yield { type: 'result', result: JSON.stringify({ decision: 'accept', issues: [] }) };
+      yield {
+        type: 'result',
+        subtype: 'success',
+        result: JSON.stringify({ decision: 'accept', issues: [] })
+      };
       return;
     }
     if (options.systemPrompt.includes('RotationCoachAgent v2')) {
       yield {
         type: 'result',
+        subtype: 'success',
         result: JSON.stringify({
           rotations: [
             directive({ kind: 'abyss-team', half: 'first' }),
@@ -49,6 +54,7 @@ class FixtureRunner {
     if (options.systemPrompt.includes('ExplainAgent v2')) {
       yield {
         type: 'result',
+        subtype: 'success',
         result: JSON.stringify({
           explanations: [
             ...[1, 2].flatMap((chamber) =>
@@ -117,6 +123,7 @@ class FixtureRunner {
     };
     yield {
       type: 'result',
+      subtype: 'success',
       result: JSON.stringify(this.outputs.shift()),
       usage: { input_tokens: 10, output_tokens: 5 },
       total_cost_usd: 0.01
@@ -128,7 +135,7 @@ class NoToolRunner {
   calls = 0;
   async *run(): AsyncIterable<unknown> {
     this.calls += 1;
-    yield { type: 'result', result: JSON.stringify(validAbyssPlan()) };
+    yield { type: 'result', subtype: 'success', result: JSON.stringify(validAbyssPlan()) };
   }
 }
 
@@ -272,7 +279,7 @@ describe('AbyssPlanAgent', () => {
   });
 
   it('treats narrative or malformed output as invalid instead of scraping arbitrary prose', async () => {
-    const runner = new FixtureRunner(['```json\n{}\n```', 'not-json']);
+    const runner = new FixtureRunner(['```json\n{}\n```', 'not-json', 'still-not-json']);
     const result = await new AbyssPlanAgent(runner).compose({
       input: abyssInput(),
       scenario: abyssScenario(),

@@ -31,6 +31,7 @@ class FixtureRunner {
     if (options.systemPrompt.includes('CritiqueAgent v2')) {
       yield {
         type: 'result',
+        subtype: 'success',
         result: JSON.stringify({
           decision: 'accept',
           issues: [
@@ -48,6 +49,7 @@ class FixtureRunner {
     if (options.systemPrompt.includes('RotationCoachAgent v2')) {
       yield {
         type: 'result',
+        subtype: 'success',
         result: JSON.stringify({
           rotations: (['first', 'second'] as const).map((half) => ({
             ...directive({ kind: 'abyss-team', half })
@@ -60,6 +62,7 @@ class FixtureRunner {
       const plan = validAbyssPlan();
       yield {
         type: 'result',
+        subtype: 'success',
         result: JSON.stringify({
           explanations: plan.chambers.flatMap(({ floor, chamber }) =>
             (['first', 'second'] as const).map((half) =>
@@ -115,6 +118,7 @@ class FixtureRunner {
     };
     yield {
       type: 'result',
+      subtype: 'success',
       result: JSON.stringify(this.outputs.shift()),
       usage: { input_tokens: 12, output_tokens: 6 },
       total_cost_usd: 0.02

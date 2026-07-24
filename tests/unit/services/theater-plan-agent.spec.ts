@@ -76,12 +76,17 @@ class Runner {
   async *run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown> {
     this.calls.push({ prompt, options });
     if (options.systemPrompt.includes('CritiqueAgent v2')) {
-      yield { type: 'result', result: JSON.stringify({ decision: 'accept', issues: [] }) };
+      yield {
+        type: 'result',
+        subtype: 'success',
+        result: JSON.stringify({ decision: 'accept', issues: [] })
+      };
       return;
     }
     if (options.systemPrompt.includes('RotationCoachAgent v2')) {
       yield {
         type: 'result',
+        subtype: 'success',
         result: JSON.stringify({
           rotations: [1, 2].map((act) => directive({ kind: 'theater-act', act }))
         })
@@ -91,6 +96,7 @@ class Runner {
     if (options.systemPrompt.includes('ExplainAgent v2')) {
       yield {
         type: 'result',
+        subtype: 'success',
         result: JSON.stringify({
           explanations: [
             directive({ kind: 'theater-cast' }),
@@ -158,6 +164,7 @@ class Runner {
     }
     yield {
       type: 'result',
+      subtype: 'success',
       result: JSON.stringify(this.outputs.shift()),
       usage: { input_tokens: 10, output_tokens: 5 },
       total_cost_usd: 0.01

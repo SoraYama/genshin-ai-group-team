@@ -8,6 +8,7 @@ import {
 } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { validateCustomHeaders } from '../../shared/custom-headers.js';
+import { privacySafeResearchText } from './research-privacy.js';
 
 const DENIED_NATIVE_TOOLS = [
   'Agent',
@@ -51,12 +52,7 @@ const researchSearchInputSchema = z
   })
   .strict()
   .superRefine(({ query }, context) => {
-    const normalized = query.normalize('NFKC').replace(/\p{Default_Ignorable_Code_Point}/gu, '');
-    if (
-      /(?:\buid\b|\b\d{9,}\b|昵称|cookie|authorization|api[-_ ]?key|bearer\s|ltoken|ltuid|ltmid|sk-[a-z0-9_-]+|crit(?:ical)?[-_ ]?(?:rate|dmg)|暴击(?:率|伤害)?|攻击力|生命值|防御力)/iu.test(
-        normalized
-      )
-    ) {
+    if (privacySafeResearchText(query) === undefined) {
       context.addIssue({
         code: 'custom',
         path: ['query'],

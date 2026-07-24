@@ -299,6 +299,8 @@ describe('buildAgentSdkOptions', () => {
     [{ query: '原神攻略 Authorization Bearer secret' }, 'Authorization'],
     [{ query: '原神攻略 api_key sk-secret' }, 'API key'],
     [{ query: '原神攻略 critRate 88.8' }, 'panel attribute'],
+    [{ query: '原神攻略 U%2549D%253A123456789' }, 'repeatedly encoded UID'],
+    [{ query: '原神攻略 x123456789x' }, 'UID digits adjacent to letters'],
     [{ query: '原神攻略', extra: 'not-supported' }, 'unexpected input field']
   ])('rejects a WebSearch input containing %s (%s)', async (toolInput, _label) => {
     const gate = createResearchToolGate({ maxSearches: 3 });

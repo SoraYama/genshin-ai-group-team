@@ -16,6 +16,7 @@ import {
   type AuditedAgentRunner
 } from './agent-turn-audit.js';
 import type { AgentSdkRunOptions } from './agent-sdk-adapter.js';
+import { privacySafeResearchText } from './research-privacy.js';
 
 const knowledgeVersionSchema = z.string().trim().min(1).max(128);
 const boundedTextSchema = z.string().trim().min(1).max(700);
@@ -47,7 +48,7 @@ const researchOutputSchema = z
       .array(
         z
           .object({
-            taskKey: z.string().trim().min(1).max(160),
+            taskRef: z.string().trim().min(1).max(80),
             summary: boundedTextSchema,
             applicability: z
               .object({
@@ -88,13 +89,6 @@ const researchInputSchema = z
         });
       }
       keys.add(task.key);
-      if (!isAnonymousTask(task)) {
-        context.addIssue({
-          code: 'custom',
-          path: ['tasks', index],
-          message: 'Guide research tasks must use the anonymous coverage-gate shape'
-        });
-      }
     });
   });
 
@@ -135,6 +129,7 @@ export interface GuideResearchAgentOptions {
   cache: Pick<GuideResearchCache, 'get' | 'put'>;
   sourceRegistry: GuideResearchSourceRegistryReader;
   sdkOptions: AgentSdkRunOptions;
+  canonicalCharacterNames: ReadonlySet<string>;
   now?: () => number;
 }
 
@@ -154,7 +149,37 @@ export interface GuideResearchAgentResult {
   gaps: GuideResearchGap[];
 }
 
+interface SanitizedResearchTask {
+  taskRef: string;
+  reason: GuideResearchTask['reason'];
+  character?: NonNullable<GuideResearchTask['character']>;
+  scenarioTags: string[];
+}
+
+interface PendingResearchTask {
+  task: GuideResearchTask;
+  projected: SanitizedResearchTask;
+}
+
 export function buildGuideResearchQueries(tasks: readonly GuideResearchTask[]): string[] {
+  return buildQueries(
+    tasks.map((task) => ({
+      character: task.character,
+      scenarioTags: task.scenarioTags
+    }))
+  );
+}
+
+function buildProjectedResearchQueries(tasks: readonly SanitizedResearchTask[]): string[] {
+  return buildQueries(tasks);
+}
+
+function buildQueries(
+  tasks: ReadonlyArray<{
+    character?: GuideResearchTask['character'];
+    scenarioTags: readonly string[];
+  }>
+): string[] {
   if (tasks.length === 0) return [];
   const bucketCount = Math.min(3, tasks.length);
   const buckets = Array.from({ length: bucketCount }, () => new Set<string>());
@@ -180,6 +205,7 @@ export class GuideResearchAgent {
   private readonly cache: Pick<GuideResearchCache, 'get' | 'put'>;
   private readonly sourceRegistry: GuideResearchSourceRegistryReader;
   private readonly sdkOptions: AgentSdkRunOptions;
+  private readonly canonicalCharacterNames: ReadonlySet<string>;
   private readonly now: () => number;
 
   constructor(options: GuideResearchAgentOptions) {
@@ -187,6 +213,7 @@ export class GuideResearchAgent {
     this.cache = options.cache;
     this.sourceRegistry = options.sourceRegistry;
     this.sdkOptions = options.sdkOptions;
+    this.canonicalCharacterNames = canonicalNameSnapshot(options.canonicalCharacterNames);
     this.now = options.now ?? Date.now;
   }
 
@@ -202,15 +229,26 @@ export class GuideResearchAgent {
         { cause: parsed.error }
       );
     }
+    const safeTasks = parsed.data.tasks.map((task, index) => {
+      const projected = projectResearchTask(task, `ref-${index + 1}`, this.canonicalCharacterNames);
+      if (projected === undefined) {
+        throw new GuideResearchAgentError(
+          'RESEARCH_TASK_INVALID',
+          'Guide research input is not an anonymous coverage-gate task'
+        );
+      }
+      return { task, projected };
+    });
 
     const cachedByKey = new Map<string, EphemeralGuideCacheValue>();
-    const misses: GuideResearchTask[] = [];
-    for (const task of parsed.data.tasks) {
+    const misses: PendingResearchTask[] = [];
+    for (const pending of safeTasks) {
+      const { task } = pending;
       const cached = await this.cache.get({
         task,
         knowledgeVersion: parsed.data.knowledgeVersion
       });
-      if (cached === undefined) misses.push(task);
+      if (cached === undefined) misses.push(pending);
       else cachedByKey.set(task.key, cached);
     }
     if (misses.length === 0) {
@@ -226,12 +264,22 @@ export class GuideResearchAgent {
 
     const registry = sourceRegistryResultSchema.parse(this.sourceRegistry.getSourceRegistry());
     const sourcesByHost = sourcesByCanonicalHost(registry);
-    const queries = buildGuideResearchQueries(misses);
+    const runtimeMisses = misses.map(({ task, projected }, index) => ({
+      task,
+      projected: { ...projected, taskRef: `ref-${index + 1}` }
+    }));
+    const queries = buildProjectedResearchQueries(runtimeMisses.map(({ projected }) => projected));
     const prompt = JSON.stringify({
       searchQueries: queries,
       allowedSourceHosts: [...sourcesByHost.keys()],
-      tasks: misses
+      tasks: runtimeMisses.map(({ projected }) => projected)
     });
+    if (privacySafeResearchText(prompt) === undefined) {
+      throw new GuideResearchAgentError(
+        'RESEARCH_TASK_INVALID',
+        'Guide research prompt projection failed privacy validation'
+      );
+    }
 
     let rawOutput: string;
     try {
@@ -259,7 +307,7 @@ export class GuideResearchAgent {
         parsed.data.tasks,
         cachedByKey,
         new Map(),
-        new Map(misses.map((task) => [task.key, code]))
+        new Map(runtimeMisses.map(({ task }) => [task.key, code]))
       );
     }
 
@@ -269,31 +317,51 @@ export class GuideResearchAgent {
         parsed.data.tasks,
         cachedByKey,
         new Map(),
-        new Map(misses.map((task) => [task.key, 'SEARCH_OUTPUT_INVALID' as const]))
+        new Map(runtimeMisses.map(({ task }) => [task.key, 'SEARCH_OUTPUT_INVALID' as const]))
       );
     }
 
-    const missingByKey = new Map(misses.map((task) => [task.key, task]));
+    const missingByRef = new Map(
+      runtimeMisses.map((pending) => [pending.projected.taskRef, pending])
+    );
+    const seenRefs = new Set<string>();
+    if (
+      decoded.results.some(({ taskRef }) => {
+        if (!missingByRef.has(taskRef) || seenRefs.has(taskRef)) return true;
+        seenRefs.add(taskRef);
+        return false;
+      })
+    ) {
+      return combineResult(
+        parsed.data.tasks,
+        cachedByKey,
+        new Map(),
+        new Map(runtimeMisses.map(({ task }) => [task.key, 'SEARCH_OUTPUT_INVALID' as const]))
+      );
+    }
     const acceptedByKey = new Map<string, ResearchCandidate[]>();
     for (const candidate of decoded.results) {
-      const task = missingByKey.get(candidate.taskKey);
-      if (task === undefined || !candidateAppliesToTask(candidate, task)) continue;
+      const pending = missingByRef.get(candidate.taskRef);
+      if (pending === undefined) continue;
+      const applicability = candidateApplicabilityForTask(candidate, pending.projected);
+      if (applicability === undefined) continue;
       const source = canonicalSource(candidate.source.url, sourcesByHost);
       if (source === undefined) continue;
-      const accepted = acceptedByKey.get(task.key) ?? [];
+      const accepted = acceptedByKey.get(pending.task.key) ?? [];
       accepted.push({
         ...candidate,
+        applicability,
         source: {
           ...candidate.source,
           url: source.url
         }
       });
-      acceptedByKey.set(task.key, accepted);
+      acceptedByKey.set(pending.task.key, accepted);
     }
 
     const researchedByKey = new Map<string, EphemeralGuideCacheValue>();
     const gapsByKey = new Map<string, GuideResearchGapCode>();
-    for (const task of misses) {
+    for (const { task } of runtimeMisses) {
       const candidates = acceptedByKey.get(task.key) ?? [];
       if (candidates.length === 0) {
         gapsByKey.set(task.key, 'SEARCH_NO_VALID_RESULTS');
@@ -377,6 +445,8 @@ function canonicalSource(
   value: string,
   sourcesByHost: ReadonlyMap<string, { id: string }>
 ): { sourceId: string; url: string } | undefined {
+  const rawHostname = rawAsciiHttpsHostname(value);
+  if (rawHostname === undefined) return undefined;
   let url: URL;
   try {
     url = new URL(value);
@@ -392,15 +462,34 @@ function canonicalSource(
     return undefined;
   }
   const hostname = canonicalHostname(url.hostname);
-  if (hostname === undefined) return undefined;
+  if (hostname === undefined || hostname !== rawHostname) return undefined;
   const source = sourcesByHost.get(hostname);
   if (source === undefined) return undefined;
   url.hostname = hostname;
   return { sourceId: source.id, url: url.href };
 }
 
+function rawAsciiHttpsHostname(value: string): string | undefined {
+  if (value.length === 0 || value.length > 2_048) return undefined;
+  const match = /^https:\/\/([^/?#]*)/iu.exec(value);
+  const authority = match?.[1];
+  if (
+    authority === undefined ||
+    authority.length === 0 ||
+    /[^\u0021-\u007e]/u.test(authority) ||
+    authority.includes('@') ||
+    authority.includes(':') ||
+    authority.includes('[') ||
+    authority.includes(']') ||
+    authority.endsWith('.')
+  ) {
+    return undefined;
+  }
+  return canonicalHostname(authority);
+}
+
 function canonicalHostname(value: string): string | undefined {
-  const normalized = value.trim().toLowerCase().replace(/\.$/u, '');
+  const normalized = value.trim().toLowerCase();
   if (
     normalized.length === 0 ||
     normalized.length > 253 ||
@@ -413,17 +502,43 @@ function canonicalHostname(value: string): string | undefined {
   return normalized;
 }
 
-function candidateAppliesToTask(candidate: ResearchCandidate, task: GuideResearchTask): boolean {
+function candidateApplicabilityForTask(
+  candidate: ResearchCandidate,
+  task: SanitizedResearchTask
+): ResearchCandidate['applicability'] | undefined {
+  const characterNames = normalizedUniqueList(candidate.applicability.characterNames);
+  const scenarioTags = normalizedUniqueList(candidate.applicability.scenarioTags);
+  const buildSignals = normalizedUniqueList(candidate.applicability.buildSignals);
+  const expectedCharacterNames = task.character === undefined ? [] : [task.character.name];
+  const expectedBuildSignals = task.character?.buildSignals ?? [];
   if (
-    task.character !== undefined &&
-    !candidate.applicability.characterNames.includes(task.character.name)
+    characterNames === undefined ||
+    scenarioTags === undefined ||
+    buildSignals === undefined ||
+    !sameStringSet(characterNames, expectedCharacterNames) ||
+    !sameStringSet(scenarioTags, task.scenarioTags) ||
+    !sameStringSet(buildSignals, expectedBuildSignals)
   ) {
-    return false;
+    return undefined;
   }
-  return (
-    task.scenarioTags.length === 0 ||
-    candidate.applicability.scenarioTags.some((tag) => task.scenarioTags.includes(tag))
-  );
+  return { characterNames, scenarioTags, buildSignals };
+}
+
+function normalizedUniqueList(values: readonly string[]): string[] | undefined {
+  const normalized = values.map(privacySafeResearchText);
+  if (
+    normalized.some((value) => value === undefined) ||
+    new Set(normalized).size !== normalized.length
+  ) {
+    return undefined;
+  }
+  return normalized as string[];
+}
+
+function sameStringSet(left: readonly string[], right: readonly string[]): boolean {
+  if (left.length !== right.length) return false;
+  const rightSet = new Set(right);
+  return left.every((value) => rightSet.has(value));
 }
 
 function cacheValueFor(
@@ -496,43 +611,82 @@ function taskDigest(taskKey: string): string {
 
 function safeQueryTerm(value: string | undefined): string | undefined {
   if (value === undefined) return undefined;
-  const normalized = value
-    .normalize('NFKC')
-    .replace(/\p{Default_Ignorable_Code_Point}/gu, '')
+  const safe = privacySafeResearchText(value);
+  if (safe === undefined) return undefined;
+  const normalized = safe
     .replace(/\p{Number}/gu, '')
     .replace(/\s+/gu, ' ')
     .trim()
     .slice(0, 80);
-  if (normalized.length === 0 || containsSensitiveLabel(normalized)) return undefined;
+  if (normalized.length === 0) return undefined;
   return normalized;
 }
 
-function isAnonymousTask(task: GuideResearchTask): boolean {
+function canonicalNameSnapshot(names: ReadonlySet<string>): ReadonlySet<string> {
+  if (names === undefined || typeof names[Symbol.iterator] !== 'function') {
+    throw new GuideResearchAgentError(
+      'RESEARCH_TASK_INVALID',
+      'Guide research requires a canonical character name set'
+    );
+  }
+  const snapshot = new Set<string>();
+  for (const name of names) {
+    const normalized = privacySafeResearchText(name);
+    if (normalized === undefined || normalized.length === 0) {
+      throw new GuideResearchAgentError(
+        'RESEARCH_TASK_INVALID',
+        'Canonical character names failed privacy validation'
+      );
+    }
+    snapshot.add(normalized);
+  }
+  return snapshot;
+}
+
+function projectResearchTask(
+  task: GuideResearchTask,
+  taskRef: string,
+  canonicalCharacterNames: ReadonlySet<string>
+): SanitizedResearchTask | undefined {
+  const scenarioTags = task.scenarioTags.map(privacySafeResearchText);
   if (
-    !task.scenarioTags.every((tag) => scenarioMechanicTagSchema.safeParse(tag).success) ||
-    !(task.character?.buildSignals ?? []).every((signal) =>
+    scenarioTags.some((tag) => tag === undefined) ||
+    !scenarioTags.every((tag) => scenarioMechanicTagSchema.safeParse(tag).success)
+  ) {
+    return undefined;
+  }
+  if (task.character === undefined) {
+    return {
+      taskRef,
+      reason: task.reason,
+      scenarioTags: scenarioTags as string[]
+    };
+  }
+  const name = privacySafeResearchText(task.character.name);
+  const element = privacySafeResearchText(task.character.element);
+  const buildSignals = task.character.buildSignals.map(privacySafeResearchText);
+  if (
+    name === undefined ||
+    element === undefined ||
+    !canonicalCharacterNames.has(name) ||
+    buildSignals.some((signal) => signal === undefined) ||
+    !(buildSignals as string[]).every((signal) =>
       ['build-match-present', 'build-conflict-present', 'build-unknown-present'].includes(signal)
     )
   ) {
-    return false;
+    return undefined;
   }
-  const visibleText = [
-    task.key,
-    task.character?.name,
-    task.character?.element,
-    task.character?.weaponType,
-    ...(task.character?.buildSignals ?? []),
-    ...task.scenarioTags
-  ]
-    .filter((value): value is string => value !== undefined)
-    .join(' ');
-  return !containsSensitiveLabel(visibleText);
-}
-
-function containsSensitiveLabel(value: string): boolean {
-  return /(?:\buid\b|昵称|cookie|authorization|api[-_ ]?key|bearer\s|ltoken|ltuid|ltmid|sk-[a-z0-9_-]+|crit(?:ical)?[-_ ]?(?:rate|dmg)|暴击(?:率|伤害)?|攻击力|生命值|防御力)/iu.test(
-    value
-  );
+  return {
+    taskRef,
+    reason: task.reason,
+    character: {
+      name,
+      element,
+      ...(task.character.weaponType === undefined ? {} : { weaponType: task.character.weaponType }),
+      buildSignals: buildSignals as string[]
+    },
+    scenarioTags: scenarioTags as string[]
+  };
 }
 
 function searchFailureCode(error: unknown): GuideResearchGapCode {

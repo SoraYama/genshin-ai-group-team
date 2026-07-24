@@ -24,7 +24,7 @@ class InvalidRunner {
   calls = 0;
   async *run(): AsyncIterable<unknown> {
     this.calls += 1;
-    yield { type: 'result', result: JSON.stringify({ invalid: true }) };
+    yield { type: 'result', subtype: 'success', result: JSON.stringify({ invalid: true }) };
   }
 }
 class WaitingRunner {
@@ -78,6 +78,7 @@ class SuccessfulStageRunner implements TheaterPlanAgentRunner {
     if (options.systemPrompt.includes('CritiqueAgent v2')) {
       yield {
         type: 'result',
+        subtype: 'success',
         result: JSON.stringify({
           decision: 'accept',
           issues: [
@@ -95,6 +96,7 @@ class SuccessfulStageRunner implements TheaterPlanAgentRunner {
     if (options.systemPrompt.includes('RotationCoachAgent v2')) {
       yield {
         type: 'result',
+        subtype: 'success',
         result: JSON.stringify({
           rotations: [1, 2].map((act) => directive({ kind: 'theater-act', act }))
         })
@@ -104,6 +106,7 @@ class SuccessfulStageRunner implements TheaterPlanAgentRunner {
     if (options.systemPrompt.includes('ExplainAgent v2')) {
       yield {
         type: 'result',
+        subtype: 'success',
         result: JSON.stringify({
           explanations: [
             directive({ kind: 'theater-cast' }),
@@ -149,6 +152,7 @@ class SuccessfulStageRunner implements TheaterPlanAgentRunner {
     };
     yield {
       type: 'result',
+      subtype: 'success',
       result: JSON.stringify(validTheaterPlan()),
       usage: { input_tokens: 10, output_tokens: 5 },
       total_cost_usd: 0.01

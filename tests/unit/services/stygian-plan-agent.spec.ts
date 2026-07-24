@@ -35,12 +35,17 @@ class FixtureRunner {
   async *run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown> {
     this.calls.push({ prompt, options });
     if (options.systemPrompt.includes('CritiqueAgent v2')) {
-      yield { type: 'result', result: JSON.stringify({ decision: 'accept', issues: [] }) };
+      yield {
+        type: 'result',
+        subtype: 'success',
+        result: JSON.stringify({ decision: 'accept', issues: [] })
+      };
       return;
     }
     if (options.systemPrompt.includes('RotationCoachAgent v2')) {
       yield {
         type: 'result',
+        subtype: 'success',
         result: JSON.stringify({
           rotations: [1, 2, 3].map((phase) => directive({ kind: 'stygian-phase', phase }))
         })
@@ -50,6 +55,7 @@ class FixtureRunner {
     if (options.systemPrompt.includes('ExplainAgent v2')) {
       yield {
         type: 'result',
+        subtype: 'success',
         result: JSON.stringify({
           explanations: [...[1, 2, 3].map((phase) => directive({ kind: 'stygian-phase', phase }))]
         })
@@ -116,6 +122,7 @@ class FixtureRunner {
     }
     yield {
       type: 'result',
+      subtype: 'success',
       result: JSON.stringify(this.outputs.shift()),
       usage: { input_tokens: 12, output_tokens: 8 },
       total_cost_usd: 0.02
@@ -127,7 +134,7 @@ class NoToolRunner {
   calls = 0;
   async *run(): AsyncIterable<unknown> {
     this.calls += 1;
-    yield { type: 'result', result: JSON.stringify(validStygianPlan()) };
+    yield { type: 'result', subtype: 'success', result: JSON.stringify(validStygianPlan()) };
   }
 }
 

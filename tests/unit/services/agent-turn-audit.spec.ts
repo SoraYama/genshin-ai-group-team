@@ -35,7 +35,7 @@ describe('runAuditedAgentTurn', () => {
             ]
           }
         };
-        yield { type: 'result', result: '{}', usage: {} };
+        yield { type: 'result', subtype: 'success', result: '{}', usage: {} };
       }
     };
     const sdkOptions: AgentSdkRunOptions = {
@@ -72,6 +72,7 @@ describe('runAuditedAgentTurn', () => {
       async *run() {
         yield {
           type: 'result',
+          subtype: 'success',
           result: '{}',
           usage: { input_tokens: 17, output_tokens: 9 },
           total_cost_usd: 0.03
@@ -199,6 +200,60 @@ describe('runAuditedAgentTurn', () => {
     });
     await expect(turn).rejects.not.toThrow('provider-secret-error');
     await expect(turn).rejects.toMatchObject({ cause: sdkResultError });
+  });
+
+  it.each([
+    ['missing subtype', { type: 'result', result: '{}', usage: {} }],
+    ['non-string subtype', { type: 'result', subtype: 7, result: '{}', usage: {} }],
+    ['unknown subtype', { type: 'result', subtype: 'future_success', result: '{}', usage: {} }],
+    ['missing success result', { type: 'result', subtype: 'success', usage: {} }],
+    [
+      'non-string success result',
+      { type: 'result', subtype: 'success', result: { secret: 'provider-secret' }, usage: {} }
+    ]
+  ])('fails closed for a result message with %s', async (_label, sdkResult) => {
+    const runner: AuditedAgentRunner = {
+      async *run() {
+        yield sdkResult;
+      }
+    };
+
+    const turn = runAuditedAgentTurn({
+      runner,
+      prompt: '{}',
+      sdkOptions: sdkOptions(),
+      systemPrompt: 'test'
+    });
+
+    await expect(turn).rejects.toMatchObject({
+      name: 'AgentTurnError',
+      code: 'AGENT_TURN_RESULT_ERROR',
+      message: 'Agent turn returned an error result',
+      cause: sdkResult
+    });
+    await expect(turn).rejects.not.toThrow('provider-secret');
+  });
+
+  it('preserves assistantText fallback when an explicit success result is empty', async () => {
+    const runner: AuditedAgentRunner = {
+      async *run() {
+        yield {
+          type: 'assistant',
+          message: { content: [{ type: 'text', text: 'assistant fallback' }] }
+        };
+        yield { type: 'result', subtype: 'success', result: '', usage: {} };
+      }
+    };
+
+    const turn = await runAuditedAgentTurn({
+      runner,
+      prompt: '{}',
+      sdkOptions: sdkOptions(),
+      systemPrompt: 'test'
+    });
+
+    expect(turn.text).toBe('assistant fallback');
+    expect(turn.finalRawText).toBe('assistant fallback');
   });
 
   it('rejects an oversized final value instead of returning a non-verbatim truncation', async () => {
