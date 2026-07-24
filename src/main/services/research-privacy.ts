@@ -6,6 +6,8 @@ const PRIVATE_URL_ID_KEY_PATTERN = /^(?:uid|user|users|account|player|profile)(?
 const PRIVATE_URL_PATH_PATTERN = /\/(?:uid|user|users|account|player|profile)(?:\/|$)/iu;
 const PRIVATE_URL_FRAGMENT_PATTERN =
   /(?:^|[/#&])(?:uid|user|users|account|player|profile)(?:[=/:]|$)/iu;
+const PRIVATE_URL_RAW_PATH_SEGMENT_PATTERN =
+  /^(?:uid|user|users|account|player|profile)(?:[-_]?id)?$/iu;
 const GENERATED_RESEARCH_IDENTIFIER_PATTERN =
   /^(?:web-(?:match|citation)-|guide-subject-)[0-9a-f]{24}$/u;
 const EXPLICIT_ARTICLE_IDENTIFIER_PATTERN = /^article-id[:_-]\p{Decimal_Number}{9,}$/iu;
@@ -45,6 +47,8 @@ export function privacySafeResearchUrl(value: string): string | undefined {
   } catch {
     return undefined;
   }
+  const rawPath = extractSafeRawResearchUrlPath(value, parsed);
+  if (rawPath === undefined) return undefined;
   if (isSensitiveResearchCanonicalText(parsed.hostname)) return undefined;
   for (const [key, parameterValue] of parsed.searchParams.entries()) {
     const canonicalKey = canonicalizeResearchPrivacyText(key);
@@ -59,11 +63,11 @@ export function privacySafeResearchUrl(value: string): string | undefined {
       return undefined;
     }
   }
-  const canonicalPath = canonicalizeResearchPrivacyText(parsed.pathname);
+  const canonicalPath = canonicalizeResearchPrivacyText(rawPath);
   if (
     canonicalPath === undefined ||
     hasSensitiveResearchMaterialWithoutLongNumber(canonicalPath) ||
-    hasUnsafeUrlPathLongNumber(canonicalPath, parsed.pathname, value) ||
+    hasUnsafeUrlPathLongNumber(canonicalPath, rawPath) ||
     PRIVATE_URL_PATH_PATTERN.test(canonicalPath)
   ) {
     return undefined;
@@ -127,50 +131,60 @@ function hasSensitiveResearchMaterialWithoutLongNumber(value: string): boolean {
   );
 }
 
-function hasUnsafeUrlPathLongNumber(
-  canonicalPath: string,
-  rawPath: string,
-  rawUrl: string
-): boolean {
-  const matches = Array.from(canonicalPath.matchAll(/\p{Decimal_Number}{9,}/gu));
-  if (matches.length === 0) return false;
-  if (
-    canonicalPath !== rawPath ||
-    ENCODED_OCTET_PATTERN.test(rawPath) ||
-    rawUrlPathContainsEncodedOctet(rawUrl)
-  ) {
-    return true;
-  }
-  for (const match of matches) {
-    const index = match.index;
-    const number = match[0];
-    if (index === undefined || number === undefined) return true;
-    const before = rawPath.slice(0, index);
-    const after = rawPath.slice(index + number.length);
-    if (
-      !/^[0-9]{9,}$/u.test(number) ||
-      !/\/articles?\/$/u.test(before) ||
-      !/^(?:\/|$)/u.test(after)
-    ) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function rawUrlPathContainsEncodedOctet(value: string): boolean {
+function extractSafeRawResearchUrlPath(value: string, parsed: URL): string | undefined {
+  if (hasAsciiControl(value) || value.includes('\\')) return undefined;
   const trimmed = value.trim();
   const authoritySeparator = trimmed.indexOf('://');
-  if (authoritySeparator < 0) return true;
-  const pathStart = trimmed.indexOf('/', authoritySeparator + 3);
-  if (pathStart < 0) return false;
-  const queryStart = trimmed.indexOf('?', pathStart);
-  const fragmentStart = trimmed.indexOf('#', pathStart);
+  if (authoritySeparator <= 0) return undefined;
+  const rawProtocol = trimmed.slice(0, authoritySeparator);
+  if (`${rawProtocol.toLowerCase()}:` !== parsed.protocol) return undefined;
+  const authorityStart = authoritySeparator + 3;
+  const firstDelimiter = firstUrlDelimiterIndex(trimmed, authorityStart);
+  const authorityEnd = firstDelimiter < 0 ? trimmed.length : firstDelimiter;
+  if (authorityEnd === authorityStart) return undefined;
+  if (firstDelimiter < 0 || trimmed[firstDelimiter] !== '/') return '';
+  const queryStart = trimmed.indexOf('?', firstDelimiter);
+  const fragmentStart = trimmed.indexOf('#', firstDelimiter);
   const pathEnd = Math.min(
     queryStart < 0 ? trimmed.length : queryStart,
     fragmentStart < 0 ? trimmed.length : fragmentStart
   );
-  return ENCODED_OCTET_PATTERN.test(trimmed.slice(pathStart, pathEnd));
+  const rawPath = trimmed.slice(firstDelimiter, pathEnd);
+  if (ENCODED_OCTET_PATTERN.test(rawPath)) return undefined;
+  const segments = rawPath.split('/');
+  if (
+    segments.some((segment) => segment === '.' || segment === '..') ||
+    segments.some((segment) => PRIVATE_URL_RAW_PATH_SEGMENT_PATTERN.test(segment)) ||
+    segments.slice(1, -1).some((segment) => segment.length === 0)
+  ) {
+    return undefined;
+  }
+  return rawPath;
+}
+
+function firstUrlDelimiterIndex(value: string, start: number): number {
+  const indexes = ['/', '?', '#']
+    .map((delimiter) => value.indexOf(delimiter, start))
+    .filter((index) => index >= 0);
+  return indexes.length === 0 ? -1 : Math.min(...indexes);
+}
+
+function hasUnsafeUrlPathLongNumber(canonicalPath: string, rawPath: string): boolean {
+  if (!LONG_IDENTITY_NUMBER_PATTERN.test(canonicalPath)) return false;
+  if (canonicalPath !== rawPath) return true;
+  const segments = rawPath.split('/');
+  let sawLongNumber = false;
+  for (const [index, segment] of segments.entries()) {
+    if (!LONG_IDENTITY_NUMBER_PATTERN.test(segment)) continue;
+    sawLongNumber = true;
+    if (
+      !/^[0-9]{9,}$/u.test(segment) ||
+      !/^(?:article|articles)$/u.test(segments[index - 1] ?? '')
+    ) {
+      return true;
+    }
+  }
+  return !sawLongNumber;
 }
 
 function hasFullPanelStatShape(value: string): boolean {
