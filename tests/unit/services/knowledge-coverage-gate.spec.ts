@@ -1,14 +1,43 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  KnowledgeCoverageGate,
-  knowledgeResearchTaskSchema
+  guideResearchTaskSchema,
+  KnowledgeCoverageGate
 } from '../../../src/main/services/knowledge-coverage-gate.js';
 import {
   knowledgeContextPacketSchema,
+  type CommittedCharacterCatalogEntry,
   type KnowledgeContextPacket,
   type KnowledgeGap
 } from '../../../src/shared/advisor-knowledge.js';
+
+const RAIDEN: CommittedCharacterCatalogEntry = {
+  id: '10000052',
+  name: '雷电将军',
+  aliases: [],
+  element: 'electro',
+  weaponType: 'polearm'
+};
+
+const trustedCatalog = {
+  getCatalogEntry(characterId: string): CommittedCharacterCatalogEntry | undefined {
+    if (characterId === RAIDEN.id) return structuredClone(RAIDEN);
+    if (characterId === '123456789') {
+      return {
+        id: '123456789',
+        name: '不应被视为角色',
+        aliases: [],
+        element: 'unknown',
+        weaponType: 'unknown'
+      };
+    }
+    return undefined;
+  }
+};
+
+function gate(): KnowledgeCoverageGate {
+  return new KnowledgeCoverageGate(trustedCatalog);
+}
 
 function packet(unknowns: KnowledgeGap[]): KnowledgeContextPacket {
   return knowledgeContextPacketSchema.parse({
@@ -40,7 +69,7 @@ function packet(unknowns: KnowledgeGap[]): KnowledgeContextPacket {
   });
 }
 
-function gap(index: number, kind: KnowledgeGap['kind'], subjectId = '10000052'): KnowledgeGap {
+function gap(index: number, kind: KnowledgeGap['kind'], subjectId = RAIDEN.id): KnowledgeGap {
   return {
     id: `gap-${index}`,
     subjectId,
@@ -49,8 +78,79 @@ function gap(index: number, kind: KnowledgeGap['kind'], subjectId = '10000052'):
   };
 }
 
+const safeContext = {
+  characters: [
+    {
+      id: RAIDEN.id,
+      name: RAIDEN.name,
+      element: RAIDEN.element,
+      weaponType: RAIDEN.weaponType
+    }
+  ],
+  scenarioTags: ['elemental-shield']
+};
+
+describe('guideResearchTaskSchema', () => {
+  const validTask = {
+    key: 'guide-missing-0123456789abcdef',
+    reason: 'missing',
+    character: {
+      name: RAIDEN.name,
+      element: RAIDEN.element,
+      weaponType: RAIDEN.weaponType,
+      buildSignals: ['build-match-present']
+    },
+    scenarioTags: ['elemental-shield']
+  } as const;
+
+  it('is strict at the task and character boundaries', () => {
+    expect(() =>
+      guideResearchTaskSchema.parse({ ...validTask, privateContext: 'secret' })
+    ).toThrow();
+    expect(() =>
+      guideResearchTaskSchema.parse({
+        ...validTask,
+        character: { ...validTask.character, uid: '123456789' }
+      })
+    ).toThrow();
+  });
+
+  it.each([
+    ['invalid weapon type', { character: { ...validTask.character, weaponType: 'axe' } }],
+    ['100-character name', { character: { ...validTask.character, name: '角'.repeat(100) } }],
+    ['30-character element', { character: { ...validTask.character, element: 'e'.repeat(30) } }],
+    [
+      '150-character build signal',
+      { character: { ...validTask.character, buildSignals: ['s'.repeat(150)] } }
+    ],
+    ['161-character key', { key: 'k'.repeat(161) }]
+  ])('rejects %s', (_label, override) => {
+    expect(() =>
+      guideResearchTaskSchema.parse({
+        ...validTask,
+        ...override
+      })
+    ).toThrow();
+  });
+
+  it('accepts the exact published upper bounds', () => {
+    expect(() =>
+      guideResearchTaskSchema.parse({
+        ...validTask,
+        key: 'k'.repeat(160),
+        character: {
+          ...validTask.character,
+          name: '角'.repeat(80),
+          element: 'e'.repeat(24),
+          buildSignals: ['s'.repeat(120)]
+        }
+      })
+    ).not.toThrow();
+  });
+});
+
 describe('KnowledgeCoverageGate', () => {
-  it('does not request research when local coverage is complete', () => {
+  it('evaluates complete local coverage without research', () => {
     const complete = knowledgeContextPacketSchema.parse({
       knowledgeVersion: 'complete',
       buildInterpretations: [],
@@ -61,96 +161,149 @@ describe('KnowledgeCoverageGate', () => {
       citations: []
     });
 
-    expect(
-      new KnowledgeCoverageGate().plan(complete, { characters: [], scenarioTags: [] })
-    ).toEqual([]);
+    expect(gate().evaluate(complete, { characters: [], scenarioTags: [] })).toEqual({
+      required: false,
+      tasks: []
+    });
   });
 
   it.each(['missing', 'stale', 'conflict', 'build-unmatched'] as const)(
-    'creates one anonymous strictly parsed research task for a %s gap',
+    'requires one strictly parsed guide task for a %s gap',
     (kind) => {
-      const tasks = new KnowledgeCoverageGate().plan(packet([gap(1, kind)]), {
-        characters: [
-          {
-            id: '10000052',
-            name: '雷电将军',
-            element: 'electro',
-            weaponType: 'polearm'
-          }
-        ],
+      const evaluation = gate().evaluate(packet([gap(1, kind)]), safeContext);
+
+      expect(evaluation.required).toBe(true);
+      expect(evaluation.tasks).toHaveLength(1);
+      expect(evaluation.tasks[0]).toMatchObject({
+        reason: kind,
+        character: {
+          name: RAIDEN.name,
+          element: RAIDEN.element,
+          weaponType: RAIDEN.weaponType,
+          buildSignals: ['build-match-present', 'build-unknown-present']
+        },
         scenarioTags: ['elemental-shield']
       });
-
-      expect(tasks).toEqual([
-        {
-          key: 'gap-1',
-          reason: kind,
-          character: {
-            name: '雷电将军',
-            element: 'electro',
-            weaponType: 'polearm',
-            buildSignals: ['safe-signal', 'safe-build-unknown']
-          },
-          scenarioTags: ['elemental-shield']
-        }
-      ]);
-      expect(() => knowledgeResearchTaskSchema.parse(tasks[0])).not.toThrow();
+      expect(evaluation.tasks[0]?.key).toMatch(new RegExp(`^guide-${kind}-[a-f0-9]{24}$`));
+      expect(() => guideResearchTaskSchema.parse(evaluation.tasks[0])).not.toThrow();
     }
   );
 
-  it('ignores payload-truncated gaps because they are not a knowledge research reason', () => {
-    expect(
-      new KnowledgeCoverageGate().plan(packet([gap(1, 'payload-truncated')]), {
-        characters: [],
-        scenarioTags: []
-      })
-    ).toEqual([]);
+  it('does not trigger research for payload truncation', () => {
+    expect(gate().evaluate(packet([gap(1, 'payload-truncated')]), safeContext)).toEqual({
+      required: false,
+      tasks: []
+    });
   });
 
-  it('serializes only whitelisted anonymous fields and bounds signals and scenario tags', () => {
+  it('uses only canonical catalog character context and never mistakes a 9-digit account UID for a character', () => {
+    const unsafePacket = packet([
+      {
+        id: 'gap-PRIVATE-NICKNAME-COOKIE-SECRET',
+        subjectId: RAIDEN.id,
+        kind: 'build-unmatched',
+        reason: 'PRIVATE-NICKNAME AUTH-SECRET'
+      },
+      {
+        id: 'gap-123456789-AUTH-SECRET',
+        subjectId: '123456789',
+        kind: 'missing',
+        reason: 'COOKIE-SECRET'
+      }
+    ]);
+    for (const interpretation of unsafePacket.buildInterpretations) {
+      interpretation.matchedSignals = ['PRIVATE-NICKNAME', '123456789', 'ltoken-v2-COOKIE-SECRET'];
+      interpretation.conflictingSignals = ['AUTHORIZATION-SECRET'];
+      interpretation.unknowns = ['API-KEY-SECRET', 'full-stats-99999'];
+    }
     const maliciousContext = {
-      uid: '123456789',
-      nickname: 'PRIVATE-NICKNAME',
-      cookie: 'ltoken_v2=COOKIE-SECRET',
-      Authorization: 'Bearer AUTH-SECRET',
       characters: [
         {
-          id: '10000052',
-          name: '雷电将军',
-          element: 'electro',
-          weaponType: 'polearm',
-          uid: '123456789',
-          cookie: 'COOKIE-SECRET',
-          Authorization: 'AUTH-SECRET',
-          fullStats: { hp: 99_999, atk: 9_999 }
+          id: RAIDEN.id,
+          name: 'PRIVATE-NICKNAME',
+          element: '123456789',
+          weaponType: 'COOKIE-SECRET',
+          buildSignals: ['AUTHORIZATION-SECRET', 'API-KEY-SECRET', 'full-stats-99999']
+        },
+        {
+          id: '123456789',
+          name: 'PRIVATE-ACCOUNT-NICKNAME',
+          element: 'UID-SECRET',
+          weaponType: 'API-KEY-SECRET',
+          buildSignals: ['COOKIE-SECRET']
         }
       ],
-      scenarioTags: Array.from({ length: 30 }, (_, index) => `tag-${index}`)
+      scenarioTags: [
+        'elemental-shield',
+        '123456789',
+        'PRIVATE-NICKNAME',
+        'ltoken_v2=COOKIE-SECRET',
+        'Authorization: Bearer AUTH-SECRET',
+        'api-key=API-KEY-SECRET',
+        'full-stats-99999'
+      ]
     };
-    const unsafePacket = packet([gap(1, 'missing'), gap(2, 'stale', 'scenario:elemental-shield')]);
-    unsafePacket.buildInterpretations[0]!.matchedSignals = Array.from(
-      { length: 12 },
-      (_, index) => `matched-${index}`
-    );
-    unsafePacket.buildInterpretations[0]!.conflictingSignals = ['must-be-trimmed'];
-    unsafePacket.buildInterpretations[0]!.unknowns = ['must-also-be-trimmed'];
 
-    const tasks = new KnowledgeCoverageGate().plan(unsafePacket, maliciousContext);
-    const serialized = JSON.stringify(tasks);
+    const first = gate().evaluate(unsafePacket, maliciousContext);
+    const second = gate().evaluate(unsafePacket, maliciousContext);
+    const serialized = JSON.stringify(first);
 
-    expect(tasks).toHaveLength(2);
-    expect(tasks[0]?.character?.buildSignals).toHaveLength(12);
-    expect(tasks[0]?.scenarioTags).toHaveLength(24);
+    expect(first).toEqual(second);
+    expect(first.required).toBe(true);
+    expect(first.tasks).toHaveLength(2);
+    expect(new Set(first.tasks.map(({ key }) => key)).size).toBe(first.tasks.length);
+    expect(first.tasks[0]?.character).toEqual({
+      name: RAIDEN.name,
+      element: RAIDEN.element,
+      weaponType: RAIDEN.weaponType,
+      buildSignals: ['build-match-present', 'build-conflict-present', 'build-unknown-present']
+    });
+    expect(first.tasks[1]?.character).toBeUndefined();
+    expect(
+      first.tasks.every(({ scenarioTags }) => scenarioTags.join(',') === 'elemental-shield')
+    ).toBe(true);
     expect(serialized).not.toMatch(
-      /123456789|PRIVATE-NICKNAME|COOKIE-SECRET|AUTH-SECRET|fullStats|99999|9999/
+      /123456789|PRIVATE|NICKNAME|COOKIE|AUTH|API-KEY|full-stats|99999|ltoken|Bearer/i
     );
-    for (const task of tasks) {
-      expect(Object.keys(task).sort()).toEqual(
-        ['character', 'key', 'reason', 'scenarioTags']
-          .filter((key) => key !== 'character' || task.character !== undefined)
-          .sort()
-      );
-      expect(() => knowledgeResearchTaskSchema.parse(task)).not.toThrow();
-    }
+  });
+
+  it('deduplicates equivalent anonymous tasks without copying gap identifiers into the key', () => {
+    const repeated = packet([
+      {
+        id: 'gap-private-one',
+        subjectId: 'scenario:PRIVATE-NICKNAME',
+        kind: 'missing',
+        reason: 'first private reason'
+      },
+      {
+        id: 'gap-private-two',
+        subjectId: 'scenario:COOKIE-SECRET',
+        kind: 'missing',
+        reason: 'second private reason'
+      }
+    ]);
+
+    const evaluation = gate().evaluate(repeated, {
+      characters: [],
+      scenarioTags: ['elemental-shield', 'PRIVATE-NICKNAME']
+    });
+
+    expect(evaluation.tasks).toHaveLength(1);
+    expect(evaluation.tasks[0]?.key).toMatch(/^guide-missing-[a-f0-9]{24}$/);
+    expect(JSON.stringify(evaluation)).not.toMatch(/private-one|private-two|NICKNAME|COOKIE/i);
+  });
+
+  it('keeps anonymous keys stable when equivalent safe scenario tags arrive in another order', () => {
+    const targetPacket = packet([gap(1, 'missing')]);
+    const first = gate().evaluate(targetPacket, {
+      ...safeContext,
+      scenarioTags: ['elemental-shield', 'boss']
+    });
+    const reordered = gate().evaluate(targetPacket, {
+      ...safeContext,
+      scenarioTags: ['boss', 'elemental-shield']
+    });
+
+    expect(reordered).toEqual(first);
   });
 });
