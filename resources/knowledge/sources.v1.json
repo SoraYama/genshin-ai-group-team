@@ -40,38 +40,6 @@
   ],
   "citations": [
     {
-      "id": "official-genshin-home",
-      "sourceId": "official-genshin",
-      "url": "https://genshin.hoyoverse.com/en/",
-      "title": "Genshin Impact Official Site",
-      "reviewedAt": "2026-07-24T23:08:06+08:00",
-      "trust": "trusted-local"
-    },
-    {
-      "id": "hoyolab-home",
-      "sourceId": "hoyolab-wiki",
-      "url": "https://hoyolab.com/",
-      "title": "HoYoLAB Official Community",
-      "reviewedAt": "2026-07-24T23:08:06+08:00",
-      "trust": "trusted-local"
-    },
-    {
-      "id": "kqm-guide-directory",
-      "sourceId": "kqm-shortlink",
-      "url": "https://kqm.gg/",
-      "title": "KQM Genshin Impact Guide Directory",
-      "reviewedAt": "2026-07-24T23:08:06+08:00",
-      "trust": "trusted-local"
-    },
-    {
-      "id": "kqm-library-home",
-      "sourceId": "kqm-library",
-      "url": "https://library.keqingmains.com/",
-      "title": "KQM Theorycrafting Library",
-      "reviewedAt": "2026-07-24T23:08:06+08:00",
-      "trust": "trusted-local"
-    },
-    {
       "id": "kqm-raiden-quickguide",
       "sourceId": "kqm-guides",
       "url": "https://keqingmains.com/q/raiden-quickguide/",

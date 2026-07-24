@@ -17,6 +17,13 @@ const acceptedHosts = [
   'kqm.gg',
   'library.keqingmains.com'
 ].sort();
+const reviewedGuideUrls = [
+  'https://keqingmains.com/q/raiden-quickguide/',
+  'https://keqingmains.com/q/shinobu-quickguide/',
+  'https://keqingmains.com/q/nahida-quickguide/',
+  'https://keqingmains.com/q/kokomi-quickguide/',
+  'https://keqingmains.com/q/furina-quickguide/'
+].sort();
 
 describe('committed advisor source policy', () => {
   it('allows exactly the initial reviewed host registry', () => {
@@ -36,6 +43,10 @@ describe('committed advisor source policy', () => {
       expect(acceptedHosts).toContain(url.hostname);
       expect(citation.trust).toBe('trusted-local');
     }
+  });
+
+  it('commits citations for exactly the five reviewed character guides', () => {
+    expect(registry.citations.map(({ url }) => url).sort()).toEqual(reviewedGuideUrls);
   });
 
   it('credits every source and declares the paraphrase-only policy', () => {
