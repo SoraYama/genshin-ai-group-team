@@ -269,10 +269,17 @@ function redactCustomSecrets(value: string, customValues: readonly string[]): st
 }
 
 function findTrailingCustomPrefixLength(value: string, customValues: readonly string[]): number {
-  const maximumPrefixLength = customValues.reduce(
-    (maximum, customValue) => Math.max(maximum, customValue.length - 1),
+  if (customValues.length === 0) return 0;
+  const maximumValueLength = customValues.reduce(
+    (maximum, customValue) => Math.max(maximum, customValue.length),
     0
   );
+  const completeTail = value.slice(-maximumValueLength).toLowerCase();
+  if (customValues.some((customValue) => completeTail.endsWith(customValue.toLowerCase()))) {
+    return 0;
+  }
+
+  const maximumPrefixLength = maximumValueLength - 1;
   if (maximumPrefixLength === 0) return 0;
   const tail = value.slice(-maximumPrefixLength).toLowerCase();
   let longestMatch = 0;

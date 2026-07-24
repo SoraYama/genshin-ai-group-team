@@ -159,6 +159,39 @@ describe('agent run trace contracts', () => {
     expect(sanitized.text).toContain('[REDACTED]');
   });
 
+  it('treats a self-overlapping custom secret ending at the scan edge as a full match', () => {
+    const customSecret = `S${'x'.repeat(510)}S`;
+    const scanLimit = MAX_TRACE_TEXT_INPUT_CHARS + customSecret.length - 1;
+    const compressiblePrefix = `apiKey="${'q'.repeat(4_096)}"\n`;
+    const input = `${compressiblePrefix}${'a'.repeat(
+      scanLimit - compressiblePrefix.length - customSecret.length
+    )}${customSecret}tail`;
+    const sanitized = sanitizeTraceText(input, {
+      maxBytes: MAX_TRACE_TEXT_MAX_BYTES,
+      customHeaderValues: [customSecret]
+    });
+
+    expect(sanitized.truncated).toBe(true);
+    expect(sanitized.text).not.toContain(customSecret.slice(0, -1));
+  });
+
+  it('fully redacts a complete edge secret whose suffix prefixes another secret', () => {
+    const completeSecret = 'alpha-END';
+    const overlappingSecret = `END${'z'.repeat(509)}`;
+    const scanLimit = MAX_TRACE_TEXT_INPUT_CHARS + overlappingSecret.length - 1;
+    const compressiblePrefix = `apiKey="${'q'.repeat(4_096)}"\n`;
+    const input = `${compressiblePrefix}${'a'.repeat(
+      scanLimit - compressiblePrefix.length - completeSecret.length
+    )}${completeSecret}tail`;
+    const sanitized = sanitizeTraceText(input, {
+      maxBytes: MAX_TRACE_TEXT_MAX_BYTES,
+      customHeaderValues: [completeSecret, overlappingSecret]
+    });
+
+    expect(sanitized.truncated).toBe(true);
+    expect(sanitized.text).not.toContain('alpha-');
+  });
+
   it('does not split Unicode surrogate pairs at bounded prefixes or final output', () => {
     const input = `${'x'.repeat(MAX_TRACE_TEXT_INPUT_CHARS - 1)}😀tail`;
     const sanitized = sanitizeTraceText(input, { maxBytes: MAX_TRACE_TEXT_MAX_BYTES });
