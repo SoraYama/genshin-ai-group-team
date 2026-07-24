@@ -16,7 +16,10 @@ const knowledgeDirectory = resolve(process.cwd(), 'resources/knowledge');
 let interpreter: BuildInterpreter;
 
 beforeAll(async () => {
-  interpreter = new BuildInterpreter(await KnowledgeBundleStore.load(knowledgeDirectory));
+  interpreter = new BuildInterpreter(
+    await KnowledgeBundleStore.load(knowledgeDirectory),
+    () => new Date('2026-07-25T00:00:00+08:00')
+  );
 });
 
 type MainStats = Record<'sands' | 'goblet' | 'circlet', ArtifactMainStatKey | 'unknown'>;
@@ -103,10 +106,10 @@ describe('BuildInterpreter reviewed archetypes', () => {
 
     expect(result).toMatchObject({
       archetypeId: 'raiden-emblem-on-field',
-      confidence: 'medium',
+      confidence: 'high',
       currentBuildUsable: true
     });
-    expect(result.matchedSignals).toEqual(['raiden-onfield-er']);
+    expect(result.matchedSignals).toEqual(['raiden-onfield-er', 'raiden-onfield-atk-sands']);
     expect(result.conflictingSignals).not.toContain('raiden-onfield-er-sands');
   });
 
@@ -188,14 +191,14 @@ describe('BuildInterpreter reviewed archetypes', () => {
       reviewedBuild(10000054, {
         sands: 'hpPct',
         goblet: 'hpPct',
-        circlet: 'hpPct'
+        circlet: 'healingBonus'
       })
     );
     const onField = interpret(
       reviewedBuild(10000054, {
         sands: 'energyRecharge',
         goblet: 'hydroDmg',
-        circlet: 'hpPct'
+        circlet: 'healingBonus'
       })
     );
 
@@ -205,11 +208,11 @@ describe('BuildInterpreter reviewed archetypes', () => {
     });
     expect(offField).toMatchObject({
       archetypeId: 'kokomi-off-field-healer',
-      confidence: 'medium'
+      confidence: 'high'
     });
     expect(onField).toMatchObject({
       archetypeId: 'kokomi-on-field-driver',
-      confidence: 'medium'
+      confidence: 'high'
     });
   });
 
@@ -363,6 +366,41 @@ describe('BuildInterpreter conservative boundaries', () => {
     });
   });
 
+  it('reports bounded diagnostics from the closest reviewed candidate on a real no-match', () => {
+    const result = interpret(
+      reviewedBuild(
+        10000052,
+        {
+          sands: 'atkPct',
+          goblet: 'electroDmg',
+          circlet: 'critRate'
+        },
+        { energyRecharge: 120 }
+      )
+    );
+
+    expect(result).toMatchObject({
+      archetypeId: null,
+      currentBuildUsable: false,
+      candidateArchetypeIds: ['raiden-emblem-on-field'],
+      matchedSignals: ['raiden-onfield-atk-sands'],
+      conflictingSignals: ['conflict:raiden-onfield-er', 'conflict:raiden-onfield-er-sands'],
+      closestCandidate: {
+        archetypeId: 'raiden-emblem-on-field',
+        supportingWeight: 2,
+        minimumSupportingWeight: 7,
+        matchedSignals: [{ id: 'raiden-onfield-atk-sands', weight: 2, required: false }],
+        missingSignals: [],
+        conflictingSignals: [
+          { id: 'raiden-onfield-er', weight: 5, required: false },
+          { id: 'raiden-onfield-er-sands', weight: 2, required: false }
+        ]
+      }
+    });
+    expect(result.matchedSignals).toHaveLength(1);
+    expect(result.conflictingSignals.length).toBeLessThanOrEqual(12);
+  });
+
   it('lowers confidence and records stale or missing build provenance', () => {
     const stale = reviewedBuild(
       10000052,
@@ -417,5 +455,84 @@ describe('BuildInterpreter conservative boundaries', () => {
     expect(interpret(second)).toEqual(interpret(first));
     expect(JSON.stringify(interpret(second))).not.toContain('Different Unverified Set');
     expect(JSON.stringify(interpret(second))).not.toContain('Different Informational Weapon');
+  });
+
+  it('accepts fresh knowledge at the review-cadence boundary', () => {
+    const build = reviewedBuild(10000052, {
+      sands: 'elementalMastery',
+      goblet: 'elementalMastery',
+      circlet: 'elementalMastery'
+    });
+
+    expect(interpret(build, { now: new Date('2026-07-25T00:00:00+08:00') })).toMatchObject({
+      archetypeId: 'raiden-em-hyperbloom',
+      currentBuildUsable: true
+    });
+    expect(interpret(build, { now: new Date('2026-10-22T15:08:06.000Z') })).toMatchObject({
+      archetypeId: 'raiden-em-hyperbloom',
+      currentBuildUsable: true
+    });
+  });
+
+  it('rejects knowledge one millisecond after its review cadence expires', () => {
+    const result = interpret(
+      reviewedBuild(10000052, {
+        sands: 'elementalMastery',
+        goblet: 'elementalMastery',
+        circlet: 'elementalMastery'
+      }),
+      {
+        now: new Date('2026-10-22T15:08:06.001Z'),
+        allowRequiredAdjustment: true,
+        roleHint: 'trigger'
+      }
+    );
+
+    expect(result).toMatchObject({
+      archetypeId: null,
+      confidence: 'low',
+      currentBuildUsable: false,
+      adjustment: 'optional',
+      unknowns: ['knowledge-review-stale']
+    });
+  });
+
+  it('rejects knowledge before its declared review time', () => {
+    expect(
+      interpret(
+        reviewedBuild(10000052, {
+          sands: 'elementalMastery',
+          goblet: 'elementalMastery',
+          circlet: 'elementalMastery'
+        }),
+        { now: new Date('2026-07-24T15:08:05.999Z') }
+      )
+    ).toMatchObject({
+      archetypeId: null,
+      currentBuildUsable: false,
+      adjustment: 'optional',
+      unknowns: ['knowledge-review-stale']
+    });
+  });
+
+  it('rejects an invalid interpretation clock explicitly', () => {
+    expect(
+      interpret(
+        reviewedBuild(10000052, {
+          sands: 'elementalMastery',
+          goblet: 'elementalMastery',
+          circlet: 'elementalMastery'
+        }),
+        {
+          now: new Date(Number.NaN),
+          allowRequiredAdjustment: true
+        }
+      )
+    ).toMatchObject({
+      archetypeId: null,
+      currentBuildUsable: false,
+      adjustment: 'optional',
+      unknowns: ['knowledge-review-time-invalid']
+    });
   });
 });

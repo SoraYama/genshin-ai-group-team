@@ -58,7 +58,10 @@ import { TheaterScenarioService } from './services/theater-scenario-service.js';
 import { TheaterAdvisorService } from './services/theater-advisor-service.js';
 import { createProductionScenarioPublicationSource } from './scenario-publication/production-composition.js';
 import { CharacterKnowledgeStore } from './services/character-knowledge-store.js';
-import { KnowledgeBundleStore } from './services/knowledge-bundle-store.js';
+import {
+  KnowledgeBundleLoadError,
+  KnowledgeBundleStore
+} from './services/knowledge-bundle-store.js';
 import { DataManagementService } from './services/data-management-service.js';
 import { registerDataManagementIpc } from './ipc/data-management.ipc.js';
 
@@ -88,6 +91,19 @@ function resolveBundledKnowledgeDir(): string {
   return app.isPackaged
     ? path.join(process.resourcesPath, 'knowledge')
     : path.resolve(__dirname, '../../resources/knowledge');
+}
+
+function bootstrapErrorSummary(error: unknown): { name: string; message: string } {
+  if (error instanceof KnowledgeBundleLoadError) {
+    return {
+      name: 'KnowledgeBundleLoadError',
+      message: error.message
+    };
+  }
+  return {
+    name: 'Error',
+    message: 'Unexpected startup failure'
+  };
 }
 
 async function bootstrapServices(): Promise<void> {
@@ -447,8 +463,8 @@ void app
       }
     });
   })
-  .catch(() => {
-    console.error('[bootstrap] application startup failed');
+  .catch((error) => {
+    console.error('[bootstrap] application startup failed', bootstrapErrorSummary(error));
     app.exit(1);
   });
 

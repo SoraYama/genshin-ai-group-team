@@ -3,7 +3,10 @@ import { basename, resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { KnowledgeBundleStore } from '../../../src/main/services/knowledge-bundle-store.js';
+import {
+  KnowledgeBundleLoadError,
+  KnowledgeBundleStore
+} from '../../../src/main/services/knowledge-bundle-store.js';
 
 const knowledgeDirectory = resolve(process.cwd(), 'resources/knowledge');
 const fileNames = [
@@ -151,30 +154,45 @@ describe('KnowledgeBundleStore', () => {
 
   it('fails loading on malformed JSON, missing files, or catalog-version mismatch', async () => {
     const files = committedFiles();
-    await expect(
-      KnowledgeBundleStore.load(
-        '/virtual/knowledge',
-        injectedReader({ ...files, 'sources.v1.json': 'x' })
-      )
-    ).rejects.toThrow();
-    await expect(
-      KnowledgeBundleStore.load(
-        '/virtual/knowledge',
-        injectedReader({ ...files, 'sources.v1.json': undefined })
-      )
-    ).rejects.toThrow(/missing sources\.v1\.json/);
+    const malformed = KnowledgeBundleStore.load(
+      '/virtual/knowledge',
+      injectedReader({ ...files, 'sources.v1.json': 'x' })
+    );
+    await expect(malformed).rejects.toMatchObject({
+      name: 'KnowledgeBundleLoadError',
+      stage: 'parse',
+      fileName: 'sources.v1.json',
+      message: 'Malformed JSON in trusted knowledge file sources.v1.json'
+    });
+
+    const missing = KnowledgeBundleStore.load('/virtual/knowledge', async (filePath, encoding) => {
+      if (basename(filePath) === 'sources.v1.json') {
+        throw new Error('secret-cookie=must-not-leak');
+      }
+      return injectedReader(files)(filePath, encoding);
+    });
+    await expect(missing).rejects.toMatchObject({
+      name: 'KnowledgeBundleLoadError',
+      stage: 'read',
+      fileName: 'sources.v1.json',
+      message: 'Unable to read trusted knowledge file sources.v1.json'
+    });
+    await expect(missing).rejects.not.toThrow(/secret-cookie/);
 
     const mismatchedStrategies = JSON.parse(files['character-strategies.v2.json']);
     mismatchedStrategies.catalogVersion = 'stale-catalog-version';
-    await expect(
-      KnowledgeBundleStore.load(
-        '/virtual/knowledge',
-        injectedReader({
-          ...files,
-          'character-strategies.v2.json': JSON.stringify(mismatchedStrategies)
-        })
-      )
-    ).rejects.toThrow();
+    const invalid = KnowledgeBundleStore.load(
+      '/virtual/knowledge',
+      injectedReader({
+        ...files,
+        'character-strategies.v2.json': JSON.stringify(mismatchedStrategies)
+      })
+    );
+    await expect(invalid).rejects.toBeInstanceOf(KnowledgeBundleLoadError);
+    await expect(invalid).rejects.toMatchObject({
+      stage: 'validation',
+      message: 'Trusted knowledge bundle validation failed'
+    });
   });
 
   it('fails loading when evidence or strategy facts have been tampered with', async () => {

@@ -967,6 +967,47 @@ export const buildInterpretationSchema = z
     contextRequired: z.boolean().default(false),
     matchedSignals: z.array(z.string().trim().min(1).max(160)).max(12),
     conflictingSignals: z.array(z.string().trim().min(1).max(160)).max(12),
+    closestCandidate: z
+      .object({
+        archetypeId: boundedIdSchema,
+        supportingWeight: z.number().int().min(0).max(120),
+        minimumSupportingWeight: z.number().int().min(0).max(120),
+        matchedSignals: z
+          .array(
+            z
+              .object({
+                id: boundedIdSchema,
+                weight: z.number().int().min(1).max(5),
+                required: z.boolean()
+              })
+              .strict()
+          )
+          .max(24),
+        missingSignals: z
+          .array(
+            z
+              .object({
+                id: boundedIdSchema,
+                weight: z.number().int().min(1).max(5),
+                required: z.boolean()
+              })
+              .strict()
+          )
+          .max(24),
+        conflictingSignals: z
+          .array(
+            z
+              .object({
+                id: boundedIdSchema,
+                weight: z.number().int().min(1).max(5),
+                required: z.boolean()
+              })
+              .strict()
+          )
+          .max(24)
+      })
+      .strict()
+      .optional(),
     currentBuildUsable: z.boolean(),
     adjustment: z.enum(['none', 'optional', 'required']),
     unknowns: z.array(z.string().trim().min(1).max(200)).max(12)

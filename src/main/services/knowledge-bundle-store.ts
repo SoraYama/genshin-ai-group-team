@@ -21,6 +21,25 @@ const COMMITTED_FILE_NAMES = {
   evidence: 'review-evidence.v1.json'
 } as const;
 
+type KnowledgeBundleFileName = (typeof COMMITTED_FILE_NAMES)[keyof typeof COMMITTED_FILE_NAMES];
+
+export class KnowledgeBundleLoadError extends Error {
+  override readonly name = 'KnowledgeBundleLoadError';
+
+  constructor(
+    readonly stage: 'read' | 'parse' | 'validation',
+    readonly fileName: KnowledgeBundleFileName | undefined
+  ) {
+    super(
+      stage === 'validation'
+        ? 'Trusted knowledge bundle validation failed'
+        : `${stage === 'read' ? 'Unable to read' : 'Malformed JSON in'} trusted knowledge file ${
+            fileName ?? 'unknown'
+          }`
+    );
+  }
+}
+
 export class KnowledgeBundleStore implements AdvisorKnowledgeReader {
   private readonly catalogById: ReadonlyMap<string, CommittedCharacterCatalogEntry>;
   private readonly strategiesById: ReadonlyMap<
@@ -28,6 +47,10 @@ export class KnowledgeBundleStore implements AdvisorKnowledgeReader {
     ReturnType<typeof committedAdvisorKnowledgeSetSchema.parse>['strategies']['characters'][number]
   >;
   private readonly citationsById: ReadonlyMap<string, CommittedCitation>;
+  private readonly sourcesById: ReadonlyMap<
+    string,
+    ReturnType<typeof committedAdvisorKnowledgeSetSchema.parse>['sources']['sources'][number]
+  >;
 
   private constructor(
     private readonly bundle: ReturnType<typeof committedAdvisorKnowledgeSetSchema.parse>
@@ -39,6 +62,7 @@ export class KnowledgeBundleStore implements AdvisorKnowledgeReader {
     this.citationsById = new Map(
       bundle.sources.citations.map((citation) => [citation.id, citation])
     );
+    this.sourcesById = new Map(bundle.sources.sources.map((source) => [source.id, source]));
   }
 
   static fromUnknown(input: unknown): KnowledgeBundleStore {
@@ -50,12 +74,26 @@ export class KnowledgeBundleStore implements AdvisorKnowledgeReader {
     readFile: ReadFile = nodeReadFile
   ): Promise<KnowledgeBundleStore> {
     const entries = await Promise.all(
-      Object.entries(COMMITTED_FILE_NAMES).map(async ([key, fileName]) => [
-        key,
-        JSON.parse(await readFile(resolve(directory, fileName), 'utf8')) as unknown
-      ])
+      Object.entries(COMMITTED_FILE_NAMES).map(async ([key, fileName]) => {
+        let serialized: string;
+        try {
+          serialized = await readFile(resolve(directory, fileName), 'utf8');
+        } catch {
+          throw new KnowledgeBundleLoadError('read', fileName);
+        }
+
+        try {
+          return [key, JSON.parse(serialized) as unknown];
+        } catch {
+          throw new KnowledgeBundleLoadError('parse', fileName);
+        }
+      })
     );
-    return KnowledgeBundleStore.fromUnknown(Object.fromEntries(entries));
+    try {
+      return KnowledgeBundleStore.fromUnknown(Object.fromEntries(entries));
+    } catch {
+      throw new KnowledgeBundleLoadError('validation', undefined);
+    }
   }
 
   get version(): string {
@@ -129,13 +167,12 @@ export class KnowledgeBundleStore implements AdvisorKnowledgeReader {
   ): boolean {
     const nowMs = now.getTime();
     if (!Number.isFinite(nowMs)) return false;
-    const sourcesById = new Map(this.bundle.sources.sources.map((source) => [source.id, source]));
     const citationIds = new Set(
       strategy.archetypes.flatMap(({ facts }) => facts.flatMap(({ citationIds }) => citationIds))
     );
     return Array.from(citationIds).every((citationId) => {
       const citation = this.citationsById.get(citationId);
-      const source = citation === undefined ? undefined : sourcesById.get(citation.sourceId);
+      const source = citation === undefined ? undefined : this.sourcesById.get(citation.sourceId);
       if (citation === undefined || source === undefined) return false;
       const reviewedAtMs = Date.parse(citation.reviewedAt);
       const expiresAtMs = reviewedAtMs + source.reviewCadenceDays * 24 * 60 * 60 * 1_000;

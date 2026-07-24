@@ -47,5 +47,11 @@ describe('scenario publisher packaging boundary', () => {
     expect(mainSource).toContain('function resolveBundledKnowledgeDir(): string');
     expect(mainSource).toContain('KnowledgeBundleStore.load(knowledgeDir)');
     expect(mainSource.match(/strategyKnowledge/g)).toHaveLength(2);
+    expect(mainSource).toContain("name: 'KnowledgeBundleLoadError'");
+    expect(mainSource).toContain('message: error.message');
+    expect(mainSource).toContain("message: 'Unexpected startup failure'");
+    expect(mainSource).toContain(
+      "console.error('[bootstrap] application startup failed', bootstrapErrorSummary(error))"
+    );
   });
 });

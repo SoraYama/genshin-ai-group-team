@@ -17,10 +17,14 @@ export interface BuildInterpretationOptions {
   allowRequiredAdjustment?: boolean;
   roleHint?: ReviewedRole;
   teamContextHint?: { role?: ReviewedRole };
+  now?: Date;
 }
 
 export class BuildInterpreter {
-  constructor(private readonly knowledge: AdvisorKnowledgeReader) {}
+  constructor(
+    private readonly knowledge: AdvisorKnowledgeReader,
+    private readonly now: () => Date = () => new Date()
+  ) {}
 
   interpret(
     character: AdvisorCharacterInput,
@@ -33,6 +37,18 @@ export class BuildInterpreter {
     }
     if (strategyResult.status === 'gap') {
       return unresolved(characterId, {}, [`character-review-gap:${characterId}`]);
+    }
+
+    const now = options.now ?? this.now();
+    if (!Number.isFinite(now.getTime())) {
+      return unresolved(characterId, {}, ['knowledge-review-time-invalid']);
+    }
+    const coverage = this.knowledge.coverageFor({
+      characterIds: [characterId],
+      now
+    });
+    if (!coverage.trustedCharacterIds.includes(characterId)) {
+      return unresolved(characterId, {}, ['knowledge-review-stale']);
     }
 
     const build = completeSignalInput(character);
@@ -51,7 +67,32 @@ export class BuildInterpreter {
     );
     const policy = evaluateReviewedArchetypes(archetypes, build);
     if (policy.matches.length === 0) {
-      return unresolved(characterId, options, ['no-compatible-reviewed-archetype']);
+      const closest = [...policy.evaluations].sort(
+        (left, right) =>
+          right.supportingWeight - left.supportingWeight ||
+          right.matchedSignalIds.length - left.matchedSignalIds.length
+      )[0];
+      return {
+        ...unresolved(characterId, options, ['no-compatible-reviewed-archetype']),
+        candidateArchetypeIds: closest === undefined ? [] : [closest.archetypeId],
+        matchedSignals: uniqueBounded(closest?.matchedSignalIds ?? []),
+        conflictingSignals: uniqueBounded([
+          ...(closest?.conflictingSignalIds.map((id) => `conflict:${id}`) ?? []),
+          ...(closest?.missingSignalIds.map((id) => `missing:${id}`) ?? [])
+        ]),
+        ...(closest === undefined
+          ? {}
+          : {
+              closestCandidate: {
+                archetypeId: closest.archetypeId,
+                supportingWeight: closest.supportingWeight,
+                minimumSupportingWeight: closest.minimumSupportingWeight,
+                matchedSignals: closest.matchedSignals,
+                missingSignals: closest.missingSignals,
+                conflictingSignals: closest.conflictingSignals
+              }
+            })
+      };
     }
 
     const candidateArchetypeIds = policy.matches.map(({ archetypeId }) => archetypeId);

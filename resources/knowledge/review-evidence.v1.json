@@ -11,11 +11,11 @@
       "archetypeBindings": [
         {
           "archetypeId": "raiden-em-hyperbloom",
-          "policySha256": "bd4cd8a615b61d2a211fc46af496e78d18bd88747456f6d0652eaea2439ee285"
+          "policySha256": "eb2942d5abab2d30d1b7dd6f228a4cefa5bd824111a6b75b979ba940b55ce502"
         },
         {
           "archetypeId": "raiden-emblem-on-field",
-          "policySha256": "349b053732e899bb4f2ac61e2a7917f0717ebafb472d20f87fda507db09ba0dc"
+          "policySha256": "b9d084ee15dc1e1a75ad19c03b9ccf8938d4bbe78818dda67f86cb4aa92b06c5"
         }
       ],
       "paraphrasedEvidence": [
@@ -31,7 +31,7 @@
         },
         {
           "id": "evidence-raiden-onfield-role",
-          "summary": "审核结论：站场方向围绕元素爆发窗口与全队回能展开，充能需求取决于队伍产球与循环条件。",
+          "summary": "审核结论：站场方向围绕元素爆发窗口与全队回能展开，攻击或充能沙均需与充能达标等另一条线索共同判断，具体需求取决于队伍产球与循环条件。",
           "factBindings": [
             {
               "factId": "raiden-onfield-role",
@@ -50,11 +50,11 @@
       "archetypeBindings": [
         {
           "archetypeId": "shinobu-em-hyperbloom",
-          "policySha256": "d0b11b05d5a76fb873330ef16e2e3744f0f365ff795d4e05014e6c65a81e98c0"
+          "policySha256": "a97f7b5ea8ba1a2ec5fab3aaba70fbd599e0a1a2da839608c52358e86f772810"
         },
         {
           "archetypeId": "shinobu-healer-quicken",
-          "policySha256": "58b8f4034dc362da3ef477b7d312f56f07de609b86a405d6a3ff557b119de62c"
+          "policySha256": "4144b8541ec020132f126d79109d3ead7a18d894ea8fcad8534592910e9b7657"
         }
       ],
       "paraphrasedEvidence": [
@@ -89,11 +89,11 @@
       "archetypeBindings": [
         {
           "archetypeId": "nahida-on-field-driver",
-          "policySha256": "fb2a72fc78e97a2ba8d60ee1b80e2285eb4d5dc8002583ea83f2f2b3cda8f325"
+          "policySha256": "a0a77ef5845e3846a637fc3d34e3236aee501df6707fa35d8b4fd8713b333209"
         },
         {
           "archetypeId": "nahida-off-field-dendro",
-          "policySha256": "e2fbe8751997242813fa14bd40ee2f7b9b8f29f086b179640b671594b070127c"
+          "policySha256": "5b99e30c0326883678aa75fb539df62605f1994cb7845103263ad0cf5dffd511"
         }
       ],
       "paraphrasedEvidence": [
@@ -133,15 +133,15 @@
       "archetypeBindings": [
         {
           "archetypeId": "kokomi-bloom-trigger",
-          "policySha256": "85b3b1dec3721cd8bfe71d23872a29e1ec39d313204983d3b2075d1cd6aee5a1"
+          "policySha256": "cf3c2a36f3b682e8b0e292042ee9e866666629fc4d81386f011503868381fc86"
         },
         {
           "archetypeId": "kokomi-off-field-healer",
-          "policySha256": "54dd79e7ff53448f7a8c61582bfe20416e475a6f5bb4a8060cd194dcc0a77ee4"
+          "policySha256": "cc6071c5c357610e3062f88ef7b41d274d0358ad4e557715a2fe6ed20d4b8985"
         },
         {
           "archetypeId": "kokomi-on-field-driver",
-          "policySha256": "311bb7eee8a215f9f21e35254f3c89f93023e1fea4801042391f4969c1248285"
+          "policySha256": "b4766d8cd3641eb180e242b4dd269fc926358e7b9b67614a97521965e66f025e"
         }
       ],
       "paraphrasedEvidence": [
@@ -186,7 +186,7 @@
       "archetypeBindings": [
         {
           "archetypeId": "furina-off-field-fanfare",
-          "policySha256": "a5a98fe44efdb8117974680810cc2d44e93dbf7a3b892211f89de30021130517"
+          "policySha256": "f3b2ac0e17a20162d49267bcb5bc90f4be1d346fabe8c1e3db5cede7c27c059b"
         }
       ],
       "paraphrasedEvidence": [

@@ -28,11 +28,11 @@ Reproducible review evidence:
 - `resources/knowledge/review-evidence.v1.json` contains only short upstream section labels and this project's own Chinese paraphrased review conclusions, with each fact ID bound to the SHA-256 of its committed fact statement. Each reviewed archetype is also bound to the SHA-256 of its complete canonical policy object, including roles, environments, teammate requirements, signals, thresholds, facts, and explicit unknowns. It does not copy guide paragraphs.
 - Citation `reviewEvidenceSha256` is the SHA-256 of one committed evidence entry serialized as UTF-8 canonical JSON: object keys are recursively sorted lexicographically, array order is preserved, and no insignificant whitespace is emitted.
 - These digests make the bundled reviewed snapshot locally tamper-evident across the files loaded together; they are not an external signature or independent trust root. They cover the committed evidence and archetype policy, **not upstream page HTML** or future upstream changes.
-- Raiden Shogun review evidence — `db0744793ccdb9ed0e65a97fc6022d307a0c79fbda2456db55447bff12f666b0`.
-- Kuki Shinobu review evidence — `12588b41142ee5ba89b47495f36eec1aa29b3e27e74e8e0e66df5fcf7b23a495`.
-- Nahida review evidence — `3fb6001e9722b6f4aa27463d69cbde8d8b4b0b51005984347059e9eb2ee68847`.
-- Kokomi review evidence — `03068357cf5f0cffae7f12bb84ee0d25a21693758d5eca2c6c309efcc4f89d43`.
-- Furina review evidence — `30e7fc76ca220490d524e32406ac659e75113a7e9b6d4c2c8fed319b28162077`.
+- Raiden Shogun review evidence — `887fb33f2722d1a513e3d1d0d005de9720827ca8964bce449aaf896991950ef8`.
+- Kuki Shinobu review evidence — `3ec3fe0cc6fb61574effd7b284c30ce1831949a5e416b9c15714b62ecf2442de`.
+- Nahida review evidence — `45b1d648dd7a1c08445882c129291a18f6697edc4646eaabbf1b086e0f6d75b7`.
+- Kokomi review evidence — `420f8ddbc2f4b115d1ca79c76706940382a988d9a3003e4c8e723358cb79f8a9`.
+- Furina review evidence — `55d58386fb4714ead9c9c3ccd71450063a58dbf0bb7e697b5f7aa4b46db62cd6`.
 
 Accepted source registry entries, reviewed 2026-07-24:
 

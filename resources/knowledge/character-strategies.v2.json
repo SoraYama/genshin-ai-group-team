@@ -1208,7 +1208,7 @@
             }
           ],
           "requiredMode": "all",
-          "minimumSupportingWeight": 5,
+          "minimumSupportingWeight": 10,
           "facts": [
             {
               "id": "raiden-hb-role",
@@ -1271,10 +1271,19 @@
               "description": "时之沙使用充能效率主词条",
               "required": false,
               "weight": 2
+            },
+            {
+              "id": "raiden-onfield-atk-sands",
+              "field": "sandsMainStat",
+              "operator": "eq",
+              "value": "atkPct",
+              "description": "时之沙使用攻击力百分比主词条",
+              "required": false,
+              "weight": 2
             }
           ],
           "requiredMode": "all",
-          "minimumSupportingWeight": 5,
+          "minimumSupportingWeight": 7,
           "facts": [
             {
               "id": "raiden-onfield-role",
@@ -1383,7 +1392,7 @@
             }
           ],
           "requiredMode": "all",
-          "minimumSupportingWeight": 3,
+          "minimumSupportingWeight": 6,
           "facts": [
             {
               "id": "kokomi-bloom-role",
@@ -1443,7 +1452,7 @@
             }
           ],
           "requiredMode": "all",
-          "minimumSupportingWeight": 3,
+          "minimumSupportingWeight": 8,
           "facts": [
             {
               "id": "kokomi-offfield-role",
@@ -1503,7 +1512,7 @@
             }
           ],
           "requiredMode": "all",
-          "minimumSupportingWeight": 3,
+          "minimumSupportingWeight": 8,
           "facts": [
             {
               "id": "kokomi-onfield-role",
@@ -1887,7 +1896,7 @@
             }
           ],
           "requiredMode": "all",
-          "minimumSupportingWeight": 5,
+          "minimumSupportingWeight": 10,
           "facts": [
             {
               "id": "shinobu-hb-role",
@@ -1953,7 +1962,7 @@
             }
           ],
           "requiredMode": "all",
-          "minimumSupportingWeight": 4,
+          "minimumSupportingWeight": 8,
           "facts": [
             {
               "id": "shinobu-quicken-role",
@@ -2247,7 +2256,7 @@
             }
           ],
           "requiredMode": "all",
-          "minimumSupportingWeight": 3,
+          "minimumSupportingWeight": 7,
           "facts": [
             {
               "id": "nahida-onfield-role",
@@ -2313,7 +2322,7 @@
             }
           ],
           "requiredMode": "all",
-          "minimumSupportingWeight": 3,
+          "minimumSupportingWeight": 8,
           "facts": [
             {
               "id": "nahida-offfield-role",
@@ -2851,7 +2860,7 @@
             }
           ],
           "requiredMode": "all",
-          "minimumSupportingWeight": 3,
+          "minimumSupportingWeight": 5,
           "facts": [
             {
               "id": "furina-fanfare-role",
