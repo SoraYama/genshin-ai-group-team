@@ -294,7 +294,7 @@ export const committedCharacterCatalogSchema = z
     retrievedAt: reviewedAtSchema,
     provenance: z.array(characterCatalogProvenanceSchema).length(3),
     exclusions: z.array(characterCatalogExclusionSchema).max(64),
-    characters: z.array(committedCharacterCatalogEntrySchema).min(1).max(256)
+    characters: z.array(committedCharacterCatalogEntrySchema).length(112)
   })
   .strict()
   .superRefine(({ provenance, exclusions, characters }, context) => {
@@ -598,7 +598,7 @@ export const committedCharacterStrategyBundleV2Schema = z
     catalogVersion: z.string().trim().min(1).max(128),
     reviewedAt: reviewedAtSchema,
     trust: z.literal('trusted-local'),
-    characters: z.array(committedCharacterStrategyV2Schema).min(1).max(256)
+    characters: z.array(committedCharacterStrategyV2Schema).length(112)
   })
   .strict()
   .superRefine(({ characters }, context) => {

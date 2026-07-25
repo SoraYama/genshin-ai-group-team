@@ -38,27 +38,45 @@ const supplementalRevision = 'b'.repeat(40);
 const supplementalUrl =
   `https://raw.githubusercontent.com/theBowja/genshin-db-dist/${supplementalRevision}` +
   '/data/scripts/chinesesimplified-characters.js';
-const supplementalPayload = gzipSync(
-  JSON.stringify({
-    data: {
-      ChineseSimplified: {
-        characters: {
-          gamma: {
-            id: 10000003,
-            name: '丙',
-            elementType: 'ELEMENT_CRYO',
-            weaponType: 'WEAPON_CATALYST'
-          }
+const supplementalCharacters = {
+  columbina: {
+    id: 10000125,
+    name: '哥伦比娅',
+    elementType: 'ELEMENT_HYDRO',
+    weaponType: 'WEAPON_CATALYST'
+  },
+  zibai: {
+    id: 10000126,
+    name: '兹白',
+    elementType: 'ELEMENT_GEO',
+    weaponType: 'WEAPON_SWORD_ONE_HAND'
+  },
+  illuga: {
+    id: 10000127,
+    name: '叶洛亚',
+    elementType: 'ELEMENT_GEO',
+    weaponType: 'WEAPON_POLE'
+  }
+};
+
+function supplementalSnapshot(characters: unknown): Uint8Array {
+  const payload = gzipSync(
+    JSON.stringify({
+      data: {
+        ChineseSimplified: {
+          characters
         }
       }
-    }
-  })
-).toString('base64');
-const supplementalBytes = encoder.encode(
-  `!function(){return n(574)("${supplementalPayload}")}();`
-);
+    })
+  ).toString('base64');
+  return encoder.encode(`!function(){return n(574)("${payload}")}();`);
+}
 
-function fixtureCatalog(): KnowledgeProvenanceCatalog {
+const supplementalBytes = supplementalSnapshot(supplementalCharacters);
+
+function fixtureCatalog(
+  supplementalCharactersBytes: Uint8Array = supplementalBytes
+): KnowledgeProvenanceCatalog {
   return {
     provenance: [
       {
@@ -74,7 +92,7 @@ function fixtureCatalog(): KnowledgeProvenanceCatalog {
       {
         id: 'genshin-db-dist-characters',
         url: supplementalUrl,
-        sha256: sha256Hex(supplementalBytes)
+        sha256: sha256Hex(supplementalCharactersBytes)
       }
     ],
     exclusions: [
@@ -87,16 +105,21 @@ function fixtureCatalog(): KnowledgeProvenanceCatalog {
     characters: [
       { id: '10000001', name: '甲', element: 'pyro', weaponType: 'sword' },
       { id: '10000002', name: '乙', element: 'hydro', weaponType: 'bow' },
-      { id: '10000003', name: '丙', element: 'cryo', weaponType: 'catalyst' }
+      { id: '10000125', name: '哥伦比娅', element: 'hydro', weaponType: 'catalyst' },
+      { id: '10000126', name: '兹白', element: 'geo', weaponType: 'sword' },
+      { id: '10000127', name: '叶洛亚', element: 'geo', weaponType: 'polearm' }
     ]
   };
 }
 
-function verify(catalog = fixtureCatalog()) {
+function verify(
+  catalog: KnowledgeProvenanceCatalog = fixtureCatalog(),
+  supplementalCharactersBytes: Uint8Array = supplementalBytes
+) {
   return verifyKnowledgeProvenance(catalog, {
     charactersBytes,
     localizationBytes,
-    supplementalCharactersBytes: supplementalBytes
+    supplementalCharactersBytes
   });
 }
 
@@ -104,9 +127,11 @@ describe('knowledge provenance pure verifier', () => {
   it('accepts matching pinned snapshots', () => {
     expect(verify()).toMatchObject({
       revision,
-      catalogCount: 3,
+      catalogCount: 5,
       exclusionCount: 1,
-      supplementalCharactersSha256: sha256Hex(supplementalBytes)
+      supplementalCharactersSha256: sha256Hex(supplementalBytes),
+      supplementalCount: 3,
+      supplementalCharacterIds: ['10000125', '10000126', '10000127']
     });
   });
 
@@ -144,17 +169,81 @@ describe('knowledge provenance pure verifier', () => {
     );
   });
 
-  it('rejects committed additions that are absent from the supplemental snapshot', () => {
-    const unsupportedAddition = fixtureCatalog();
+  it('rejects every Enka-missing catalog ID outside the fixed supplemental allowlist', () => {
+    const extendedSupplementalBytes = supplementalSnapshot({
+      ...supplementalCharacters,
+      unsupported: {
+        id: 10000128,
+        name: '未授权补充',
+        elementType: 'ELEMENT_CRYO',
+        weaponType: 'WEAPON_CATALYST'
+      }
+    });
+    const unsupportedAddition = fixtureCatalog(extendedSupplementalBytes);
     unsupportedAddition.characters.push({
-      id: '10000004',
-      name: '丁',
+      id: '10000128',
+      name: '未授权补充',
       element: 'cryo',
       weaponType: 'catalyst'
     });
 
-    expect(() => verify(unsupportedAddition)).toThrow(
-      /supplemental metadata is missing for committed character 10000004/i
+    expect(() => verify(unsupportedAddition, extendedSupplementalBytes)).toThrow(
+      /committed character absent from Enka is not allowlisted.*10000128/i
+    );
+  });
+
+  it('rejects a missing required supplemental row', () => {
+    const missingBytes = supplementalSnapshot({
+      columbina: supplementalCharacters.columbina,
+      zibai: supplementalCharacters.zibai
+    });
+
+    expect(() => verify(fixtureCatalog(missingBytes), missingBytes)).toThrow(
+      /supplemental metadata is missing for required character 10000127/i
+    );
+  });
+
+  it('rejects malformed supplemental structures and required names', () => {
+    const malformedStructureBytes = supplementalSnapshot([]);
+    expect(() =>
+      verify(fixtureCatalog(malformedStructureBytes), malformedStructureBytes)
+    ).toThrow(/supplemental character snapshot is missing.*characters/i);
+
+    const malformedNameBytes = supplementalSnapshot({
+      ...supplementalCharacters,
+      columbina: { ...supplementalCharacters.columbina, name: '' }
+    });
+    expect(() => verify(fixtureCatalog(malformedNameBytes), malformedNameBytes)).toThrow(
+      /invalid supplemental name for required character 10000125/i
+    );
+  });
+
+  it('rejects unknown element and weapon values on required supplemental rows', () => {
+    const unknownElementBytes = supplementalSnapshot({
+      ...supplementalCharacters,
+      zibai: { ...supplementalCharacters.zibai, elementType: 'ELEMENT_VOID' }
+    });
+    expect(() => verify(fixtureCatalog(unknownElementBytes), unknownElementBytes)).toThrow(
+      /unsupported supplemental element.*10000126.*ELEMENT_VOID/i
+    );
+
+    const unknownWeaponBytes = supplementalSnapshot({
+      ...supplementalCharacters,
+      illuga: { ...supplementalCharacters.illuga, weaponType: 'WEAPON_ORB' }
+    });
+    expect(() => verify(fixtureCatalog(unknownWeaponBytes), unknownWeaponBytes)).toThrow(
+      /unsupported supplemental weapon.*10000127.*WEAPON_ORB/i
+    );
+  });
+
+  it('rejects duplicate required supplemental IDs even when object keys differ', () => {
+    const duplicateBytes = supplementalSnapshot({
+      ...supplementalCharacters,
+      columbinaDuplicate: { ...supplementalCharacters.columbina }
+    });
+
+    expect(() => verify(fixtureCatalog(duplicateBytes), duplicateBytes)).toThrow(
+      /duplicate required supplemental character 10000125/i
     );
   });
 });

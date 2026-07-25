@@ -29,6 +29,8 @@ export interface KnowledgeProvenanceReport {
   charactersSha256: string;
   localizationSha256: string;
   supplementalCharactersSha256: string;
+  supplementalCount: number;
+  supplementalCharacterIds: string[];
 }
 
 const elementByEnkaValue: Readonly<Record<string, string>> = {
@@ -61,6 +63,10 @@ const supplementalElementByValue: Readonly<Record<string, string>> = {
   ELEMENT_PYRO: 'pyro',
   ELEMENT_CRYO: 'cryo'
 };
+const requiredSupplementalCharacterIds = ['10000125', '10000126', '10000127'] as const;
+const requiredSupplementalCharacterIdSet: ReadonlySet<string> = new Set(
+  requiredSupplementalCharacterIds
+);
 
 export function sha256Hex(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex');
@@ -94,6 +100,26 @@ export function verifyKnowledgeProvenance(
   const populatedIds = new Set(populatedRows.map(([id]) => id));
   const committedIds = new Set(catalog.characters.map(({ id }) => id));
   const exclusionIds = new Set(catalog.exclusions.map(({ id }) => id));
+  const unsupportedSupplementalIds = [...committedIds].filter(
+    (id) => !populatedIds.has(id) && !requiredSupplementalCharacterIdSet.has(id)
+  );
+  if (unsupportedSupplementalIds.length > 0) {
+    throw new Error(
+      `Committed character absent from Enka is not allowlisted for supplemental provenance: ${unsupportedSupplementalIds
+        .sort()
+        .join(', ')}`
+    );
+  }
+  const missingCommittedSupplementalIds = requiredSupplementalCharacterIds.filter(
+    (id) => !committedIds.has(id)
+  );
+  if (missingCommittedSupplementalIds.length > 0) {
+    throw new Error(
+      `Required supplemental character is missing from committed catalog: ${missingCommittedSupplementalIds.join(
+        ', '
+      )}`
+    );
+  }
 
   const missingExclusions = [...populatedIds].filter(
     (id) => !committedIds.has(id) && !exclusionIds.has(id)
@@ -130,15 +156,13 @@ export function verifyKnowledgeProvenance(
     .filter(([id]) => !exclusionIds.has(id))
     .map(([id, value]) => normalizeCharacter(id, value, zhCn))
     .concat(
-      catalog.characters
-        .filter(({ id }) => !populatedIds.has(id))
-        .map(({ id }) => {
-          const supplemental = supplementalCharacters.get(id);
-          if (supplemental === undefined) {
-            throw new Error(`Supplemental metadata is missing for committed character ${id}`);
-          }
-          return supplemental;
-        })
+      requiredSupplementalCharacterIds.map((id) => {
+        const character = supplementalCharacters.get(id);
+        if (!character) {
+          throw new Error(`Supplemental metadata is missing for required character ${id}`);
+        }
+        return character;
+      })
     )
     .sort((left, right) => left.id.localeCompare(right.id));
   const committed = catalog.characters
@@ -167,7 +191,9 @@ export function verifyKnowledgeProvenance(
     exclusionCount: catalog.exclusions.length,
     charactersSha256,
     localizationSha256,
-    supplementalCharactersSha256
+    supplementalCharactersSha256,
+    supplementalCount: requiredSupplementalCharacterIds.length,
+    supplementalCharacterIds: [...requiredSupplementalCharacterIds]
   };
 }
 
@@ -250,21 +276,41 @@ function parseSupplementalCharacters(
     string,
     { id: string; name: string; element: string; weaponType: string }
   >();
+  const seenRequiredIds = new Set<string>();
   for (const value of Object.values(characters)) {
     if (!isRecord(value)) continue;
     const id = String(value['id']);
+    if (!requiredSupplementalCharacterIdSet.has(id)) continue;
+    if (seenRequiredIds.has(id)) {
+      throw new Error(`Duplicate required supplemental character ${id}`);
+    }
+    seenRequiredIds.add(id);
     const name = value['name'];
+    if (typeof name !== 'string' || name.length === 0 || name !== name.trim()) {
+      throw new Error(`Invalid supplemental name for required character ${id}`);
+    }
+    const rawElement = value['elementType'];
     const element =
-      typeof value['elementType'] === 'string'
-        ? supplementalElementByValue[value['elementType']]
-        : undefined;
+      typeof rawElement === 'string' ? supplementalElementByValue[rawElement] : undefined;
+    if (!element) {
+      throw new Error(
+        `Unsupported supplemental element for required character ${id}: ${String(rawElement)}`
+      );
+    }
+    const rawWeapon = value['weaponType'];
     const weaponType =
-      typeof value['weaponType'] === 'string' ? weaponByEnkaValue[value['weaponType']] : undefined;
-    if (!/^1\d{7}$/u.test(id) || typeof name !== 'string' || !element || !weaponType) continue;
-    if (normalized.has(id)) {
-      throw new Error(`Supplemental character snapshot contains duplicate id ${id}`);
+      typeof rawWeapon === 'string' ? weaponByEnkaValue[rawWeapon] : undefined;
+    if (!weaponType) {
+      throw new Error(
+        `Unsupported supplemental weapon for required character ${id}: ${String(rawWeapon)}`
+      );
     }
     normalized.set(id, { id, name, element, weaponType });
+  }
+  for (const id of requiredSupplementalCharacterIds) {
+    if (!normalized.has(id)) {
+      throw new Error(`Supplemental metadata is missing for required character ${id}`);
+    }
   }
   return normalized;
 }

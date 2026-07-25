@@ -22,7 +22,7 @@ const report = verifyKnowledgeProvenance(catalog, {
 });
 
 console.log(
-  `[knowledge-provenance] verified revision=${report.revision} catalog=${report.catalogCount} exclusions=${report.exclusionCount} charactersSha256=${report.charactersSha256} locSha256=${report.localizationSha256} supplementalSha256=${report.supplementalCharactersSha256} weaponType=verified`
+  `[knowledge-provenance] verified revision=${report.revision} catalog=${report.catalogCount} exclusions=${report.exclusionCount} charactersSha256=${report.charactersSha256} locSha256=${report.localizationSha256} supplementalSha256=${report.supplementalCharactersSha256} supplementalCount=${report.supplementalCount} supplementalIds=${report.supplementalCharacterIds.join(',')} weaponType=verified`
 );
 
 async function fetchSnapshot(url: string | undefined): Promise<Uint8Array> {

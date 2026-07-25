@@ -227,7 +227,7 @@ describe('committed advisor knowledge bundles', () => {
 
     expect(new Set(catalogIds).size).toBe(catalogIds.length);
     expect(new Set(strategyIds).size).toBe(strategyIds.length);
-    expect(catalogIds.length).toBeGreaterThanOrEqual(112);
+    expect(catalogIds).toHaveLength(112);
     expect([...strategyIds].sort()).toEqual([...catalogIds].sort());
     expect(
       catalog.characters
@@ -253,6 +253,42 @@ describe('committed advisor knowledge bundles', () => {
         weaponType: 'polearm'
       }
     ]);
+  });
+
+  it('rejects committed catalog and strategy snapshots whose size is not exactly 112', () => {
+    const shortCatalog = structuredClone(catalog);
+    shortCatalog.characters.pop();
+    expect(committedCharacterCatalogSchema.safeParse(shortCatalog).success).toBe(false);
+
+    const longCatalog = structuredClone(catalog);
+    longCatalog.characters.push({
+      id: '19999999',
+      name: '越界目录测试项',
+      aliases: [],
+      element: 'cryo',
+      weaponType: 'catalyst'
+    });
+    expect(committedCharacterCatalogSchema.safeParse(longCatalog).success).toBe(false);
+
+    const shortStrategies = structuredClone(strategies);
+    shortStrategies.characters.pop();
+    expect(committedCharacterStrategyBundleV2Schema.safeParse(shortStrategies).success).toBe(
+      false
+    );
+
+    const longStrategies = structuredClone(strategies);
+    const extraStrategy = structuredClone(
+      longStrategies.characters.find(({ reviewState }) => reviewState === 'unreviewed')!
+    );
+    extraStrategy.id = '19999999';
+    extraStrategy.name = '越界策略测试项';
+    extraStrategy.archetypes[0]!.id = 'unreviewed-19999999';
+    extraStrategy.archetypes[0]!.unknowns[0]!.id = 'strategy-gap-19999999';
+    extraStrategy.unknowns[0]!.id = 'character-review-gap-19999999';
+    longStrategies.characters.push(extraStrategy);
+    expect(committedCharacterStrategyBundleV2Schema.safeParse(longStrategies).success).toBe(
+      false
+    );
   });
 
   it('audits every non-canonical numeric upstream entry excluded from the roster', () => {
