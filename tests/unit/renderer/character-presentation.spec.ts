@@ -158,6 +158,7 @@ describe('character presentation decisions', () => {
       kind: 'raw',
       label: 'new_stat script alert(1) /script'
     });
-    expect(presentArtifactStatKey('   ')).toEqual({ kind: 'raw', label: 'unknown' });
+    expect(presentArtifactStatKey('   ')).toEqual({ kind: 'unavailable' });
+    expect(presentArtifactStatKey('\u0000\u001f\u007f')).toEqual({ kind: 'unavailable' });
   });
 });

@@ -1,3 +1,4 @@
+import type { RefObject } from 'react';
 import { ElementIcon } from '../../design/Icons';
 import { elements, type Element } from '../../design/tokens';
 import { useI18n } from '../../i18n';
@@ -9,6 +10,7 @@ interface RosterToolbarProps {
   filter: ElementFilter;
   filteredCount: number;
   query: string;
+  searchInputRef: RefObject<HTMLInputElement | null>;
   sort: RosterSortMode;
   totalCount: number;
   onFilterChange: (filter: ElementFilter) => void;
@@ -23,6 +25,7 @@ export function RosterToolbar({
   onQueryChange,
   onSortChange,
   query,
+  searchInputRef,
   sort,
   totalCount
 }: RosterToolbarProps) {
@@ -32,6 +35,7 @@ export function RosterToolbar({
       <label className="gta-roster-search">
         <span className="gta-field-label">{t('roster.search')}</span>
         <input
+          ref={searchInputRef}
           type="search"
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}

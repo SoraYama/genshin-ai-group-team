@@ -1,82 +1,218 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { createElement, type ReactElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { afterAll, describe, expect, it } from 'vitest';
+import type { CharacterProfile } from '../../../src/shared/domain.js';
+import { I18nProvider, type Locale } from '../../../src/renderer/i18n/index.js';
+import { CharacterCard } from '../../../src/renderer/pages/Roster/CharacterCard.js';
+import { CharacterDetailDrawer } from '../../../src/renderer/pages/Roster/CharacterDetailDrawer.js';
+import { CharacterTile } from '../../../src/renderer/pages/Roster/CharacterTile.js';
 
-describe('roster character portrait', () => {
-  it('renders a semantic compact tile with the proxied portrait and fallback', async () => {
-    const source = await readFile(
-      path.resolve('src/renderer/pages/Roster/CharacterTile.tsx'),
-      'utf8'
+const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+
+afterAll(() => {
+  if (originalLocalStorage) {
+    Object.defineProperty(globalThis, 'localStorage', originalLocalStorage);
+  } else {
+    Reflect.deleteProperty(globalThis, 'localStorage');
+  }
+});
+
+function renderLocalized(locale: Locale, child: ReactElement): string {
+  const storage: Storage = {
+    length: 1,
+    clear: () => undefined,
+    getItem: (key) => (key === 'gta.locale' ? locale : null),
+    key: (index) => (index === 0 ? 'gta.locale' : null),
+    removeItem: () => undefined,
+    setItem: () => undefined
+  };
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: storage
+  });
+  return renderToStaticMarkup(createElement(I18nProvider, null, child));
+}
+
+function character(overrides: Partial<CharacterProfile> = {}): CharacterProfile {
+  return {
+    id: 10000052,
+    name: '枫原万叶',
+    element: 'Anemo',
+    rarity: 5,
+    imageUrl: 'gtai-img://avatar/UI_AvatarIcon_Kazuha.png',
+    level: 90,
+    constellation: 2,
+    completeness: 'detailed',
+    missingFields: [],
+    provenance: {
+      ownership: {
+        source: 'miyoushe-list',
+        fetchedAt: '2026-07-25T00:00:00.000Z'
+      },
+      build: {
+        source: 'enka',
+        fetchedAt: '2026-07-25T00:00:00.000Z'
+      },
+      stats: {
+        source: 'enka',
+        fetchedAt: '2026-07-25T00:00:00.000Z'
+      }
+    },
+    build: {
+      stats: {
+        hp: 19999,
+        atk: 1450,
+        def: 900,
+        critRate: 45.4,
+        critDmg: 112.2,
+        energyRecharge: 117.5,
+        elementalMastery: 820
+      },
+      weapon: {
+        id: 11503,
+        name: '苍古自由之誓',
+        iconUrl: '',
+        level: 90,
+        refinement: 1,
+        rarity: 5
+      },
+      artifacts: [
+        {
+          slot: 'sands',
+          setId: 15002,
+          setName: '翠绿之影',
+          level: 20,
+          rarity: 5,
+          mainStat: { key: 'elementalMastery', value: 187 },
+          subStats: []
+        }
+      ],
+      talents: {
+        normalAttack: 6,
+        elementalSkill: 9,
+        elementalBurst: 9
+      }
+    },
+    ...overrides
+  };
+}
+
+describe('roster character components', () => {
+  it('SSR-renders the compact semantic tile with a proxied portrait', () => {
+    const markup = renderLocalized(
+      'zh-CN',
+      createElement(CharacterTile, {
+        character: character(),
+        imageRevision: '2026-07-25T00:00:00.000Z',
+        onSelect: () => undefined,
+        selected: true
+      })
     );
 
-    expect(source).toContain('data-testid="character-tile"');
-    expect(source).toContain('type="button"');
-    expect(source).toContain('aria-pressed={selected}');
-    expect(source).toContain('renderTile(character)');
-    expect(source).toContain('<img');
-    expect(source).toContain('loading="lazy"');
-    expect(source).toContain('decoding="async"');
-    expect(source).toContain('onError=');
-    expect(source).toContain('<IdentityMark');
+    expect(markup).toContain('data-testid="character-tile"');
+    expect(markup).toContain('aria-pressed="true"');
+    expect(markup).toContain('aria-controls="character-detail-drawer"');
+    expect(markup).toContain('src="gtai-img://avatar/UI_AvatarIcon_Kazuha.png"');
+    expect(markup).toContain('loading="lazy"');
+    expect(markup).toContain('decoding="async"');
+    expect(markup).toContain('枫原万叶');
+    expect(markup).toContain('Lv.90');
+    expect(markup).toContain('详细面板');
   });
 
-  it('sizes the loaded portrait as the tile scanning anchor', async () => {
-    const source = await readFile(path.resolve('src/renderer/styles/pages/roster.css'), 'utf8');
-
-    expect(source).toContain('.character-tile__portrait.has-image img');
-    expect(source).toContain('object-fit: cover');
-    expect(source).toContain('object-position: center top');
-  });
-
-  it('uses a restrained cold grid with gold limited to interaction and completeness', async () => {
-    const styles = await readFile(path.resolve('src/renderer/styles/pages/roster.css'), 'utf8');
-
-    expect(styles).toMatch(/\.roster-grid\s*\{[^}]*background:/su);
-    expect(styles).toContain('.character-tile:hover');
-    expect(styles).toContain(".character-tile[aria-pressed='true']");
-    expect(styles).toContain('.character-tile:focus-visible');
-  });
-
-  it('moves complete character data into an accessible right-side drawer', async () => {
-    const drawer = await readFile(
-      path.resolve('src/renderer/pages/Roster/CharacterDetailDrawer.tsx'),
-      'utf8'
-    );
-    const detail = await readFile(
-      path.resolve('src/renderer/pages/Roster/CharacterCard.tsx'),
-      'utf8'
+  it('SSR-renders an identity fallback instead of a forbidden external portrait', () => {
+    const markup = renderLocalized(
+      'zh-CN',
+      createElement(CharacterTile, {
+        character: character({
+          imageUrl: 'https://enka.network/ui/UI_AvatarIcon_Kazuha.png'
+        }),
+        onSelect: () => undefined,
+        selected: false
+      })
     );
 
-    expect(drawer).toContain('role="dialog"');
-    expect(drawer).toContain('aria-modal="true"');
-    expect(drawer).toContain('<CharacterCard character={character} />');
-    expect(drawer).toContain("event.key === 'Escape'");
-    expect(drawer).toContain("event.key === 'Tab'");
-    expect(detail).toContain('gta-character-detail');
+    expect(markup).not.toContain('https://enka.network/ui/UI_AvatarIcon_Kazuha.png');
+    expect(markup).toContain('character-tile__rune');
+    expect(markup).toContain('枫');
   });
 
-  it('renders the known energy value without generic advice', async () => {
-    const translations = await readFile(path.resolve('src/renderer/i18n/index.tsx'), 'utf8');
-
-    expect(translations.match(/'roster\.energyPanel\.known': '\{\{value\}\}%'/gu)).toHaveLength(2);
-    expect(translations).not.toContain('是否够用需结合角色、队伍产球与实战循环判断');
-    expect(translations).not.toContain(
-      'Whether it is sufficient depends on the character, team particles, and rotation.'
-    );
-  });
-
-  it('surfaces explicitly missing build fields through localized detail copy', async () => {
-    const detail = await readFile(
-      path.resolve('src/renderer/pages/Roster/CharacterCard.tsx'),
-      'utf8'
+  it('SSR-renders known build facts without generic energy advice', () => {
+    const markup = renderLocalized(
+      'zh-CN',
+      createElement(CharacterCard, { character: character() })
     );
 
-    expect(detail).toContain('character.missingFields');
-    expect(detail).toContain("t('roster.missing'");
-    expect(detail).toContain("'roster.provenance.stats'");
+    expect(markup).toContain('117.5%');
+    expect(markup).toContain('苍古自由之誓');
+    expect(markup).toContain('元素精通 187');
+    expect(markup).not.toContain('是否够用需结合角色');
   });
 
-  it('allocates the viewport remainder to a self-scrolling dense grid and drawer', async () => {
+  it('SSR-renders explicitly missing build fields with localized copy', () => {
+    const missing = character({
+      build: undefined,
+      completeness: 'basic',
+      missingFields: ['stats', 'weapon', 'artifacts', 'talents']
+    });
+
+    const zhMarkup = renderLocalized('zh-CN', createElement(CharacterCard, { character: missing }));
+    const enMarkup = renderLocalized('en-US', createElement(CharacterCard, { character: missing }));
+
+    expect(zhMarkup).toContain('缺失：面板数值、武器、圣遗物、天赋');
+    expect(enMarkup).toContain('Missing: Panel stats, Weapon, Artifacts, Talents');
+  });
+
+  it('SSR-renders the character card inside a named modal drawer', () => {
+    const markup = renderLocalized(
+      'zh-CN',
+      createElement(CharacterDetailDrawer, {
+        character: character(),
+        onDismiss: () => undefined
+      })
+    );
+
+    expect(markup).toContain('role="dialog"');
+    expect(markup).toContain('aria-modal="true"');
+    expect(markup).toContain('枫原万叶资料');
+    expect(markup).toContain('gta-character-detail');
+  });
+
+  it('localizes blank or control-only artifact stat keys as unavailable', () => {
+    const unavailable = character({
+      build: {
+        ...character().build,
+        artifacts: [
+          {
+            slot: 'goblet',
+            setId: 0,
+            setName: '',
+            level: 20,
+            rarity: 5,
+            mainStat: { key: '\u0000 \u001f', value: 46.6 },
+            subStats: []
+          }
+        ]
+      }
+    });
+
+    const zhMarkup = renderLocalized(
+      'zh-CN',
+      createElement(CharacterCard, { character: unavailable })
+    );
+    const enMarkup = renderLocalized(
+      'en-US',
+      createElement(CharacterCard, { character: unavailable })
+    );
+
+    expect(zhMarkup).toContain('属性类型不可用 46.6');
+    expect(enMarkup).toContain('Stat unavailable 46.6');
+    expect(zhMarkup).not.toContain('unknown');
+  });
+
+  it('keeps the dense grid and drawer within independently scrolling surfaces', async () => {
     const styles = await readFile(path.resolve('src/renderer/styles/pages/roster.css'), 'utf8');
 
     expect(styles).toMatch(

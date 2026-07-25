@@ -7,11 +7,17 @@ import { isRenderableCharacterPortrait, renderTile } from './character-presentat
 
 interface CharacterTileProps {
   character: CharacterProfile;
+  imageRevision?: string;
   selected: boolean;
   onSelect: (trigger: HTMLButtonElement) => void;
 }
 
-export function CharacterTile({ character, onSelect, selected }: CharacterTileProps) {
+export function CharacterTile({
+  character,
+  imageRevision,
+  onSelect,
+  selected
+}: CharacterTileProps) {
   const { t } = useI18n();
   const tile = renderTile(character);
   const element = normalizeElement(tile.element);
@@ -37,7 +43,12 @@ export function CharacterTile({ character, onSelect, selected }: CharacterTilePr
       }
       onClick={(event) => onSelect(event.currentTarget)}
     >
-      <CharacterPortrait element={element} imageUrl={character.imageUrl} name={tile.name} />
+      <CharacterPortrait
+        element={element}
+        imageRevision={imageRevision}
+        imageUrl={character.imageUrl}
+        name={tile.name}
+      />
       <span className="character-tile__copy">
         <strong>{tile.name}</strong>
         <span className="character-tile__meta">
@@ -62,15 +73,20 @@ export function CharacterTile({ character, onSelect, selected }: CharacterTilePr
 
 export function CharacterPortrait({
   element,
+  imageRevision,
   imageUrl,
   name
 }: {
   element: Element | undefined;
+  imageRevision?: string;
   imageUrl: string | undefined;
   name: string;
 }) {
-  const [failedImageUrl, setFailedImageUrl] = useState<string>();
-  const canShowImage = isRenderableCharacterPortrait(imageUrl) && failedImageUrl !== imageUrl;
+  const imageRequestKey = isRenderableCharacterPortrait(imageUrl)
+    ? `${imageUrl}\u0000${imageRevision ?? ''}`
+    : undefined;
+  const [failedImageRequestKey, setFailedImageRequestKey] = useState<string>();
+  const canShowImage = imageRequestKey !== undefined && failedImageRequestKey !== imageRequestKey;
 
   if (!canShowImage) {
     return <IdentityMark name={name} element={element} />;
@@ -84,7 +100,7 @@ export function CharacterPortrait({
         loading="lazy"
         decoding="async"
         draggable={false}
-        onError={() => setFailedImageUrl(imageUrl)}
+        onError={() => setFailedImageRequestKey(imageRequestKey)}
       />
     </span>
   );

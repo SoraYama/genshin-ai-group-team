@@ -124,7 +124,8 @@ export type ArtifactStatKey =
 
 export type PresentedArtifactStatKey =
   | { kind: 'known'; key: ArtifactStatKey }
-  | { kind: 'raw'; label: string };
+  | { kind: 'raw'; label: string }
+  | { kind: 'unavailable' };
 
 const artifactStatAliases: Record<string, ArtifactStatKey> = {
   HP: 'hp',
@@ -216,7 +217,7 @@ export function presentArtifactStatKey(raw: string): PresentedArtifactStatKey {
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 48);
-  return { kind: 'raw', label: label || 'unknown' };
+  return label ? { kind: 'raw', label } : { kind: 'unavailable' };
 }
 
 export function artifactStatUsesPercent(key: PresentedArtifactStatKey): boolean {

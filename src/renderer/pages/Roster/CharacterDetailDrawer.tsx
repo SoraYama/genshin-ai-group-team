@@ -5,6 +5,7 @@ import { CharacterCard } from './CharacterCard';
 
 interface CharacterDetailDrawerProps {
   character: CharacterProfile;
+  imageRevision?: string;
   onDismiss: () => void;
 }
 
@@ -17,7 +18,11 @@ const FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])'
 ].join(',');
 
-export function CharacterDetailDrawer({ character, onDismiss }: CharacterDetailDrawerProps) {
+export function CharacterDetailDrawer({
+  character,
+  imageRevision,
+  onDismiss
+}: CharacterDetailDrawerProps) {
   const { t } = useI18n();
   const titleId = useId();
   const drawerRef = useRef<HTMLElement>(null);
@@ -100,7 +105,7 @@ export function CharacterDetailDrawer({ character, onDismiss }: CharacterDetailD
           </button>
         </header>
         <div className="character-detail-drawer__scroll">
-          <CharacterCard character={character} />
+          <CharacterCard character={character} imageRevision={imageRevision} />
         </div>
       </aside>
     </div>

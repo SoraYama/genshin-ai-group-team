@@ -907,6 +907,8 @@ test('renders profile coverage and known build fields without fake zero values',
     'Data completeness: high to low'
   ]);
   await switchToChinese();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('menu', { name: '账号与设置' })).toBeHidden();
   await sortSelect.selectOption('default');
 
   const maintenanceButton = page.getByRole('button', { name: '账号维护' });
@@ -1199,12 +1201,10 @@ test('renders profile coverage and known build fields without fake zero values',
     .getByRole('dialog', { name: '删除脱敏测试账号的本机角色资料？' })
     .getByRole('button', { name: '删除脱敏测试账号的本机角色资料' })
     .click();
-  await expect(page.getByRole('tab', { name: /备用测试账号/ })).toHaveAttribute(
-    'aria-selected',
-    'true'
-  );
+  const remainingAccountTab = page.getByRole('tab', { name: /备用测试账号/ });
+  await expect(remainingAccountTab).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByText(/当前没有角色面板数据/)).toBeVisible();
-  expect(await page.evaluate<string>("document.activeElement?.tagName ?? ''")).not.toBe('BODY');
+  await expect(remainingAccountTab).toBeFocused();
   expect(rendererErrors).toEqual([]);
 });
 

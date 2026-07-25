@@ -23,6 +23,11 @@ type Status =
   | { kind: 'success'; message: string }
   | { kind: 'error'; message: string };
 
+interface ProfileRequestToken {
+  generation: number;
+  uid: string;
+}
+
 export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPageProps) {
   const { locale, t } = useI18n();
   const [profile, setProfile] = useState<PersistedProfile | null>(null);
@@ -33,33 +38,82 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
   const [sortMode, setSortMode] = useState<RosterSortMode>('default');
   const [selectedCharacterId, setSelectedCharacterId] = useState<number | null>(null);
   const selectedTileRef = useRef<HTMLButtonElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const rosterGridRef = useRef<HTMLDivElement | null>(null);
+  const focusFrameRef = useRef<number | null>(null);
   const activeUid = state.activeUid;
+  const activeUidRef = useRef(activeUid);
+  const mountedRef = useRef(true);
+  const requestGenerationRef = useRef(0);
+  activeUidRef.current = activeUid;
 
+  const beginProfileRequest = useCallback(
+    (uid: string): ProfileRequestToken => ({
+      generation: ++requestGenerationRef.current,
+      uid
+    }),
+    []
+  );
+  const canCommitProfileRequest = useCallback(
+    (token: ProfileRequestToken, responseUid?: string): boolean =>
+      mountedRef.current &&
+      token.generation === requestGenerationRef.current &&
+      token.uid === activeUidRef.current &&
+      (responseUid === undefined || responseUid === token.uid),
+    []
+  );
+  const restorePersistedActiveUid = useCallback(async () => {
+    while (mountedRef.current) {
+      const uid = activeUidRef.current;
+      const generation = requestGenerationRef.current;
+      if (!uid) return;
+      await api.profile.setActive({ uid });
+      if (!mountedRef.current) return;
+      if (uid === activeUidRef.current && generation === requestGenerationRef.current) return;
+    }
+  }, []);
   const loadProfile = useCallback(
     async (uid: string) => {
+      const token = beginProfileRequest(uid);
       setStatus({ kind: 'loading', label: t('common.loading') });
       try {
-        setProfile(await api.profile.get({ uid }));
+        const next = await api.profile.get({ uid });
+        if (!canCommitProfileRequest(token, next?.uid)) return;
+        setProfile(next);
         setStatus({ kind: 'idle' });
       } catch (error) {
+        if (!canCommitProfileRequest(token)) return;
         setStatus({ kind: 'error', message: localizeError(error, locale, t, 'roster.error.load') });
       }
     },
-    [locale, t]
+    [beginProfileRequest, canCommitProfileRequest, locale, t]
   );
 
   useEffect(() => {
-    if (!activeUid) {
-      setProfile(null);
-      return;
-    }
-    void loadProfile(activeUid);
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      requestGenerationRef.current += 1;
+      if (focusFrameRef.current !== null) cancelAnimationFrame(focusFrameRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    requestGenerationRef.current += 1;
+    setProfile(null);
+    setLastRefresh(null);
+    setStatus({ kind: 'idle' });
+  }, [activeUid]);
+
+  useEffect(() => {
+    if (activeUid) void loadProfile(activeUid);
   }, [activeUid, loadProfile]);
 
+  const verifiedProfile = profile?.uid === activeUid ? profile : null;
   const filteredCharacters = useMemo(() => {
-    if (!profile) return [];
+    if (!verifiedProfile) return [];
     const normalizedQuery = query.trim().toLocaleLowerCase(locale);
-    return profile.characters.filter((character) => {
+    return verifiedProfile.characters.filter((character) => {
       const matchesQuery =
         normalizedQuery.length === 0 ||
         character.name.toLocaleLowerCase(locale).includes(normalizedQuery);
@@ -67,7 +121,7 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
         elementFilter === 'all' || normalizeElement(character.element) === elementFilter;
       return matchesQuery && matchesElement;
     });
-  }, [elementFilter, locale, profile, query]);
+  }, [elementFilter, locale, query, verifiedProfile]);
   const sortedCharacters = useMemo(
     () => sortCharacters(filteredCharacters, sortMode, locale),
     [filteredCharacters, locale, sortMode]
@@ -75,11 +129,50 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
   const selectedCharacter =
     selectedCharacterId === null
       ? undefined
-      : profile?.characters.find((character) => character.id === selectedCharacterId);
+      : verifiedProfile?.characters.find((character) => character.id === selectedCharacterId);
+
+  const restoreRosterFocus = useCallback((preferred?: HTMLElement | null) => {
+    if (focusFrameRef.current !== null) cancelAnimationFrame(focusFrameRef.current);
+    focusFrameRef.current = requestAnimationFrame(() => {
+      focusFrameRef.current = requestAnimationFrame(() => {
+        focusFrameRef.current = null;
+        if (!mountedRef.current) return;
+        const activeTab =
+          document.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]') ??
+          (activeUidRef.current
+            ? document.getElementById(`profile-tab-${activeUidRef.current}`)
+            : null);
+        const target =
+          (preferred?.isConnected ? preferred : null) ??
+          (searchInputRef.current?.isConnected ? searchInputRef.current : null) ??
+          (rosterGridRef.current?.isConnected ? rosterGridRef.current : null) ??
+          activeTab;
+        target?.focus();
+      });
+    });
+  }, []);
+
+  useEffect(() => {
+    if (selectedCharacterId === null) return;
+    const stillExists = verifiedProfile?.characters.some(
+      (character) => character.id === selectedCharacterId
+    );
+    if (stillExists) return;
+    const trigger = selectedTileRef.current;
+    selectedTileRef.current = null;
+    setSelectedCharacterId(null);
+    restoreRosterFocus(trigger);
+  }, [restoreRosterFocus, selectedCharacterId, verifiedProfile]);
 
   async function handleSetActive(uid: string) {
+    if (uid === activeUidRef.current) return;
+    requestGenerationRef.current += 1;
+    setProfile(null);
+    setLastRefresh(null);
+    selectedTileRef.current = null;
     setSelectedCharacterId(null);
     await api.profile.setActive({ uid });
+    if (!mountedRef.current) return;
     setQuery('');
     setElementFilter('all');
     setSortMode('default');
@@ -107,14 +200,17 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
 
   async function handleRefresh() {
     if (!activeUid) return;
+    const token = beginProfileRequest(activeUid);
     setStatus({ kind: 'loading', label: t('roster.action.refreshing') });
     try {
       const outcome = await api.profile.refresh({ uid: activeUid });
+      if (!canCommitProfileRequest(token, outcome.profile.uid)) return;
       setProfile(outcome.profile);
       setLastRefresh(outcome.summary);
       setStatus({ kind: 'success', message: t('roster.updateDone') });
       await onStateChange();
     } catch (error) {
+      if (!canCommitProfileRequest(token)) return;
       setStatus({
         kind: 'error',
         message: localizeError(error, locale, t, 'roster.error.refresh')
@@ -124,9 +220,11 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
 
   async function handleReloginAndRefresh() {
     if (!activeUid) return;
+    const token = beginProfileRequest(activeUid);
     setStatus({ kind: 'loading', label: t('roster.action.waitLogin') });
     try {
       const login = await api.miyoushe.loginViaBrowser();
+      if (!canCommitProfileRequest(token)) return;
       if (!login.ok) {
         setStatus({
           kind: 'error',
@@ -138,7 +236,7 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
         });
         return;
       }
-      const match = login.bind.roles.find((role) => role.gameUid === activeUid);
+      const match = login.bind.roles.find((role) => role.gameUid === token.uid);
       if (!match) {
         setStatus({ kind: 'error', message: t('roster.error.uidMismatch') });
         return;
@@ -146,13 +244,18 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
       setStatus({ kind: 'loading', label: t('roster.action.fetchingAll') });
       const refreshed = await api.profile.importFromSession({
         sessionId: login.sessionId,
-        uid: activeUid
+        uid: token.uid
       });
+      if (!canCommitProfileRequest(token, refreshed.uid)) {
+        await restorePersistedActiveUid();
+        return;
+      }
       setProfile(refreshed);
       setLastRefresh(null);
       setStatus({ kind: 'success', message: t('roster.accountUpdated') });
       await onStateChange();
     } catch (error) {
+      if (!canCommitProfileRequest(token)) return;
       setStatus({
         kind: 'error',
         message: localizeError(error, locale, t, 'roster.error.relogin')
@@ -187,22 +290,27 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
   }
 
   async function handleDelete() {
-    if (!profile) return;
-    await api.profile.delete({ uid: profile.uid });
+    if (!activeUid || verifiedProfile?.uid !== activeUid) return;
+    await api.profile.delete({ uid: activeUid });
+    if (!mountedRef.current) return;
     await onStateChange();
+    restoreRosterFocus();
   }
 
   function handleSelectCharacter(characterId: number, trigger: HTMLButtonElement) {
+    if (focusFrameRef.current !== null) {
+      cancelAnimationFrame(focusFrameRef.current);
+      focusFrameRef.current = null;
+    }
     selectedTileRef.current = trigger;
     setSelectedCharacterId(characterId);
   }
 
   function handleDismissCharacter() {
-    setSelectedCharacterId(null);
     const trigger = selectedTileRef.current;
-    requestAnimationFrame(() => {
-      if (trigger?.isConnected) trigger.focus();
-    });
+    selectedTileRef.current = null;
+    setSelectedCharacterId(null);
+    restoreRosterFocus(trigger);
   }
 
   if (state.profiles.length === 0) {
@@ -224,10 +332,10 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
     <section className="gta-roster-page roster-page">
       <div className="gta-roster-heading">
         <h2 className="gta-section-title">{t('roster.title')}</h2>
-        {profile && (
+        {verifiedProfile && (
           <AccountMaintenanceMenu
             busy={status.kind === 'loading'}
-            profile={profile}
+            profile={verifiedProfile}
             onDelete={handleDelete}
             onDiagnose={handlePing}
             onGotoOnboarding={onGotoOnboarding}
@@ -282,14 +390,14 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
         )}
         {lastRefresh && status.kind !== 'loading' && <RefreshNotice summary={lastRefresh} />}
 
-        {profile && (
+        {verifiedProfile && (
           <>
             <ProfileSummary
-              profile={profile}
+              profile={verifiedProfile}
               loading={status.kind === 'loading'}
               onRefresh={() => void handleRefresh()}
             />
-            {profile.characters.length === 0 ? (
+            {verifiedProfile.characters.length === 0 ? (
               <div className="gta-roster-empty">
                 <p>{t('roster.emptyProfile')}</p>
               </div>
@@ -297,9 +405,10 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
               <>
                 <RosterToolbar
                   query={query}
+                  searchInputRef={searchInputRef}
                   filter={elementFilter}
                   sort={sortMode}
-                  totalCount={profile.characters.length}
+                  totalCount={verifiedProfile.characters.length}
                   filteredCount={filteredCharacters.length}
                   onQueryChange={setQuery}
                   onFilterChange={setElementFilter}
@@ -308,11 +417,17 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
                 {filteredCharacters.length === 0 ? (
                   <p className="gta-roster-no-results">{t('roster.noResults')}</p>
                 ) : (
-                  <div className="roster-grid" aria-label={t('roster.characterGrid')}>
+                  <div
+                    ref={rosterGridRef}
+                    className="roster-grid"
+                    aria-label={t('roster.characterGrid')}
+                    tabIndex={-1}
+                  >
                     {sortedCharacters.map((character) => (
                       <CharacterTile
                         key={character.id}
                         character={character}
+                        imageRevision={verifiedProfile.fetchedAt}
                         selected={character.id === selectedCharacterId}
                         onSelect={(trigger) => handleSelectCharacter(character.id, trigger)}
                       />
@@ -325,7 +440,11 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
         )}
       </div>
       {selectedCharacter && (
-        <CharacterDetailDrawer character={selectedCharacter} onDismiss={handleDismissCharacter} />
+        <CharacterDetailDrawer
+          character={selectedCharacter}
+          imageRevision={verifiedProfile?.fetchedAt}
+          onDismiss={handleDismissCharacter}
+        />
       )}
     </section>
   );

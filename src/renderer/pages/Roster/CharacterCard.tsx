@@ -19,6 +19,7 @@ import { CharacterPortrait } from './CharacterTile';
 
 interface CharacterCardProps {
   character: CharacterProfile;
+  imageRevision?: string;
 }
 
 const statRows: Array<{
@@ -48,7 +49,7 @@ const missingFieldLabels: Record<BuildField, TranslationKey> = {
   talents: 'roster.talents'
 };
 
-export function CharacterCard({ character }: CharacterCardProps) {
+export function CharacterCard({ character, imageRevision }: CharacterCardProps) {
   const { locale, t } = useI18n();
   const element = normalizeElement(character.element);
   const rarity = normalizeRarity(character.rarity);
@@ -71,7 +72,12 @@ export function CharacterCard({ character }: CharacterCardProps) {
       }
     >
       <div className="gta-character-main">
-        <CharacterPortrait name={character.name} element={element} imageUrl={character.imageUrl} />
+        <CharacterPortrait
+          name={character.name}
+          element={element}
+          imageRevision={imageRevision}
+          imageUrl={character.imageUrl}
+        />
         <div className="gta-character-identity">
           <div className="gta-character-title-row">
             <h3 className="gta-name">{character.name}</h3>
@@ -220,7 +226,9 @@ function ArtifactDetails({ artifacts }: { artifacts: ArtifactPiece[] | undefined
           const statLabel =
             presented.kind === 'known'
               ? t(`roster.artifactStat.${presented.key}`)
-              : presented.label;
+              : presented.kind === 'raw'
+                ? presented.label
+                : t('roster.artifactStat.unavailable');
           const suffix = artifactStatUsesPercent(presented) ? '%' : '';
           return (
             <li key={`${artifact.slot}-${artifact.setId}-${index}`}>
