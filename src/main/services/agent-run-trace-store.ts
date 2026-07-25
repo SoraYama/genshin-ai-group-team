@@ -448,6 +448,35 @@ export class AgentRunTraceStore implements AgentRunTraceWriter {
     trace.model = this.sanitize(trace.model, 256, undefined, registry).text || REDACTION_MARKER;
     for (const stage of trace.stages) {
       let changed = false;
+      if (stage.truncated === true) {
+        if (stage.inputSummary !== undefined) stage.inputSummary = REDACTION_MARKER;
+        if (stage.rawOutput !== undefined) stage.rawOutput = REDACTION_MARKER;
+        stage.tools = stage.tools.map((tool) => ({
+          ...tool,
+          ...(tool.truncated === true ? { name: REDACTION_MARKER } : {}),
+          ...(tool.inputSummary === undefined ? {} : { inputSummary: REDACTION_MARKER }),
+          ...(tool.outputSummary === undefined ? {} : { outputSummary: REDACTION_MARKER }),
+          ...(tool.failure === undefined
+            ? {}
+            : {
+                failure: {
+                  ...tool.failure,
+                  message: REDACTION_MARKER,
+                  ...(tool.failure.details === undefined
+                    ? {}
+                    : { details: { redacted: REDACTION_MARKER } })
+                }
+              }),
+          truncated: true
+        }));
+        if (stage.failure !== undefined) {
+          stage.failure.message = REDACTION_MARKER;
+          if (stage.failure.details !== undefined) {
+            stage.failure.details = { redacted: REDACTION_MARKER };
+          }
+        }
+        changed = true;
+      }
       if (stage.inputSummary !== undefined) {
         const sanitized = this.sanitize(stage.inputSummary, undefined, undefined, registry);
         stage.inputSummary = sanitized.text;

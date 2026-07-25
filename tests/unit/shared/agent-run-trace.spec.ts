@@ -69,6 +69,23 @@ describe('agent run trace contracts', () => {
     expect(sanitized.text.match(/\[REDACTED\]/g)?.length).toBeGreaterThanOrEqual(6);
   });
 
+  it('fails closed when a double-encoded registered secret crosses the scan boundary', () => {
+    const secret = 'sk-Api_One';
+    const encoded = [...secret]
+      .map((character) =>
+        `%25${character.codePointAt(0)!.toString(16).padStart(2, '0')}`
+      )
+      .join('');
+    const raw = `${'x'.repeat(MAX_TRACE_TEXT_INPUT_CHARS - 10)}${encoded}-tail`;
+
+    expect(
+      sanitizeTraceText(raw, {
+        maxBytes: MAX_TRACE_TEXT_MAX_BYTES,
+        customHeaderValues: [secret]
+      })
+    ).toEqual({ text: '[REDACTED]', truncated: true });
+  });
+
   it('redacts complete quoted Cookie and apiKey values', () => {
     const sanitized = sanitizeTraceText(
       ['Cookie: session="cookie-secret"; theme=dark', 'apiKey="api secret, tail"'].join('\n')

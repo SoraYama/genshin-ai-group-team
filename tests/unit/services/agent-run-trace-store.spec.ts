@@ -660,6 +660,25 @@ describe('AgentRunTraceStore privacy boundary', () => {
 
     expect(store.latest()?.stages[0]?.rawOutput).toBe('[REDACTED]');
   });
+
+  it('fails closed when late registration follows compaction that split the secret', () => {
+    const secret = `late-${'s'.repeat(595)}`;
+    const store = new AgentRunTraceStore({ maxBytes: MIN_AGENT_RUN_TRACE_BYTES });
+    const lease = store.start(run('compacted-run'));
+    store.startStage(lease, { stage: 'compose' });
+    store.completeStage(
+      lease,
+      completedStage('compose', {
+        rawOutput: `${'x'.repeat(400)}${secret}${'m'.repeat(18_000)}`
+      })
+    );
+    expect(store.latest()?.stages[0]?.truncated).toBe(true);
+
+    store.startStage(lease, { stage: 'critique', sensitiveValues: [secret] });
+
+    expect(store.latest()?.stages[0]?.rawOutput).toBe('[REDACTED]');
+    expect(JSON.stringify(store.latest())).not.toContain('late-');
+  });
 });
 
 describe('AgentRunTraceStore UTF-8 budget', () => {

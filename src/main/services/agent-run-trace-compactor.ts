@@ -47,7 +47,7 @@ export function compactTraceToBudget(
   if (jsonBytes(trace) <= maxBytes) return { measurements: 3, pass: 'summary' };
 
   applyCanonicalSkeleton(trace);
-  return { measurements: 4, pass: 'skeleton' };
+  return { measurements: 3, pass: 'skeleton' };
 }
 
 export function jsonBytes(value: unknown): number {

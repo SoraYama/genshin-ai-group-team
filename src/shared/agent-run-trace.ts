@@ -206,6 +206,13 @@ export function sanitizeTraceText(
   const scanLimit = MAX_TRACE_TEXT_INPUT_CHARS + Math.max(0, maximumCustomValueLength - 1);
   const sourceWasCapped = value.length > MAX_TRACE_TEXT_INPUT_CHARS;
   const scanPrefix = takeCodePointSafePrefix(value, scanLimit);
+  if (
+    scanPrefix.truncated &&
+    maximumCustomValueLength > 0 &&
+    hasEncodedBoundaryRisk(scanPrefix.text, maximumCustomValueLength)
+  ) {
+    return { text: REDACTION_MARKER, truncated: true };
+  }
   const trailingCustomSpanLength = scanPrefix.truncated
     ? findTrailingCustomSpanLength(scanPrefix.text, registry.values)
     : 0;
@@ -222,6 +229,13 @@ export function sanitizeTraceText(
     text: output.text,
     truncated: sourceWasCapped || trailingCustomSpanLength > 0 || output.truncated
   };
+}
+
+function hasEncodedBoundaryRisk(value: string, maximumSecretLength: number): boolean {
+  // Eight canonicalization rounds can grow one original character to at most
+  // 17 code units (`%` -> `%25` adds two per round).
+  const boundaryWindow = Math.max(64, maximumSecretLength * 17);
+  return /%[0-9a-f]{2}/iu.test(value.slice(-boundaryWindow));
 }
 
 function normalizeByteBudget(value: number | undefined): number {
