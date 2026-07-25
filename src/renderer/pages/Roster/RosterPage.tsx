@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { PersistedProfile, ProfileStateView, RefreshSummary } from '../../../shared/domain';
 import { ButtonGlyph } from '../../design/Icons';
 import { normalizeElement } from '../../design/tokens';
 import { api } from '../../ipc';
 import { localizeError, useI18n } from '../../i18n';
 import { AccountMaintenanceMenu } from './AccountMaintenanceMenu';
-import { CharacterCard } from './CharacterCard';
+import { CharacterDetailDrawer } from './CharacterDetailDrawer';
+import { CharacterTile } from './CharacterTile';
 import { ProfileSummary } from './ProfileSummary';
 import { RosterToolbar, type ElementFilter } from './RosterToolbar';
 
@@ -28,6 +29,8 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
   const [lastRefresh, setLastRefresh] = useState<RefreshSummary | null>(null);
   const [query, setQuery] = useState('');
   const [elementFilter, setElementFilter] = useState<ElementFilter>('all');
+  const [selectedCharacterId, setSelectedCharacterId] = useState<number | null>(null);
+  const selectedTileRef = useRef<HTMLButtonElement | null>(null);
   const activeUid = state.activeUid;
 
   const loadProfile = useCallback(
@@ -63,8 +66,13 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
       return matchesQuery && matchesElement;
     });
   }, [elementFilter, locale, profile, query]);
+  const selectedCharacter =
+    selectedCharacterId === null
+      ? undefined
+      : profile?.characters.find((character) => character.id === selectedCharacterId);
 
   async function handleSetActive(uid: string) {
+    setSelectedCharacterId(null);
     await api.profile.setActive({ uid });
     setQuery('');
     setElementFilter('all');
@@ -177,6 +185,19 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
     await onStateChange();
   }
 
+  function handleSelectCharacter(characterId: number, trigger: HTMLButtonElement) {
+    selectedTileRef.current = trigger;
+    setSelectedCharacterId(characterId);
+  }
+
+  function handleDismissCharacter() {
+    setSelectedCharacterId(null);
+    const trigger = selectedTileRef.current;
+    requestAnimationFrame(() => {
+      if (trigger?.isConnected) trigger.focus();
+    });
+  }
+
   if (state.profiles.length === 0) {
     return (
       <section className="gta-roster-empty">
@@ -193,7 +214,7 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
   }
 
   return (
-    <section className="gta-roster-page">
+    <section className="gta-roster-page roster-page">
       <div className="gta-roster-heading">
         <h2 className="gta-section-title">{t('roster.title')}</h2>
         {profile && (
@@ -278,9 +299,14 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
                 {filteredCharacters.length === 0 ? (
                   <p className="gta-roster-no-results">{t('roster.noResults')}</p>
                 ) : (
-                  <div className="gta-character-list">
+                  <div className="roster-grid" aria-label={t('roster.characterGrid')}>
                     {filteredCharacters.map((character) => (
-                      <CharacterCard key={character.id} character={character} />
+                      <CharacterTile
+                        key={character.id}
+                        character={character}
+                        selected={character.id === selectedCharacterId}
+                        onSelect={(trigger) => handleSelectCharacter(character.id, trigger)}
+                      />
                     ))}
                   </div>
                 )}
@@ -289,6 +315,9 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
           </>
         )}
       </div>
+      {selectedCharacter && (
+        <CharacterDetailDrawer character={selectedCharacter} onDismiss={handleDismissCharacter} />
+      )}
     </section>
   );
 }

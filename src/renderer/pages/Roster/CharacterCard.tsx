@@ -1,20 +1,21 @@
-import { useState, type CSSProperties } from 'react';
+import type { CSSProperties } from 'react';
 import type {
   ArtifactPiece,
+  BuildField,
   CharacterProfile,
   CharacterStats,
   FieldProvenance
 } from '../../../shared/domain';
 import { BuildIcon, ElementIcon, StarIcon, StatIcon, type StatIconName } from '../../design/Icons';
-import { elementPalette, normalizeElement, type Element } from '../../design/tokens';
+import { elementPalette, normalizeElement } from '../../design/tokens';
 import { useI18n, type TranslationKey } from '../../i18n';
 import {
   artifactStatUsesPercent,
-  isRenderableCharacterPortrait,
   presentArtifactStatKey,
   presentEnergyRecharge,
   reactionTagsForElement
 } from './character-presentation';
+import { CharacterPortrait } from './CharacterTile';
 
 interface CharacterCardProps {
   character: CharacterProfile;
@@ -40,6 +41,13 @@ const statRows: Array<{
   { key: 'elementalMastery', icon: 'elemental-mastery', label: 'roster.elementalMastery' }
 ];
 
+const missingFieldLabels: Record<BuildField, TranslationKey> = {
+  stats: 'roster.provenance.stats',
+  weapon: 'roster.weapon',
+  artifacts: 'roster.artifacts',
+  talents: 'roster.talents'
+};
+
 export function CharacterCard({ character }: CharacterCardProps) {
   const { locale, t } = useI18n();
   const element = normalizeElement(character.element);
@@ -63,11 +71,7 @@ export function CharacterCard({ character }: CharacterCardProps) {
       }
     >
       <div className="gta-character-main">
-        <CharacterPortrait
-          name={character.name}
-          element={element}
-          imageUrl={character.imageUrl}
-        />
+        <CharacterPortrait name={character.name} element={element} imageUrl={character.imageUrl} />
         <div className="gta-character-identity">
           <div className="gta-character-title-row">
             <h3 className="gta-name">{character.name}</h3>
@@ -106,6 +110,16 @@ export function CharacterCard({ character }: CharacterCardProps) {
           </div>
         </div>
       </div>
+
+      {character.missingFields.length > 0 && (
+        <p className="gta-character-missing">
+          {t('roster.missing', {
+            fields: character.missingFields
+              .map((field) => t(missingFieldLabels[field]))
+              .join(locale === 'zh-CN' ? '、' : ', ')
+          })}
+        </p>
+      )}
 
       <div className="gta-character-team-layer">
         <TeamFact label={t('roster.roleLabel')} value={t('roster.rolePending')} />
@@ -150,16 +164,8 @@ export function CharacterCard({ character }: CharacterCardProps) {
           })}
         </dl>
         <div className="gta-character-build">
-          <BuildLine
-            icon="weapon"
-            label={t('roster.weapon')}
-            value={formatWeapon(character, t)}
-          />
-          <BuildLine
-            icon="talents"
-            label={t('roster.talents')}
-            value={formatTalents(character)}
-          />
+          <BuildLine icon="weapon" label={t('roster.weapon')} value={formatWeapon(character, t)} />
+          <BuildLine icon="talents" label={t('roster.talents')} value={formatTalents(character)} />
           <BuildLine
             icon="artifacts"
             label={t('roster.artifacts')}
@@ -178,58 +184,6 @@ function TeamFact({ label, value }: { label: string; value: string }) {
     <div className="gta-character-team-fact">
       <span>{label}</span>
       <strong>{value}</strong>
-    </div>
-  );
-}
-
-export function CharacterPortrait({
-  element,
-  imageUrl,
-  name
-}: {
-  element: Element | undefined;
-  imageUrl: string | undefined;
-  name: string;
-}) {
-  const [failedImageUrl, setFailedImageUrl] = useState<string>();
-  const canShowImage =
-    isRenderableCharacterPortrait(imageUrl) && failedImageUrl !== imageUrl;
-
-  if (!canShowImage) {
-    return <IdentityMark name={name} element={element} />;
-  }
-
-  return (
-    <div className="gta-character-mark has-image">
-      <img
-        src={imageUrl}
-        alt={name}
-        loading="lazy"
-        decoding="async"
-        draggable={false}
-        onError={() => setFailedImageUrl(imageUrl)}
-      />
-    </div>
-  );
-}
-
-function IdentityMark({ element, name }: { element: Element | undefined; name: string }) {
-  const palette = element ? elementPalette[element] : undefined;
-  return (
-    <div
-      className={element ? 'gta-character-mark' : 'gta-character-mark is-unknown'}
-      style={
-        {
-          '--character-a': palette?.gradientStart ?? '#71808a',
-          '--character-b': palette?.bg ?? '#3f505c'
-        } as CSSProperties
-      }
-      aria-label={name}
-    >
-      <span className="gta-character-mark-rune" aria-hidden="true">
-        {name.trim().slice(0, 1) || '◇'}
-      </span>
-      <span className="gta-character-mark-orbit" aria-hidden="true" />
     </div>
   );
 }

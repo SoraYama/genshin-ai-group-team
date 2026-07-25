@@ -1,8 +1,23 @@
+import type { CharacterProfile, DataCompleteness } from '../../../shared/domain';
 import type { Element } from '../../design/tokens';
 
-export function isRenderableCharacterPortrait(
-  value: string | undefined
-): value is string {
+export interface CharacterTilePresentation {
+  name: string;
+  level: number | '—';
+  element: string;
+  completeness: DataCompleteness;
+}
+
+export function renderTile(character: CharacterProfile): CharacterTilePresentation {
+  return {
+    name: character.name,
+    level: character.level ?? '—',
+    element: character.element,
+    completeness: character.completeness
+  };
+}
+
+export function isRenderableCharacterPortrait(value: string | undefined): value is string {
   if (!value) return false;
   try {
     const url = new URL(value);
@@ -12,9 +27,7 @@ export function isRenderableCharacterPortrait(
   }
 }
 
-export type PresentedEnergyRecharge =
-  | { kind: 'known'; value: number }
-  | { kind: 'unknown' };
+export type PresentedEnergyRecharge = { kind: 'known'; value: number } | { kind: 'unknown' };
 
 export function presentEnergyRecharge(value: number | undefined): PresentedEnergyRecharge {
   return typeof value === 'number' && Number.isFinite(value) && value > 0

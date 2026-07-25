@@ -249,6 +249,16 @@ async function launchApp(): Promise<void> {
   electronApp.on('window', observeRenderer);
 }
 
+async function setMainWindowZoom(factor: number): Promise<void> {
+  const actual = await electronApp.evaluate(({ BrowserWindow }, nextFactor) => {
+    const window = BrowserWindow.getAllWindows()[0];
+    if (!window) throw new Error('Missing main window');
+    window.webContents.setZoomFactor(nextFactor);
+    return window.webContents.getZoomFactor();
+  }, factor);
+  expect(actual).toBeCloseTo(factor, 2);
+}
+
 function observeRenderer(rendererPage: Page): void {
   if (observedPages.has(rendererPage)) return;
   observedPages.add(rendererPage);
@@ -754,16 +764,30 @@ test('renders profile coverage and known build fields without fake zero values',
               provenance: {
                 ownership: { source: 'miyoushe-list', fetchedAt }
               }
-            }
+            },
+            ...Array.from({ length: 22 }, (_, index) => ({
+              id: 10001000 + index,
+              name: `角色${String(index + 1).padStart(2, '0')}`,
+              element: ['Hydro', 'Electro', 'Anemo', 'Geo', 'Cryo', 'Dendro'][index % 6],
+              rarity: 4,
+              imageUrl: '',
+              level: 80,
+              constellation: index % 7,
+              completeness: 'basic',
+              missingFields: ['stats', 'weapon', 'artifacts', 'talents'],
+              provenance: {
+                ownership: { source: 'miyoushe-list', fetchedAt }
+              }
+            }))
           ],
           coverage: {
-            expectedOwnedCount: 2,
-            ownedCount: 2,
+            expectedOwnedCount: 24,
+            ownedCount: 24,
             detailedCount: 1,
             buildCount: 1,
             statsCount: 1,
             enkaShowcaseCount: 1,
-            missingDetailCount: 1,
+            missingDetailCount: 23,
             partial: true
           }
         },
@@ -796,7 +820,7 @@ test('renders profile coverage and known build fields without fake zero values',
       name: /更换米游社账号|连接诊断|退出米游社登录|绑定新 UID|删除本机角色资料/
     })
   ).toHaveCount(0);
-  await expect(page.getByTestId('profile-coverage-summary')).toContainText('已读取 2 名角色');
+  await expect(page.getByTestId('profile-coverage-summary')).toContainText('已读取 24 名角色');
   await expect(page.getByTestId('profile-coverage-summary')).toContainText('1 名有完整装备面板');
   await expect(page.getByText('冒险等阶 58')).toBeVisible();
   await expect(page.getByText(/世界等级/)).toHaveCount(0);
@@ -821,6 +845,19 @@ test('renders profile coverage and known build fields without fake zero values',
   await expect(primaryAccountTab).toBeFocused();
   await expect(primaryAccountTab).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByText('测试角色', { exact: true })).toBeVisible();
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const characterTiles = page.getByTestId('character-tile');
+  await expect(characterTiles).toHaveCount(24);
+  const visibleTileCount = await characterTiles.evaluateAll((tiles) => {
+    const grid = tiles[0]?.closest('.roster-grid');
+    if (!grid) return 0;
+    const gridRect = grid.getBoundingClientRect();
+    return tiles.filter((tile) => {
+      const rect = tile.getBoundingClientRect();
+      return rect.top >= gridRect.top && rect.bottom <= gridRect.bottom;
+    }).length;
+  });
+  expect(visibleTileCount).toBeGreaterThanOrEqual(12);
 
   const maintenanceButton = page.getByRole('button', { name: '账号维护' });
   await maintenanceButton.focus();
@@ -882,34 +919,46 @@ test('renders profile coverage and known build fields without fake zero values',
   await expect(page.getByText('测试角色', { exact: true })).toBeVisible();
   await expect(maintenanceButton).toBeFocused();
 
-  const characterCard = page.locator('article').filter({ hasText: '测试角色' });
-  await expect(characterCard.locator('.gta-character-mark.has-image img')).toBeVisible();
-  await expect(characterCard).toContainText('1命');
-  await expect(characterCard).toContainText('火元素');
-  await expect(characterCard).toContainText('5星');
-  await expect(characterCard).toContainText('测试武器 · Lv 90 · 精2');
-  await expect(characterCard).toContainText('定位需结合队伍判断');
-  await expect(characterCard).toContainText('可参与反应');
-  await expect(characterCard).toContainText('蒸发');
-  await expect(characterCard).toContainText('融化');
-  await expect(characterCard).not.toContainText('主要反应');
-  await expect(characterCard).toContainText('充能效率');
-  await expect(characterCard).toContainText('119.9%');
-  await expect(characterCard).not.toContainText('是否够用需结合角色、队伍产球与实战循环判断');
-  await expect(characterCard).not.toContainText(/充能偏低|充能中等|充能较高/u);
-  await expect(characterCard.getByTitle('命座', { exact: true })).toBeVisible();
-  await expect(characterCard.getByTitle('元素', { exact: true })).toBeVisible();
-  await expect(characterCard.getByTitle('稀有度', { exact: true })).toBeVisible();
+  const characterTile = characterTiles.filter({ hasText: '测试角色' });
+  await expect(characterTile.locator('.character-tile__portrait.has-image img')).toBeVisible();
+  await expect(characterTile).toContainText('Lv.90');
+  await expect(characterTile).toContainText('详细面板');
+  await characterTile.focus();
+  await page.keyboard.press('Enter');
+  const characterDrawer = page.getByRole('dialog', { name: '测试角色资料' });
+  await expect(characterDrawer).toBeVisible();
+  await expect(characterTile).toHaveAttribute('aria-pressed', 'true');
+  const drawerCloseButton = characterDrawer.getByRole('button', { name: '关闭对话框' });
+  await expect(drawerCloseButton).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(drawerCloseButton).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(drawerCloseButton).toBeFocused();
+  expect(
+    await page.evaluate<{ grid: string; shell: string }>(`({
+      grid: getComputedStyle(document.querySelector('.roster-grid')).overflowY,
+      shell: getComputedStyle(document.querySelector('.app-shell')).overflowY
+    })`)
+  ).toEqual({ grid: 'hidden', shell: 'hidden' });
+  await expect(characterDrawer).toContainText('Lv.90');
+  await expect(characterDrawer).toContainText('1命');
+  await expect(characterDrawer).toContainText('火元素');
+  await expect(characterDrawer).toContainText('5星');
+  await expect(characterDrawer).toContainText('测试武器 · Lv 90 · 精2');
+  await expect(characterDrawer).toContainText('定位需结合队伍判断');
+  await expect(characterDrawer).toContainText('可参与反应');
+  await expect(characterDrawer).toContainText('蒸发');
+  await expect(characterDrawer).toContainText('融化');
+  await expect(characterDrawer).not.toContainText('主要反应');
+  await expect(characterDrawer).toContainText('充能效率');
+  await expect(characterDrawer).toContainText('119.9%');
+  await expect(characterDrawer).toContainText('详细面板');
+  await expect(characterDrawer).not.toContainText('是否够用需结合角色、队伍产球与实战循环判断');
+  await expect(characterDrawer).not.toContainText(/充能偏低|充能中等|充能较高/u);
+  await expect(characterDrawer.getByTitle('命座', { exact: true })).toBeVisible();
+  await expect(characterDrawer.getByTitle('元素', { exact: true })).toBeVisible();
+  await expect(characterDrawer.getByTitle('稀有度', { exact: true })).toBeVisible();
 
-  const unknownCard = page.locator('article').filter({ hasText: '未知角色' });
-  await expect(unknownCard).toContainText('元素未知');
-  await expect(unknownCard).toContainText('稀有度未知');
-  await expect(unknownCard).not.toContainText('火元素');
-  await expect(unknownCard).not.toContainText('1星');
-  await expect(unknownCard.getByText('可参与反应')).toHaveCount(0);
-  await expect(unknownCard).toContainText('暂无可靠面板数据');
-
-  await expect(characterCard.getByRole('button', { name: '查看测试角色详细资料' })).toHaveCount(0);
   for (const title of [
     '生命',
     '攻击',
@@ -922,45 +971,115 @@ test('renders profile coverage and known build fields without fake zero values',
     '天赋',
     '圣遗物'
   ]) {
-    await expect(characterCard.getByTitle(title, { exact: true })).toBeVisible();
+    await expect(characterDrawer.getByTitle(title, { exact: true })).toBeVisible();
   }
-  await expect(characterCard.getByText('测试武器 · Lv 90 · 精2')).toHaveCount(2);
-  await expect(characterCard.getByText('6 / 9 / 10')).toBeVisible();
-  await expect(characterCard.getByText(/测试套装×2/)).toBeVisible();
-  await expect(characterCard).toContainText('时之沙');
-  await expect(characterCard).toContainText('攻击力 46.6%');
-  await expect(characterCard).toContainText('理之冠');
-  await expect(characterCard).toContainText('new_stat script 7.7');
-  await expect(characterCard).toContainText('持有与等级');
-  await expect(characterCard).toContainText('米游社角色清单');
-  await expect(characterCard).toContainText('装备资料');
-  await expect(characterCard).toContainText('米游社养成资料');
-  await expect(characterCard).toContainText('面板数值');
-  await expect(characterCard).toContainText('UID 展示柜');
-  await expect(characterCard).toContainText('资料更新时间');
-  await expect(characterCard.getByText('—', { exact: true }).first()).toBeVisible();
-  await expect(characterCard).not.toContainText(/(^|\D)0($|\D)/);
+  await expect(characterDrawer.getByText('测试武器 · Lv 90 · 精2')).toHaveCount(2);
+  await expect(characterDrawer.getByText('6 / 9 / 10')).toBeVisible();
+  await expect(characterDrawer.getByText(/测试套装×2/)).toBeVisible();
+  await expect(characterDrawer).toContainText('时之沙');
+  await expect(characterDrawer).toContainText('攻击力 46.6%');
+  await expect(characterDrawer).toContainText('理之冠');
+  await expect(characterDrawer).toContainText('new_stat script 7.7');
+  await expect(characterDrawer).toContainText('持有与等级');
+  await expect(characterDrawer).toContainText('米游社角色清单');
+  await expect(characterDrawer).toContainText('装备资料');
+  await expect(characterDrawer).toContainText('米游社养成资料');
+  await expect(characterDrawer).toContainText('面板数值');
+  await expect(characterDrawer).toContainText('UID 展示柜');
+  await expect(characterDrawer).toContainText('资料更新时间');
+  await expect(characterDrawer.getByText('—', { exact: true }).first()).toBeVisible();
+  await expect(characterDrawer).not.toContainText(/(^|\D)0($|\D)/);
+  await page.keyboard.press('Escape');
+  await expect(characterDrawer).toBeHidden();
+  await expect(characterTile).toBeFocused();
+  expect(
+    await page.evaluate<{ grid: string; shell: string }>(`({
+      grid: getComputedStyle(document.querySelector('.roster-grid')).overflowY,
+      shell: getComputedStyle(document.querySelector('.app-shell')).overflowY
+    })`)
+  ).toEqual({ grid: 'auto', shell: 'auto' });
+
+  const unknownTile = characterTiles.filter({ hasText: '未知角色' });
+  await unknownTile.click();
+  const unknownDrawer = page.getByRole('dialog', { name: '未知角色资料' });
+  await expect(unknownDrawer).toContainText('元素未知');
+  await expect(unknownDrawer).toContainText('稀有度未知');
+  await expect(unknownDrawer).not.toContainText('火元素');
+  await expect(unknownDrawer).not.toContainText('1星');
+  await expect(unknownDrawer.getByText('可参与反应')).toHaveCount(0);
+  await expect(unknownDrawer).toContainText('暂无可靠面板数据');
+  await expect(unknownDrawer).toContainText('基础数据');
+  await expect(unknownDrawer).toContainText('缺失：面板数值、武器、圣遗物、天赋');
+  await page.keyboard.press('Escape');
+  await expect(unknownDrawer).toBeHidden();
+  await expect(unknownTile).toBeFocused();
 
   const searchInput = page.getByRole('searchbox', { name: '搜索角色' });
   await searchInput.fill('不存在');
-  await expect(page.getByText('显示 0 / 2 名角色')).toBeVisible();
-  await expect(characterCard).toBeHidden();
+  await expect(page.getByText('显示 0 / 24 名角色')).toBeVisible();
+  await expect(characterTile).toBeHidden();
   await searchInput.fill('测试');
-  await expect(page.getByText('显示 1 / 2 名角色')).toBeVisible();
+  await expect(page.getByText('显示 1 / 24 名角色')).toBeVisible();
   await page.getByRole('button', { name: '水元素' }).click();
-  await expect(characterCard).toBeHidden();
+  await expect(characterTile).toBeHidden();
   await page.getByRole('button', { name: '火元素' }).click();
-  await expect(characterCard).toBeVisible();
+  await expect(characterTile).toBeVisible();
   await searchInput.fill('');
-  await expect(unknownCard).toBeHidden();
+  await expect(unknownTile).toBeHidden();
   await page.getByRole('button', { name: '全部', exact: true }).click();
-  await expect(unknownCard).toBeVisible();
+  await expect(unknownTile).toBeVisible();
+  const rosterMetrics = await page.evaluate<{
+    documentHeight: number;
+    gridClientHeight: number;
+    gridOverflowY: string;
+    gridScrollHeight: number;
+    shellClientHeight: number;
+    shellScrollHeight: number;
+    viewportHeight: number;
+  }>(`(() => {
+    const grid = document.querySelector('.roster-grid');
+    const shell = document.querySelector('.app-shell');
+    if (!grid || !shell) throw new Error('Missing roster scroll surfaces');
+    return {
+      documentHeight: document.documentElement.scrollHeight,
+      gridClientHeight: grid.clientHeight,
+      gridOverflowY: getComputedStyle(grid).overflowY,
+      gridScrollHeight: grid.scrollHeight,
+      shellClientHeight: shell.clientHeight,
+      shellScrollHeight: shell.scrollHeight,
+      viewportHeight: window.innerHeight
+    };
+  })()`);
+  expect(rosterMetrics.documentHeight).toBeLessThanOrEqual(rosterMetrics.viewportHeight + 2);
+  expect(rosterMetrics.shellScrollHeight).toBeLessThanOrEqual(rosterMetrics.shellClientHeight + 2);
+  expect(rosterMetrics.gridOverflowY).toBe('auto');
+  expect(rosterMetrics.gridScrollHeight).toBeGreaterThan(rosterMetrics.gridClientHeight);
+
+  for (const factor of [1.5, 2]) {
+    await setMainWindowZoom(factor);
+    const lastTile = page.getByTestId('character-tile').last();
+    await lastTile.scrollIntoViewIfNeeded();
+    await expect(lastTile).toBeInViewport();
+  }
+  await setMainWindowZoom(1);
   await expectNoForbiddenPlayerTerms();
+  await characterTile.click();
+  await expect(characterDrawer).toBeVisible();
+  await page.evaluate(
+    `Promise.all(
+      Array.from(document.querySelector('[role="dialog"]').getAnimations(), (animation) =>
+        animation.finished
+      )
+    )`
+  );
   await expectPageFitsEveryViewport('Roster expanded detail');
   await page.setViewportSize({ width: 1024, height: 768 });
   await page.screenshot({ path: path.join(tmpdir(), 'gta-m3-roster-1024x768.png') });
   await page.setViewportSize({ width: 1600, height: 1000 });
   await page.screenshot({ path: path.join(tmpdir(), 'gta-m3-roster-1600x1000.png') });
+  await page.keyboard.press('Escape');
+  await expect(characterDrawer).toBeHidden();
+  await expect(characterTile).toBeFocused();
   await maintenanceButton.click();
   await maintenanceMenu.getByRole('menuitem', { name: '删除本机角色资料' }).click();
   await expectPageFitsEveryViewport('Roster delete dialog');
@@ -1009,7 +1128,7 @@ test('renders profile coverage and known build fields without fake zero values',
   await page.screenshot({ path: path.join(tmpdir(), 'gta-m2-challenge-1600x1000.png') });
 
   await page.getByRole('button', { name: '历史记录' }).click();
-  await expect(page.getByRole('heading', { name: '推荐记录' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '推荐记录', exact: true })).toBeVisible();
   await expectNoForbiddenPlayerTerms();
   await expectPageFitsEveryViewport('History');
 

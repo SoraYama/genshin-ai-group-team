@@ -1,38 +1,48 @@
-.gta-roster-page {
+.roster-page {
+  --app-shell-offset: 196px;
+  height: calc(100dvh - var(--app-shell-offset));
+  min-height: 0;
   display: grid;
-  gap: 18px;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 8px;
+  overflow: hidden;
 }
 
 .gta-roster-heading {
   position: relative;
   z-index: 12;
   display: flex;
+  min-height: 36px;
   align-items: center;
   justify-content: space-between;
   gap: 18px;
 }
 
 .gta-roster-heading .gta-section-title {
-  margin-bottom: 0;
+  margin: 0;
+  font-size: clamp(20px, 1.8vw, 26px);
 }
 
 .gta-uid-tabs {
   display: flex;
-  flex-wrap: wrap;
+  min-height: 50px;
   gap: 7px;
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 
 .gta-uid-tab {
   display: flex;
   min-width: 170px;
-  min-height: 50px;
+  min-height: 48px;
+  flex: 0 0 auto;
   flex-direction: column;
   justify-content: center;
   gap: 2px;
-  padding: 7px 13px;
+  padding: 6px 12px;
   border: 1px solid rgba(222, 232, 229, 0.24);
   color: rgba(247, 245, 236, 0.76);
-  background: rgba(15, 30, 43, 0.48);
+  background: rgba(15, 30, 43, 0.58);
   text-align: left;
   cursor: pointer;
 }
@@ -46,7 +56,7 @@
 .gta-uid-tab.is-active {
   border-color: var(--gta-gold);
   color: var(--gta-text-on-dark);
-  background: rgba(38, 59, 76, 0.9);
+  background: rgba(38, 59, 76, 0.94);
 }
 
 .gta-uid-tab span {
@@ -59,28 +69,32 @@
   font-size: 9px;
 }
 
+.gta-roster-tabpanel {
+  position: relative;
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(201, 216, 221, 0.22);
+  background: rgba(8, 19, 31, 0.78);
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.2);
+}
+
 .gta-profile-summary {
   display: grid;
-  grid-template-columns: minmax(175px, 0.75fr) minmax(300px, 1.65fr) auto;
+  min-height: 78px;
+  flex: 0 0 auto;
+  grid-template-columns: minmax(160px, 0.72fr) minmax(280px, 1.7fr) auto;
   align-items: stretch;
-  border: 1px solid rgba(219, 229, 226, 0.84);
+  border-bottom: 1px solid rgba(197, 213, 218, 0.48);
   color: var(--gta-text-on-light);
-  background: linear-gradient(110deg, rgba(241, 246, 244, 0.98), rgba(222, 233, 230, 0.96));
-  box-shadow: var(--gta-shadow-panel);
-  clip-path: polygon(
-    10px 0,
-    100% 0,
-    100% calc(100% - 10px),
-    calc(100% - 10px) 100%,
-    0 100%,
-    0 10px
-  );
-  animation: gta-content-enter 360ms var(--gta-ease) both;
+  background: linear-gradient(105deg, rgba(237, 243, 241, 0.98), rgba(217, 228, 228, 0.96));
+  animation: gta-content-enter 240ms var(--gta-ease) both;
 }
 
 .gta-profile-summary > div {
   min-width: 0;
-  padding: clamp(17px, 2vw, 25px);
+  padding: 10px 14px;
 }
 
 .gta-profile-summary > div + div {
@@ -89,9 +103,9 @@
 
 .gta-kicker {
   display: block;
-  margin-bottom: 7px;
+  margin-bottom: 3px;
   color: #6f633f;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -103,55 +117,63 @@
 }
 
 .gta-profile-summary h3 {
-  margin-bottom: 7px;
-  font-size: clamp(20px, 2vw, 27px);
+  margin-bottom: 3px;
+  font-size: clamp(17px, 1.6vw, 21px);
 }
 
 .gta-profile-summary-account p,
 .gta-profile-summary-status p,
 .gta-profile-summary-action > span {
   color: var(--gta-text-on-light-soft);
-  font-size: var(--gta-text-xs);
-  line-height: 1.65;
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .gta-profile-summary-status {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 6px;
+  gap: 2px;
 }
 
 .gta-profile-summary-status strong {
-  font-size: var(--gta-text-md);
-  line-height: 1.5;
+  overflow: hidden;
+  font-size: var(--gta-text-sm);
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .gta-profile-summary-status details {
   width: fit-content;
   color: var(--gta-text-on-light-soft);
-  font-size: var(--gta-text-xs);
+  font-size: 10px;
 }
 
 .gta-profile-summary-status summary {
-  min-height: 44px;
-  padding-block: 12px;
+  min-height: 24px;
+  padding-block: 4px;
   color: #594e32;
   cursor: pointer;
 }
 
 .gta-profile-summary-status details p {
   max-width: 580px;
-  padding: 2px 0 8px 17px;
+  padding: 2px 0 8px 12px;
 }
 
 .gta-profile-summary-action {
   display: flex;
-  min-width: 190px;
-  flex-direction: column;
-  align-items: flex-end;
-  justify-content: center;
-  gap: 9px;
+  min-width: 185px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.gta-profile-summary-action .gta-btn {
+  min-height: 38px;
+  padding-block: 6px;
 }
 
 .gta-maintenance {
@@ -160,7 +182,7 @@
 
 .gta-maintenance-trigger {
   display: inline-flex;
-  min-height: 44px;
+  min-height: 40px;
   align-items: center;
   gap: 9px;
   padding: 6px 12px;
@@ -220,173 +242,208 @@
 }
 
 .gta-success,
-.gta-roster-notice {
+.gta-roster-notice,
+.gta-roster-tabpanel > .gta-error,
+.gta-roster-tabpanel > .gta-hint {
+  flex: 0 0 auto;
   margin: 0;
-  padding: 12px 16px;
+  padding: 8px 12px;
   border-left: 2px solid var(--gta-ok-color);
   color: var(--gta-text-on-light);
-  background: rgba(236, 242, 241, 0.94);
+  background: rgba(236, 242, 241, 0.96);
+  font-size: 11px;
+}
+
+.gta-roster-tabpanel > .gta-error {
+  border-left-color: var(--gta-danger);
 }
 
 .gta-roster-notice {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px 12px;
+  gap: 4px 10px;
   border-left-color: var(--gta-gold);
-  font-size: var(--gta-text-xs);
 }
 
 .gta-roster-notice span + span::before {
-  margin-right: 12px;
+  margin-right: 10px;
   color: var(--gta-gold);
   content: '→';
 }
 
 .gta-roster-toolbar {
   display: grid;
-  grid-template-columns: minmax(220px, 0.72fr) minmax(390px, 1.8fr) auto;
-  align-items: end;
-  gap: 14px;
-  padding: 14px 16px;
-  border-top: 1px solid rgba(218, 229, 226, 0.48);
-  border-bottom: 1px solid rgba(218, 229, 226, 0.48);
-  color: var(--gta-text-on-light);
-  background: rgba(230, 238, 235, 0.9);
+  min-height: 64px;
+  flex: 0 0 auto;
+  grid-template-columns: minmax(180px, 0.64fr) minmax(390px, 1.8fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(198, 215, 220, 0.28);
+  color: #dce7e9;
+  background: rgba(14, 31, 45, 0.96);
 }
 
 .gta-roster-search {
   display: grid;
-  gap: 5px;
+  gap: 3px;
+}
+
+.gta-roster-search .gta-field-label {
+  color: rgba(220, 232, 235, 0.62);
+  font-size: 10px;
 }
 
 .gta-roster-search input {
   width: 100%;
-  min-height: 44px;
-  padding: 9px 12px;
-  border: 1px solid var(--gta-stroke);
+  min-height: 38px;
+  padding: 7px 10px;
+  border: 1px solid rgba(192, 210, 215, 0.34);
   border-radius: 0;
-  color: var(--gta-text-on-light);
-  background: rgba(255, 255, 255, 0.68);
+  color: #edf4f6;
+  background: rgba(4, 14, 25, 0.62);
+}
+
+.gta-roster-search input::placeholder {
+  color: rgba(220, 232, 235, 0.42);
 }
 
 .gta-roster-search input:focus {
   border-color: var(--gta-gold);
-  outline: 3px solid var(--gta-gold-soft);
+  outline: 2px solid var(--gta-gold-soft);
 }
 
 .gta-element-filters {
   display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 
 .gta-element-filters button {
   display: inline-flex;
-  min-width: 44px;
-  min-height: 44px;
+  min-width: 40px;
+  min-height: 38px;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  padding: 7px 10px;
-  border: 1px solid var(--gta-stroke);
-  color: var(--gta-text-on-light-soft);
-  background: rgba(255, 255, 255, 0.38);
+  gap: 4px;
+  padding: 6px 8px;
+  border: 1px solid rgba(192, 210, 215, 0.28);
+  color: rgba(225, 235, 237, 0.68);
+  background: rgba(4, 14, 25, 0.34);
   cursor: pointer;
 }
 
-.gta-element-filters button:hover,
+.gta-element-filters button:hover {
+  border-color: rgba(219, 231, 233, 0.58);
+  color: #edf4f6;
+}
+
 .gta-element-filters button:focus-visible,
 .gta-element-filters button.is-active {
   border-color: var(--gta-gold);
   outline: 0;
-  color: var(--gta-text-on-dark);
-  background: var(--gta-panel-dark);
+  color: #f4ead0;
+  background: rgba(49, 62, 71, 0.94);
 }
 
 .gta-roster-count {
   margin: 0;
-  color: var(--gta-text-on-light-faint);
-  font-size: var(--gta-text-xs);
+  color: rgba(220, 232, 235, 0.58);
+  font-size: 10px;
   white-space: nowrap;
 }
 
-.gta-character-list {
+.roster-grid {
+  overflow: auto;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 540px), 1fr));
-  align-items: start;
-  gap: 16px;
-  margin-top: 16px;
+  min-height: 0;
+  flex: 1 1 auto;
+  grid-template-columns: repeat(auto-fill, minmax(108px, 1fr));
+  align-content: start;
+  gap: 8px;
+  padding: 10px;
+  background:
+    linear-gradient(rgba(122, 151, 162, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(122, 151, 162, 0.04) 1px, transparent 1px), rgba(6, 17, 29, 0.86);
+  background-size: 28px 28px;
+  scrollbar-color: rgba(179, 197, 201, 0.44) rgba(5, 15, 26, 0.4);
+  overscroll-behavior: contain;
 }
 
-.gta-character {
+.character-tile {
   --character-element: #71808a;
   position: relative;
-  overflow: hidden;
-  border: 1px solid
-    color-mix(in srgb, var(--character-element) 22%, rgba(208, 221, 218, 0.84));
-  color: var(--gta-text-on-light);
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--character-element) 12%, rgba(239, 244, 242, 0.97)),
-    color-mix(in srgb, var(--character-element) 5%, rgba(239, 244, 242, 0.97))
-  );
-  box-shadow: 0 8px 22px rgba(1, 8, 16, 0.12);
-  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
-  transition:
-    border-color var(--gta-dur-base),
-    transform var(--gta-dur-base);
-}
-
-.gta-character:hover {
-  border-color: var(--gta-gold);
-  transform: translateY(-1px);
-}
-
-.gta-character-main {
   display: grid;
-  grid-template-columns: 76px minmax(0, 1fr);
-  align-items: center;
-  gap: 14px;
-  min-height: 104px;
-  padding: 13px 14px;
+  min-width: 0;
+  min-height: 157px;
+  grid-template-rows: 86px 28px 17px;
+  gap: 6px;
+  overflow: hidden;
+  padding: 6px 6px 8px;
+  border: 1px solid rgba(178, 199, 205, 0.24);
+  border-radius: 0;
+  color: #e9f0f2;
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--character-element) 8%, rgba(23, 40, 54, 0.98)),
+    rgba(9, 22, 35, 0.98)
+  );
+  box-shadow: 0 5px 14px rgba(0, 0, 0, 0.16);
+  clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 150ms var(--gta-ease),
+    background-color 150ms var(--gta-ease),
+    transform 150ms var(--gta-ease);
 }
 
-.gta-character-mark {
+.character-tile:hover {
+  border-color: rgba(209, 224, 227, 0.58);
+  background-color: rgba(38, 57, 70, 0.98);
+  transform: translateY(-2px);
+}
+
+.character-tile[aria-pressed='true'] {
+  border-color: var(--gta-gold);
+  box-shadow:
+    inset 0 0 0 1px rgba(224, 205, 151, 0.44),
+    0 8px 20px rgba(0, 0, 0, 0.24);
+}
+
+.character-tile:focus-visible {
+  border-color: var(--gta-gold);
+  outline: 2px solid var(--gta-focus);
+  outline-offset: 2px;
+}
+
+.character-tile__portrait {
   --character-a: #6b9b95;
   --character-b: #315f78;
   position: relative;
   display: grid;
-  width: 76px;
-  height: 76px;
+  width: 100%;
+  height: 86px;
   overflow: hidden;
   place-items: center;
   color: white;
   background:
-    radial-gradient(circle at 30% 25%, rgba(255, 255, 255, 0.3), transparent 26%),
+    radial-gradient(circle at 30% 24%, rgba(255, 255, 255, 0.25), transparent 28%),
     linear-gradient(145deg, var(--character-a), var(--character-b));
-  clip-path: polygon(9px 0, 100% 0, 100% calc(100% - 9px), calc(100% - 9px) 100%, 0 100%, 0 9px);
 }
 
-.gta-character-mark::before {
+.character-tile__portrait::before {
   position: absolute;
-  width: 48px;
-  height: 48px;
-  border: 1px solid rgba(255, 255, 255, 0.34);
-  content: '';
-  transform: rotate(45deg);
-}
-
-.gta-character-mark.has-image::before {
-  z-index: 1;
   inset: 5px;
-  width: auto;
-  height: auto;
-  border-color: rgba(255, 255, 255, 0.42);
+  z-index: 1;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  content: '';
   pointer-events: none;
-  transform: none;
 }
 
-.gta-character-mark.has-image img {
+.character-tile__portrait.has-image img {
   display: block;
   width: 100%;
   height: 100%;
@@ -394,20 +451,155 @@
   object-position: center top;
 }
 
-.gta-character-mark-rune {
+.character-tile__rune {
   z-index: 1;
-  font-size: 26px;
+  font-size: 28px;
   font-weight: 900;
   text-shadow: 0 3px 12px rgba(0, 0, 0, 0.25);
 }
 
-.gta-character-mark-orbit {
+.character-tile__orbit {
   position: absolute;
-  bottom: -18px;
-  width: 64px;
-  height: 38px;
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  bottom: -22px;
+  width: 72px;
+  height: 42px;
+  border: 1px solid rgba(255, 255, 255, 0.26);
   border-radius: 50%;
+}
+
+.character-tile__copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.character-tile__copy > strong {
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.character-tile__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: rgba(220, 232, 235, 0.62);
+  font-family: var(--gta-font-mono);
+  font-size: 9px;
+}
+
+.character-tile__meta > span {
+  display: inline-flex;
+  align-items: center;
+}
+
+.character-tile__completeness {
+  display: inline-flex;
+  min-height: 17px;
+  align-items: center;
+  justify-self: start;
+  overflow: hidden;
+  max-width: 100%;
+  padding: 2px 5px;
+  border-left: 2px solid var(--gta-gold);
+  color: #d9c998;
+  background: rgba(223, 204, 151, 0.08);
+  font-size: 9px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.character-tile__completeness.is-basic {
+  border-left-color: rgba(198, 215, 220, 0.42);
+  color: rgba(220, 232, 235, 0.58);
+}
+
+.character-detail-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(2, 9, 17, 0.48);
+  backdrop-filter: blur(2px);
+  animation: roster-backdrop-in 180ms ease-out both;
+}
+
+.character-detail-drawer {
+  width: clamp(360px, 38vw, 560px);
+  height: 100dvh;
+  min-width: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  border-left: 1px solid rgba(222, 204, 151, 0.7);
+  color: var(--gta-text-on-light);
+  background: #e4ecea;
+  box-shadow: -20px 0 52px rgba(0, 0, 0, 0.34);
+  animation: roster-drawer-in 220ms var(--gta-ease) both;
+}
+
+.character-detail-drawer:focus {
+  outline: none;
+}
+
+.character-detail-drawer__header {
+  display: flex;
+  min-height: 70px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(86, 111, 116, 0.22);
+  background: rgba(239, 244, 242, 0.98);
+}
+
+.character-detail-drawer__header h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.character-detail-drawer__scroll {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.gta-character {
+  --character-element: #71808a;
+  min-height: 100%;
+  color: var(--gta-text-on-light);
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--character-element) 7%, rgba(239, 244, 242, 0.98)),
+    rgba(224, 234, 232, 0.98)
+  );
+}
+
+.gta-character-main {
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  min-height: 108px;
+  padding: 13px 16px;
+}
+
+.gta-character-main .character-tile__portrait {
+  width: 82px;
+  height: 82px;
+}
+
+.gta-character-missing {
+  margin: 0;
+  padding: 8px 16px;
+  border-top: 1px solid rgba(150, 169, 172, 0.28);
+  color: #6f5b33;
+  background: rgba(232, 227, 210, 0.46);
+  font-size: 11px;
 }
 
 .gta-character-identity {
@@ -428,22 +620,26 @@
   gap: 8px;
 }
 
+.gta-character-title-row h3 {
+  margin: 0;
+}
+
 .gta-character-facts {
   flex-wrap: wrap;
-  gap: 6px 13px;
+  gap: 5px 11px;
   color: var(--gta-text-on-light-soft);
-  font-size: var(--gta-text-xs);
+  font-size: 11px;
 }
 
 .gta-character-facts > span {
   gap: 4px;
-  min-height: 24px;
+  min-height: 22px;
 }
 
 .gta-character-stars {
   display: inline-flex;
   gap: 1px;
-  color: #8a733d;
+  color: #786839;
 }
 
 .gta-neutral-element {
@@ -451,27 +647,22 @@
   width: 16px;
   height: 16px;
   place-items: center;
-  color: var(--gta-text-on-light-faint);
+  color: currentColor;
   font-size: 15px;
 }
 
 .gta-character-team-layer {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0;
   border-top: 1px solid var(--gta-stroke-soft);
-  background: color-mix(
-    in srgb,
-    var(--character-element) 6%,
-    rgba(231, 238, 236, 0.7)
-  );
+  background: rgba(221, 232, 230, 0.74);
 }
 
 .gta-character-team-fact {
   display: grid;
   min-width: 0;
   gap: 4px;
-  padding: 10px 14px;
+  padding: 9px 13px;
   border-right: 1px solid var(--gta-stroke-soft);
   border-bottom: 1px solid var(--gta-stroke-soft);
 }
@@ -487,13 +678,13 @@
 
 .gta-character-team-fact > span {
   color: var(--gta-text-on-light-faint);
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .gta-character-team-fact > strong {
   overflow-wrap: anywhere;
-  font-size: var(--gta-text-xs);
-  line-height: 1.5;
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 .gta-character-reactions > div {
@@ -503,37 +694,33 @@
 }
 
 .gta-character-reactions em {
-  padding: 2px 6px;
+  padding: 2px 5px;
   border: 1px solid rgba(157, 178, 177, 0.72);
   color: var(--gta-text-on-light-soft);
   background: rgba(247, 249, 247, 0.62);
-  font-size: 11px;
+  font-size: 10px;
   font-style: normal;
 }
 
 .gta-character-detail {
   display: grid;
-  grid-template-columns: minmax(260px, 1.1fr) minmax(220px, 0.9fr);
+  grid-template-columns: 1fr;
   grid-template-areas:
-    'stats build'
-    'artifacts artifacts'
-    'provenance provenance';
-  gap: 16px;
-  padding: 15px;
+    'stats'
+    'build'
+    'artifacts'
+    'provenance';
+  gap: 14px;
+  padding: 14px 16px 22px;
   border-top: 1px solid var(--gta-stroke-soft);
-  background: color-mix(
-    in srgb,
-    var(--character-element) 5%,
-    rgba(222, 232, 230, 0.58)
-  );
-  animation: gta-detail-reveal 180ms var(--gta-ease) both;
+  background: rgba(219, 230, 228, 0.72);
 }
 
 .gta-character-stats {
   display: grid;
   grid-area: stats;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px 14px;
+  gap: 5px 13px;
   margin: 0;
 }
 
@@ -547,14 +734,14 @@
 .gta-character-stat {
   min-width: 0;
   justify-content: space-between;
-  gap: 9px;
-  min-height: 30px;
-  font-size: var(--gta-text-xs);
+  gap: 8px;
+  min-height: 28px;
+  font-size: 11px;
 }
 
 .gta-character-stat dt,
 .gta-character-build-label {
-  gap: 6px;
+  gap: 5px;
   color: var(--gta-text-on-light-faint);
 }
 
@@ -567,28 +754,25 @@
 .gta-character-build {
   display: grid;
   grid-area: build;
-  gap: 7px;
-  align-content: start;
+  gap: 5px;
 }
 
 .gta-character-build-line {
   display: grid;
   grid-template-columns: 72px minmax(0, 1fr);
   align-items: center;
-  gap: 9px;
-  min-height: 30px;
-  font-size: var(--gta-text-xs);
+  gap: 8px;
+  min-height: 28px;
+  font-size: 11px;
 }
 
 .gta-character-build-line strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .gta-character-artifact-detail,
 .gta-character-provenance {
-  padding-top: 13px;
+  padding-top: 12px;
   border-top: 1px solid var(--gta-stroke-soft);
 }
 
@@ -602,9 +786,9 @@
 
 .gta-character-artifact-detail h4,
 .gta-character-provenance h4 {
-  margin: 0 0 9px;
+  margin: 0 0 8px;
   color: var(--gta-text-on-light-soft);
-  font-size: var(--gta-text-xs);
+  font-size: 11px;
 }
 
 .gta-character-artifact-detail ul,
@@ -616,17 +800,13 @@
   list-style: none;
 }
 
-.gta-character-artifact-detail ul {
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-}
-
 .gta-character-artifact-detail li {
   display: grid;
   gap: 3px;
   padding: 8px 10px;
-  border-left: 2px solid var(--gta-gold);
-  background: rgba(247, 249, 247, 0.56);
-  font-size: var(--gta-text-xs);
+  border-left: 2px solid rgba(87, 111, 116, 0.5);
+  background: rgba(247, 249, 247, 0.58);
+  font-size: 11px;
 }
 
 .gta-character-artifact-detail li span {
@@ -640,10 +820,10 @@
 
 .gta-character-provenance li {
   display: grid;
-  grid-template-columns: minmax(88px, 0.3fr) minmax(0, 1fr);
-  gap: 9px;
+  grid-template-columns: minmax(88px, 0.34fr) minmax(0, 1fr);
+  gap: 8px;
   color: var(--gta-text-on-light-faint);
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .gta-character-provenance li strong {
@@ -652,92 +832,101 @@
 
 .gta-roster-empty,
 .gta-roster-no-results {
-  padding: 34px;
-  border: 1px solid rgba(221, 232, 229, 0.72);
+  min-height: 0;
+  flex: 1 1 auto;
+  margin: 0;
+  padding: 28px;
+  border: 1px solid rgba(221, 232, 229, 0.32);
   color: var(--gta-text-on-dark);
   background: rgba(13, 27, 41, 0.68);
 }
 
 .gta-roster-empty p,
 .gta-roster-no-results {
-  margin: 0 0 18px;
+  margin-block: 0 16px;
 }
 
-@keyframes gta-detail-reveal {
+@keyframes roster-backdrop-in {
   from {
     opacity: 0;
-    transform: translateY(-5px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
   }
 }
 
-@media (max-width: 1180px) {
-  .gta-profile-summary {
-    grid-template-columns: minmax(175px, 0.8fr) minmax(300px, 1.4fr);
+@keyframes roster-drawer-in {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
   }
-  .gta-profile-summary-action {
-    grid-column: 1 / -1;
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-    border-top: 1px solid var(--gta-stroke-soft);
-    border-left: 0 !important;
+}
+
+@media (max-width: 1120px) {
+  .roster-page {
+    --app-shell-offset: 248px;
   }
+
   .gta-roster-toolbar {
-    grid-template-columns: minmax(210px, 0.7fr) minmax(0, 1.3fr);
+    grid-template-columns: minmax(180px, 0.7fr) minmax(0, 1.3fr);
   }
+
   .gta-roster-count {
     grid-column: 1 / -1;
   }
 }
 
-@media (max-width: 720px) {
+@media (max-width: 800px) {
   .gta-profile-summary {
     grid-template-columns: 1fr;
   }
+
   .gta-profile-summary > div + div {
     border-top: 1px solid var(--gta-stroke-soft);
     border-left: 0;
   }
+
   .gta-profile-summary-action {
-    grid-column: auto;
-    align-items: stretch;
-    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
   }
+
   .gta-roster-toolbar {
     grid-template-columns: 1fr;
   }
+
   .gta-roster-count {
     grid-column: auto;
   }
-  .gta-character-main {
-    grid-template-columns: 62px minmax(0, 1fr);
-    gap: 10px;
+
+  .character-detail-drawer {
+    width: min(100vw, 560px);
   }
-  .gta-character-mark {
-    width: 62px;
-    height: 70px;
+}
+
+@media (max-height: 680px) {
+  .roster-page {
+    height: auto;
+    min-height: calc(100dvh - var(--app-shell-offset));
+    overflow: visible;
   }
-  .gta-character-detail {
-    grid-template-columns: 1fr;
-    grid-template-areas:
-      'stats'
-      'build'
-      'artifacts'
-      'provenance';
+
+  .gta-roster-tabpanel {
+    min-height: 520px;
+    overflow: visible;
   }
-  .gta-character-stats {
-    grid-template-columns: 1fr;
+
+  .roster-grid {
+    overflow: visible;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .gta-profile-summary,
-  .gta-character-detail,
-  .gta-maintenance-menu {
+  .gta-maintenance-menu,
+  .character-detail-backdrop,
+  .character-detail-drawer {
     animation: none;
+  }
+
+  .character-tile {
+    transition: none;
   }
 }

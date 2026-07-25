@@ -4,10 +4,39 @@ import {
   isRenderableCharacterPortrait,
   presentArtifactStatKey,
   presentEnergyRecharge,
-  reactionTagsForElement
+  reactionTagsForElement,
+  renderTile
 } from '../../../src/renderer/pages/Roster/character-presentation.js';
 
 describe('character presentation decisions', () => {
+  it('keeps the tile model limited to scan-friendly identity fields', () => {
+    const tile = renderTile({
+      id: 52,
+      name: '雷电将军',
+      element: 'Electro',
+      rarity: 5,
+      imageUrl: '',
+      level: 90,
+      constellation: 2,
+      completeness: 'detailed',
+      missingFields: [],
+      provenance: {
+        ownership: {
+          source: 'miyoushe-list',
+          fetchedAt: '2026-07-25T00:00:00.000Z'
+        }
+      }
+    });
+
+    expect(tile).toEqual({
+      name: '雷电将军',
+      level: 90,
+      element: 'Electro',
+      completeness: 'detailed'
+    });
+    expect(tile).not.toHaveProperty('artifactDetails');
+  });
+
   it('does not turn an unknown element into Pyro', () => {
     expect(normalizeElement('Pyro')).toBe('pyro');
     expect(normalizeElement('')).toBeUndefined();
@@ -29,9 +58,7 @@ describe('character presentation decisions', () => {
   });
 
   it('accepts only the existing main-process image proxy for portraits', () => {
-    expect(
-      isRenderableCharacterPortrait('gtai-img://avatar/UI_AvatarIcon_Kazuha.png')
-    ).toBe(true);
+    expect(isRenderableCharacterPortrait('gtai-img://avatar/UI_AvatarIcon_Kazuha.png')).toBe(true);
     expect(isRenderableCharacterPortrait('gtai-img://remote/abc123')).toBe(true);
     expect(isRenderableCharacterPortrait('https://enka.network/ui/a.png')).toBe(false);
     expect(isRenderableCharacterPortrait('file:///tmp/a.png')).toBe(false);

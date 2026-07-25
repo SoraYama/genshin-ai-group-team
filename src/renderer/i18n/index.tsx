@@ -1,10 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-export {
-  destructiveErrorRecovery,
-  getErrorCode,
-  localizeError
-} from './error-localization';
+export { destructiveErrorRecovery, getErrorCode, localizeError } from './error-localization';
 
 export type Locale = 'zh-CN' | 'en-US';
 
@@ -188,6 +184,9 @@ const zh = {
   'roster.filterAll': '全部',
   'roster.filteredCount': '显示 {{shown}} / {{total}} 名角色',
   'roster.noResults': '没有符合当前搜索和元素筛选的角色。',
+  'roster.characterGrid': '角色头像列表',
+  'roster.viewDetails': '查看{{name}}详细资料',
+  'roster.drawerTitle': '{{name}}资料',
   'roster.element': '元素',
   'roster.element.pyro': '火元素',
   'roster.element.hydro': '水元素',
@@ -640,6 +639,9 @@ const en: Record<keyof typeof zh, string> = {
   'roster.filterAll': 'All',
   'roster.filteredCount': 'Showing {{shown}} / {{total}} characters',
   'roster.noResults': 'No characters match this search and element filter.',
+  'roster.characterGrid': 'Character portrait grid',
+  'roster.viewDetails': 'View {{name}} details',
+  'roster.drawerTitle': '{{name}} details',
   'roster.element': 'Element',
   'roster.element.pyro': 'Pyro',
   'roster.element.hydro': 'Hydro',
