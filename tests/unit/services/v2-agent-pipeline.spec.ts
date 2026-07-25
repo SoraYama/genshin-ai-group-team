@@ -7,7 +7,10 @@ import {
   type V2PipelineContext
 } from '../../../src/main/services/v2-agent-pipeline.js';
 import type { ToolAudit } from '../../../src/main/services/agent-turn-audit.js';
-import { AgentRunTraceStore } from '../../../src/main/services/agent-run-trace-store.js';
+import {
+  AgentRunTraceStore,
+  type AgentRunTraceWriter
+} from '../../../src/main/services/agent-run-trace-store.js';
 import type { RecommendationPlan } from '../../../src/shared/scenario-v2.js';
 import type { V2ExplainOutput, V2RotationOutput } from '../../../src/main/agents/contracts.js';
 import { buildUnknownKnowledgeContext } from '../../../src/main/services/v2-agent-context.js';
@@ -245,7 +248,7 @@ function run(
     | { ok: true; plan: RecommendationPlan }
     | { ok: false; issues: Array<{ code: string; path: Array<string | number>; message: string }> },
   pipelineContext: V2PipelineContext = context(baseline),
-  trace?: AgentRunTraceStore
+  trace?: AgentRunTraceWriter
 ) {
   return runV2AgentPipeline({
     runner,
@@ -264,6 +267,23 @@ function run(
       message
     })
   });
+}
+
+function throwingTraceWriter(
+  method: keyof AgentRunTraceWriter,
+  store = new AgentRunTraceStore()
+): AgentRunTraceWriter {
+  return new Proxy(store, {
+    get(target, property) {
+      if (property === method) {
+        return () => {
+          throw new Error(`trace-writer-${String(method)}-failed`);
+        };
+      }
+      const value = Reflect.get(target, property, target) as unknown;
+      return typeof value === 'function' ? value.bind(target) : value;
+    }
+  }) as AgentRunTraceWriter;
 }
 
 function traceStageStatuses(store: AgentRunTraceStore) {
@@ -816,6 +836,74 @@ describe('V2 agent pipeline repair and grounding', () => {
 });
 
 describe('V2 agent pipeline trace observer', () => {
+  it.each(['start', 'startStage', 'completeStage', 'skipStage', 'finish', 'latest'] as const)(
+    'keeps a successful pipeline unchanged when trace writer.%s throws',
+    async (method) => {
+      const baseline = validAbyssPlan();
+      const runner = new StageRunner([
+        baseline,
+        { decision: 'accept', issues: [] },
+        rotationOutput(baseline),
+        explainOutput(baseline)
+      ]);
+
+      const result = await run(
+        runner,
+        baseline,
+        (text) => ({ ok: true, plan: JSON.parse(text) as RecommendationPlan }),
+        context(baseline),
+        throwingTraceWriter(method)
+      );
+
+      expect(result).toMatchObject({ ok: true, repairs: 0 });
+    }
+  );
+
+  it('keeps a validation result unchanged when trace writer.failStage throws', async () => {
+    const baseline = validAbyssPlan();
+    const result = await run(
+      new StageRunner([baseline, 'not-json']),
+      baseline,
+      (text) => ({ ok: true, plan: JSON.parse(text) as RecommendationPlan }),
+      context(baseline),
+      throwingTraceWriter('failStage')
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      issues: [expect.objectContaining({ path: ['critique'] })]
+    });
+  });
+
+  it('preserves the SDK option error when trace writer.start also throws', async () => {
+    const baseline = validAbyssPlan();
+    const sdkError = new Error('original-sdk-options-error');
+
+    await expect(
+      runV2AgentPipeline({
+        runner: new StageRunner([]),
+        context: context(baseline),
+        trace: throwingTraceWriter('start'),
+        sdkOptionsForStage: () => {
+          throw sdkError;
+        },
+        composer: {
+          initialPrompt: '{}',
+          systemPrompt: 'composer',
+          repairPrompt: 'repair',
+          validate: () => {
+            throw new Error('unreachable');
+          }
+        },
+        invalidIssue: (stage, message) => ({
+          code: 'AGENT_OUTPUT_INVALID',
+          path: [stage],
+          message
+        })
+      })
+    ).rejects.toBe(sdkError);
+  });
+
   it('records safe raw outputs, true stage usage, skipped repairs, and a completed terminal run', async () => {
     const baseline = validAbyssPlan();
     const runner = new StageRunner([
@@ -1006,6 +1094,64 @@ describe('V2 agent pipeline trace observer', () => {
       failure: { code: 'VALIDATION_FAILED' }
     });
     expect(JSON.stringify(trace.latest())).not.toContain('must-not-leak');
+  });
+
+  it('classifies strict-stage input schema errors as local validation failures', async () => {
+    const baseline = validAbyssPlan();
+    const invalidPlan = { ...baseline, scenarioId: '' } as RecommendationPlan;
+    const trace = new AgentRunTraceStore();
+
+    await expect(
+      run(
+        new StageRunner([baseline]),
+        baseline,
+        () => ({ ok: true, plan: invalidPlan }),
+        context(baseline),
+        trace
+      )
+    ).rejects.toMatchObject({ name: 'ZodError' });
+
+    expect(trace.latest()).toMatchObject({
+      status: 'failed',
+      failure: { code: 'VALIDATION_FAILED' }
+    });
+    expect(trace.latest()?.stages.find(({ stage }) => stage === 'critique')).toMatchObject({
+      status: 'failed',
+      failure: { code: 'VALIDATION_FAILED' }
+    });
+  });
+
+  it('classifies repair payload serialization errors as local validation failures', async () => {
+    const baseline = validAbyssPlan();
+    const trace = new AgentRunTraceStore();
+    const circularIssue: Record<string, unknown> = {
+      code: 'PLAN_SCHEMA_INVALID',
+      path: [],
+      message: 'repair required'
+    };
+    circularIssue['details'] = circularIssue;
+
+    await expect(
+      run(
+        new StageRunner([baseline]),
+        baseline,
+        () => ({
+          ok: false,
+          issues: [circularIssue as never]
+        }),
+        context(baseline),
+        trace
+      )
+    ).rejects.toThrow();
+
+    expect(trace.latest()).toMatchObject({
+      status: 'failed',
+      failure: { code: 'VALIDATION_FAILED' }
+    });
+    expect(trace.latest()?.stages.find(({ stage }) => stage === 'repair-1')).toMatchObject({
+      status: 'failed',
+      failure: { code: 'VALIDATION_FAILED' }
+    });
   });
 
   it('records strict JSON/schema failure raw text and marks later stages skipped', async () => {

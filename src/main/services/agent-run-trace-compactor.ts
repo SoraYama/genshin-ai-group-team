@@ -1,6 +1,16 @@
-import type { AgentRunTrace, AgentToolTrace } from '../../shared/agent-run-trace.js';
+import type {
+  AgentFailure,
+  AgentRunTrace,
+  AgentStageTrace,
+  AgentToolTrace
+} from '../../shared/agent-run-trace.js';
 
 const TRUNCATION_MARKER = '\n…[TRUNCATED]…\n';
+
+export interface TraceCompactionStats {
+  measurements: number;
+  pass: 'none' | 'quota' | 'summary' | 'skeleton';
+}
 
 export function headTailUtf8(
   value: string,
@@ -20,45 +30,166 @@ export function headTailUtf8(
   };
 }
 
-export function compactTraceToBudget(trace: AgentRunTrace, maxBytes: number): void {
-  let guard = 0;
-  while (jsonBytes(trace) > maxBytes && guard < 256) {
-    guard += 1;
-    const fields = compactableTextFields(trace).sort(
-      (left, right) => utf8Bytes(right.get()) - utf8Bytes(left.get())
-    );
-    const field = fields.find(({ get }) => utf8Bytes(get()) > utf8Bytes(TRUNCATION_MARKER));
-    if (field === undefined) break;
-    const current = field.get();
-    const over = jsonBytes(trace) - maxBytes;
-    const nextBudget = Math.max(
-      utf8Bytes(TRUNCATION_MARKER),
-      utf8Bytes(current) - Math.max(over, Math.ceil(utf8Bytes(current) / 3))
-    );
-    const next = headTailUtf8(current, nextBudget).text;
-    if (next === current) break;
-    field.set(next);
-    field.mark();
-  }
-  if (jsonBytes(trace) <= maxBytes) return;
-  for (const stage of trace.stages) {
-    while (stage.citationIds.length > 0 && jsonBytes(trace) > maxBytes) {
-      stage.citationIds.pop();
-      stage.truncated = true;
-    }
-  }
-  if (jsonBytes(trace) <= maxBytes) return;
-  dropOptionalTraceText(trace, maxBytes);
-  if (jsonBytes(trace) <= maxBytes) return;
-  summarizeTraceTools(trace, maxBytes);
-  if (jsonBytes(trace) <= maxBytes) return;
-  minimizeFailureText(trace, maxBytes);
-  if (jsonBytes(trace) <= maxBytes) return;
-  minimizeTraceIdentifiers(trace, maxBytes);
+/**
+ * Compaction deliberately has a constant number of whole-trace measurements.
+ * No pass sorts fields or repeatedly stringifies after individual mutations.
+ */
+export function compactTraceToBudget(
+  trace: AgentRunTrace,
+  maxBytes: number
+): TraceCompactionStats {
+  if (jsonBytes(trace) <= maxBytes) return { measurements: 1, pass: 'none' };
+
+  applyTextQuotas(trace);
+  if (jsonBytes(trace) <= maxBytes) return { measurements: 2, pass: 'quota' };
+
+  summarizeOptionalPayload(trace);
+  if (jsonBytes(trace) <= maxBytes) return { measurements: 3, pass: 'summary' };
+
+  applyCanonicalSkeleton(trace);
+  return { measurements: 4, pass: 'skeleton' };
 }
 
 export function jsonBytes(value: unknown): number {
   return utf8Bytes(JSON.stringify(value));
+}
+
+function applyTextQuotas(trace: AgentRunTrace): void {
+  trace.correlationId = compactText(trace.correlationId, 128).text || 'trace';
+  trace.model = compactText(trace.model, 128).text || 'model';
+  for (const stage of trace.stages) {
+    compactStageText(stage);
+  }
+  if (trace.status === 'failed') compactFailure(trace.failure, 256, 4, 128);
+}
+
+function compactStageText(stage: AgentStageTrace): void {
+  let changed = false;
+  if (stage.inputSummary !== undefined) {
+    const compacted = compactText(stage.inputSummary, 512);
+    stage.inputSummary = compacted.text;
+    changed ||= compacted.truncated;
+  }
+  if (stage.rawOutput !== undefined) {
+    const compacted = compactText(stage.rawOutput, 1_024);
+    stage.rawOutput = compacted.text;
+    changed ||= compacted.truncated;
+  }
+  if (stage.failure !== undefined) changed ||= compactFailure(stage.failure, 256, 4, 128);
+  if (stage.citationIds.length > 16) {
+    stage.citationIds = stage.citationIds.slice(0, 16);
+    changed = true;
+  }
+  for (const tool of stage.tools) {
+    changed ||= compactToolText(tool);
+  }
+  if (changed) stage.truncated = true;
+}
+
+function compactToolText(tool: AgentToolTrace): boolean {
+  let changed = false;
+  const name = compactText(tool.name, 96);
+  tool.name = name.text || 'tool';
+  changed ||= name.truncated;
+  if (tool.inputSummary !== undefined) {
+    const input = compactText(tool.inputSummary, 384);
+    tool.inputSummary = input.text;
+    changed ||= input.truncated;
+  }
+  if (tool.outputSummary !== undefined) {
+    const output = compactText(tool.outputSummary, 384);
+    tool.outputSummary = output.text;
+    changed ||= output.truncated;
+  }
+  if (tool.failure !== undefined) changed ||= compactFailure(tool.failure, 192, 4, 96);
+  if (changed) tool.truncated = true;
+  return changed;
+}
+
+function compactFailure(
+  failure: AgentFailure,
+  messageBytes: number,
+  detailCount: number,
+  detailBytes: number
+): boolean {
+  let changed = false;
+  const message = compactText(failure.message, messageBytes);
+  failure.message = message.text || '!';
+  changed ||= message.truncated;
+  if (failure.details !== undefined) {
+    const entries = Object.entries(failure.details);
+    const bounded = entries.slice(0, detailCount).map(([key, value]) => {
+      const compacted = compactText(value, detailBytes);
+      changed ||= compacted.truncated;
+      return [key, compacted.text] as const;
+    });
+    changed ||= entries.length > bounded.length;
+    failure.details = Object.fromEntries(bounded);
+  }
+  return changed;
+}
+
+function summarizeOptionalPayload(trace: AgentRunTrace): void {
+  for (const stage of trace.stages) {
+    delete stage.inputSummary;
+    delete stage.rawOutput;
+    delete stage.durationMs;
+    stage.citationIds = [];
+    if (stage.failure !== undefined) {
+      stage.failure.message = compactText(stage.failure.message, 96).text || '!';
+      delete stage.failure.details;
+    }
+    if (stage.tools.length > 0) {
+      const representative =
+        stage.tools.find(({ status }) => status === 'failed') ?? stage.tools[0]!;
+      stage.tools = [minimizeTool(representative)];
+    }
+    stage.truncated = true;
+  }
+  if (trace.status === 'failed') {
+    trace.failure.message = compactText(trace.failure.message, 96).text || '!';
+    delete trace.failure.details;
+  }
+}
+
+function applyCanonicalSkeleton(trace: AgentRunTrace): void {
+  trace.correlationId = compactText(trace.correlationId, 32).text || 'trace';
+  trace.model = compactText(trace.model, 32).text || 'model';
+  trace.stages = trace.stages.map((stage) => {
+    const tool =
+      stage.tools.find(({ status }) => status === 'failed') ?? stage.tools[0];
+    return {
+      stage: stage.stage,
+      status: stage.status,
+      tools: tool === undefined ? [] : [minimizeTool(tool)],
+      citationIds: [],
+      usage: stage.usage,
+      ...(stage.failure === undefined ? {} : { failure: minimizeFailure(stage.failure) }),
+      truncated: true
+    };
+  });
+  if (trace.status === 'failed') trace.failure = minimizeFailure(trace.failure);
+}
+
+function minimizeTool(tool: AgentToolTrace): AgentToolTrace {
+  return {
+    name: compactText(tool.name, 48).text || 'tool',
+    status: tool.status,
+    ...(tool.failure === undefined ? {} : { failure: minimizeFailure(tool.failure) }),
+    truncated: true
+  };
+}
+
+function minimizeFailure(failure: AgentFailure): AgentFailure {
+  return {
+    code: failure.code,
+    message: '!',
+    retryable: failure.retryable
+  };
+}
+
+function compactText(value: string, maxBytes: number): { text: string; truncated: boolean } {
+  return headTailUtf8(value, maxBytes);
 }
 
 function utf8Prefix(value: string, maxBytes: number): string {
@@ -85,235 +216,6 @@ function utf8Suffix(value: string, maxBytes: number): string {
     bytes += size;
   }
   return result.reverse().join('');
-}
-
-function dropOptionalTraceText(trace: AgentRunTrace, maxBytes: number): void {
-  for (const stage of trace.stages) {
-    if (jsonBytes(trace) <= maxBytes) return;
-    if (stage.inputSummary !== undefined) {
-      delete stage.inputSummary;
-      stage.truncated = true;
-    }
-    if (jsonBytes(trace) <= maxBytes) return;
-    if (stage.rawOutput !== undefined) {
-      delete stage.rawOutput;
-      stage.truncated = true;
-    }
-    for (const tool of stage.tools) {
-      if (jsonBytes(trace) <= maxBytes) return;
-      if (tool.inputSummary !== undefined) {
-        delete tool.inputSummary;
-        tool.truncated = true;
-        stage.truncated = true;
-      }
-      if (jsonBytes(trace) <= maxBytes) return;
-      if (tool.outputSummary !== undefined) {
-        delete tool.outputSummary;
-        tool.truncated = true;
-        stage.truncated = true;
-      }
-      if (jsonBytes(trace) <= maxBytes) return;
-      if (tool.durationMs !== undefined) {
-        delete tool.durationMs;
-        tool.truncated = true;
-        stage.truncated = true;
-      }
-    }
-    if (jsonBytes(trace) <= maxBytes) return;
-    if (stage.durationMs !== undefined) {
-      delete stage.durationMs;
-      stage.truncated = true;
-    }
-  }
-}
-
-function summarizeTraceTools(trace: AgentRunTrace, maxBytes: number): void {
-  for (const stage of trace.stages) {
-    if (jsonBytes(trace) <= maxBytes) return;
-    if (stage.tools.length > 3) {
-      const first = minimizeTool(stage.tools[0]!);
-      const last = minimizeTool(stage.tools[stage.tools.length - 1]!);
-      const omitted = stage.tools.slice(1, -1);
-      stage.tools = [first, summarizedTool(omitted), last];
-      stage.truncated = true;
-    }
-  }
-  for (const stage of trace.stages) {
-    if (jsonBytes(trace) <= maxBytes) return;
-    if (stage.tools.length > 0) {
-      stage.tools = [summarizedTool(stage.tools)];
-      stage.truncated = true;
-    }
-  }
-}
-
-function minimizeTool(tool: AgentToolTrace): AgentToolTrace {
-  return tool.status === 'failed'
-    ? {
-        name: headTailUtf8(tool.name, 64).text || 'tool',
-        status: 'failed',
-        failure: {
-          code: tool.failure?.code ?? 'TOOL_REQUIREMENT_FAILED',
-          message: '!',
-          retryable: tool.failure?.retryable ?? false
-        },
-        truncated: true
-      }
-    : {
-        name: headTailUtf8(tool.name, 64).text || 'tool',
-        status: tool.status,
-        truncated: true
-      };
-}
-
-function summarizedTool(tools: readonly AgentToolTrace[]): AgentToolTrace {
-  const failed = tools.find(({ status }) => status === 'failed');
-  return failed === undefined
-    ? {
-        name: `[${tools.length} tools summarized]`,
-        status: 'completed',
-        truncated: true
-      }
-    : {
-        name: `[${tools.length} tools summarized]`,
-        status: 'failed',
-        failure: {
-          code: failed.failure?.code ?? 'TOOL_REQUIREMENT_FAILED',
-          message: '!',
-          retryable: failed.failure?.retryable ?? false
-        },
-        truncated: true
-      };
-}
-
-function minimizeFailureText(trace: AgentRunTrace, maxBytes: number): void {
-  for (const stage of trace.stages) {
-    if (jsonBytes(trace) <= maxBytes) return;
-    if (stage.failure !== undefined) {
-      stage.failure.message = '!';
-      delete stage.failure.details;
-      stage.truncated = true;
-    }
-    for (const tool of stage.tools) {
-      if (jsonBytes(trace) <= maxBytes) return;
-      if (tool.failure !== undefined) {
-        tool.failure.message = '!';
-        delete tool.failure.details;
-        tool.truncated = true;
-        stage.truncated = true;
-      }
-    }
-  }
-  if (jsonBytes(trace) <= maxBytes || trace.status !== 'failed') return;
-  trace.failure.message = '!';
-  delete trace.failure.details;
-}
-
-function minimizeTraceIdentifiers(trace: AgentRunTrace, maxBytes: number): void {
-  if (jsonBytes(trace) <= maxBytes) return;
-  trace.correlationId = headTailUtf8(trace.correlationId, 32).text || 'trace';
-  if (jsonBytes(trace) <= maxBytes) return;
-  trace.model = headTailUtf8(trace.model, 32).text || 'model';
-}
-
-function compactableTextFields(trace: AgentRunTrace): Array<{
-  get: () => string;
-  set: (value: string) => void;
-  mark: () => void;
-}> {
-  const fields: Array<{
-    get: () => string;
-    set: (value: string) => void;
-    mark: () => void;
-  }> = [];
-  const add = (
-    owner: { truncated?: boolean } | (() => void),
-    get: () => string | undefined,
-    set: (value: string) => void
-  ) => {
-    if (get() === undefined) return;
-    fields.push({
-      get: () => get() ?? '',
-      set,
-      mark: () => {
-        if (typeof owner === 'function') owner();
-        else owner.truncated = true;
-      }
-    });
-  };
-  for (const stage of trace.stages) {
-    add(
-      stage,
-      () => stage.inputSummary,
-      (value) => (stage.inputSummary = value)
-    );
-    add(
-      stage,
-      () => stage.rawOutput,
-      (value) => (stage.rawOutput = value)
-    );
-    if (stage.failure !== undefined) {
-      add(
-        stage,
-        () => stage.failure?.message,
-        (value) => (stage.failure!.message = value)
-      );
-      Object.keys(stage.failure.details ?? {}).forEach((key) =>
-        add(
-          stage,
-          () => stage.failure?.details?.[key],
-          (value) => (stage.failure!.details![key] = value)
-        )
-      );
-    }
-    for (const tool of stage.tools) {
-      add(
-        tool,
-        () => tool.inputSummary,
-        (value) => (tool.inputSummary = value)
-      );
-      add(
-        tool,
-        () => tool.outputSummary,
-        (value) => (tool.outputSummary = value)
-      );
-      if (tool.failure !== undefined) {
-        add(
-          tool,
-          () => tool.failure?.message,
-          (value) => (tool.failure!.message = value)
-        );
-        Object.keys(tool.failure.details ?? {}).forEach((key) =>
-          add(
-            tool,
-            () => tool.failure?.details?.[key],
-            (value) => (tool.failure!.details![key] = value)
-          )
-        );
-      }
-    }
-  }
-  if (trace.status === 'failed') {
-    const markTerminalFailure = () => {
-      trace.failure.details = {
-        ...Object.fromEntries(Object.entries(trace.failure.details ?? {}).slice(0, 31)),
-        truncated: TRUNCATION_MARKER
-      };
-    };
-    add(
-      markTerminalFailure,
-      () => trace.failure.message,
-      (value) => (trace.failure.message = value)
-    );
-    Object.keys(trace.failure.details ?? {}).forEach((key) =>
-      add(
-        markTerminalFailure,
-        () => trace.failure.details?.[key],
-        (value) => (trace.failure.details![key] = value)
-      )
-    );
-  }
-  return fields;
 }
 
 function utf8Bytes(value: string): number {

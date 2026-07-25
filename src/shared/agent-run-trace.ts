@@ -1,12 +1,24 @@
 import { z } from 'zod';
 
+import {
+  MAX_TRACE_CUSTOM_HEADER_AGGREGATE_LENGTH,
+  MAX_TRACE_CUSTOM_HEADER_VALUE_LENGTH,
+  MAX_TRACE_CUSTOM_HEADER_VALUES,
+  buildTraceSensitiveRegistry,
+  redactTraceSecrets,
+  type TraceSensitiveRegistry
+} from './agent-run-trace-redactor.js';
+
+export {
+  MAX_TRACE_CUSTOM_HEADER_AGGREGATE_LENGTH,
+  MAX_TRACE_CUSTOM_HEADER_VALUE_LENGTH,
+  MAX_TRACE_CUSTOM_HEADER_VALUES
+} from './agent-run-trace-redactor.js';
+
 export const MAX_TRACE_TEXT_OUTPUT_CODE_UNITS = 32_768;
 export const DEFAULT_TRACE_TEXT_MAX_BYTES = 16_384;
 export const MAX_TRACE_TEXT_MAX_BYTES = 32_768;
 export const MAX_TRACE_TEXT_INPUT_CHARS = 32_768;
-export const MAX_TRACE_CUSTOM_HEADER_VALUES = 64;
-export const MAX_TRACE_CUSTOM_HEADER_VALUE_LENGTH = 4_096;
-export const MAX_TRACE_CUSTOM_HEADER_AGGREGATE_LENGTH = 64 * 1_024;
 
 const REDACTION_MARKER = '[REDACTED]';
 const boundedTextSchema = z.string().max(MAX_TRACE_TEXT_OUTPUT_CODE_UNITS);
@@ -185,8 +197,8 @@ export function sanitizeTraceText(
   options: SanitizeTraceTextOptions = {}
 ): SanitizedTraceText {
   const maxBytes = normalizeByteBudget(options.maxBytes);
-  const customHeaderValues = normalizeCustomHeaderValues(options.customHeaderValues);
-  const maximumCustomValueLength = customHeaderValues.reduce(
+  const registry = normalizeCustomHeaderValues(options.customHeaderValues);
+  const maximumCustomValueLength = registry.values.reduce(
     (maximum, customValue) => Math.max(maximum, customValue.length),
     0
   );
@@ -195,15 +207,14 @@ export function sanitizeTraceText(
   const sourceWasCapped = value.length > MAX_TRACE_TEXT_INPUT_CHARS;
   const scanPrefix = takeCodePointSafePrefix(value, scanLimit);
   const trailingCustomSpanLength = scanPrefix.truncated
-    ? findTrailingCustomSpanLength(scanPrefix.text, customHeaderValues)
+    ? findTrailingCustomSpanLength(scanPrefix.text, registry.values)
     : 0;
   const completeScanText =
     trailingCustomSpanLength === 0
       ? scanPrefix.text
       : scanPrefix.text.slice(0, -trailingCustomSpanLength);
 
-  let redacted = redactRecognizedSecrets(completeScanText);
-  redacted = redactCustomSecrets(redacted, customHeaderValues);
+  let redacted = redactTraceSecrets(completeScanText, registry).text;
   if (trailingCustomSpanLength > 0) redacted += REDACTION_MARKER;
 
   const output = truncateSanitizedText(redacted, maxBytes);
@@ -223,59 +234,19 @@ function normalizeByteBudget(value: number | undefined): number {
   return value;
 }
 
-function normalizeCustomHeaderValues(values: readonly string[] | undefined): readonly string[] {
-  if (values === undefined) return [];
-  if (values.length > MAX_TRACE_CUSTOM_HEADER_VALUES) {
-    throw new RangeError(
-      `customHeaderValues may contain at most ${MAX_TRACE_CUSTOM_HEADER_VALUES} values`
-    );
-  }
-  const uniqueValues = new Map<string, string>();
-  values.forEach((value) => {
-    if (value.length > MAX_TRACE_CUSTOM_HEADER_VALUE_LENGTH) {
-      throw new RangeError(
-        `custom header values may contain at most ${MAX_TRACE_CUSTOM_HEADER_VALUE_LENGTH} characters`
-      );
-    }
-    const wellFormedValue = makeWellFormed(value);
-    if (wellFormedValue.length > 0) {
-      const key = wellFormedValue.toLowerCase();
-      if (!uniqueValues.has(key)) uniqueValues.set(key, wellFormedValue);
-    }
-  });
-  const normalized = [...uniqueValues.values()].sort(
-    (left, right) => right.length - left.length || left.localeCompare(right)
+function normalizeCustomHeaderValues(
+  values: readonly string[] | undefined
+): TraceSensitiveRegistry {
+  const registry = buildTraceSensitiveRegistry(
+    [],
+    values?.map((value) => makeWellFormed(value))
   );
-  if (
-    normalized.reduce((total, value) => total + value.length, 0) >
-    MAX_TRACE_CUSTOM_HEADER_AGGREGATE_LENGTH
-  ) {
+  if (registry.failClosed) {
     throw new RangeError(
-      `customHeaderValues may contain at most ${MAX_TRACE_CUSTOM_HEADER_AGGREGATE_LENGTH} characters in aggregate`
+      `customHeaderValues exceed count ${MAX_TRACE_CUSTOM_HEADER_VALUES}, value length ${MAX_TRACE_CUSTOM_HEADER_VALUE_LENGTH}, or aggregate ${MAX_TRACE_CUSTOM_HEADER_AGGREGATE_LENGTH}`
     );
   }
-  return normalized;
-}
-
-function redactRecognizedSecrets(value: string): string {
-  return value
-    .replace(
-      /("(?:apiKey|ANTHROPIC_AUTH_TOKEN)"\s*:\s*)"(?:\\.|[^"\\])*(?:"|$)/gi,
-      '$1"[REDACTED]"'
-    )
-    .replace(/("(?:Authorization|Cookie)"\s*:\s*)"(?:\\.|[^"\\])*(?:"|$)/gi, '$1"[REDACTED]"')
-    .replace(/((?<!")\b(?:Authorization|Cookie)\b\s*[:=]\s*)[^\r\n,}，]*/gi, '$1[REDACTED]')
-    .replace(
-      /((?<!")\b(?:apiKey|ANTHROPIC_AUTH_TOKEN)\b\s*[:=]\s*)(?:"(?:\\.|[^"\\])*(?:"|$)|'(?:\\.|[^'\\])*(?:'|$)|[^\r\n,;}；，]+)/gi,
-      '$1[REDACTED]'
-    )
-    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [REDACTED]');
-}
-
-function redactCustomSecrets(value: string, customValues: readonly string[]): string {
-  if (customValues.length === 0) return value;
-  const combinedPattern = customValues.map(escapeRegExp).join('|');
-  return value.replace(new RegExp(combinedPattern, 'giu'), REDACTION_MARKER);
+  return registry;
 }
 
 function findTrailingCustomSpanLength(value: string, customValues: readonly string[]): number {
@@ -390,10 +361,6 @@ function isHighSurrogate(codeUnit: number): boolean {
 
 function isLowSurrogate(codeUnit: number): boolean {
   return codeUnit >= 0xdc00 && codeUnit <= 0xdfff;
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 export type AgentFailureCode = z.infer<typeof agentFailureCodeSchema>;

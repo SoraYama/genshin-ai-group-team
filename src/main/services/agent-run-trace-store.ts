@@ -1,12 +1,8 @@
 import {
-  MAX_TRACE_CUSTOM_HEADER_AGGREGATE_LENGTH,
-  MAX_TRACE_CUSTOM_HEADER_VALUE_LENGTH,
-  MAX_TRACE_CUSTOM_HEADER_VALUES,
   MAX_TRACE_TEXT_MAX_BYTES,
   agentFinalSourceSchema,
   agentRunTraceSchema,
   agentStageSchema,
-  sanitizeTraceText,
   type AgentFailure,
   type AgentRunTrace,
   type AgentStage,
@@ -14,13 +10,25 @@ import {
   type AgentTraceKnowledgeSummary,
   type AgentUsage
 } from '../../shared/agent-run-trace.js';
+import {
+  TRACE_REDACTION_MARKER,
+  buildTraceSensitiveRegistry,
+  redactTraceSecrets,
+  type TraceSensitiveRegistry
+} from '../../shared/agent-run-trace-redactor.js';
 import { compactTraceToBudget, headTailUtf8, jsonBytes } from './agent-run-trace-compactor.js';
 
 const DEFAULT_MAX_BYTES = 256 * 1024;
-const MIN_MAX_BYTES = 4 * 1024;
-const REDACTION_MARKER = '[REDACTED]';
+export const MIN_AGENT_RUN_TRACE_BYTES = 16 * 1024;
+const REDACTION_MARKER = TRACE_REDACTION_MARKER;
+const MAX_TOOL_SUMMARY_BYTES = 2_048;
+const MAX_TOOL_INPUT_CHARACTERS = 4_096;
+const MAX_TOOL_FAILURE_DETAILS = 4;
+const MAX_TOOL_FAILURE_DETAIL_BYTES = 512;
+const MAX_TOOL_FAILURE_DETAIL_CHARACTERS = 2_048;
 const EMPTY_USAGE: AgentUsage = { inputTokens: 0, outputTokens: 0 };
 const TRACE_LEASE_GENERATION = Symbol('agent-run-trace-generation');
+const EMPTY_SENSITIVE_REGISTRY = buildTraceSensitiveRegistry([], []);
 
 export interface AgentRunTraceStoreOptions {
   maxBytes?: number;
@@ -92,25 +100,25 @@ export class AgentRunTraceStore implements AgentRunTraceWriter {
   private readonly now: () => number;
   private trace: AgentRunTrace | null = null;
   private activeLease: AgentRunTraceLease | null = null;
-  private sensitiveValues: readonly string[] = [];
-  private failClosedRedaction = false;
+  private sensitiveRegistry: TraceSensitiveRegistry = EMPTY_SENSITIVE_REGISTRY;
   private readonly stageStartedAt = new Map<number, number>();
 
   constructor(options: AgentRunTraceStoreOptions = {}) {
     const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
-    if (!Number.isSafeInteger(maxBytes) || maxBytes < MIN_MAX_BYTES) {
-      throw new RangeError(`maxBytes must be a safe integer of at least ${MIN_MAX_BYTES}`);
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < MIN_AGENT_RUN_TRACE_BYTES) {
+      throw new RangeError(
+        `maxBytes must be a safe integer of at least ${MIN_AGENT_RUN_TRACE_BYTES}`
+      );
     }
     this.maxBytes = maxBytes;
     this.now = options.now ?? Date.now;
   }
 
   start(input: StartTraceInput): AgentRunTraceLease {
-    const registry = buildSensitiveRegistry([], input.sensitiveValues);
-    this.sensitiveValues = registry.values;
-    this.failClosedRedaction = registry.failClosed;
-    const correlationId = this.sanitize(input.correlationId, 128).text || REDACTION_MARKER;
-    const model = this.sanitize(input.model, 256).text || REDACTION_MARKER;
+    const registry = buildTraceSensitiveRegistry([], input.sensitiveValues);
+    const correlationId =
+      this.sanitize(input.correlationId, 128, undefined, registry).text || REDACTION_MARKER;
+    const model = this.sanitize(input.model, 256, undefined, registry).text || REDACTION_MARKER;
     const candidate = {
       correlationId,
       startedAt: input.startedAt ?? new Date(this.now()).toISOString(),
@@ -122,11 +130,6 @@ export class AgentRunTraceStore implements AgentRunTraceWriter {
     };
     const committed = this.prepare(candidate);
     if (committed === null) {
-      this.trace = null;
-      this.activeLease = null;
-      this.sensitiveValues = [];
-      this.failClosedRedaction = false;
-      this.stageStartedAt.clear();
       throw new TypeError('Trace start input is invalid');
     }
     const lease = Object.freeze({
@@ -135,38 +138,45 @@ export class AgentRunTraceStore implements AgentRunTraceWriter {
     });
     this.trace = committed;
     this.activeLease = lease;
+    this.sensitiveRegistry = registry;
     this.stageStartedAt.clear();
     return lease;
   }
 
   startStage(lease: AgentRunTraceLease, input: StartStageInput): void {
-    this.updateRunning(lease, (candidate) => {
-      if (
-        !agentStageSchema.safeParse(input.stage).success ||
-        candidate.stages.some(({ status }) => status === 'started')
-      ) {
-        return false;
-      }
-      const registry = buildSensitiveRegistry(this.sensitiveValues, input.sensitiveValues);
-      const registryChanged =
-        registry.failClosed !== this.failClosedRedaction ||
-        registry.values.some((value, index) => value !== this.sensitiveValues[index]);
-      this.sensitiveValues = registry.values;
-      this.failClosedRedaction ||= registry.failClosed;
-      if (registryChanged) this.resanitizeTrace(candidate);
-      const summary =
-        input.inputSummary === undefined ? undefined : this.sanitize(input.inputSummary).text;
-      candidate.stages.push({
-        stage: input.stage,
-        status: 'started',
-        ...(summary === undefined ? {} : { inputSummary: summary }),
-        tools: [],
-        citationIds: this.sanitizeIds(input.citationIds),
-        usage: { ...EMPTY_USAGE }
-      });
-      this.stageStartedAt.set(candidate.stages.length - 1, this.now());
-      return true;
+    if (
+      this.trace?.status !== 'running' ||
+      this.activeLease !== lease ||
+      !agentStageSchema.safeParse(input.stage).success ||
+      this.trace.stages.some(({ status }) => status === 'started')
+    ) {
+      return;
+    }
+    const candidate = structuredClone(this.trace);
+    const registry = this.sensitiveRegistry.failClosed
+      ? this.sensitiveRegistry
+      : buildTraceSensitiveRegistry(this.sensitiveRegistry.values, input.sensitiveValues);
+    const registryChanged =
+      registry.failClosed !== this.sensitiveRegistry.failClosed ||
+      registry.values.some((value, index) => value !== this.sensitiveRegistry.values[index]);
+    if (registryChanged) this.resanitizeTrace(candidate, registry);
+    const summary =
+      input.inputSummary === undefined
+        ? undefined
+        : this.sanitize(input.inputSummary, undefined, undefined, registry).text;
+    candidate.stages.push({
+      stage: input.stage,
+      status: 'started',
+      ...(summary === undefined ? {} : { inputSummary: summary }),
+      tools: [],
+      citationIds: this.sanitizeIds(input.citationIds, registry),
+      usage: { ...EMPTY_USAGE }
     });
+    const committed = this.prepare(candidate);
+    if (committed === null) return;
+    this.trace = committed;
+    this.sensitiveRegistry = registry;
+    this.stageStartedAt.set(candidate.stages.length - 1, this.now());
   }
 
   completeStage(lease: AgentRunTraceLease, input: CompleteStageInput): void {
@@ -229,8 +239,7 @@ export class AgentRunTraceStore implements AgentRunTraceWriter {
     if (committed === null) return;
     this.trace = committed;
     this.stageStartedAt.clear();
-    this.sensitiveValues = [];
-    this.failClosedRedaction = false;
+    this.sensitiveRegistry = EMPTY_SENSITIVE_REGISTRY;
   }
 
   latest(): AgentRunTrace | null {
@@ -242,7 +251,7 @@ export class AgentRunTraceStore implements AgentRunTraceWriter {
     input: CompleteStageInput,
     failure: AgentFailure | undefined
   ): void {
-    this.updateRunning(lease, (candidate) => {
+    const committed = this.updateRunning(lease, (candidate) => {
       if (!agentStageSchema.safeParse(input.stage).success) return false;
       const index = findStartedStage(candidate, input.stage);
       if (index < 0) return false;
@@ -270,57 +279,86 @@ export class AgentRunTraceStore implements AgentRunTraceWriter {
           : {})
       };
       candidate.usage = addUsage(candidate.usage, candidate.stages[index]!.usage);
-      this.stageStartedAt.delete(index);
       return true;
     });
+    if (committed) {
+      const trace = this.trace;
+      if (trace !== null) {
+        const index = findTerminalStage(trace, input.stage);
+        if (index >= 0) this.stageStartedAt.delete(index);
+      }
+    }
   }
 
   private updateRunning(
     lease: AgentRunTraceLease,
     update: (candidate: Extract<AgentRunTrace, { status: 'running' }>) => boolean
-  ): void {
-    if (this.trace?.status !== 'running' || this.activeLease !== lease) return;
+  ): boolean {
+    if (this.trace?.status !== 'running' || this.activeLease !== lease) return false;
     const candidate = structuredClone(this.trace);
-    if (!update(candidate)) return;
+    if (!update(candidate)) return false;
     const committed = this.prepare(candidate);
-    if (committed !== null) this.trace = committed;
+    if (committed === null) return false;
+    this.trace = committed;
+    return true;
   }
 
-  private sanitize(value: string, maxBytes = MAX_TRACE_TEXT_MAX_BYTES): SanitizedText {
-    if (this.failClosedRedaction) {
-      return { text: REDACTION_MARKER, changed: value !== REDACTION_MARKER };
-    }
-    const privateRedacted = redactPrivateTraceText(value, this.sensitiveValues);
-    const bounded = headTailUtf8(privateRedacted, Math.min(maxBytes, MAX_TRACE_TEXT_MAX_BYTES));
-    const shared = sanitizeTraceText(bounded.text, {
-      maxBytes: Math.min(maxBytes, MAX_TRACE_TEXT_MAX_BYTES),
-      customHeaderValues: this.sensitiveValues.filter((value) => !/^[0-9]+$/u.test(value))
-    });
+  private sanitize(
+    value: string,
+    maxBytes = MAX_TRACE_TEXT_MAX_BYTES,
+    maxInputCharacters = MAX_TRACE_TEXT_MAX_BYTES,
+    registry: TraceSensitiveRegistry = this.sensitiveRegistry
+  ): SanitizedText {
+    const prebounded = boundInputCharacters(value, maxInputCharacters);
+    const redacted = redactTraceSecrets(prebounded.text, registry);
+    const bounded = headTailUtf8(
+      redacted.text,
+      Math.min(maxBytes, MAX_TRACE_TEXT_MAX_BYTES)
+    );
     return {
-      text: shared.text,
-      changed:
-        privateRedacted !== value ||
-        bounded.truncated ||
-        shared.truncated ||
-        shared.text !== bounded.text
+      text: bounded.text,
+      changed: prebounded.truncated || redacted.redacted || bounded.truncated
     };
   }
 
-  private sanitizeIds(values: readonly string[] | undefined): string[] {
+  private sanitizeIds(
+    values: readonly string[] | undefined,
+    registry: TraceSensitiveRegistry = this.sensitiveRegistry
+  ): string[] {
     const unique = new Set<string>();
     for (const value of values ?? []) {
-      const sanitized = this.sanitize(value, 128).text;
+      const sanitized = this.sanitize(value, 128, 512, registry).text;
       if (sanitized.length > 0) unique.add(sanitized);
       if (unique.size >= 256) break;
     }
     return [...unique];
   }
 
-  private sanitizeTool(tool: AgentToolTrace): AgentToolTrace {
-    const input = tool.inputSummary === undefined ? undefined : this.sanitize(tool.inputSummary);
-    const output = tool.outputSummary === undefined ? undefined : this.sanitize(tool.outputSummary);
-    const failure = tool.failure === undefined ? undefined : this.sanitizeFailure(tool.failure);
-    const name = this.sanitize(tool.name, 128);
+  private sanitizeTool(
+    tool: AgentToolTrace,
+    registry: TraceSensitiveRegistry = this.sensitiveRegistry
+  ): AgentToolTrace {
+    const input =
+      tool.inputSummary === undefined
+        ? undefined
+        : this.sanitize(
+            tool.inputSummary,
+            MAX_TOOL_SUMMARY_BYTES,
+            MAX_TOOL_INPUT_CHARACTERS,
+            registry
+          );
+    const output =
+      tool.outputSummary === undefined
+        ? undefined
+        : this.sanitize(
+            tool.outputSummary,
+            MAX_TOOL_SUMMARY_BYTES,
+            MAX_TOOL_INPUT_CHARACTERS,
+            registry
+          );
+    const failure =
+      tool.failure === undefined ? undefined : this.sanitizeFailure(tool.failure, true, registry);
+    const name = this.sanitize(tool.name, 128, 512, registry);
     const changed =
       name.changed ||
       input?.changed === true ||
@@ -337,18 +375,34 @@ export class AgentRunTraceStore implements AgentRunTraceWriter {
     };
   }
 
-  private sanitizeFailure(failure: AgentFailure): AgentFailure {
-    const message = this.sanitize(failure.message, 1_000);
+  private sanitizeFailure(
+    failure: AgentFailure,
+    toolFailure = false,
+    registry: TraceSensitiveRegistry = this.sensitiveRegistry
+  ): AgentFailure {
+    const message = this.sanitize(
+      failure.message,
+      toolFailure ? MAX_TOOL_FAILURE_DETAIL_BYTES : 1_000,
+      toolFailure ? MAX_TOOL_FAILURE_DETAIL_CHARACTERS : MAX_TRACE_TEXT_MAX_BYTES,
+      registry
+    );
     let redacted = message.changed;
     const details =
       failure.details === undefined
         ? undefined
         : Object.fromEntries(
             Object.entries(failure.details)
-              .slice(0, 31)
+              .slice(0, toolFailure ? MAX_TOOL_FAILURE_DETAILS : 31)
               .map(([key, value]) => {
-                const sanitizedKey = this.sanitize(key, 80);
-                const sanitizedValue = this.sanitize(value);
+                const sanitizedKey = this.sanitize(key, 80, 512, registry);
+                const sanitizedValue = this.sanitize(
+                  value,
+                  toolFailure ? MAX_TOOL_FAILURE_DETAIL_BYTES : MAX_TRACE_TEXT_MAX_BYTES,
+                  toolFailure
+                    ? MAX_TOOL_FAILURE_DETAIL_CHARACTERS
+                    : MAX_TRACE_TEXT_MAX_BYTES,
+                  registry
+                );
                 redacted ||= sanitizedKey.changed || sanitizedValue.changed;
                 return [sanitizedKey.text || REDACTION_MARKER, sanitizedValue.text];
               })
@@ -385,31 +439,35 @@ export class AgentRunTraceStore implements AgentRunTraceWriter {
     return final.data;
   }
 
-  private resanitizeTrace(trace: Extract<AgentRunTrace, { status: 'running' }>): void {
-    trace.correlationId = this.sanitize(trace.correlationId, 128).text || REDACTION_MARKER;
-    trace.model = this.sanitize(trace.model, 256).text || REDACTION_MARKER;
+  private resanitizeTrace(
+    trace: Extract<AgentRunTrace, { status: 'running' }>,
+    registry: TraceSensitiveRegistry
+  ): void {
+    trace.correlationId =
+      this.sanitize(trace.correlationId, 128, undefined, registry).text || REDACTION_MARKER;
+    trace.model = this.sanitize(trace.model, 256, undefined, registry).text || REDACTION_MARKER;
     for (const stage of trace.stages) {
       let changed = false;
       if (stage.inputSummary !== undefined) {
-        const sanitized = this.sanitize(stage.inputSummary);
+        const sanitized = this.sanitize(stage.inputSummary, undefined, undefined, registry);
         stage.inputSummary = sanitized.text;
         changed ||= sanitized.changed;
       }
       if (stage.rawOutput !== undefined) {
-        const sanitized = this.sanitize(stage.rawOutput);
+        const sanitized = this.sanitize(stage.rawOutput, undefined, undefined, registry);
         stage.rawOutput = sanitized.text;
         changed ||= sanitized.changed;
       }
-      const citationIds = this.sanitizeIds(stage.citationIds);
+      const citationIds = this.sanitizeIds(stage.citationIds, registry);
       changed ||= citationIds.some((id, index) => id !== stage.citationIds[index]);
       stage.citationIds = citationIds;
       stage.tools = stage.tools.map((tool) => {
-        const sanitized = this.sanitizeTool(tool);
+        const sanitized = this.sanitizeTool(tool, registry);
         changed ||= JSON.stringify(sanitized) !== JSON.stringify(tool);
         return sanitized;
       });
       if (stage.failure !== undefined) {
-        const sanitized = this.sanitizeFailure(stage.failure);
+        const sanitized = this.sanitizeFailure(stage.failure, false, registry);
         changed ||= JSON.stringify(sanitized) !== JSON.stringify(stage.failure);
         stage.failure = sanitized;
       }
@@ -426,118 +484,27 @@ function findStartedStage(trace: AgentRunTrace, stage: AgentStage): number {
   return -1;
 }
 
-function buildSensitiveRegistry(
-  existing: readonly string[],
-  incoming: readonly string[] | undefined
-): { values: readonly string[]; failClosed: boolean } {
-  const unique = new Set(existing);
-  let failClosed = false;
-  for (const value of incoming ?? []) {
-    if (value.length === 0) continue;
-    if (value.length > MAX_TRACE_CUSTOM_HEADER_VALUE_LENGTH) {
-      failClosed = true;
-      continue;
-    }
-    unique.add(value);
+function findTerminalStage(trace: AgentRunTrace, stage: AgentStage): number {
+  for (let index = trace.stages.length - 1; index >= 0; index -= 1) {
+    const candidate = trace.stages[index]!;
+    if (candidate.stage === stage && candidate.status !== 'started') return index;
   }
-  const values = [...unique].sort(
-    (left, right) => right.length - left.length || left.localeCompare(right)
-  );
-  if (
-    values.length > MAX_TRACE_CUSTOM_HEADER_VALUES ||
-    values.reduce((total, value) => total + value.length, 0) >
-      MAX_TRACE_CUSTOM_HEADER_AGGREGATE_LENGTH
-  ) {
-    return { values: [], failClosed: true };
-  }
-  return { values, failClosed };
+  return -1;
 }
 
-function redactPrivateTraceText(value: string, sensitiveValues: readonly string[]): string {
-  let redacted = value
-    .replace(
-      /("(?:uid|game_uid|nickname|privateProfile|private_profile)"\s*:\s*)"(?:\\.|[^"\\])*(?:"|$)/giu,
-      '$1"[REDACTED]"'
-    )
-    .replace(
-      /((?:^|[\s,{;；，])(?:(?:uid|game_uid)\s*(?:[:=：]|-)|(?:nickname|private[-_ ]?profile)\s*[:=：])\s*)[^\r\n,;}；，]+/gimu,
-      '$1[REDACTED]'
-    )
-    .replace(
-      /("(?:apiKey|ANTHROPIC_AUTH_TOKEN|Authorization|Cookie)"\s*:\s*)"(?:\\.|[^"\\])*(?:"|$)/giu,
-      '$1"[REDACTED]"'
-    )
-    .replace(/((?<!")\b(?:Authorization|Cookie)\b\s*[:=：]\s*)[^\r\n,}，]*/giu, '$1[REDACTED]')
-    .replace(
-      /((?<!")\b(?:apiKey|ANTHROPIC_AUTH_TOKEN)\b\s*[:=：]\s*)(?:"(?:\\.|[^"\\])*(?:"|$)|'(?:\\.|[^'\\])*(?:'|$)|[^\r\n,;}；，]+)/giu,
-      '$1[REDACTED]'
-    )
-    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/giu, 'Bearer [REDACTED]');
-  for (const secret of sensitiveValues) {
-    redacted = redacted.replace(sensitiveValuePattern(secret), REDACTION_MARKER);
-  }
-  return containsCanonicalPrivacyLeak(canonicalTracePrivacyText(redacted))
-    ? REDACTION_MARKER
-    : redacted;
-}
-
-function sensitiveValuePattern(value: string): RegExp {
-  if (/^[0-9]+$/u.test(value)) {
-    const digits = Array.from(value)
-      .map((digit) => {
-        const fullwidth = String.fromCodePoint(0xff10 + Number(digit));
-        return `[${digit}${fullwidth}]\\p{Default_Ignorable_Code_Point}*`;
-      })
-      .join('');
-    return new RegExp(`(?<!\\p{Decimal_Number})${digits}(?!\\p{Decimal_Number})`, 'giu');
-  }
-  return new RegExp(escapeRegExp(value), 'giu');
-}
-
-function canonicalTracePrivacyText(value: string): string {
-  let canonical = value.normalize('NFKC').replace(/\p{Default_Ignorable_Code_Point}/gu, '');
-  for (let round = 0; round < 8 && /%[0-9a-f]{2}/iu.test(canonical); round += 1) {
-    const decoded = decodePercentRuns(canonical);
-    if (decoded === canonical) break;
-    canonical = decoded.normalize('NFKC').replace(/\p{Default_Ignorable_Code_Point}/gu, '');
-  }
-  return canonical;
-}
-
-function decodePercentRuns(value: string): string {
-  return value.replace(/(?:%[0-9a-f]{2})+/giu, (encoded) => {
-    try {
-      return decodeURIComponent(encoded);
-    } catch {
-      return encoded.replace(/%([0-7][0-9a-f])/giu, (_, byte: string) =>
-        String.fromCodePoint(Number.parseInt(byte, 16))
-      );
-    }
-  });
-}
-
-function containsCanonicalPrivacyLeak(value: string): boolean {
-  const label =
-    '(?:uid|game_uid|nickname|private[-_ ]?profile|apiKey|ANTHROPIC_AUTH_TOKEN|Authorization|Cookie)';
-  const valuePattern = '([^\\r\\n,;}；，]+)';
-  const labeledValues = [
-    ...value.matchAll(new RegExp(`["']${label}["']\\s*[:=：]\\s*${valuePattern}`, 'gimu')),
-    ...value.matchAll(
-      new RegExp(`(?:^|[^\\p{L}\\p{N}_])${label}\\s*(?:[:=：]|-)\\s*${valuePattern}`, 'gimu')
-    ),
-    ...value.matchAll(new RegExp(`\\bBearer\\s+${valuePattern}`, 'gimu'))
-  ];
-  return labeledValues.some((match) => !isExactRedactionMarker(match[1] ?? ''));
-}
-
-function isExactRedactionMarker(value: string): boolean {
-  let normalized = value.trim();
-  const first = normalized[0];
-  const last = normalized[normalized.length - 1];
-  if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
-    normalized = normalized.slice(1, -1).trim();
-  }
-  return normalized === REDACTION_MARKER;
+function boundInputCharacters(
+  value: string,
+  maxCharacters: number
+): { text: string; truncated: boolean } {
+  if (value.length <= maxCharacters) return { text: value, truncated: false };
+  const marker = '\n…[TRUNCATED]…\n';
+  const available = Math.max(0, maxCharacters - marker.length);
+  const head = Math.ceil(available / 2);
+  const tail = Math.floor(available / 2);
+  return {
+    text: `${value.slice(0, head)}${marker}${value.slice(value.length - tail)}`,
+    truncated: true
+  };
 }
 
 function sanitizeUsage(usage: AgentUsage | undefined): AgentUsage {
@@ -574,8 +541,4 @@ function nonnegativeInteger(value: number | undefined): number {
 
 function finiteDuration(value: number): number {
   return Number.isFinite(value) ? Math.min(86_400_000, Math.max(0, value)) : 0;
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

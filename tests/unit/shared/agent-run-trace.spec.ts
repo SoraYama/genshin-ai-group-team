@@ -121,6 +121,16 @@ describe('agent run trace contracts', () => {
     expect(sanitized.text).not.toContain('collision-secret');
   });
 
+  it('applies canonical registered-secret detection through the shared sanitizer', () => {
+    const encoded = 'token=%2573%256B%252D%2541%2570%2569%255F%254F%256E%2565';
+
+    expect(
+      sanitizeTraceText(encoded, {
+        customHeaderValues: ['sk-Api_One']
+      }).text
+    ).toBe('[REDACTED]');
+  });
+
   it('caps input work and marks input-prefix truncation', () => {
     const sanitized = sanitizeTraceText('x'.repeat(100_000), {
       maxBytes: MAX_TRACE_TEXT_MAX_BYTES

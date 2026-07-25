@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   AgentRunTraceStore,
+  MIN_AGENT_RUN_TRACE_BYTES,
   type CompleteStageInput,
   type StartTraceInput
 } from '../../../src/main/services/agent-run-trace-store.js';
@@ -210,6 +211,33 @@ describe('AgentRunTraceStore lifecycle', () => {
       finalSource: 'blocked',
       failure: { code: 'AGENT_ABORTED' }
     });
+  });
+
+  it('keeps the previous trace, lease, and secret registry when a replacement start is invalid', () => {
+    const store = new AgentRunTraceStore();
+    const lease = store.start(
+      run('stable-run', {
+        sensitiveValues: ['stable-secret']
+      })
+    );
+    const before = store.latest();
+
+    expect(() =>
+      store.start(
+        run('invalid-run', {
+          startedAt: 'not-an-iso-timestamp',
+          sensitiveValues: ['replacement-secret']
+        })
+      )
+    ).toThrow(TypeError);
+    expect(store.latest()).toEqual(before);
+
+    store.startStage(lease, { stage: 'compose' });
+    store.completeStage(
+      lease,
+      completedStage('compose', { rawOutput: 'stable-secret replacement-secret' })
+    );
+    expect(store.latest()?.stages[0]?.rawOutput).toBe('[REDACTED] replacement-secret');
   });
 });
 
@@ -590,11 +618,30 @@ describe('AgentRunTraceStore privacy boundary', () => {
     expect(trace?.stages[0]).toMatchObject({ truncated: true });
     expect(trace?.stages[1]).toMatchObject({ stage: 'critique', status: 'started' });
   });
+
+  it('re-sanitizes an encoded earlier secret when a later stage registers its canonical value', () => {
+    const store = new AgentRunTraceStore();
+    const lease = store.start(run('late-canonical-registration'));
+    store.startStage(lease, { stage: 'compose' });
+    store.completeStage(
+      lease,
+      completedStage('compose', {
+        rawOutput: 'earlier token %2573%256B%252D%2541%2570%2569%255F%254F%256E%2565'
+      })
+    );
+
+    store.startStage(lease, {
+      stage: 'critique',
+      sensitiveValues: ['sk-Api_One']
+    });
+
+    expect(store.latest()?.stages[0]?.rawOutput).toBe('[REDACTED]');
+  });
 });
 
 describe('AgentRunTraceStore UTF-8 budget', () => {
   it('keeps UTF-8-safe head and tail for a single oversized CJK and emoji stage', () => {
-    const store = new AgentRunTraceStore({ maxBytes: 8_000 });
+    const store = new AgentRunTraceStore({ maxBytes: MIN_AGENT_RUN_TRACE_BYTES });
     const raw = `HEAD-${'原神🙂'.repeat(5_000)}-TAIL`;
     const lease = store.start(run('large'));
     store.startStage(lease, { stage: 'compose', inputSummary: 'input' });
@@ -602,7 +649,9 @@ describe('AgentRunTraceStore UTF-8 budget', () => {
 
     const trace = store.latest();
     const output = trace?.stages[0]?.rawOutput ?? '';
-    expect(Buffer.byteLength(JSON.stringify(trace), 'utf8')).toBeLessThanOrEqual(8_000);
+    expect(Buffer.byteLength(JSON.stringify(trace), 'utf8')).toBeLessThanOrEqual(
+      MIN_AGENT_RUN_TRACE_BYTES
+    );
     expect(output.startsWith('HEAD-')).toBe(true);
     expect(output.endsWith('-TAIL')).toBe(true);
     expect(output).toContain('[TRUNCATED]');
@@ -612,7 +661,7 @@ describe('AgentRunTraceStore UTF-8 budget', () => {
   });
 
   it('enforces the aggregate budget across stages while retaining stage metadata', () => {
-    const store = new AgentRunTraceStore({ maxBytes: 12_000 });
+    const store = new AgentRunTraceStore({ maxBytes: MIN_AGENT_RUN_TRACE_BYTES });
     const lease = store.start(run('aggregate'));
     for (const stage of ['compose', 'repair-1', 'critique', 'rotation', 'explain'] as const) {
       store.startStage(lease, { stage, inputSummary: `${stage}-${'输入'.repeat(1_000)}` });
@@ -623,7 +672,9 @@ describe('AgentRunTraceStore UTF-8 budget', () => {
     }
 
     const trace = store.latest();
-    expect(Buffer.byteLength(JSON.stringify(trace), 'utf8')).toBeLessThanOrEqual(12_000);
+    expect(Buffer.byteLength(JSON.stringify(trace), 'utf8')).toBeLessThanOrEqual(
+      MIN_AGENT_RUN_TRACE_BYTES
+    );
     expect(trace?.stages.map(({ stage }) => stage)).toEqual([
       'compose',
       'repair-1',
@@ -636,7 +687,7 @@ describe('AgentRunTraceStore UTF-8 budget', () => {
   });
 
   it('retains failure, tool outcome, and token usage when compacting text', () => {
-    const store = new AgentRunTraceStore({ maxBytes: 7_000 });
+    const store = new AgentRunTraceStore({ maxBytes: MIN_AGENT_RUN_TRACE_BYTES });
     const lease = store.start(run('failure-budget'));
     store.startStage(lease, {
       stage: 'compose',
@@ -667,7 +718,9 @@ describe('AgentRunTraceStore UTF-8 budget', () => {
     });
 
     const trace = store.latest();
-    expect(Buffer.byteLength(JSON.stringify(trace), 'utf8')).toBeLessThanOrEqual(7_000);
+    expect(Buffer.byteLength(JSON.stringify(trace), 'utf8')).toBeLessThanOrEqual(
+      MIN_AGENT_RUN_TRACE_BYTES
+    );
     expect(trace?.stages[0]).toMatchObject({
       status: 'failed',
       usage: { inputTokens: 321, outputTokens: 123 },
@@ -682,8 +735,14 @@ describe('AgentRunTraceStore UTF-8 budget', () => {
     });
   });
 
-  it('always commits a valid terminal trace at 4096 bytes with the maximum tool count', () => {
-    const store = new AgentRunTraceStore({ maxBytes: 4_096 });
+  it('rejects budgets below the defensible minimum', () => {
+    expect(
+      () => new AgentRunTraceStore({ maxBytes: MIN_AGENT_RUN_TRACE_BYTES - 1 })
+    ).toThrow(RangeError);
+  });
+
+  it('always commits a valid terminal trace at the minimum budget with the maximum tool count', () => {
+    const store = new AgentRunTraceStore({ maxBytes: MIN_AGENT_RUN_TRACE_BYTES });
     const lease = store.start(run('fixed-overhead'));
     store.startStage(lease, {
       stage: 'compose',
@@ -729,11 +788,13 @@ describe('AgentRunTraceStore UTF-8 budget', () => {
       usage: { inputTokens: 987, outputTokens: 654 }
     });
     expect(trace?.stages[0]?.tools.length).toBeGreaterThan(0);
-    expect(Buffer.byteLength(JSON.stringify(trace), 'utf8')).toBeLessThanOrEqual(4_096);
+    expect(Buffer.byteLength(JSON.stringify(trace), 'utf8')).toBeLessThanOrEqual(
+      MIN_AGENT_RUN_TRACE_BYTES
+    );
   });
 
-  it('preserves every stage status and aggregate usage at the minimum supported budget', () => {
-    const store = new AgentRunTraceStore({ maxBytes: 4_096 });
+  it('preserves all 16 failed stages, representative tools, and usage at the minimum budget', () => {
+    const store = new AgentRunTraceStore({ maxBytes: MIN_AGENT_RUN_TRACE_BYTES });
     const lease = store.start(run('many-stages'));
     const stages = Array.from({ length: 16 }, (_, index) =>
       index === 0
@@ -750,7 +811,19 @@ describe('AgentRunTraceStore UTF-8 budget', () => {
       store.failStage(lease, {
         stage,
         rawOutput: `raw-${index}-${'原文'.repeat(1_000)}`,
-        tools: [],
+        tools: [
+          {
+            name: `tool-${index}`,
+            status: 'failed',
+            inputSummary: 'x'.repeat(4_000),
+            outputSummary: 'y'.repeat(4_000),
+            failure: {
+              code: 'TOOL_REQUIREMENT_FAILED',
+              message: 'tool failed',
+              retryable: false
+            }
+          }
+        ],
         citationIds: [],
         usage: { inputTokens: 10, outputTokens: 5 },
         failure: {
@@ -778,7 +851,52 @@ describe('AgentRunTraceStore UTF-8 budget', () => {
     });
     expect(trace?.stages).toHaveLength(16);
     expect(trace?.stages.every(({ status }) => status === 'failed')).toBe(true);
-    expect(Buffer.byteLength(JSON.stringify(trace), 'utf8')).toBeLessThanOrEqual(4_096);
+    expect(trace?.stages.every(({ tools }) => tools.length >= 1)).toBe(true);
+    expect(
+      trace?.stages.every(({ tools }) => tools[0]?.failure?.code === 'TOOL_REQUIREMENT_FAILED')
+    ).toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(trace), 'utf8')).toBeLessThanOrEqual(
+      MIN_AGENT_RUN_TRACE_BYTES
+    );
+  });
+
+  it('compacts adversarial tool payloads in bounded time', () => {
+    const store = new AgentRunTraceStore({ maxBytes: MIN_AGENT_RUN_TRACE_BYTES });
+    const lease = store.start(run('bounded-work'));
+    store.startStage(lease, { stage: 'compose' });
+    const large = 'x'.repeat(32 * 1024);
+    const started = performance.now();
+    store.failStage(lease, {
+      stage: 'compose',
+      tools: Array.from({ length: 64 }, (_, index) => ({
+        name: `tool-${index}`,
+        status: 'failed' as const,
+        inputSummary: large,
+        outputSummary: large,
+        failure: {
+          code: 'TOOL_REQUIREMENT_FAILED' as const,
+          message: large,
+          retryable: false,
+          details: Object.fromEntries(
+            Array.from({ length: 31 }, (__, detail) => [`detail-${detail}`, large])
+          )
+        }
+      })),
+      citationIds: [],
+      usage: { inputTokens: 1, outputTokens: 1 },
+      failure: {
+        code: 'VALIDATION_FAILED',
+        message: 'failed',
+        retryable: false
+      }
+    });
+    const elapsed = performance.now() - started;
+
+    expect(elapsed).toBeLessThan(1_000);
+    expect(agentRunTraceSchema.safeParse(store.latest()).success).toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(store.latest()), 'utf8')).toBeLessThanOrEqual(
+      MIN_AGENT_RUN_TRACE_BYTES
+    );
   });
 });
 

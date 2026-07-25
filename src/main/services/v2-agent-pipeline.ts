@@ -166,6 +166,13 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
           usage
         };
       }
+      const failure = agentFailure(
+        'VALIDATION_FAILED',
+        'Composer input serialization failed.',
+        false
+      );
+      trace.failStage(stage, failure);
+      trace.fail(failure);
       throw error;
     }
     let composerTurn: AuditedAgentTurn;
@@ -221,7 +228,19 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
       previousPlan = parseJsonOrRaw(composerTurn.text);
       continue;
     }
-    const candidateViolation = candidatePoolViolation(validated.plan, context);
+    let candidateViolation: string | undefined;
+    try {
+      candidateViolation = candidatePoolViolation(validated.plan, context);
+    } catch (error) {
+      const failure = agentFailure(
+        'VALIDATION_FAILED',
+        'Composer returned a plan that could not be validated locally.',
+        false
+      );
+      trace.failStage(stage, failure, composerTurn);
+      trace.fail(failure);
+      throw error;
+    }
     if (candidateViolation) {
       const issue = options.invalidIssue(stage, candidateViolation);
       const failure = agentFailure('VALIDATION_FAILED', candidateViolation, false);
@@ -243,14 +262,20 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
       () => toolFreeOptions(options.sdkOptionsForStage('critique')),
       trace
     );
-    const critiqueResult = await runStrictStage({
-      runner: options.runner,
-      sdkOptions: critiqueOptions,
-      prompt: v2CritiqueInputSchema.parse({
+    const critiquePrompt = parseStrictStageInput(
+      'critique',
+      v2CritiqueInputSchema,
+      {
         stage: 'critique',
         context,
         plan: validated.plan
-      }),
+      },
+      trace
+    );
+    const critiqueResult = await runStrictStage({
+      runner: options.runner,
+      sdkOptions: critiqueOptions,
+      prompt: critiquePrompt,
       systemPrompt: CRITIQUE_PROMPT_V2,
       schema: v2CritiqueOutputSchema,
       correlationId: context.correlationId,
@@ -313,15 +338,21 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
       () => toolFreeOptions(options.sdkOptionsForStage('rotation')),
       trace
     );
-    const rotationResult = await runStrictStage({
-      runner: options.runner,
-      sdkOptions: rotationOptions,
-      prompt: v2RotationInputSchema.parse({
+    const rotationPrompt = parseStrictStageInput(
+      'rotation',
+      v2RotationInputSchema,
+      {
         stage: 'rotation',
         context,
         plan: validated.plan,
         critique: critiqueResult.value
-      }),
+      },
+      trace
+    );
+    const rotationResult = await runStrictStage({
+      runner: options.runner,
+      sdkOptions: rotationOptions,
+      prompt: rotationPrompt,
       systemPrompt: ROTATION_COACH_PROMPT_V2,
       schema: v2RotationOutputSchema,
       correlationId: context.correlationId,
@@ -374,16 +405,22 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
       () => toolFreeOptions(options.sdkOptionsForStage('explain')),
       trace
     );
-    const explainResult = await runStrictStage({
-      runner: options.runner,
-      sdkOptions: explainOptions,
-      prompt: v2ExplainInputSchema.parse({
+    const explainPrompt = parseStrictStageInput(
+      'explain',
+      v2ExplainInputSchema,
+      {
         stage: 'explain',
         context,
         plan: validated.plan,
         critique: critiqueResult.value,
         rotation: rotationResult.value
-      }),
+      },
+      trace
+    );
+    const explainResult = await runStrictStage({
+      runner: options.runner,
+      sdkOptions: explainOptions,
+      prompt: explainPrompt,
       systemPrompt: EXPLAIN_PROMPT_V2,
       schema: v2ExplainOutputSchema,
       correlationId: context.correlationId,
@@ -594,7 +631,14 @@ async function runStrictStage<T>(options: {
         failure: agentFailure('VALIDATION_FAILED', error.message, false)
       };
     }
-    throw error;
+    const message = 'Stage input serialization failed.';
+    return {
+      ok: false,
+      message,
+      usage: zeroUsage(),
+      failure: agentFailure('VALIDATION_FAILED', message, false),
+      error
+    };
   }
   let turn: AuditedAgentTurn;
   try {
@@ -643,6 +687,26 @@ async function runStrictStage<T>(options: {
         ),
         turn
       };
+}
+
+function parseStrictStageInput<T>(
+  stage: Extract<V2AgentStage, 'critique' | 'rotation' | 'explain'>,
+  schema: z.ZodType<T>,
+  input: unknown,
+  trace: PipelineTraceObserver
+): T {
+  try {
+    return schema.parse(input);
+  } catch (error) {
+    const failure = agentFailure(
+      'VALIDATION_FAILED',
+      `${stage} input failed local validation.`,
+      false
+    );
+    trace.failStage(stage, failure);
+    trace.fail(failure);
+    throw error;
+  }
 }
 
 function toolFreeOptions(options: AgentSdkRunOptions): AgentSdkRunOptions {
@@ -816,52 +880,60 @@ const TRACE_PIPELINE_STAGES = [
 
 class PipelineTraceObserver {
   private readonly attempted = new Set<V2AgentStage>();
-  private readonly lease: AgentRunTraceLease | undefined;
+  private writer: AgentRunTraceWriter | undefined;
+  private lease: AgentRunTraceLease | undefined;
   private activeStage: V2AgentStage | undefined;
   private terminal = false;
 
   constructor(
-    private readonly writer: AgentRunTraceWriter | undefined,
+    writer: AgentRunTraceWriter | undefined,
     private readonly context: V2PipelineContext,
     initialOptions?: AgentSdkRunOptions
   ) {
-    this.lease = this.writer?.start({
-      correlationId: context.correlationId,
-      model: initialOptions?.model ?? '[unavailable]',
-      knowledge: {
-        trusted: context.knowledge.coverage.trusted,
-        ephemeral: context.knowledge.coverage.ephemeral,
-        unknown: context.knowledge.coverage.unknown,
-        searched: context.knowledge.ephemeralMatches.length > 0
-      },
-      sensitiveValues: [
-        context.profileRef.uid,
-        ...(initialOptions === undefined
-          ? []
-          : [initialOptions.apiKey, ...Object.values(initialOptions.customHeaders ?? {})])
-      ]
-    });
+    this.writer = writer;
+    if (writer === undefined) return;
+    try {
+      this.lease = writer.start({
+        correlationId: context.correlationId,
+        model: initialOptions?.model ?? '[unavailable]',
+        knowledge: {
+          trusted: context.knowledge.coverage.trusted,
+          ephemeral: context.knowledge.coverage.ephemeral,
+          unknown: context.knowledge.coverage.unknown,
+          searched: context.knowledge.ephemeralMatches.length > 0
+        },
+        sensitiveValues: [
+          context.profileRef.uid,
+          ...(initialOptions === undefined
+            ? []
+            : [initialOptions.apiKey, ...Object.values(initialOptions.customHeaders ?? {})])
+        ]
+      });
+    } catch {
+      this.disableWriter();
+    }
   }
 
   startStage(stage: V2AgentStage, inputSummary: string, stageOptions: AgentSdkRunOptions): void {
     this.attempted.add(stage);
     this.activeStage = stage;
-    if (this.writer === undefined || this.lease === undefined) return;
-    this.writer.startStage(this.lease, {
-      stage,
-      inputSummary,
-      sensitiveValues: [
-        this.context.profileRef.uid,
-        stageOptions.apiKey,
-        ...Object.values(stageOptions.customHeaders ?? {})
-      ]
+    this.write((writer, lease) => {
+      writer.startStage(lease, {
+        stage,
+        inputSummary,
+        sensitiveValues: [
+          this.context.profileRef.uid,
+          stageOptions.apiKey,
+          ...Object.values(stageOptions.customHeaders ?? {})
+        ]
+      });
     });
   }
 
   completeStage(stage: V2AgentStage, turn: AuditedAgentTurn): void {
-    if (this.writer !== undefined && this.lease !== undefined) {
-      this.writer.completeStage(this.lease, traceStageTerminalInput(stage, turn));
-    }
+    this.write((writer, lease) =>
+      writer.completeStage(lease, traceStageTerminalInput(stage, turn))
+    );
     if (this.activeStage === stage) this.activeStage = undefined;
   }
 
@@ -871,12 +943,12 @@ class PipelineTraceObserver {
     turn?: AuditedAgentTurn,
     usage: AgentUsage = zeroUsage()
   ): void {
-    if (this.writer !== undefined && this.lease !== undefined) {
-      this.writer.failStage(this.lease, {
+    this.write((writer, lease) => {
+      writer.failStage(lease, {
         ...traceStageTerminalInput(stage, turn, usage),
         failure
       });
-    }
+    });
     if (this.activeStage === stage) this.activeStage = undefined;
   }
 
@@ -889,13 +961,13 @@ class PipelineTraceObserver {
     );
     this.attempted.add(stage);
     this.activeStage = stage;
-    if (this.writer !== undefined && this.lease !== undefined) {
-      this.writer.startStage(this.lease, {
+    this.write((writer, lease) => {
+      writer.startStage(lease, {
         stage,
         inputSummary,
         sensitiveValues: [this.context.profileRef.uid]
       });
-    }
+    });
     this.failStage(stage, failure);
     this.fail(failure);
   }
@@ -910,34 +982,48 @@ class PipelineTraceObserver {
   complete(): void {
     if (this.terminal) return;
     this.skipUnattempted();
-    if (this.writer !== undefined && this.lease !== undefined) {
-      this.writer.finish(this.lease, { finalSource: 'smart-service' });
-    }
+    this.write((writer, lease) => writer.finish(lease, { finalSource: 'smart-service' }));
     this.terminal = true;
   }
 
   fail(failure: AgentFailure): void {
     if (this.terminal) return;
     this.skipUnattempted();
-    if (this.writer !== undefined && this.lease !== undefined) {
-      this.writer.finish(this.lease, {
+    this.write((writer, lease) => {
+      writer.finish(lease, {
         finalSource: 'blocked',
         failure
       });
-    }
+    });
     this.terminal = true;
   }
 
   private skipUnattempted(): void {
     for (const stage of TRACE_PIPELINE_STAGES) {
       if (this.attempted.has(stage)) continue;
-      if (this.writer !== undefined && this.lease !== undefined) {
-        this.writer.skipStage(this.lease, {
+      this.write((writer, lease) => {
+        writer.skipStage(lease, {
           stage,
           inputSummary: 'Stage was not executed.'
         });
-      }
+      });
     }
+  }
+
+  private write(
+    operation: (writer: AgentRunTraceWriter, lease: AgentRunTraceLease) => void
+  ): void {
+    if (this.writer === undefined || this.lease === undefined) return;
+    try {
+      operation(this.writer, this.lease);
+    } catch {
+      this.disableWriter();
+    }
+  }
+
+  private disableWriter(): void {
+    this.writer = undefined;
+    this.lease = undefined;
   }
 }
 
