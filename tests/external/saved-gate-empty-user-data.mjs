@@ -1,24 +1,33 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import electronPath from 'electron';
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+const entries = [
+  { gate: 'agent-saved', entry: 'dist/main/agent-saved-gate.mjs' },
+  { gate: 'advisor-saved', entry: 'dist/main/advisor-saved-gate.mjs' }
+];
 
-for (const gate of ['agent-saved', 'advisor-saved']) {
+for (const { gate, entry } of entries) {
+  const entryPath = path.join(repositoryRoot, entry);
+  assert.equal(existsSync(entryPath), true, `${entry} is missing; run the build before this probe`);
   const userDataDirectory = mkdtempSync(path.join(tmpdir(), `gta-${gate}-empty-`));
   try {
-    const result = spawnSync(npmCommand, ['run', '--silent', `gate:${gate}`], {
+    const childEnvironment = {
+      ...process.env,
+      GTA_E2E_USER_DATA_DIR: userDataDirectory
+    };
+    delete childEnvironment.ELECTRON_RUN_AS_NODE;
+    delete childEnvironment.GTA_DEV_WATCH;
+    const result = spawnSync(electronPath, [entryPath], {
       cwd: repositoryRoot,
       encoding: 'utf8',
-      env: {
-        ...process.env,
-        GTA_E2E_USER_DATA_DIR: userDataDirectory
-      },
-      timeout: 180_000
+      env: childEnvironment,
+      timeout: 60_000
     });
 
     assert.equal(result.error, undefined, `${gate}: ${result.error?.message}`);

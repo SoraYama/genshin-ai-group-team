@@ -71,6 +71,33 @@ describe('tsup dev readiness', () => {
       'npm run --silent build:main -- --silent && electron dist/main/advisor-saved-gate.mjs'
     );
   });
+
+  it('runs the empty-userData process probe directly after one build in local and CI gates', async () => {
+    const [packageSource, probeSource, ciSource] = await Promise.all([
+      readFile(path.resolve(import.meta.dirname, '../../../package.json'), 'utf8'),
+      readFile(
+        path.resolve(import.meta.dirname, '../../../tests/external/saved-gate-empty-user-data.mjs'),
+        'utf8'
+      ),
+      readFile(path.resolve(import.meta.dirname, '../../../.github/workflows/ci.yml'), 'utf8')
+    ]);
+    const packageJson = JSON.parse(packageSource) as { scripts: Record<string, string> };
+    const localGate = packageJson.scripts['gate:local'] ?? '';
+
+    expect(packageJson.scripts['test:saved-gates-empty-user-data']).toBe(
+      'node tests/external/saved-gate-empty-user-data.mjs'
+    );
+    expect(localGate).toContain(
+      'npm run build && npm run test:saved-gates-empty-user-data && npm run test:renderer-budget'
+    );
+    expect(localGate.match(/\bnpm run build\b/gu)).toHaveLength(1);
+    expect(probeSource).toContain("import electronPath from 'electron'");
+    expect(probeSource).toContain("'dist/main/agent-saved-gate.mjs'");
+    expect(probeSource).toContain("'dist/main/advisor-saved-gate.mjs'");
+    expect(probeSource).toContain('GTA_E2E_USER_DATA_DIR: userDataDirectory');
+    expect(probeSource).not.toMatch(/\bnpm(?:Command)?\b|gate:agent-saved|gate:advisor-saved/u);
+    expect(ciSource).toContain('xvfb-run -a npm run gate:local');
+  });
 });
 
 async function invokeOnSuccess(onSuccess: unknown): Promise<void> {

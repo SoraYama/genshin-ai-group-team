@@ -43,6 +43,35 @@ class StageRunner {
   }
 }
 
+class StrictStageProviderFailureRunner extends StageRunner {
+  constructor(private readonly baseline: RecommendationPlan) {
+    super([]);
+  }
+
+  override async *run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown> {
+    this.calls.push({ prompt, options });
+    if (this.calls.length === 1) {
+      yield {
+        type: 'result',
+        subtype: 'success',
+        result: JSON.stringify(this.baseline),
+        usage: { input_tokens: 10, output_tokens: 5 },
+        total_cost_usd: 0.01
+      };
+      return;
+    }
+    yield {
+      type: 'result',
+      subtype: 'error_during_execution',
+      status: 429,
+      errors: ['TOP-SECRET-PROVIDER-BODY'],
+      prompt: 'PRIVATE-PROFILE-PROMPT',
+      usage: { input_tokens: 7, output_tokens: 1 },
+      total_cost_usd: 0.02
+    };
+  }
+}
+
 function sdkOptions(): AgentSdkRunOptions {
   return {
     apiKey: 'secret',
@@ -1866,6 +1895,46 @@ describe('V2 agent pipeline trace observer', () => {
       status: 'failed',
       failure: { code: 'AGENT_ABORTED' }
     });
+  });
+
+  it('preserves only safe SDK and HTTP diagnostics from a natural strict-stage provider failure', async () => {
+    const baseline = validAbyssPlan();
+    const trace = new AgentRunTraceStore();
+
+    await expect(
+      run(
+        new StrictStageProviderFailureRunner(baseline),
+        baseline,
+        (text) => ({ ok: true, plan: JSON.parse(text) as RecommendationPlan }),
+        context(baseline),
+        trace
+      )
+    ).rejects.toMatchObject({ code: 'AGENT_TURN_RESULT_ERROR' });
+
+    expect(trace.latest()).toMatchObject({
+      status: 'failed',
+      finalSource: 'blocked',
+      failure: {
+        code: 'PROVIDER_ERROR',
+        details: {
+          sdkCode: 'AGENT_TURN_RESULT_ERROR',
+          httpStatus: '429'
+        }
+      }
+    });
+    expect(trace.latest()?.stages.find(({ stage }) => stage === 'critique')).toMatchObject({
+      status: 'failed',
+      failure: {
+        code: 'PROVIDER_ERROR',
+        details: {
+          sdkCode: 'AGENT_TURN_RESULT_ERROR',
+          httpStatus: '429'
+        }
+      }
+    });
+    expect(JSON.stringify(trace.latest())).not.toMatch(
+      /TOP-SECRET-PROVIDER-BODY|PRIVATE-PROFILE-PROMPT/u
+    );
   });
 
   it.each([

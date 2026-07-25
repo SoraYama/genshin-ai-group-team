@@ -27,6 +27,7 @@ import {
   AgentTurnError,
   addAgentUsage,
   runAuditedAgentTurn,
+  safeAgentTurnFailureDetails,
   type AgentUsage,
   type AuditedAgentTurn,
   type AuditedAgentRunner,
@@ -1312,15 +1313,25 @@ function agentTurnFailure(error: unknown): AgentFailure {
   if (!(error instanceof AgentTurnError)) {
     return agentFailure('PROVIDER_ERROR', 'Agent turn failed.', true);
   }
+  const diagnostic = safeAgentTurnFailureDetails(error);
+  const details: AgentFailure['details'] = {
+    ...(diagnostic.sdkCode === undefined ? {} : { sdkCode: diagnostic.sdkCode }),
+    ...(diagnostic.httpStatus === undefined ? {} : { httpStatus: String(diagnostic.httpStatus) })
+  };
   switch (error.code) {
     case 'AGENT_TURN_CANCELLED':
-      return agentFailure('AGENT_ABORTED', 'Agent turn was cancelled.', true);
+      return agentFailure('AGENT_ABORTED', 'Agent turn was cancelled.', true, details);
     case 'AGENT_TURN_STREAM_FAILED':
     case 'AGENT_TURN_RESULT_ERROR':
-      return agentFailure('PROVIDER_ERROR', 'Agent provider request failed.', true);
+      return agentFailure('PROVIDER_ERROR', 'Agent provider request failed.', true, details);
     case 'AGENT_TURN_INCOMPLETE':
     case 'AGENT_TURN_OUTPUT_TOO_LARGE':
-      return agentFailure('AGENT_OUTPUT_INVALID', 'Agent turn returned invalid output.', false);
+      return agentFailure(
+        'AGENT_OUTPUT_INVALID',
+        'Agent turn returned invalid output.',
+        false,
+        details
+      );
   }
 }
 
@@ -1328,8 +1339,18 @@ function agentTurnErrorUsage(error: unknown): AgentUsage {
   return error instanceof AgentTurnError && error.usage !== undefined ? error.usage : zeroUsage();
 }
 
-function agentFailure(code: AgentFailureCode, message: string, retryable: boolean): AgentFailure {
-  return { code, message, retryable };
+function agentFailure(
+  code: AgentFailureCode,
+  message: string,
+  retryable: boolean,
+  details?: AgentFailure['details']
+): AgentFailure {
+  return {
+    code,
+    message,
+    retryable,
+    ...(details === undefined || Object.keys(details).length === 0 ? {} : { details })
+  };
 }
 
 function parseJsonOrRaw(raw: string): unknown {

@@ -25,7 +25,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run gate:local
+      - run: xvfb-run -a npm run gate:local
       - run: npm run audit:all
 
   electron-smoke:

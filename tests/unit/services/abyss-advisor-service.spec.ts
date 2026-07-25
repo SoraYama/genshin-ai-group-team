@@ -3,6 +3,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 
 import { AbyssAdvisorService } from '../../../src/main/services/abyss-advisor-service.js';
+import { evaluateAdvisorGate } from '../../../src/main/gates/advisor-saved-gate.js';
 import { CharacterKnowledgeStore } from '../../../src/main/services/character-knowledge-store.js';
 import type {
   AdvisorKnowledgeReader,
@@ -222,7 +223,15 @@ function withServiceAssignments(
 class ProviderFailureRunner {
   async *run(): AsyncIterable<unknown> {
     yield await Promise.reject(
-      new AgentTurnError('AGENT_TURN_STREAM_FAILED', 'upstream 500: TOP-SECRET-BODY')
+      new AgentTurnError('AGENT_TURN_STREAM_FAILED', 'upstream 500: TOP-SECRET-BODY', {
+        cause: {
+          response: {
+            status: 503,
+            body: 'TOP-SECRET-PROVIDER-BODY',
+            prompt: 'PRIVATE-PROFILE-PROMPT'
+          }
+        }
+      })
     );
   }
 }
@@ -1487,9 +1496,34 @@ describe('AbyssAdvisorService', () => {
     expect(trace.latest()).toMatchObject({
       status: 'failed',
       finalSource: 'local-rules',
-      failure: { code: 'PROVIDER_ERROR' }
+      failure: {
+        code: 'PROVIDER_ERROR',
+        details: {
+          sdkCode: 'AGENT_TURN_STREAM_FAILED',
+          httpStatus: '503'
+        }
+      }
     });
-    expect(JSON.stringify(trace.latest())).not.toMatch(/TOP-SECRET|upstream 500/i);
+    expect(
+      evaluateAdvisorGate({
+        kind: 'run',
+        result,
+        trace: trace.latest(),
+        ownedCharacterIds: ABYSS_CHARACTERS.map(({ id }) => String(id)),
+        latencyMs: 1
+      })
+    ).toEqual({
+      gate: 'advisor-saved',
+      status: 'failed',
+      code: 'ADVISOR_FELL_BACK',
+      failedStage: 'compose',
+      traceFailureCode: 'PROVIDER_ERROR',
+      sdkCode: 'AGENT_TURN_STREAM_FAILED',
+      httpStatus: 503
+    });
+    expect(JSON.stringify(trace.latest())).not.toMatch(
+      /TOP-SECRET|upstream 500|PRIVATE-PROFILE-PROMPT/i
+    );
   });
 
   it('does not label a schema-valid response smart-service when total model usage is zero', async () => {
