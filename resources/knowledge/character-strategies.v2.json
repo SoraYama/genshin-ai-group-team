@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "knowledgeVersion": "2026-07-25.reviewed-2",
   "sourceVersion": "2026-07-25",
-  "catalogVersion": "enka-2026-07-24",
+  "catalogVersion": "enka-genshin-db-2026-07-25",
   "reviewedAt": "2026-07-24T23:08:06+08:00",
   "trust": "trusted-local",
   "characters": [
@@ -3877,6 +3877,96 @@
       "unknowns": [
         {
           "id": "character-review-gap-10000124",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000125",
+      "name": "哥伦比娅",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000125",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000125",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000125",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000126",
+      "name": "兹白",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000126",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000126",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000126",
+          "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
+        }
+      ]
+    },
+    {
+      "id": "10000127",
+      "name": "叶洛亚",
+      "reviewState": "unreviewed",
+      "baseRoles": ["unclassified"],
+      "archetypes": [
+        {
+          "id": "unreviewed-10000127",
+          "name": "未审阅保守占位",
+          "role": "unclassified",
+          "coverage": "gap",
+          "environments": [],
+          "teammateSlots": [],
+          "signals": [],
+          "facts": [],
+          "unknowns": [
+            {
+              "id": "strategy-gap-10000127",
+              "description": "基础定位、队友坑位、环境适配与配装判别均待直接相关攻略审阅。"
+            }
+          ]
+        }
+      ],
+      "unknowns": [
+        {
+          "id": "character-review-gap-10000127",
           "description": "当前仅保证角色可被 canonical ID 索引，不提供可执行的配队结论。"
         }
       ]

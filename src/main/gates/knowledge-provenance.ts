@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { gunzipSync } from 'node:zlib';
 
 export interface KnowledgeProvenanceCatalog {
   provenance: Array<{ id: string; url: string; sha256: string }>;
@@ -18,6 +19,7 @@ export interface KnowledgeProvenanceCatalog {
 export interface KnowledgeProvenanceSnapshots {
   charactersBytes: Uint8Array;
   localizationBytes: Uint8Array;
+  supplementalCharactersBytes: Uint8Array;
 }
 
 export interface KnowledgeProvenanceReport {
@@ -26,6 +28,7 @@ export interface KnowledgeProvenanceReport {
   exclusionCount: number;
   charactersSha256: string;
   localizationSha256: string;
+  supplementalCharactersSha256: string;
 }
 
 const elementByEnkaValue: Readonly<Record<string, string>> = {
@@ -46,6 +49,18 @@ const weaponByEnkaValue: Readonly<Record<string, string>> = {
 };
 const pinnedUrlPattern =
   /^https:\/\/raw\.githubusercontent\.com\/EnkaNetwork\/API-docs\/([0-9a-f]{40})\/store\/(characters|loc)\.json$/;
+const supplementalUrlPattern =
+  /^https:\/\/raw\.githubusercontent\.com\/theBowja\/genshin-db-dist\/([0-9a-f]{40})\/data\/scripts\/chinesesimplified-characters\.js$/;
+const supplementalPayloadPattern = /n\(574\)\("(?<payload>H4sI[A-Za-z0-9+/=]+)"\)/u;
+const supplementalElementByValue: Readonly<Record<string, string>> = {
+  ELEMENT_ANEMO: 'anemo',
+  ELEMENT_GEO: 'geo',
+  ELEMENT_ELECTRO: 'electro',
+  ELEMENT_DENDRO: 'dendro',
+  ELEMENT_HYDRO: 'hydro',
+  ELEMENT_PYRO: 'pyro',
+  ELEMENT_CRYO: 'cryo'
+};
 
 export function sha256Hex(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex');
@@ -57,6 +72,7 @@ export function verifyKnowledgeProvenance(
 ): KnowledgeProvenanceReport {
   const charactersProvenance = requireProvenance(catalog, 'enka-characters', 'characters');
   const localizationProvenance = requireProvenance(catalog, 'enka-localization', 'loc');
+  const supplementalProvenance = requireSupplementalProvenance(catalog);
   const revision = pinnedRevision(charactersProvenance.url, 'characters');
   const localizationRevision = pinnedRevision(localizationProvenance.url, 'loc');
   if (localizationRevision !== revision) {
@@ -65,8 +81,15 @@ export function verifyKnowledgeProvenance(
 
   const charactersSha256 = verifyDigest(charactersProvenance, snapshots.charactersBytes);
   const localizationSha256 = verifyDigest(localizationProvenance, snapshots.localizationBytes);
+  const supplementalCharactersSha256 = verifyDigest(
+    supplementalProvenance,
+    snapshots.supplementalCharactersBytes
+  );
   const characters = parseObjectSnapshot(snapshots.charactersBytes, 'characters');
   const localization = parseObjectSnapshot(snapshots.localizationBytes, 'localization');
+  const supplementalCharacters = parseSupplementalCharacters(
+    snapshots.supplementalCharactersBytes
+  );
   const populatedRows = populatedCharacterRows(characters);
   const populatedIds = new Set(populatedRows.map(([id]) => id));
   const committedIds = new Set(catalog.characters.map(({ id }) => id));
@@ -88,7 +111,8 @@ export function verifyKnowledgeProvenance(
     if (exclusion.kind === 'alternate-variant') {
       if (
         !exclusion.canonicalId ||
-        !populatedIds.has(exclusion.canonicalId) ||
+        (!populatedIds.has(exclusion.canonicalId) &&
+          !supplementalCharacters.has(exclusion.canonicalId)) ||
         !committedIds.has(exclusion.canonicalId)
       ) {
         throw new Error(
@@ -105,6 +129,17 @@ export function verifyKnowledgeProvenance(
   const reconstructed = populatedRows
     .filter(([id]) => !exclusionIds.has(id))
     .map(([id, value]) => normalizeCharacter(id, value, zhCn))
+    .concat(
+      catalog.characters
+        .filter(({ id }) => !populatedIds.has(id))
+        .map(({ id }) => {
+          const supplemental = supplementalCharacters.get(id);
+          if (supplemental === undefined) {
+            throw new Error(`Supplemental metadata is missing for committed character ${id}`);
+          }
+          return supplemental;
+        })
+    )
     .sort((left, right) => left.id.localeCompare(right.id));
   const committed = catalog.characters
     .map(({ id, name, element, weaponType }) => ({ id, name, element, weaponType }))
@@ -131,8 +166,22 @@ export function verifyKnowledgeProvenance(
     catalogCount: committed.length,
     exclusionCount: catalog.exclusions.length,
     charactersSha256,
-    localizationSha256
+    localizationSha256,
+    supplementalCharactersSha256
   };
+}
+
+function requireSupplementalProvenance(
+  catalog: KnowledgeProvenanceCatalog
+): KnowledgeProvenanceCatalog['provenance'][number] {
+  const provenance = catalog.provenance.find(
+    ({ id }) => id === 'genshin-db-dist-characters'
+  );
+  if (!provenance) throw new Error('Missing provenance entry: genshin-db-dist-characters');
+  if (!supplementalUrlPattern.test(provenance.url)) {
+    throw new Error(`Provenance URL is not pinned to an immutable commit: ${provenance.url}`);
+  }
+  return provenance;
 }
 
 function requireProvenance(
@@ -179,6 +228,59 @@ function parseObjectSnapshot(bytes: Uint8Array, label: string): Record<string, u
   }
   if (!isRecord(value)) throw new Error(`${label} snapshot must contain a JSON object`);
   return value;
+}
+
+function parseSupplementalCharacters(
+  bytes: Uint8Array
+): Map<string, { id: string; name: string; element: string; weaponType: string }> {
+  const source = new TextDecoder().decode(bytes);
+  const payload = supplementalPayloadPattern.exec(source)?.groups?.['payload'];
+  if (payload === undefined) {
+    throw new Error('Supplemental character snapshot does not contain the expected gzip payload');
+  }
+
+  let document: unknown;
+  try {
+    document = JSON.parse(new TextDecoder().decode(gunzipSync(Buffer.from(payload, 'base64'))));
+  } catch {
+    throw new Error('Supplemental character snapshot payload is not valid gzip JSON');
+  }
+  const characters = nestedRecord(document, ['data', 'ChineseSimplified', 'characters']);
+  const normalized = new Map<
+    string,
+    { id: string; name: string; element: string; weaponType: string }
+  >();
+  for (const value of Object.values(characters)) {
+    if (!isRecord(value)) continue;
+    const id = String(value['id']);
+    const name = value['name'];
+    const element =
+      typeof value['elementType'] === 'string'
+        ? supplementalElementByValue[value['elementType']]
+        : undefined;
+    const weaponType =
+      typeof value['weaponType'] === 'string' ? weaponByEnkaValue[value['weaponType']] : undefined;
+    if (!/^1\d{7}$/u.test(id) || typeof name !== 'string' || !element || !weaponType) continue;
+    if (normalized.has(id)) {
+      throw new Error(`Supplemental character snapshot contains duplicate id ${id}`);
+    }
+    normalized.set(id, { id, name, element, weaponType });
+  }
+  return normalized;
+}
+
+function nestedRecord(value: unknown, path: readonly string[]): Record<string, unknown> {
+  let current = value;
+  for (const key of path) {
+    if (!isRecord(current)) {
+      throw new Error(`Supplemental character snapshot is missing ${path.join('.')}`);
+    }
+    current = current[key];
+  }
+  if (!isRecord(current)) {
+    throw new Error(`Supplemental character snapshot is missing ${path.join('.')}`);
+  }
+  return current;
 }
 
 function populatedCharacterRows(

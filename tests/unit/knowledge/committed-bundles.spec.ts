@@ -227,8 +227,32 @@ describe('committed advisor knowledge bundles', () => {
 
     expect(new Set(catalogIds).size).toBe(catalogIds.length);
     expect(new Set(strategyIds).size).toBe(strategyIds.length);
-    expect(catalogIds).toHaveLength(109);
+    expect(catalogIds.length).toBeGreaterThanOrEqual(112);
     expect([...strategyIds].sort()).toEqual([...catalogIds].sort());
+    expect(
+      catalog.characters
+        .filter(({ id }) => ['10000125', '10000126', '10000127'].includes(id))
+        .map(({ id, name, element, weaponType }) => ({ id, name, element, weaponType }))
+    ).toEqual([
+      {
+        id: '10000125',
+        name: '哥伦比娅',
+        element: 'hydro',
+        weaponType: 'catalyst'
+      },
+      {
+        id: '10000126',
+        name: '兹白',
+        element: 'geo',
+        weaponType: 'sword'
+      },
+      {
+        id: '10000127',
+        name: '叶洛亚',
+        element: 'geo',
+        weaponType: 'polearm'
+      }
+    ]);
   });
 
   it('audits every non-canonical numeric upstream entry excluded from the roster', () => {
@@ -243,7 +267,8 @@ describe('committed advisor knowledge bundles', () => {
       canonicalId: '10000116'
     });
     expect(catalog.exclusions.find(({ id }) => id === '10000904')).toMatchObject({
-      kind: 'provisional'
+      kind: 'alternate-variant',
+      canonicalId: '10000125'
     });
   });
 
@@ -424,16 +449,25 @@ describe('committed advisor knowledge bundles', () => {
   });
 
   it('records immutable upstream provenance hashes for the catalog snapshot', () => {
-    expect(catalog.provenance).toHaveLength(2);
-    for (const { url } of catalog.provenance) {
-      expect(url).toMatch(
-        /^https:\/\/raw\.githubusercontent\.com\/EnkaNetwork\/API-docs\/[0-9a-f]{40}\/store\/(?:characters|loc)\.json$/
-      );
+    expect(catalog.provenance).toHaveLength(3);
+    for (const { id, url } of catalog.provenance) {
+      if (id === 'genshin-db-dist-characters') {
+        expect(url).toMatch(
+          /^https:\/\/raw\.githubusercontent\.com\/theBowja\/genshin-db-dist\/[0-9a-f]{40}\/data\/scripts\/chinesesimplified-characters\.js$/
+        );
+      } else {
+        expect(url).toMatch(
+          /^https:\/\/raw\.githubusercontent\.com\/EnkaNetwork\/API-docs\/[0-9a-f]{40}\/store\/(?:characters|loc)\.json$/
+        );
+      }
       expect(url).not.toContain('/master/');
+      expect(url).not.toContain('/main/');
     }
     expect(Object.fromEntries(catalog.provenance.map(({ id, sha256 }) => [id, sha256]))).toEqual({
       'enka-characters': '51dbaef256968a41dab3429d60f88f77f29645c4b79bf606fc93d4fbf3be33e4',
-      'enka-localization': 'ee8a58105be0595b386d035377711d7aa0859d09550241b291459372bbd38976'
+      'enka-localization': 'ee8a58105be0595b386d035377711d7aa0859d09550241b291459372bbd38976',
+      'genshin-db-dist-characters':
+        'da5d96d246972062380a7c24b095e404c091e64a8958b2c3869abfba03fb9299'
     });
   });
 });

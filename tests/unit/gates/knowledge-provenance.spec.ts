@@ -1,3 +1,5 @@
+import { gzipSync } from 'node:zlib';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -32,6 +34,29 @@ const charactersBytes = encoder.encode(
 const localizationBytes = encoder.encode(
   JSON.stringify({ 'zh-cn': { '1': '甲', '2': '乙', '3': '甲·变体' } })
 );
+const supplementalRevision = 'b'.repeat(40);
+const supplementalUrl =
+  `https://raw.githubusercontent.com/theBowja/genshin-db-dist/${supplementalRevision}` +
+  '/data/scripts/chinesesimplified-characters.js';
+const supplementalPayload = gzipSync(
+  JSON.stringify({
+    data: {
+      ChineseSimplified: {
+        characters: {
+          gamma: {
+            id: 10000003,
+            name: '丙',
+            elementType: 'ELEMENT_CRYO',
+            weaponType: 'WEAPON_CATALYST'
+          }
+        }
+      }
+    }
+  })
+).toString('base64');
+const supplementalBytes = encoder.encode(
+  `!function(){return n(574)("${supplementalPayload}")}();`
+);
 
 function fixtureCatalog(): KnowledgeProvenanceCatalog {
   return {
@@ -45,6 +70,11 @@ function fixtureCatalog(): KnowledgeProvenanceCatalog {
         id: 'enka-localization',
         url: localizationUrl,
         sha256: sha256Hex(localizationBytes)
+      },
+      {
+        id: 'genshin-db-dist-characters',
+        url: supplementalUrl,
+        sha256: sha256Hex(supplementalBytes)
       }
     ],
     exclusions: [
@@ -56,25 +86,31 @@ function fixtureCatalog(): KnowledgeProvenanceCatalog {
     ],
     characters: [
       { id: '10000001', name: '甲', element: 'pyro', weaponType: 'sword' },
-      { id: '10000002', name: '乙', element: 'hydro', weaponType: 'bow' }
+      { id: '10000002', name: '乙', element: 'hydro', weaponType: 'bow' },
+      { id: '10000003', name: '丙', element: 'cryo', weaponType: 'catalyst' }
     ]
   };
 }
 
 function verify(catalog = fixtureCatalog()) {
-  return verifyKnowledgeProvenance(catalog, { charactersBytes, localizationBytes });
+  return verifyKnowledgeProvenance(catalog, {
+    charactersBytes,
+    localizationBytes,
+    supplementalCharactersBytes: supplementalBytes
+  });
 }
 
 describe('knowledge provenance pure verifier', () => {
   it('accepts matching pinned snapshots', () => {
     expect(verify()).toMatchObject({
       revision,
-      catalogCount: 2,
-      exclusionCount: 1
+      catalogCount: 3,
+      exclusionCount: 1,
+      supplementalCharactersSha256: sha256Hex(supplementalBytes)
     });
   });
 
-  it('rejects mutable provenance URLs and digest mismatches', () => {
+  it('rejects mutable provenance URLs and digest mismatches for both catalog sources', () => {
     const mutable = fixtureCatalog();
     mutable.provenance[0]!.url =
       'https://raw.githubusercontent.com/EnkaNetwork/API-docs/master/store/characters.json';
@@ -83,6 +119,17 @@ describe('knowledge provenance pure verifier', () => {
     const mismatched = fixtureCatalog();
     mismatched.provenance[0]!.sha256 = '0'.repeat(64);
     expect(() => verify(mismatched)).toThrow(/digest mismatch.*enka-characters/i);
+
+    const mutableSupplement = fixtureCatalog();
+    mutableSupplement.provenance[2]!.url =
+      'https://raw.githubusercontent.com/theBowja/genshin-db-dist/main/data/scripts/chinesesimplified-characters.js';
+    expect(() => verify(mutableSupplement)).toThrow(/not pinned to an immutable commit/i);
+
+    const mismatchedSupplement = fixtureCatalog();
+    mismatchedSupplement.provenance[2]!.sha256 = '0'.repeat(64);
+    expect(() => verify(mismatchedSupplement)).toThrow(
+      /digest mismatch.*genshin-db-dist-characters/i
+    );
   });
 
   it('rejects missing exclusion audits and invalid alternate canonical targets', () => {
@@ -97,16 +144,17 @@ describe('knowledge provenance pure verifier', () => {
     );
   });
 
-  it('reports catalog length mismatches explicitly', () => {
-    const wrongLength = fixtureCatalog();
-    wrongLength.characters.push({
-      id: '10000003',
-      name: '丙',
+  it('rejects committed additions that are absent from the supplemental snapshot', () => {
+    const unsupportedAddition = fixtureCatalog();
+    unsupportedAddition.characters.push({
+      id: '10000004',
+      name: '丁',
       element: 'cryo',
       weaponType: 'catalyst'
     });
 
-    expect(() => verify(wrongLength)).toThrow(/catalog length mismatch: upstream=2 committed=3/i);
-    expect(() => verify(wrongLength)).not.toThrow(/index -1/i);
+    expect(() => verify(unsupportedAddition)).toThrow(
+      /supplemental metadata is missing for committed character 10000004/i
+    );
   });
 });

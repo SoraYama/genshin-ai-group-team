@@ -292,7 +292,7 @@ export const committedCharacterCatalogSchema = z
     schemaVersion: z.literal(1),
     catalogVersion: z.string().trim().min(1).max(128),
     retrievedAt: reviewedAtSchema,
-    provenance: z.array(characterCatalogProvenanceSchema).length(2),
+    provenance: z.array(characterCatalogProvenanceSchema).length(3),
     exclusions: z.array(characterCatalogExclusionSchema).max(64),
     characters: z.array(committedCharacterCatalogEntrySchema).min(1).max(256)
   })

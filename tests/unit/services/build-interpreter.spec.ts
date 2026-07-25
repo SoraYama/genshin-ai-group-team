@@ -260,7 +260,7 @@ describe('BuildInterpreter reviewed archetypes', () => {
 });
 
 describe('BuildInterpreter conservative boundaries', () => {
-  it('keeps all 104 unreviewed catalog entries as explicit low-confidence gaps', () => {
+  it('keeps all 107 unreviewed catalog entries as explicit low-confidence gaps', () => {
     const bundle = JSON.parse(
       readFileSync(resolve(knowledgeDirectory, 'character-strategies.v2.json'), 'utf8')
     ) as {
@@ -270,7 +270,7 @@ describe('BuildInterpreter conservative boundaries', () => {
       .filter(({ reviewState }) => reviewState === 'unreviewed')
       .map(({ id }) => id);
 
-    expect(unreviewedIds).toHaveLength(104);
+    expect(unreviewedIds).toHaveLength(107);
     for (const id of unreviewedIds) {
       expect(interpret(reviewedBuild(Number(id), {}))).toMatchObject({
         characterId: id,

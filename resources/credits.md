@@ -17,11 +17,13 @@ Bundled visual dependencies:
 
 The versioned files under `resources/knowledge/` are developer-reviewed source assets. Runtime web search results are never written back into these trusted bundles. Strategy facts are concise Chinese **paraphrased summaries, not copied guide text**. Links identify the pages reviewed and do not imply endorsement by their authors.
 
-Catalog provenance, retrieved 2026-07-24:
+Catalog provenance, retrieved 2026-07-24 and 2026-07-25:
 
 - EnkaNetwork API Docs revision `2b9d23b334306f5845551ae7571d1165cdf096e5`, `store/characters.json` — `https://raw.githubusercontent.com/EnkaNetwork/API-docs/2b9d23b334306f5845551ae7571d1165cdf096e5/store/characters.json`; used for upstream canonical IDs, element and weapon metadata; SHA-256 `51dbaef256968a41dab3429d60f88f77f29645c4b79bf606fc93d4fbf3be33e4`.
 - EnkaNetwork API Docs revision `2b9d23b334306f5845551ae7571d1165cdf096e5`, `store/loc.json` — `https://raw.githubusercontent.com/EnkaNetwork/API-docs/2b9d23b334306f5845551ae7571d1165cdf096e5/store/loc.json`; used for Simplified Chinese names; SHA-256 `ee8a58105be0595b386d035377711d7aa0859d09550241b291459372bbd38976`.
-- The snapshot exposes 114 populated numeric rows, but five are not canonical player-roster characters: trial IDs `10000901` and `10000902`, alternate ID `10000903` (mapped to canonical `10000116`), provisional ID `10000904`, and test ID `11000046`. They are recorded in the catalog's bounded `exclusions` audit list, leaving 109 canonical entries. This is a documented upstream discrepancy from the original 112-character acceptance floor.
+- genshin-db-dist revision `9ccef4a295bc6cc84dfd9b02addce1313883367f`, `data/scripts/chinesesimplified-characters.js` — `https://raw.githubusercontent.com/theBowja/genshin-db-dist/9ccef4a295bc6cc84dfd9b02addce1313883367f/data/scripts/chinesesimplified-characters.js`; used only to supplement the three formal characters absent from the older Enka snapshot; SHA-256 `da5d96d246972062380a7c24b095e404c091e64a8958b2c3869abfba03fb9299`.
+- The Enka snapshot exposes 114 populated numeric rows, but five are not canonical player-roster characters: trial IDs `10000901` and `10000902`, alternate ID `10000903` (mapped to canonical `10000116`), obsolete provisional/alternate ID `10000904` (mapped to canonical `10000125`), and test ID `11000046`. The fixed supplemental snapshot contributes canonical IDs `10000125`–`10000127`, bringing the committed catalog and strategy index to 112 entries.
+- HoYoLAB's official Luna IV event-wish notices (`https://www.hoyolab.com/article/43195155` and `https://www.hoyolab.com/article/43195205`) were checked on 2026-07-25 to confirm that Columbina, Zibai, and Illuga are formal released characters and to cross-check their elements. The committed Simplified Chinese catalog uses `哥伦比娅`, `兹白`, and `叶洛亚`. Their strategy rows remain explicit `unreviewed` gaps with no trusted facts until directly relevant guides are reviewed.
 
 Reproducible review evidence:
 

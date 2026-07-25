@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "catalogVersion": "enka-2026-07-24",
-  "retrievedAt": "2026-07-24T23:08:06+08:00",
+  "catalogVersion": "enka-genshin-db-2026-07-25",
+  "retrievedAt": "2026-07-25T20:05:00+08:00",
   "provenance": [
     {
       "id": "enka-characters",
@@ -14,6 +14,12 @@
       "url": "https://raw.githubusercontent.com/EnkaNetwork/API-docs/2b9d23b334306f5845551ae7571d1165cdf096e5/store/loc.json",
       "retrievedAt": "2026-07-24T23:08:06+08:00",
       "sha256": "ee8a58105be0595b386d035377711d7aa0859d09550241b291459372bbd38976"
+    },
+    {
+      "id": "genshin-db-dist-characters",
+      "url": "https://raw.githubusercontent.com/theBowja/genshin-db-dist/9ccef4a295bc6cc84dfd9b02addce1313883367f/data/scripts/chinesesimplified-characters.js",
+      "retrievedAt": "2026-07-25T20:05:00+08:00",
+      "sha256": "da5d96d246972062380a7c24b095e404c091e64a8958b2c3869abfba03fb9299"
     }
   ],
   "exclusions": [
@@ -39,8 +45,9 @@
     {
       "id": "10000904",
       "name": "哥伦比娅",
-      "kind": "provisional",
-      "reason": "该上游条目的身份与技能元数据尚未形成可核验的 canonical 映射，保守列为 provisional 排除项。"
+      "kind": "alternate-variant",
+      "canonicalId": "10000125",
+      "reason": "旧 Enka 条目是与正式角色重复的 provisional 替代 ID，且旧条目的火元素元数据与固定补充来源中的正式水元素角色冲突；canonical 角色收录为 10000125。"
     },
     {
       "id": "11000046",
@@ -826,6 +833,27 @@
       "aliases": [],
       "element": "anemo",
       "weaponType": "bow"
+    },
+    {
+      "id": "10000125",
+      "name": "哥伦比娅",
+      "aliases": [],
+      "element": "hydro",
+      "weaponType": "catalyst"
+    },
+    {
+      "id": "10000126",
+      "name": "兹白",
+      "aliases": [],
+      "element": "geo",
+      "weaponType": "sword"
+    },
+    {
+      "id": "10000127",
+      "name": "叶洛亚",
+      "aliases": [],
+      "element": "geo",
+      "weaponType": "polearm"
     }
   ]
 }

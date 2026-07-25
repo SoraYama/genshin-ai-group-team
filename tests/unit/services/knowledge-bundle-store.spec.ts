@@ -42,7 +42,7 @@ describe('KnowledgeBundleStore', () => {
     const store = await KnowledgeBundleStore.load(knowledgeDirectory);
 
     expect(store.version).toBe('2026-07-25.reviewed-2');
-    expect(store.catalogVersion).toBe('enka-2026-07-24');
+    expect(store.catalogVersion).toBe('enka-genshin-db-2026-07-25');
     expect(store.getCatalogEntry('10000052')).toMatchObject({
       id: '10000052',
       name: '雷电将军'
@@ -228,11 +228,11 @@ describe('KnowledgeBundleStore', () => {
       characterIds: allIds,
       now: new Date('2026-07-25T00:00:00+08:00')
     });
-    expect(coverage.requestedCharacterIds).toHaveLength(109);
+    expect(coverage.requestedCharacterIds).toHaveLength(112);
     expect(coverage.trustedCharacterIds.sort()).toEqual(
       ['10000052', '10000054', '10000065', '10000073', '10000089'].sort()
     );
-    expect(coverage.unknownCharacterIds).toHaveLength(104);
+    expect(coverage.unknownCharacterIds).toHaveLength(107);
     expect(JSON.stringify(coverage)).not.toContain('strategy-gap-');
 
     expect(
