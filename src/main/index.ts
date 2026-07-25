@@ -339,6 +339,7 @@ async function bootstrapServices(): Promise<void> {
   registerAbyssAdvisorIpc({
     scenario: abyssScenario,
     advisor: abyssAdvisor,
+    traceStore: abyssTrace,
     getMainWindow: () => mainWindow
   });
   registerStygianAdvisorIpc({

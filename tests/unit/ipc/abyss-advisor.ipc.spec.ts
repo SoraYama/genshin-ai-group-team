@@ -20,6 +20,7 @@ describe('abyss advisor IPC', () => {
   it('registers scenario, plan and cancel channels and emits semantic progress', async () => {
     const send = vi.fn();
     const scenario = { getView: vi.fn().mockResolvedValue({ status: 'unavailable' }) };
+    const traceStore = { latest: vi.fn().mockReturnValue(null) };
     const advisor = {
       recommend: vi.fn().mockImplementation(async (_input, progress) => {
         progress({ correlationId: 'abyss-test-request', step: 'reading-roster' });
@@ -36,13 +37,15 @@ describe('abyss advisor IPC', () => {
     registerAbyssAdvisorIpc({
       scenario,
       advisor,
+      traceStore,
       getMainWindow: () => ({ isDestroyed: () => false, webContents: { send } }) as never
     });
 
     expect([...handlers.keys()]).toEqual([
       'advisor-v2:abyss-scenario',
       'advisor-v2:abyss-plan',
-      'advisor-v2:abyss-cancel'
+      'advisor-v2:abyss-cancel',
+      'advisor-v2:abyss-latest-trace'
     ]);
     await handlers.get('advisor-v2:abyss-scenario')?.(undefined);
     expect(scenario.getView).toHaveBeenCalledOnce();
@@ -59,6 +62,10 @@ describe('abyss advisor IPC', () => {
       ok: true
     });
     expect(advisor.cancel).toHaveBeenCalledWith('abyss-test-request');
+    await expect(
+      handlers.get('advisor-v2:abyss-latest-trace')?.(undefined)
+    ).resolves.toBeNull();
+    expect(traceStore.latest).toHaveBeenCalledOnce();
   });
 
   it('rejects invalid UID and non-canonical character IDs before calling the service', async () => {
@@ -66,6 +73,7 @@ describe('abyss advisor IPC', () => {
     registerAbyssAdvisorIpc({
       scenario: { getView: vi.fn() },
       advisor,
+      traceStore: { latest: vi.fn() },
       getMainWindow: () => undefined
     });
 
@@ -84,6 +92,7 @@ describe('abyss advisor IPC', () => {
     registerAbyssAdvisorIpc({
       scenario: { getView: vi.fn() },
       advisor,
+      traceStore: { latest: vi.fn() },
       getMainWindow: () => undefined
     });
 

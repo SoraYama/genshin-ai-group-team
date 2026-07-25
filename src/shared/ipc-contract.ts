@@ -45,6 +45,7 @@ import type {
   TheaterAdvisorResult,
   TheaterScenarioView
 } from './theater-advisor.js';
+import type { AgentRunTrace } from './agent-run-trace.js';
 
 export const ADVISOR_EVENT_CHANNEL = 'advisor:event' as const;
 export const ABYSS_ADVISOR_EVENT_CHANNEL = 'abyss-advisor:event' as const;
@@ -115,6 +116,7 @@ export interface IpcContract {
   'advisor-v2:abyss-scenario': { req: void; res: AbyssScenarioView };
   'advisor-v2:abyss-plan': { req: AbyssAdvisorPlanInput; res: AbyssAdvisorResult };
   'advisor-v2:abyss-cancel': { req: { correlationId: string }; res: { ok: boolean } };
+  'advisor-v2:abyss-latest-trace': { req: void; res: AgentRunTrace | null };
   'advisor-v2:stygian-scenario': { req: void; res: StygianScenarioView };
   'advisor-v2:stygian-plan': { req: StygianAdvisorPlanInput; res: StygianAdvisorResult };
   'advisor-v2:stygian-cancel': { req: { correlationId: string }; res: { ok: boolean } };
@@ -186,6 +188,7 @@ export const ALL_IPC_CHANNELS: IpcChannel[] = [
   'advisor-v2:abyss-scenario',
   'advisor-v2:abyss-plan',
   'advisor-v2:abyss-cancel',
+  'advisor-v2:abyss-latest-trace',
   'advisor-v2:stygian-scenario',
   'advisor-v2:stygian-plan',
   'advisor-v2:stygian-cancel',
@@ -269,6 +272,7 @@ export interface RendererApi {
     cancel: (
       input: IpcRequest<'advisor-v2:abyss-cancel'>
     ) => Promise<IpcResponse<'advisor-v2:abyss-cancel'>>;
+    getLatestTrace: () => Promise<IpcResponse<'advisor-v2:abyss-latest-trace'>>;
     onEvent: (cb: (event: AbyssAdvisorEvent) => void) => () => void;
   };
   stygianAdvisor: {
