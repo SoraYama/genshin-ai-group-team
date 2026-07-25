@@ -1,5 +1,44 @@
 import type { CharacterProfile, DataCompleteness } from '../../../shared/domain';
-import type { Element } from '../../design/tokens';
+import { elements, normalizeElement, type Element } from '../../design/tokens';
+
+export type RosterSortMode = 'default' | 'level-desc' | 'name' | 'element' | 'completeness-desc';
+
+export function sortCharacters(
+  characters: readonly CharacterProfile[],
+  mode: RosterSortMode,
+  locale: string
+): CharacterProfile[] {
+  if (mode === 'default') return [...characters];
+
+  const collator = new Intl.Collator(locale, { numeric: true, sensitivity: 'base' });
+  const completenessRank: Record<DataCompleteness, number> = {
+    basic: 0,
+    build: 1,
+    detailed: 2
+  };
+  const compare = (left: CharacterProfile, right: CharacterProfile): number => {
+    switch (mode) {
+      case 'level-desc':
+        return (right.level ?? Number.NEGATIVE_INFINITY) - (left.level ?? Number.NEGATIVE_INFINITY);
+      case 'name':
+        return collator.compare(left.name, right.name);
+      case 'element': {
+        const leftElement = normalizeElement(left.element);
+        const rightElement = normalizeElement(right.element);
+        const leftIndex = leftElement ? elements.indexOf(leftElement) : elements.length;
+        const rightIndex = rightElement ? elements.indexOf(rightElement) : elements.length;
+        return leftIndex - rightIndex;
+      }
+      case 'completeness-desc':
+        return completenessRank[right.completeness] - completenessRank[left.completeness];
+    }
+  };
+
+  return characters
+    .map((character, index) => ({ character, index }))
+    .sort((left, right) => compare(left.character, right.character) || left.index - right.index)
+    .map(({ character }) => character);
+}
 
 export interface CharacterTilePresentation {
   name: string;

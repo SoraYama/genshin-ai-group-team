@@ -275,7 +275,9 @@
   display: grid;
   min-height: 64px;
   flex: 0 0 auto;
-  grid-template-columns: minmax(180px, 0.64fr) minmax(390px, 1.8fr) auto;
+  grid-template-columns:
+    minmax(160px, 0.58fr) minmax(340px, 1.55fr)
+    minmax(142px, 0.52fr) auto;
   align-items: center;
   gap: 10px;
   padding: 8px 12px;
@@ -284,12 +286,14 @@
   background: rgba(14, 31, 45, 0.96);
 }
 
-.gta-roster-search {
+.gta-roster-search,
+.gta-roster-sort {
   display: grid;
   gap: 3px;
 }
 
-.gta-roster-search .gta-field-label {
+.gta-roster-search .gta-field-label,
+.gta-roster-sort .gta-field-label {
   color: rgba(220, 232, 235, 0.62);
   font-size: 10px;
 }
@@ -304,11 +308,22 @@
   background: rgba(4, 14, 25, 0.62);
 }
 
+.gta-roster-sort select {
+  width: 100%;
+  min-height: 38px;
+  padding: 7px 26px 7px 9px;
+  border: 1px solid rgba(192, 210, 215, 0.34);
+  border-radius: 0;
+  color: #edf4f6;
+  background: rgba(4, 14, 25, 0.62);
+}
+
 .gta-roster-search input::placeholder {
   color: rgba(220, 232, 235, 0.42);
 }
 
-.gta-roster-search input:focus {
+.gta-roster-search input:focus,
+.gta-roster-sort select:focus {
   border-color: var(--gta-gold);
   outline: 2px solid var(--gta-gold-soft);
 }
@@ -865,11 +880,9 @@
   }
 
   .gta-roster-toolbar {
-    grid-template-columns: minmax(180px, 0.7fr) minmax(0, 1.3fr);
-  }
-
-  .gta-roster-count {
-    grid-column: 1 / -1;
+    grid-template-columns:
+      minmax(150px, 0.65fr) minmax(280px, 1.4fr)
+      minmax(132px, 0.5fr) auto;
   }
 }
 

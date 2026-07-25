@@ -859,6 +859,56 @@ test('renders profile coverage and known build fields without fake zero values',
   });
   expect(visibleTileCount).toBeGreaterThanOrEqual(12);
 
+  const sortSelect = page.getByRole('combobox', { name: '角色排序' });
+  await expect(sortSelect).toHaveValue('default');
+  await expect(sortSelect.locator('option')).toHaveText([
+    '默认顺序',
+    '等级从高到低',
+    '名称',
+    '元素',
+    '资料完整度从高到低'
+  ]);
+  await expect(characterTiles.locator('.character-tile__copy > strong').first()).toHaveText(
+    '测试角色'
+  );
+  await expect(characterTiles.locator('.character-tile__copy > strong').nth(1)).toHaveText(
+    '未知角色'
+  );
+  await sortSelect.focus();
+  await page.keyboard.press('Tab');
+  await expect(characterTiles.first()).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(sortSelect).toBeFocused();
+  await sortSelect.selectOption('level-desc');
+  await expect(sortSelect).toHaveValue('level-desc');
+  await expect(characterTiles.locator('.character-tile__copy > strong').nth(1)).toHaveText(
+    '角色01'
+  );
+  await expect(characterTiles.locator('.character-tile__copy > strong').last()).toHaveText(
+    '未知角色'
+  );
+  await page.getByRole('button', { name: '水元素' }).click();
+  await expect(characterTiles).toHaveCount(4);
+  await expect(characterTiles.locator('.character-tile__copy > strong')).toHaveText([
+    '角色01',
+    '角色07',
+    '角色13',
+    '角色19'
+  ]);
+  await expect(sortSelect).toHaveValue('level-desc');
+  await page.getByRole('button', { name: '全部', exact: true }).click();
+  await switchToEnglish();
+  const englishSortSelect = page.getByRole('combobox', { name: 'Sort characters' });
+  await expect(englishSortSelect.locator('option')).toHaveText([
+    'Default order',
+    'Level: high to low',
+    'Name',
+    'Element',
+    'Data completeness: high to low'
+  ]);
+  await switchToChinese();
+  await sortSelect.selectOption('default');
+
   const maintenanceButton = page.getByRole('button', { name: '账号维护' });
   await maintenanceButton.focus();
   await page.keyboard.press('ArrowDown');

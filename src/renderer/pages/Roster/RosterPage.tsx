@@ -9,6 +9,7 @@ import { CharacterDetailDrawer } from './CharacterDetailDrawer';
 import { CharacterTile } from './CharacterTile';
 import { ProfileSummary } from './ProfileSummary';
 import { RosterToolbar, type ElementFilter } from './RosterToolbar';
+import { sortCharacters, type RosterSortMode } from './character-presentation';
 
 interface RosterPageProps {
   state: ProfileStateView;
@@ -29,6 +30,7 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
   const [lastRefresh, setLastRefresh] = useState<RefreshSummary | null>(null);
   const [query, setQuery] = useState('');
   const [elementFilter, setElementFilter] = useState<ElementFilter>('all');
+  const [sortMode, setSortMode] = useState<RosterSortMode>('default');
   const [selectedCharacterId, setSelectedCharacterId] = useState<number | null>(null);
   const selectedTileRef = useRef<HTMLButtonElement | null>(null);
   const activeUid = state.activeUid;
@@ -66,6 +68,10 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
       return matchesQuery && matchesElement;
     });
   }, [elementFilter, locale, profile, query]);
+  const sortedCharacters = useMemo(
+    () => sortCharacters(filteredCharacters, sortMode, locale),
+    [filteredCharacters, locale, sortMode]
+  );
   const selectedCharacter =
     selectedCharacterId === null
       ? undefined
@@ -76,6 +82,7 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
     await api.profile.setActive({ uid });
     setQuery('');
     setElementFilter('all');
+    setSortMode('default');
     await onStateChange();
   }
 
@@ -291,16 +298,18 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
                 <RosterToolbar
                   query={query}
                   filter={elementFilter}
+                  sort={sortMode}
                   totalCount={profile.characters.length}
                   filteredCount={filteredCharacters.length}
                   onQueryChange={setQuery}
                   onFilterChange={setElementFilter}
+                  onSortChange={setSortMode}
                 />
                 {filteredCharacters.length === 0 ? (
                   <p className="gta-roster-no-results">{t('roster.noResults')}</p>
                 ) : (
                   <div className="roster-grid" aria-label={t('roster.characterGrid')}>
-                    {filteredCharacters.map((character) => (
+                    {sortedCharacters.map((character) => (
                       <CharacterTile
                         key={character.id}
                         character={character}
