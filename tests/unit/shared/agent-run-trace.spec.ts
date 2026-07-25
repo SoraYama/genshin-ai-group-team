@@ -40,6 +40,12 @@ function containsLoneSurrogate(value: string): boolean {
 }
 
 describe('agent run trace contracts', () => {
+  it('defines exactly one schema variant per terminal status', () => {
+    expect(
+      agentRunTraceSchema.options.map((option) => option.shape.status.value)
+    ).toEqual(['running', 'completed', 'failed']);
+  });
+
   it('redacts sensitive headers and values case-insensitively', () => {
     const sanitized = sanitizeTraceText(
       [
