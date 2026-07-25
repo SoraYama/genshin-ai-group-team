@@ -3,7 +3,9 @@
 ## 结论
 
 - 验证日期：2026-07-25（Asia/Shanghai）
-- 实现提交：`365a5350e33e4e2e928f55c605095bfd4417d49c`
+- 实现提交：
+  - `365a5350e33e4e2e928f55c605095bfd4417d49c`（112 角色目录与固定来源）
+  - `5c9bf7b1ad8da9b46f608343a97aad13df3e46f9`（exact-112 schema 与 supplemental fail-closed 审查修复）
 - 自动门禁结论：通过。
 - 固定公开知识来源结论：通过，目录与策略各 112 个 canonical 角色。
 - 真实保存态门禁结论：未执行。`gate:provider-saved`、`gate:agent-saved`、`gate:advisor-saved` 会读取玩家已保存的凭据、访问已配置的第三方 Provider，并产生真实模型用量；当前正在等待用户对此给出明确授权。不得把本记录解释为真实 Agent 或完整 Advisor 管线已经通过。
@@ -12,13 +14,13 @@
 
 ## 自动门禁
 
-最终验证窗口为 2026-07-25 20:02–20:06（Asia/Shanghai）。
+初次完整验证窗口为 2026-07-25 20:02–20:06；审查修复最终验证窗口为 20:14–20:18（Asia/Shanghai）。
 
 | 命令                                | 退出码 | 结果                                                                   |
 | ----------------------------------- | -----: | ---------------------------------------------------------------------- |
 | `npm run lint`                      |      0 | ESLint 零 warning                                                      |
 | `npm run typecheck`                 |      0 | renderer、main/shared、renderer tests 三组 TypeScript 检查通过         |
-| `npm run test`                      |      0 | 120 个文件、1587 项测试通过                                            |
+| `npm run test`                      |      0 | 120 个文件、1592 项测试通过                                            |
 | `npm run test:golden`               |      0 | 6 个文件、80 项约束/历史/离线 golden 测试通过                          |
 | `npm run build`                     |      0 | Vite renderer 与 tsup main/preload 构建通过                            |
 | `npm run test:renderer-budget`      |      0 | `rendererMiB=12.26`、`javascriptKiB=502`、`cssKiB=93`、25 个文件       |
@@ -27,11 +29,16 @@
 
 完整单测第一次运行发现一个仍写死为 104 的 unreviewed 数量断言；目录补齐后正确值为 107。更新该机械断言后重新运行完整测试，结果为 120/120 文件、1587/1587 测试通过。
 
+质量审查修复又新增 5 项回归测试，最终结果为 120/120 文件、1592/1592 测试通过。第一次把完整测试与 lint/typecheck 并行运行时，一个既有同步性能测试在竞争 CPU 的情况下记录 536.6 ms，超过 500 ms 阈值；未修改阈值或优化器代码，随后独立运行两次完整测试均通过。
+
 `gate:knowledge-provenance` 在网络沙箱内的第一次尝试因 DNS 被禁而退出 1；获准只访问公开的固定 Git 原始文件后重新运行并退出 0。这不是产品逻辑失败。成功输出复核了：
 
 - Enka characters SHA-256：`51dbaef256968a41dab3429d60f88f77f29645c4b79bf606fc93d4fbf3be33e4`
 - Enka localization SHA-256：`ee8a58105be0595b386d035377711d7aa0859d09550241b291459372bbd38976`
 - genshin-db-dist supplement SHA-256：`da5d96d246972062380a7c24b095e404c091e64a8958b2c3869abfba03fb9299`
+- supplemental allowlist：`supplementalCount=3`，`supplementalIds=10000125,10000126,10000127`
+
+provenance verifier 对 supplemental 使用固定三项 allowlist。任何其他不在 Enka 快照中的 committed ID 都会失败；三个 required ID 任一缺失、结构或名称异常、元素/武器值未知、或 required ID 重复都会 fail closed。catalog 与 strategy committed schema 都锁定为恰好 112 项，不接受 111 或 113 项快照。
 
 ## 目录与 coverage
 
