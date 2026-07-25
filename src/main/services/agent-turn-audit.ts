@@ -4,7 +4,11 @@ import type { WebSearchOutput } from '@anthropic-ai/claude-agent-sdk/sdk-tools';
 import { z } from 'zod';
 
 import type { AgentSdkRunOptions } from './agent-sdk-adapter.js';
-import { privacySafeResearchText, privacySafeResearchUrl } from './research-privacy.js';
+import {
+  canonicalizeResearchPrivacyText,
+  privacySafeResearchText,
+  privacySafeResearchUrl
+} from './research-privacy.js';
 
 export const AGENT_TURN_RAW_SUMMARY_MAX_MESSAGES = 64;
 export const AGENT_TURN_RAW_SUMMARY_PREVIEW_MAX_CHARS = 500;
@@ -25,6 +29,16 @@ export function auditCorrelationId(value: string): string {
     .digest('hex')
     .slice(0, 32);
   return `audit-correlation-${digest}`;
+}
+
+export function auditToolInputKey(
+  key: string,
+  sensitiveValues: readonly string[] = []
+): string {
+  return auditToolInputKeyFromCanonicalValues(
+    key,
+    canonicalSensitiveAuditValues(sensitiveValues)
+  );
 }
 
 const webSearchOutputSchema = z
@@ -174,10 +188,10 @@ export async function runAuditedAgentTurn(options: {
   const webSearchAttempts: WebSearchEvidenceAttempt[] = [];
   const toolResultIds = new Set<string>();
   const pendingToolResultIds = new Set<string>();
-  const sensitiveAuditValues = [
+  const sensitiveAuditValues = canonicalSensitiveAuditValues([
     options.sdkOptions.apiKey,
     ...Object.values(options.sdkOptions.customHeaders ?? {})
-  ].filter((value) => value.length > 0);
+  ]);
   let toolsTruncated = false;
   let webSearchEvidenceTruncated = false;
   let usage: AgentUsage = { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 };
@@ -264,7 +278,7 @@ export async function runAuditedAgentTurn(options: {
               toolsTruncated = true;
               continue;
             }
-            const toolUseId = boundedToolAuditLabel(block['id'], sensitiveAuditValues);
+            const toolUseId = boundedToolAuditId(block['id'], sensitiveAuditValues);
             const audit: ToolAudit = {
               id: toolUseId,
               name: boundedToolAuditLabel(block['name'], sensitiveAuditValues),
@@ -331,7 +345,7 @@ export async function runAuditedAgentTurn(options: {
             block['type'] === 'tool_result' &&
             typeof block['tool_use_id'] === 'string'
           ) {
-            const toolUseId = boundedToolAuditLabel(
+            const toolUseId = boundedToolAuditId(
               block['tool_use_id'],
               sensitiveAuditValues
             );
@@ -480,10 +494,41 @@ function boundedToolAuditLabel(
   value: string,
   sensitiveValues: readonly string[]
 ): string {
-  if (sensitiveValues.some((sensitive) => value.includes(sensitive))) {
-    return '[REDACTED]';
+  const canonical = canonicalizeResearchPrivacyText(value);
+  if (
+    canonical === undefined ||
+    containsCanonicalSensitiveAuditValue(canonical, sensitiveValues)
+  ) {
+    return REDACTED_AUDIT_VALUE;
   }
-  return privacySafePartialText(value).slice(0, 128);
+  return privacySafeResearchText(canonical)?.slice(0, 128) ?? REDACTED_AUDIT_VALUE;
+}
+
+function boundedToolAuditId(
+  value: string,
+  sensitiveValues: readonly string[]
+): string {
+  const canonical = canonicalizeResearchPrivacyText(value);
+  if (
+    canonical === undefined ||
+    canonical.length === 0 ||
+    canonical.length > 128 ||
+    containsCanonicalSensitiveAuditValue(canonical, sensitiveValues)
+  ) {
+    return opaqueAuditIdentity(
+      'genshin-team-advisor:tool-audit-id:v1',
+      'audit-tool-id',
+      canonical ?? value
+    );
+  }
+  const safe = privacySafeResearchText(canonical);
+  return safe === undefined
+    ? opaqueAuditIdentity(
+        'genshin-team-advisor:tool-audit-id:v1',
+        'audit-tool-id',
+        canonical
+      )
+    : safe;
 }
 
 function privacySafePartialTurn(input: {
@@ -563,7 +608,7 @@ function privacySafeToolInput(
   if (depth >= 4 || budget.nodes <= 0) return {};
   const output = Object.create(null) as Record<string, unknown>;
   for (const [key, value] of Object.entries(input).slice(0, 16)) {
-    const safeKey = privacySafeToolKey(key, sensitiveValues);
+    const safeKey = auditToolInputKeyFromCanonicalValues(key, sensitiveValues);
     const safeValue = privacySafeToolValue(
       key,
       value,
@@ -595,19 +640,27 @@ function privacySafeToolValue(
   if (typeof value === 'boolean' || value === null) return value;
   if (isSensitiveToolAuditKey(key, sensitiveValues)) return REDACTED_AUDIT_VALUE;
   if (typeof value === 'string') {
-    if (containsSensitiveAuditValue(value, sensitiveValues)) {
+    const canonical = canonicalizeResearchPrivacyText(value);
+    if (
+      canonical === undefined ||
+      containsCanonicalSensitiveAuditValue(canonical, sensitiveValues)
+    ) {
       return REDACTED_AUDIT_VALUE;
     }
     const maxCharacters = Math.min(256, budget.stringCharacters);
-    const sanitized = privacySafePartialText(value).slice(0, maxCharacters);
+    const sanitized =
+      privacySafeResearchText(canonical)?.slice(0, maxCharacters) ??
+      REDACTED_AUDIT_VALUE;
     budget.stringCharacters = Math.max(0, budget.stringCharacters - sanitized.length);
     return sanitized;
   }
   if (typeof value === 'number') {
-    const representation = String(value);
+    const representation = canonicalizeResearchPrivacyText(String(value));
     if (
       !Number.isFinite(value) ||
-      containsSensitiveAuditValue(representation, sensitiveValues) ||
+      !Number.isSafeInteger(value) ||
+      representation === undefined ||
+      containsCanonicalSensitiveAuditValue(representation, sensitiveValues) ||
       privacySafeResearchText(representation) === undefined
     ) {
       return REDACTED_AUDIT_VALUE;
@@ -633,32 +686,59 @@ function privacySafeToolValue(
   return undefined;
 }
 
-function privacySafeToolKey(
+function auditToolInputKeyFromCanonicalValues(
   key: string,
   sensitiveValues: readonly string[]
 ): string {
-  if (isSensitiveToolAuditKey(key, sensitiveValues)) {
-    return AGENT_TURN_REDACTED_KEY;
+  const canonical = canonicalizeResearchPrivacyText(key);
+  if (
+    canonical === undefined ||
+    canonical.length === 0 ||
+    canonical.length > 80 ||
+    isSensitiveToolAuditKey(canonical, sensitiveValues)
+  ) {
+    return opaqueAuditIdentity(
+      'genshin-team-advisor:tool-audit-key:v1',
+      'audit-key',
+      canonical ?? key
+    );
   }
-  return privacySafeResearchText(key)?.slice(0, 80) ?? AGENT_TURN_REDACTED_KEY;
+  return canonical;
 }
 
 function isSensitiveToolAuditKey(
   key: string,
   sensitiveValues: readonly string[]
 ): boolean {
+  const canonical = canonicalizeResearchPrivacyText(key);
   return (
-    SENSITIVE_TOOL_AUDIT_KEY_PATTERN.test(key) ||
-    containsSensitiveAuditValue(key, sensitiveValues) ||
-    privacySafeResearchText(key) === undefined
+    canonical === undefined ||
+    SENSITIVE_TOOL_AUDIT_KEY_PATTERN.test(canonical) ||
+    containsCanonicalSensitiveAuditValue(canonical, sensitiveValues) ||
+    privacySafeResearchText(canonical) === undefined
   );
 }
 
-function containsSensitiveAuditValue(
+function containsCanonicalSensitiveAuditValue(
   value: string,
   sensitiveValues: readonly string[]
 ): boolean {
   return sensitiveValues.some((sensitive) => value.includes(sensitive));
+}
+
+function canonicalSensitiveAuditValues(values: readonly string[]): string[] {
+  return values.flatMap((value) => {
+    const canonical = canonicalizeResearchPrivacyText(value);
+    return canonical === undefined || canonical.length === 0 ? [] : [canonical];
+  });
+}
+
+function opaqueAuditIdentity(domain: string, prefix: string, value: string): string {
+  const digest = createHash('sha256')
+    .update(`${domain}\u0000${value}`)
+    .digest('hex')
+    .slice(0, 32);
+  return `${prefix}-${digest}`;
 }
 
 function assertBoundedFinalText(value: string): void {

@@ -18,7 +18,7 @@ import type {
 } from '../agents/contracts.js';
 import type { AgentSdkRunOptions } from './agent-sdk-adapter.js';
 import {
-  AGENT_TURN_REDACTED_KEY,
+  auditToolInputKey,
   type AgentUsage,
   type AuditedAgentRunner,
   type ToolAudit
@@ -162,7 +162,7 @@ function requiredTools(
         ({ name, input }) =>
           name === 'mcp__genshin__read_profile_cache' &&
           auditedUidMatches(
-            input['uid'] ?? input[AGENT_TURN_REDACTED_KEY],
+            input[auditToolInputKey('uid')],
             context.input.uid
           )
       )

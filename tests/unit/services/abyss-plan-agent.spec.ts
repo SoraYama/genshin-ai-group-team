@@ -323,6 +323,61 @@ describe('AbyssPlanAgent', () => {
     });
   });
 
+  it.each(['authorization', 'token', '123456789'])(
+    'does not accept a successful %s-only profile call as UID evidence',
+    async (credentialKey) => {
+      class NonUidProfileRunner extends FixtureRunner {
+        override async *run(
+          prompt: string,
+          options: AgentSdkRunOptions
+        ): AsyncIterable<unknown> {
+          for await (const message of super.run(prompt, options)) {
+            if (
+              typeof message === 'object' &&
+              message !== null &&
+              (message as { type?: string }).type === 'assistant'
+            ) {
+              const current = structuredClone(message) as {
+                message: {
+                  content: Array<{
+                    id?: string;
+                    input?: Record<string, unknown>;
+                  }>;
+                };
+              };
+              const profile = current.message.content.find(({ id }) => id === 'profile');
+              if (profile?.input !== undefined) {
+                delete profile.input['uid'];
+                profile.input[credentialKey] = 'credential-value';
+              }
+              yield current;
+            } else {
+              yield message;
+            }
+          }
+        }
+      }
+      const runner = new NonUidProfileRunner([
+        validAbyssPlan(),
+        validAbyssPlan(),
+        validAbyssPlan()
+      ]);
+
+      const result = await new AbyssPlanAgent(runner).compose({
+        input: abyssInput(),
+        scenario: abyssScenario(),
+        characters: ABYSS_CHARACTERS,
+        pipelineContext: pipelineContext(),
+        sdkOptions: sdkOptions()
+      });
+
+      expect(result).toMatchObject({
+        ok: false,
+        issues: [expect.objectContaining({ path: ['tools'] })]
+      });
+    }
+  );
+
   it('continues an existing trace lease without starting or finishing a second run', async () => {
     const runner = new FixtureRunner([validAbyssPlan()]);
     const trace = new AgentRunTraceStore();
