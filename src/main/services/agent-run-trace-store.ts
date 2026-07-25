@@ -497,14 +497,10 @@ function boundInputCharacters(
   maxCharacters: number
 ): { text: string; truncated: boolean } {
   if (value.length <= maxCharacters) return { text: value, truncated: false };
-  const marker = '\n…[TRUNCATED]…\n';
-  const available = Math.max(0, maxCharacters - marker.length);
-  const head = Math.ceil(available / 2);
-  const tail = Math.floor(available / 2);
-  return {
-    text: `${value.slice(0, head)}${marker}${value.slice(value.length - tail)}`,
-    truncated: true
-  };
+  // Do not join independently sampled head/tail fragments before redaction:
+  // a credential label may fall in the omitted middle while its value survives
+  // in the tail. Oversized untrusted fields therefore fail closed.
+  return { text: REDACTION_MARKER, truncated: true };
 }
 
 function sanitizeUsage(usage: AgentUsage | undefined): AgentUsage {

@@ -330,6 +330,29 @@ describe('AgentRunTraceStore privacy boundary', () => {
     expect(agentRunTraceSchema.safeParse(store.latest()).success).toBe(true);
   });
 
+  it('fails closed before sampling an oversized tool field whose credential spans the cutoff', () => {
+    const store = new AgentRunTraceStore();
+    const lease = store.start(run('oversized-tool-secret'));
+    store.startStage(lease, { stage: 'compose' });
+    store.completeStage(
+      lease,
+      completedStage('compose', {
+        tools: [
+          {
+            name: 'tool',
+            status: 'completed',
+            inputSummary: `apiKey=${'secret-material-'.repeat(1_000)}`
+          }
+        ]
+      })
+    );
+
+    expect(store.latest()?.stages[0]?.tools[0]).toMatchObject({
+      inputSummary: '[REDACTED]',
+      truncated: true
+    });
+  });
+
   it('keeps ordinary large gameplay numbers verbatim while redacting a registered UID', () => {
     const store = new AgentRunTraceStore();
     const lease = store.start(
