@@ -54,6 +54,14 @@ describe('evaluateAgentGate', () => {
     expect(gateExitCode(output)).toBe(0);
   });
 
+  it('rejects a zero-latency agent turn', () => {
+    expect(evaluateAgentGate({ ...successfulTurn, latencyMs: 0 })).toEqual({
+      gate: 'agent-saved',
+      status: 'failed',
+      code: 'AGENT_LATENCY_INVALID'
+    });
+  });
+
   it('covers every stable agent gate failure code', () => {
     const cases: Array<[string, AgentGateEvaluationInput]> = [
       ['MISSING_SAVED_API_KEY', { kind: 'unavailable', code: 'MISSING_SAVED_API_KEY' }],

@@ -77,6 +77,14 @@ describe('evaluateAdvisorGate', () => {
     expect(JSON.stringify(output)).not.toContain('characterIds');
   });
 
+  it('rejects a zero-latency advisor run', () => {
+    expect(evaluateAdvisorGate({ ...successfulRun(), latencyMs: 0 })).toEqual({
+      gate: 'advisor-saved',
+      status: 'failed',
+      code: 'ADVISOR_LATENCY_INVALID'
+    });
+  });
+
   it('covers every stable advisor gate failure code', () => {
     const base = successfulRun();
     const stage = (name: (typeof requiredStages)[number]) =>
@@ -261,5 +269,20 @@ describe('evaluateAdvisorGate', () => {
       );
       expect(source).toContain("app.setPath('userData', isolatedUserDataDirectory)");
     }
+  });
+
+  it('documents usable last-known-good production publications without allowing fixtures', async () => {
+    const documentation = await readFile(
+      path.resolve(import.meta.dirname, '../../../docs/llm-provider.md'),
+      'utf8'
+    );
+
+    expect(documentation).toContain(
+      '刷新失败时，只要 last-known-good 正式发布仍为 fresh / expiring 且 usable，门禁可以继续'
+    );
+    expect(documentation).toContain(
+      '只有没有可用的 production publication 时才返回 `SCENARIO_UNAVAILABLE`'
+    );
+    expect(documentation).toContain('绝不改用 development sample');
   });
 });

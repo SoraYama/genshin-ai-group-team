@@ -169,7 +169,7 @@ export function evaluateAdvisorGate(input: AdvisorGateEvaluationInput): AdvisorG
   if (!knowledgeMatches(input.result.knowledgeSummary, input.trace.knowledge)) {
     return failed('KNOWLEDGE_SUMMARY_MISMATCH');
   }
-  if (!nonnegativeFinite(input.latencyMs)) return failed('ADVISOR_LATENCY_INVALID');
+  if (!positiveFinite(input.latencyMs)) return failed('ADVISOR_LATENCY_INVALID');
 
   return {
     gate: 'advisor-saved',
@@ -210,10 +210,6 @@ function failed(code: AdvisorGateFailureCode): AdvisorGateOutput {
 
 function positiveFinite(value: number): boolean {
   return Number.isFinite(value) && value > 0;
-}
-
-function nonnegativeFinite(value: number): boolean {
-  return Number.isFinite(value) && value >= 0;
 }
 
 function knowledgeMatches(left: KnowledgeSummary, right: KnowledgeSummary): boolean {

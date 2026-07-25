@@ -96,7 +96,7 @@ export function evaluateAgentGate(input: AgentGateEvaluationInput): AgentGateOut
     customHeaderValues: input.sensitiveValues
   }).text.trim();
   if (model.length === 0) return failed('AGENT_MODEL_MISSING');
-  if (!nonnegativeFinite(input.latencyMs)) return failed('AGENT_LATENCY_INVALID');
+  if (!positiveFinite(input.latencyMs)) return failed('AGENT_LATENCY_INVALID');
 
   return {
     gate: 'agent-saved',
@@ -121,10 +121,6 @@ function failed(code: AgentGateFailureCode): AgentGateOutput {
 
 function positiveFinite(value: number): boolean {
   return Number.isFinite(value) && value > 0;
-}
-
-function nonnegativeFinite(value: number): boolean {
-  return Number.isFinite(value) && value >= 0;
 }
 
 function stableSdkCode(value: string | undefined): string | undefined {
