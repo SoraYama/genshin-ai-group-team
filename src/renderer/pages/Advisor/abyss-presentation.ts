@@ -119,6 +119,7 @@ const AGENT_FAILURE_LABELS: Record<AgentFailureCode, { zh: string; en: string }>
 
 const AGENT_TOOL_LABELS: Record<string, { zh: string; en: string }> = {
   mcp__genshin__read_profile_cache: { zh: '读取角色资料', en: 'Read character data' },
+  mcp__genshin__query_team_knowledge: { zh: '查询配队知识', en: 'Query team knowledge' },
   mcp__genshin__query_genshin_db: { zh: '查询游戏资料', en: 'Query game data' },
   mcp__genshin__query_enemy_data: { zh: '查询敌人资料', en: 'Query enemy data' }
 };

@@ -183,7 +183,7 @@ const trace: AgentRunTrace = {
       inputSummary: 'input',
       tools: [
         {
-          name: 'mcp__genshin__read_profile_cache',
+          name: 'mcp__genshin__query_team_knowledge',
           status: 'completed'
         }
       ],
@@ -229,14 +229,16 @@ describe('agent trace behavior', () => {
 
     expect(english).toContain('Team composition');
     expect(english).toContain('Failed');
-    expect(english).toContain('Read character data');
+    expect(english).toContain('Query team knowledge');
     expect(english).toContain('Completed');
     expect(english).toContain('Provider error');
     expect(english).not.toContain('PROVIDER_ERROR');
+    expect(english).not.toContain('Business tool');
     expect(chinese).toContain('队伍构成');
     expect(chinese).toContain('失败');
-    expect(chinese).toContain('读取角色资料');
+    expect(chinese).toContain('查询配队知识');
     expect(chinese).toContain('已完成');
     expect(chinese).toContain('模型服务错误');
+    expect(chinese).not.toContain('业务工具');
   });
 });

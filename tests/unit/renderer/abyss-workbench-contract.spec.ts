@@ -43,4 +43,15 @@ describe('abyss workbench interaction contract', () => {
     expect(workbenchCss).toContain('@media (prefers-reduced-motion: reduce)');
     expect(drawerCss).toContain('@media (prefers-reduced-motion: reduce)');
   });
+
+  it('does not retain the unreachable legacy Abyss stylesheet namespace', async () => {
+    const advisorCss = await readFile(
+      path.resolve('src/renderer/styles/pages/advisor.css'),
+      'utf8'
+    );
+
+    expect(advisorCss).not.toContain('.gta-advisor-legacy-abyss');
+    expect(advisorCss).not.toContain('@keyframes gta-abyss-reveal');
+    expect(advisorCss).not.toContain('@keyframes gta-abyss-result-reveal');
+  });
 });

@@ -21,7 +21,7 @@
     "build:renderer": "vite build",
     "build:main": "tsup",
     "build:scenario-publisher": "tsup --config tsup.scenario-data.config.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.renderer-tests.json",
     "lint": "eslint . --max-warnings=0",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write \"src/**/*.{ts,tsx,css,json,md}\" \"tests/**/*.{ts,tsx,json,md}\" \"*.{js,ts,json}\" \".github/**/*.yml\"",
