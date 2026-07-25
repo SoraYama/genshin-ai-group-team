@@ -126,6 +126,7 @@ export class KnowledgeCoverageGate {
       ]);
       const key = anonymousTaskKey({
         reason: knowledgeGap.kind,
+        gapIdentity: opaqueGapIdentity(knowledgeGap),
         characterId: catalogCharacter?.id,
         mechanicId: mechanic?.id,
         character,
@@ -210,6 +211,7 @@ function buildSignalSummary(
 
 function anonymousTaskKey(input: {
   reason: GuideResearchTask['reason'];
+  gapIdentity: string;
   characterId?: string;
   mechanicId?: string;
   character?: GuideResearchTask['character'];
@@ -220,6 +222,7 @@ function anonymousTaskKey(input: {
     .update(
       JSON.stringify({
         reason: input.reason,
+        gapIdentity: input.gapIdentity,
         characterId: input.characterId ?? null,
         mechanicId: input.mechanicId ?? null,
         buildSignals: input.character?.buildSignals ?? [],
@@ -230,4 +233,10 @@ function anonymousTaskKey(input: {
     .digest('hex')
     .slice(0, 24);
   return `guide-${input.reason}-${digest}`;
+}
+
+function opaqueGapIdentity(gap: KnowledgeGap): string {
+  return createHash('sha256')
+    .update(`knowledge-gap-v1\u0000${gap.id}\u0000${gap.subjectId}`)
+    .digest('hex');
 }

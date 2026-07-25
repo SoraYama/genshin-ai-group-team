@@ -18,9 +18,9 @@ const MAX_DETAILED_PROFILES = 24;
 export class V2ContextBudgetError extends AgentPayloadTooLargeError {
   override readonly name = 'V2ContextBudgetError';
 
-  constructor(actualBytes: number) {
-    super('pipeline-context', actualBytes, MAX_V2_AGENT_CONTEXT_BYTES);
-    this.message = `V2 agent context exceeds ${MAX_V2_AGENT_CONTEXT_BYTES} bytes: ${actualBytes}`;
+  constructor(actualBytes: number, maxBytes = MAX_V2_AGENT_CONTEXT_BYTES) {
+    super('pipeline-context', actualBytes, maxBytes);
+    this.message = `V2 agent context exceeds ${maxBytes} bytes: ${actualBytes}`;
   }
 }
 
@@ -63,7 +63,6 @@ export function buildUnknownKnowledgeContext(
 
 export function buildV2PipelineContext(options: BuildV2PipelineContextOptions): V2PipelineContext {
   const baseline = options.feasibleBaseline;
-  const selectedCharacterIds = new Set(planCharacterIds(baseline));
   const sortedCharacters = options.profile.characters
     .slice()
     .sort((left, right) => left.id - right.id);
@@ -127,28 +126,52 @@ export function buildV2PipelineContext(options: BuildV2PipelineContextOptions): 
       knowledge: knowledgeContextPacketSchema.parse(knowledge)
     }))
   };
-  let budgetError = contextBudgetError(baseContext);
+  return fitV2PipelineContextValueToBudget(
+    baseContext as V2PipelineContext,
+    MAX_V2_AGENT_CONTEXT_BYTES
+  );
+}
+
+export function fitV2PipelineContextToBudget(
+  input: V2PipelineContext,
+  maxBytes: number
+): V2PipelineContext {
+  return fitV2PipelineContextValueToBudget(
+    v2PipelineContextSchema.parse(input),
+    maxBytes
+  );
+}
+
+function fitV2PipelineContextValueToBudget(
+  input: V2PipelineContext,
+  maxBytes: number
+): V2PipelineContext {
+  const context = structuredClone(input);
+  const selectedCharacterIds = new Set(
+    planCharacterIds(context.candidate.feasibleBaseline)
+  );
+  let budgetError = contextBudgetError(context, maxBytes);
   if (budgetError !== undefined) {
     compactProfileDetails(
-      baseContext.profile as V2PipelineContext['profile'],
+      context.profile,
       selectedCharacterIds
     );
-    budgetError = contextBudgetError(baseContext);
+    budgetError = contextBudgetError(context, maxBytes);
   }
   if (budgetError !== undefined) {
-    if (compactUnselectedKnowledge(baseContext.knowledge, selectedCharacterIds)) {
+    if (compactUnselectedKnowledge(context.knowledge, selectedCharacterIds)) {
       addPayloadTruncationGap(
-        baseContext.knowledge,
+        context.knowledge,
         'Knowledge entries or citations were removed to fit the bounded agent context.'
       );
-      synchronizeCoverage(baseContext.knowledge);
+      synchronizeCoverage(context.knowledge);
     }
-    budgetError = contextBudgetError(baseContext);
+    budgetError = contextBudgetError(context, maxBytes);
   }
   if (budgetError !== undefined) {
     const knowledgePackets = [
-      baseContext.knowledge,
-      ...(baseContext.targetKnowledgeViews?.map(({ knowledge }) => knowledge) ?? [])
+      context.knowledge,
+      ...(context.targetKnowledgeViews?.map(({ knowledge }) => knowledge) ?? [])
     ];
     const compactedPackets = knowledgePackets.filter((knowledge) =>
       removeFactStatements(knowledge)
@@ -162,21 +185,24 @@ export function buildV2PipelineContext(options: BuildV2PipelineContextOptions): 
         synchronizeCoverage(knowledge);
       });
     }
-    budgetError = contextBudgetError(baseContext);
+    budgetError = contextBudgetError(context, maxBytes);
   }
   if (budgetError !== undefined) {
     throw budgetError;
   }
-  return v2PipelineContextSchema.parse(baseContext);
+  return v2PipelineContextSchema.parse(context);
 }
 
-function contextBudgetError(value: unknown): V2ContextBudgetError | undefined {
+function contextBudgetError(
+  value: unknown,
+  maxBytes: number
+): V2ContextBudgetError | undefined {
   try {
-    stringifyAgentPayload(value, 'pipeline-context', MAX_V2_AGENT_CONTEXT_BYTES);
+    stringifyAgentPayload(value, 'pipeline-context', maxBytes);
     return undefined;
   } catch (error) {
     if (error instanceof AgentPayloadTooLargeError) {
-      return new V2ContextBudgetError(error.actualBytes);
+      return new V2ContextBudgetError(error.actualBytes, maxBytes);
     }
     throw error;
   }
@@ -343,7 +369,11 @@ function compactTeam(team: { id: string; characterIds: string[] }) {
   return { id: team.id, characterIds: team.characterIds };
 }
 
-function planCharacterIds(plan: RecommendationPlan): string[] {
+function planCharacterIds(
+  plan:
+    | RecommendationPlan
+    | V2PipelineContext['candidate']['feasibleBaseline']
+): string[] {
   switch (plan.mode) {
     case 'spiral-abyss':
       return [...plan.firstHalfTeam.characterIds, ...plan.secondHalfTeam.characterIds];

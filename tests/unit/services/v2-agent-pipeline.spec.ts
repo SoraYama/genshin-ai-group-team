@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { AgentSdkRunOptions } from '../../../src/main/services/agent-sdk-adapter.js';
 import {
@@ -13,8 +13,12 @@ import {
 } from '../../../src/main/services/agent-run-trace-store.js';
 import type { RecommendationPlan } from '../../../src/shared/scenario-v2.js';
 import type { V2ExplainOutput, V2RotationOutput } from '../../../src/main/agents/contracts.js';
-import { buildUnknownKnowledgeContext } from '../../../src/main/services/v2-agent-context.js';
-import { validAbyssPlan } from './abyss-test-fixtures.js';
+import {
+  buildUnknownKnowledgeContext,
+  buildV2PipelineContext
+} from '../../../src/main/services/v2-agent-context.js';
+import { MAX_AGENT_PAYLOAD_BYTES } from '../../../src/main/services/agent-payload-budget.js';
+import { ABYSS_CHARACTERS, validAbyssPlan } from './abyss-test-fixtures.js';
 import { validStygianPlan } from './stygian-test-fixtures.js';
 import { validTheaterPlan } from './theater-test-fixtures.js';
 
@@ -284,6 +288,71 @@ function trustedKnowledgePacket(characterId: string): V2PipelineContext['knowled
   };
 }
 
+function envelopeBudgetContext(): V2PipelineContext {
+  const baseline = validAbyssPlan();
+  const selectedIds = planIds(baseline);
+  const knowledge = trustedKnowledgePacket(selectedIds[0]!);
+  knowledge.trustedMatches[0]!.factStatements = Array.from(
+    { length: 32 },
+    (_, index) => `low-priority-fact-${index}-${'f'.repeat(560)}`
+  );
+  const targetKnowledge: V2PipelineContext['knowledge'] = {
+    knowledgeVersion: 'trusted-test',
+    buildInterpretations: [],
+    trustedMatches: [
+      {
+        id: 'target-shield-match',
+        mechanicId: 'shield-breaking',
+        summary: 'Reviewed target shield strategy.',
+        citationIds: ['target-shield-citation']
+      }
+    ],
+    ephemeralMatches: [],
+    unknowns: [],
+    coverage: { requested: 1, trusted: 1, ephemeral: 0, unknown: 0 },
+    citations: [
+      {
+        id: 'target-shield-citation',
+        sourceId: 'trusted-source',
+        url: 'https://example.com/target-shield',
+        title: 'Target shield review',
+        reviewedAt: '2026-07-24T10:00:00+08:00',
+        trust: 'trusted-local'
+      }
+    ]
+  };
+  return buildV2PipelineContext({
+    correlationId: 'envelope-budget',
+    profile: {
+      schemaVersion: 2,
+      uid: '123456789',
+      source: 'merged',
+      fetchedAt: '2026-07-23T00:00:00.000Z',
+      characters: ABYSS_CHARACTERS,
+      coverage: {
+        ownedCount: ABYSS_CHARACTERS.length,
+        detailedCount: ABYSS_CHARACTERS.length,
+        buildCount: ABYSS_CHARACTERS.length,
+        statsCount: ABYSS_CHARACTERS.length,
+        enkaShowcaseCount: 8,
+        missingDetailCount: 0,
+        partial: false
+      }
+    },
+    feasibleBaseline: baseline,
+    eligibleCharacterIds: selectedIds,
+    mechanics: [{ target: '12-1 上半', facts: ['元素盾'], unknowns: [] }],
+    interventions: { noBuildChange: true },
+    knowledge,
+    targetKnowledgeViews: [
+      {
+        targetKey: '12:1:first',
+        knowledge: targetKnowledge
+      }
+    ]
+  });
+}
+
 function withKnowledgeFact(
   output: V2ExplainOutput,
   characterId: string
@@ -467,6 +536,225 @@ describe.each([
 });
 
 describe('V2 agent pipeline repair and grounding', () => {
+  it('compacts a builder-valid context against the complete Compose envelope before sending', async () => {
+    const baseline = validAbyssPlan();
+    const pipelineContext = envelopeBudgetContext();
+    const request = { padding: 'r'.repeat(30_000) };
+    expect(Buffer.byteLength(JSON.stringify(pipelineContext), 'utf8')).toBeLessThanOrEqual(
+      MAX_AGENT_PAYLOAD_BYTES
+    );
+    expect(pipelineContext.knowledge.trustedMatches[0]?.factStatements).toHaveLength(32);
+    expect(
+      Buffer.byteLength(JSON.stringify({ request, context: pipelineContext }), 'utf8')
+    ).toBeGreaterThan(MAX_AGENT_PAYLOAD_BYTES);
+    const runner = new StageRunner([
+      baseline,
+      { decision: 'accept', issues: [] },
+      rotationOutput(baseline),
+      explainOutput(baseline)
+    ]);
+
+    const result = await runV2AgentPipeline({
+      runner,
+      context: pipelineContext,
+      sdkOptionsForStage: () => sdkOptions(),
+      composer: {
+        initialPrompt: JSON.stringify(request),
+        systemPrompt: 'composer:near-envelope',
+        repairPrompt: 'repair',
+        validate: (text) => ({
+          ok: true,
+          plan: JSON.parse(text) as RecommendationPlan
+        })
+      },
+      invalidIssue: (stage, message) => ({
+        code: 'AGENT_OUTPUT_INVALID',
+        path: [stage],
+        message
+      })
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(runner.calls).toHaveLength(4);
+    expect(
+      runner.calls.every(
+        ({ prompt }) => Buffer.byteLength(prompt, 'utf8') <= MAX_AGENT_PAYLOAD_BYTES
+      )
+    ).toBe(true);
+    const composePayload = JSON.parse(runner.calls[0]!.prompt) as {
+      context: V2PipelineContext;
+    };
+    expect(composePayload.context.knowledge.trustedMatches[0]?.factStatements).toBeUndefined();
+    expect(composePayload.context.knowledge.unknowns).toContainEqual(
+      expect.objectContaining({ kind: 'payload-truncated' })
+    );
+    expect(composePayload.context.targetKnowledgeViews).toEqual([
+      {
+        targetKey: '12:1:first',
+        knowledge: expect.objectContaining({
+          trustedMatches: [
+            expect.objectContaining({
+              id: 'target-shield-match',
+              citationIds: ['target-shield-citation']
+            })
+          ],
+          citations: [
+            expect.objectContaining({
+              id: 'target-shield-citation',
+              trust: 'trusted-local'
+            })
+          ]
+        })
+      }
+    ]);
+  });
+
+  it('rebudgets the context for a near-limit Repair envelope and invokes the repair runner', async () => {
+    const baseline = validAbyssPlan();
+    const pipelineContext = envelopeBudgetContext();
+    const invalid = { padding: 'p'.repeat(25_000) };
+    const issues = [{ code: 'PLAN_SCHEMA_INVALID', path: [], message: '结构无效' }];
+    expect(
+      Buffer.byteLength(
+        JSON.stringify({
+          instruction: '只修复具体 issue，返回完整方案。',
+          issues,
+          previousPlan: invalid,
+          context: pipelineContext
+        }),
+        'utf8'
+      )
+    ).toBeGreaterThan(MAX_AGENT_PAYLOAD_BYTES);
+    const runner = new StageRunner([
+      invalid,
+      baseline,
+      { decision: 'accept', issues: [] },
+      rotationOutput(baseline),
+      explainOutput(baseline)
+    ]);
+
+    const result = await run(
+      runner,
+      baseline,
+      (text) =>
+        (JSON.parse(text) as { padding?: string }).padding === undefined
+          ? { ok: true, plan: JSON.parse(text) as RecommendationPlan }
+          : { ok: false, issues },
+      pipelineContext
+    );
+
+    expect(result).toMatchObject({ ok: true, repairs: 1 });
+    expect(runner.calls).toHaveLength(5);
+    expect(Buffer.byteLength(runner.calls[1]!.prompt, 'utf8')).toBeLessThanOrEqual(
+      MAX_AGENT_PAYLOAD_BYTES
+    );
+    const repairPayload = JSON.parse(runner.calls[1]!.prompt) as {
+      context: V2PipelineContext;
+    };
+    expect(repairPayload.context.knowledge.trustedMatches[0]?.factStatements).toBeUndefined();
+  });
+
+  it('rebudgets the context for a near-limit strict-stage envelope before Critique', async () => {
+    const pipelineContext = envelopeBudgetContext();
+    const baseline = validAbyssPlan({ warnings: ['w'.repeat(30_000)] });
+    expect(
+      Buffer.byteLength(
+        JSON.stringify({ stage: 'critique', context: pipelineContext, plan: baseline }),
+        'utf8'
+      )
+    ).toBeGreaterThan(MAX_AGENT_PAYLOAD_BYTES);
+    const runner = new StageRunner([
+      baseline,
+      { decision: 'accept', issues: [] },
+      rotationOutput(baseline),
+      explainOutput(baseline)
+    ]);
+
+    const result = await run(
+      runner,
+      baseline,
+      (text) => ({ ok: true, plan: JSON.parse(text) as RecommendationPlan }),
+      pipelineContext
+    );
+
+    expect(result).toMatchObject({ ok: true });
+    expect(runner.calls).toHaveLength(4);
+    expect(Buffer.byteLength(runner.calls[1]!.prompt, 'utf8')).toBeLessThanOrEqual(
+      MAX_AGENT_PAYLOAD_BYTES
+    );
+    const critiquePayload = JSON.parse(runner.calls[1]!.prompt) as {
+      context: V2PipelineContext;
+    };
+    expect(critiquePayload.context.knowledge.trustedMatches[0]?.factStatements).toBeUndefined();
+  });
+
+  it('fails Composer validation closed when its bounded tool audit was truncated', async () => {
+    const baseline = validAbyssPlan();
+    const calls: string[] = [];
+    const runner = {
+      async *run(prompt: string): AsyncIterable<unknown> {
+        calls.push(prompt);
+        const tools = Array.from({ length: 65 }, (_, index) => ({
+          type: 'tool_use',
+          id: `tool-${index}`,
+          name: 'read_profile_cache',
+          input: { characterIds: ['1001'] }
+        }));
+        yield { type: 'assistant', message: { content: tools } };
+        yield {
+          type: 'user',
+          message: {
+            content: tools.map(({ id }) => ({
+              type: 'tool_result',
+              tool_use_id: id,
+              is_error: false,
+              content: 'ok'
+            }))
+          }
+        };
+        yield {
+          type: 'result',
+          subtype: 'success',
+          result: JSON.stringify(baseline),
+          usage: {}
+        };
+      }
+    };
+    const validate = vi.fn((text: string) => ({
+      ok: true as const,
+      plan: JSON.parse(text) as RecommendationPlan
+    }));
+
+    const result = await runV2AgentPipeline({
+      runner,
+      context: context(baseline),
+      sdkOptionsForStage: () => sdkOptions(),
+      composer: {
+        initialPrompt: '{}',
+        systemPrompt: 'composer:truncated-tools',
+        repairPrompt: 'repair',
+        validate
+      },
+      invalidIssue: (stage, message) => ({
+        code: 'AGENT_OUTPUT_INVALID',
+        path: [stage],
+        message
+      })
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      repairs: 2,
+      issues: [
+        expect.objectContaining({
+          message: expect.stringContaining('tool audit was truncated')
+        })
+      ]
+    });
+    expect(calls).toHaveLength(3);
+    expect(validate).not.toHaveBeenCalled();
+  });
+
   it('fails closed before the runner when the final Compose prompt exceeds 48 KiB UTF-8', async () => {
     const baseline = validAbyssPlan();
     const runner = new StageRunner([baseline]);

@@ -572,6 +572,53 @@ describe('GuideResearchAgent', () => {
     });
   });
 
+  it('fails closed when the collected tool audit is truncated', async () => {
+    const researchTask = task('guide-truncated-tool-audit');
+    const researchCache = cache();
+    const runner: AuditedAgentRunner = {
+      async *run(prompt) {
+        const messages = sdkWebSearchTurn(prompt, modelOutput('ref-1'));
+        yield messages[0];
+        yield messages[1];
+        yield {
+          type: 'assistant',
+          message: {
+            content: Array.from({ length: 64 }, (_, index) => ({
+              type: 'tool_use',
+              id: `overflow-${index}`,
+              name: 'WebSearch',
+              input: { query: '原神 配队 攻略' }
+            }))
+          }
+        };
+        yield messages[2];
+      }
+    };
+    const agent = new GuideResearchAgent({
+      runner,
+      cache: researchCache,
+      sourceRegistry: sourceRegistry(),
+      sdkOptions: sdkOptions(),
+      canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
+      now: () => NOW
+    });
+
+    const result = await agent.research({
+      tasks: [researchTask],
+      knowledgeVersion: 'knowledge-v2'
+    });
+
+    expect(researchCache.put).not.toHaveBeenCalled();
+    expect(result.entries).toEqual([]);
+    expect(result.gaps).toEqual([
+      { taskKey: researchTask.key, code: 'SEARCH_OUTPUT_INVALID' }
+    ]);
+    expect(result.audit).toMatchObject({
+      toolsTruncated: true,
+      tools: { length: 64 }
+    });
+  });
+
   it.each([1, 2, 3])(
     'accepts provider JSON backed by %i resolved WebSearch calls',
     async (count) => {

@@ -171,6 +171,17 @@ export class GuideResearchAgent {
         normalizeResearchUrl: (url) => canonicalGuideSource(url, sourcesByHost)?.url
       });
       auditedTurn = turn;
+      if (turn.toolsTruncated === true) {
+        return liveResearchResult(
+          combineGuideResearchResult(
+            parsed.tasks,
+            cachedByKey,
+            new Map(),
+            gapsFor(runtimeMisses, 'SEARCH_OUTPUT_INVALID')
+          ),
+          turn
+        );
+      }
       const resolvedUrls = resolvedSearchUrls(turn.webSearchEvidence, queries, turn.tools);
       if (resolvedUrls === undefined) {
         return liveResearchResult(

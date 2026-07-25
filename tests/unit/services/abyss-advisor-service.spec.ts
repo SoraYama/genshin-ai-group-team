@@ -14,6 +14,10 @@ import type { AbyssScenarioView } from '../../../src/shared/abyss-advisor.js';
 import { AgentRunTraceStore } from '../../../src/main/services/agent-run-trace-store.js';
 import { AgentTurnError } from '../../../src/main/services/agent-turn-audit.js';
 import { GuideResearchAgent } from '../../../src/main/services/guide-research-agent.js';
+import {
+  KnowledgeCoverageGate,
+  type KnowledgeCoverageEvaluation
+} from '../../../src/main/services/knowledge-coverage-gate.js';
 import type { GuideResearchAgentResult } from '../../../src/main/services/guide-research-contract.js';
 import {
   ABYSS_CHARACTERS,
@@ -533,15 +537,7 @@ function service(options: {
   coverageEvaluate?: (
     packet: KnowledgeContextPacket,
     context: { targetKey?: string }
-  ) => {
-    required: boolean;
-    tasks: Array<{ key: string; reason: 'missing'; scenarioTags: string[] }>;
-    bindings: Array<{
-      taskKey: string;
-      unknownIndexes: number[];
-      targetKeys?: string[];
-    }>;
-  };
+  ) => KnowledgeCoverageEvaluation;
 }) {
   const strategyKnowledge = new Proxy({} as AdvisorKnowledgeReader, {
     get() {
@@ -786,6 +782,73 @@ describe('AbyssAdvisorService', () => {
       ephemeral: 1,
       unknown: 0,
       trusted: 7
+    });
+  });
+
+  it('binds one anonymous research match to only one of two formerly colliding target gaps', async () => {
+    const base = trustedPacket();
+    const target = knowledgeContextPacketSchema.parse({
+      ...base,
+      unknowns: [
+        {
+          id: 'gap-scenario-collision',
+          subjectId: 'scenario:unregistered-collision',
+          kind: 'missing',
+          reason: 'Scenario guidance is absent.'
+        },
+        {
+          id: 'gap-mechanic-collision',
+          subjectId: 'mechanic:unregistered-collision',
+          kind: 'missing',
+          reason: 'Mechanic guidance is absent.'
+        }
+      ],
+      coverage: { requested: 10, trusted: 8, ephemeral: 0, unknown: 2 }
+    });
+    const coverageGate = new KnowledgeCoverageGate({
+      getCatalogEntry: () => undefined,
+      getMechanicStrategy: () => undefined
+    });
+    const research = vi.fn(
+      async (
+        input: Parameters<GuideResearchAgent['research']>[0]
+      ): Promise<GuideResearchAgentResult> => {
+        const result = successfulResearch();
+        result.entries[0]!.taskKey = input.tasks[0]!.key;
+        return result;
+      }
+    );
+    const runner = new FixtureRunner([validAbyssPlan({ confidence: 'high' })]);
+
+    const result = await service({
+      runner,
+      apiKey: 'secret',
+      buildPacket: vi.fn((input: { scenarioTarget: { id: string } }) =>
+        input.scenarioTarget.id.endsWith(':12:1:first') ? target : base
+      ),
+      coverageEvaluate: (packet, { targetKey }) =>
+        coverageGate.evaluate(packet, {
+          characters: [],
+          scenarioTags: ['elemental-shield'],
+          targetKey
+        }),
+      research: { research }
+    }).recommend(abyssInput());
+
+    const requestedTasks = research.mock.calls[0]![0].tasks;
+    expect(requestedTasks).toHaveLength(2);
+    expect(new Set(requestedTasks.map(({ key }) => key)).size).toBe(2);
+    expect(result).toMatchObject({
+      status: 'planned',
+      source: 'smart-service',
+      plan: { confidence: 'low' },
+      knowledgeSummary: { searched: true, trusted: 8, ephemeral: 1, unknown: 1 }
+    });
+    expect(result.assumptions.join(' ')).toContain('12:1:first');
+    expect(target).toMatchObject({
+      trustedMatches: { length: 8 },
+      ephemeralMatches: [],
+      unknowns: { length: 2 }
     });
   });
 

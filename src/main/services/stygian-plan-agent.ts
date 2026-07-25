@@ -135,7 +135,8 @@ function validateRequiredTools(
     successful
       .filter(
         ({ name, input }) =>
-          name === 'mcp__genshin__read_profile_cache' && input['uid'] === context.input.uid
+          name === 'mcp__genshin__read_profile_cache' &&
+          auditedUidMatches(input['uid'], context.input.uid)
       )
       .flatMap(({ input }) =>
         Array.isArray(input['characterIds'])
@@ -165,6 +166,10 @@ function validateRequiredTools(
     message: '智能服务没有成功读取生成方案所需的角色与三阶段首领资料。',
     details: { missing }
   };
+}
+
+function auditedUidMatches(value: unknown, expected: string): boolean {
+  return value === expected || value === '[REDACTED]';
 }
 
 function buildComposePayload(context: StygianPlanAgentInput): string {

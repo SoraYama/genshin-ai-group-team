@@ -32,7 +32,13 @@ import {
   type AuditedAgentRunner,
   type ToolAudit
 } from './agent-turn-audit.js';
-import { AgentPayloadTooLargeError, stringifyAgentPayload } from './agent-payload-budget.js';
+import {
+  AgentPayloadTooLargeError,
+  MAX_AGENT_PAYLOAD_BYTES,
+  stringifyAgentPayload,
+  type AgentPayloadScope
+} from './agent-payload-budget.js';
+import { fitV2PipelineContextToBudget } from './v2-agent-context.js';
 import type {
   AgentRunTraceLease,
   AgentRunTraceWriter,
@@ -127,10 +133,11 @@ export async function runV2AgentPipeline<P extends RecommendationPlan, I extends
 
 async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I extends PipelineIssue>(
   options: RunV2AgentPipelineOptions<P, I>,
-  context: V2PipelineContext,
+  initialContext: V2PipelineContext,
   initialComposerOptions: AgentSdkRunOptions,
   trace: PipelineTraceObserver
 ): Promise<V2AgentPipelineResult<P, I>> {
+  let context = initialContext;
   let usage = zeroUsage();
   let repairs = 0;
   let previousPlan: unknown;
@@ -151,16 +158,16 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
     );
     let composerPrompt: string;
     try {
-      composerPrompt =
+      const prepared =
         stage === 'compose'
-          ? stringifyAgentPayload(
+          ? serializeStageEnvelope(
               {
                 request: parseJsonOrRaw(options.composer.initialPrompt),
                 context
               },
               'compose-prompt'
             )
-          : stringifyAgentPayload(
+          : serializeStageEnvelope(
               {
                 instruction: '只修复具体 issue，返回完整方案。',
                 issues: pendingIssues,
@@ -169,6 +176,8 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
               },
               'repair-prompt'
             );
+      context = prepared.context;
+      composerPrompt = prepared.serialized;
     } catch (error) {
       if (error instanceof AgentPayloadTooLargeError) {
         const failure = agentFailure('VALIDATION_FAILED', error.message, false);
@@ -216,7 +225,18 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
     usage = addAgentUsage(usage, composerTurn.usage);
     let validated: ValidationResult<P, I>;
     try {
-      validated = options.composer.validate(composerTurn.text, composerTurn.tools);
+      validated =
+        composerTurn.toolsTruncated === true
+          ? {
+              ok: false,
+              issues: [
+                options.invalidIssue(
+                  stage,
+                  'Composer tool audit was truncated; required tool evidence is incomplete.'
+                )
+              ]
+            }
+          : options.composer.validate(composerTurn.text, composerTurn.tools);
     } catch (error) {
       const failure = agentFailure(
         'VALIDATION_FAILED',
@@ -278,7 +298,7 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
       () => toolFreeOptions(options.sdkOptionsForStage('critique')),
       trace
     );
-    const critiquePrompt = parseStrictStageInput(
+    const critiqueInput = prepareStrictStageEnvelope(
       'critique',
       v2CritiqueInputSchema,
       {
@@ -288,10 +308,19 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
       },
       trace
     );
+    if (!critiqueInput.ok) {
+      return {
+        ok: false,
+        repairs,
+        issues: [options.invalidIssue('critique', critiqueInput.message)],
+        usage
+      };
+    }
+    context = critiqueInput.context;
     const critiqueResult = await runStrictStage({
       runner: options.runner,
       sdkOptions: critiqueOptions,
-      prompt: critiquePrompt,
+      prompt: critiqueInput.input,
       systemPrompt:
         context.mode === 'spiral-abyss' ? CRITIQUE_PROMPT_V3 : CRITIQUE_PROMPT_V2,
       schema: v2CritiqueOutputSchema,
@@ -356,7 +385,7 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
       () => toolFreeOptions(options.sdkOptionsForStage('rotation')),
       trace
     );
-    const rotationPrompt = parseStrictStageInput(
+    const rotationInput = prepareStrictStageEnvelope(
       'rotation',
       v2RotationInputSchema,
       {
@@ -367,10 +396,19 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
       },
       trace
     );
+    if (!rotationInput.ok) {
+      return {
+        ok: false,
+        repairs,
+        issues: [options.invalidIssue('rotation', rotationInput.message)],
+        usage
+      };
+    }
+    context = rotationInput.context;
     const rotationResult = await runStrictStage({
       runner: options.runner,
       sdkOptions: rotationOptions,
-      prompt: rotationPrompt,
+      prompt: rotationInput.input,
       systemPrompt:
         context.mode === 'spiral-abyss'
           ? ROTATION_COACH_PROMPT_V3
@@ -431,7 +469,7 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
       () => toolFreeOptions(options.sdkOptionsForStage('explain')),
       trace
     );
-    const explainPrompt = parseStrictStageInput(
+    const explainInput = prepareStrictStageEnvelope(
       'explain',
       v2ExplainInputSchema,
       {
@@ -443,10 +481,19 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
       },
       trace
     );
+    if (!explainInput.ok) {
+      return {
+        ok: false,
+        repairs,
+        issues: [options.invalidIssue('explain', explainInput.message)],
+        usage
+      };
+    }
+    context = explainInput.context;
     const explainResult = await runStrictStage({
       runner: options.runner,
       sdkOptions: explainOptions,
-      prompt: explainPrompt,
+      prompt: explainInput.input,
       systemPrompt:
         context.mode === 'spiral-abyss' ? EXPLAIN_PROMPT_V3 : EXPLAIN_PROMPT_V2,
       schema: v2ExplainOutputSchema,
@@ -789,6 +836,70 @@ function parseStrictStageInput<T>(
     trace.fail(failure);
     throw error;
   }
+}
+
+function prepareStrictStageEnvelope<T extends { context: V2PipelineContext }>(
+  stage: Extract<V2AgentStage, 'critique' | 'rotation' | 'explain'>,
+  schema: z.ZodType<T>,
+  input: unknown,
+  trace: PipelineTraceObserver
+):
+  | { ok: true; input: T; context: V2PipelineContext }
+  | { ok: false; message: string } {
+  const parsed = parseStrictStageInput(stage, schema, input, trace);
+  try {
+    const prepared = serializeStageEnvelope(parsed, 'strict-stage-prompt');
+    return {
+      ok: true,
+      input: prepared.input,
+      context: prepared.context
+    };
+  } catch (error) {
+    if (!(error instanceof AgentPayloadTooLargeError)) throw error;
+    const failure = agentFailure('VALIDATION_FAILED', error.message, false);
+    trace.failStage(stage, failure);
+    trace.fail(failure);
+    return { ok: false, message: error.message };
+  }
+}
+
+function serializeStageEnvelope<T extends { context: V2PipelineContext }>(
+  input: T,
+  scope: Extract<
+    AgentPayloadScope,
+    'compose-prompt' | 'repair-prompt' | 'strict-stage-prompt'
+  >
+): { input: T; context: V2PipelineContext; serialized: string } {
+  const placeholder = JSON.stringify({ ...input, context: null });
+  const nonContextBytes =
+    Buffer.byteLength(placeholder, 'utf8') - Buffer.byteLength('null', 'utf8');
+  const contextBudget = MAX_AGENT_PAYLOAD_BYTES - nonContextBytes;
+  if (contextBudget <= 0) {
+    throw new AgentPayloadTooLargeError(
+      scope,
+      Buffer.byteLength(JSON.stringify(input), 'utf8'),
+      MAX_AGENT_PAYLOAD_BYTES
+    );
+  }
+  let context: V2PipelineContext;
+  try {
+    context = fitV2PipelineContextToBudget(input.context, contextBudget);
+  } catch (error) {
+    if (error instanceof AgentPayloadTooLargeError) {
+      throw new AgentPayloadTooLargeError(
+        scope,
+        nonContextBytes + error.actualBytes,
+        MAX_AGENT_PAYLOAD_BYTES
+      );
+    }
+    throw error;
+  }
+  const fitted = { ...input, context };
+  return {
+    input: fitted,
+    context,
+    serialized: stringifyAgentPayload(fitted, scope, MAX_AGENT_PAYLOAD_BYTES)
+  };
 }
 
 function toolFreeOptions(options: AgentSdkRunOptions): AgentSdkRunOptions {

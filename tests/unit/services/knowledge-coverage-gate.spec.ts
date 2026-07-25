@@ -316,7 +316,7 @@ describe('KnowledgeCoverageGate', () => {
     );
   });
 
-  it('deduplicates equivalent anonymous tasks without copying gap identifiers into the key', () => {
+  it('keeps equivalent anonymous gaps one-to-one without copying gap identifiers into the key', () => {
     const repeated = packet([
       {
         id: 'gap-private-one',
@@ -337,15 +337,22 @@ describe('KnowledgeCoverageGate', () => {
       scenarioTags: ['elemental-shield', 'PRIVATE-NICKNAME']
     });
 
-    expect(evaluation.tasks).toHaveLength(1);
+    expect(evaluation.tasks).toHaveLength(2);
+    expect(new Set(evaluation.tasks.map(({ key }) => key)).size).toBe(2);
     expect(evaluation.bindings).toEqual([
       {
         taskKey: evaluation.tasks[0]!.key,
-        unknownIndexes: [0, 1]
+        unknownIndexes: [0]
+      },
+      {
+        taskKey: evaluation.tasks[1]!.key,
+        unknownIndexes: [1]
       }
     ]);
-    expect(evaluation.tasks[0]).not.toHaveProperty('subjectIds');
-    expect(evaluation.tasks[0]?.key).toMatch(/^guide-missing-[a-f0-9]{24}$/);
+    expect(evaluation.tasks.every((task) => !('subjectIds' in task))).toBe(true);
+    expect(
+      evaluation.tasks.every(({ key }) => /^guide-missing-[a-f0-9]{24}$/.test(key))
+    ).toBe(true);
     expect(JSON.stringify(evaluation)).not.toMatch(/private-one|private-two|NICKNAME|COOKIE/i);
   });
 

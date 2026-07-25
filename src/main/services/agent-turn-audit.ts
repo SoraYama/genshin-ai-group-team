@@ -133,6 +133,7 @@ export interface AuditedAgentTurn {
   finalRawText: string;
   rawMessagesSummary: RawAgentMessagesSummary;
   tools: ToolAudit[];
+  toolsTruncated?: boolean;
   webSearchEvidence: WebSearchEvidence;
   usage: AgentUsage;
 }
@@ -157,6 +158,12 @@ export async function runAuditedAgentTurn(options: {
   const webSearchById = new Map<string, WebSearchEvidenceAttempt>();
   const webSearchAttempts: WebSearchEvidenceAttempt[] = [];
   const toolResultIds = new Set<string>();
+  const pendingToolResultIds = new Set<string>();
+  const sensitiveAuditValues = [
+    options.sdkOptions.apiKey,
+    ...Object.values(options.sdkOptions.customHeaders ?? {})
+  ].filter((value) => value.length > 0);
+  let toolsTruncated = false;
   let webSearchEvidenceTruncated = false;
   let usage: AgentUsage = { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 };
   const rawMessagesSummary: RawAgentMessagesSummary = {
@@ -176,6 +183,7 @@ export async function runAuditedAgentTurn(options: {
       assistantText,
       rawMessagesSummary,
       tools,
+      toolsTruncated,
       webSearchAttempts,
       webSearchEvidenceTruncated,
       usage
@@ -237,20 +245,33 @@ export async function runAuditedAgentTurn(options: {
             typeof block['id'] === 'string' &&
             typeof block['name'] === 'string'
           ) {
+            if (tools.length >= AGENT_TURN_TOOL_AUDIT_MAX) {
+              toolsTruncated = true;
+              continue;
+            }
+            const toolUseId = boundedToolAuditLabel(block['id'], sensitiveAuditValues);
             const audit: ToolAudit = {
-              id: block['id'],
-              name: block['name'],
-              input: isRecord(block['input']) ? { ...block['input'] } : {},
+              id: toolUseId,
+              name: boundedToolAuditLabel(block['name'], sensitiveAuditValues),
+              input: isRecord(block['input'])
+                ? privacySafeToolInput(block['input'], sensitiveAuditValues)
+                : {},
               succeeded: false,
-              correlationId: options.auditContext?.correlationId ?? 'unscoped',
+              correlationId: boundedToolAuditLabel(
+                options.auditContext?.correlationId ?? 'unscoped',
+                sensitiveAuditValues
+              ),
               round: options.auditContext?.round ?? 'single'
             };
             tools.push(audit);
-            const matchingAudits = toolsById.get(block['id']) ?? [];
+            const matchingAudits = toolsById.get(toolUseId) ?? [];
             matchingAudits.push(audit);
-            toolsById.set(block['id'], matchingAudits);
+            toolsById.set(toolUseId, matchingAudits);
+            if (pendingToolResultIds.delete(toolUseId)) {
+              toolResultIds.add(toolUseId);
+            }
             if (block['name'] === 'WebSearch') {
-              const id = webSearchToolUseId(block['id']);
+              const id = webSearchToolUseId(toolUseId);
               const query =
                 isRecord(block['input']) && typeof block['input']['query'] === 'string'
                   ? boundedResearchQuery(block['input']['query'])
@@ -296,12 +317,22 @@ export async function runAuditedAgentTurn(options: {
             block['type'] === 'tool_result' &&
             typeof block['tool_use_id'] === 'string'
           ) {
-            const toolUseId = block['tool_use_id'];
+            const toolUseId = boundedToolAuditLabel(
+              block['tool_use_id'],
+              sensitiveAuditValues
+            );
+            const matchingAudits = toolsById.get(toolUseId);
+            if (matchingAudits === undefined) {
+              if (pendingToolResultIds.size < AGENT_TURN_TOOL_AUDIT_MAX) {
+                pendingToolResultIds.add(toolUseId);
+              }
+              continue;
+            }
             const duplicate = toolResultIds.has(toolUseId);
             toolResultIds.add(toolUseId);
-            toolsById
-              .get(toolUseId)
-              ?.forEach((use) => (use.succeeded = !duplicate && block['is_error'] !== true));
+            matchingAudits.forEach(
+              (use) => (use.succeeded = !duplicate && block['is_error'] !== true)
+            );
             const search = webSearchById.get(toolUseId);
             if (search) {
               if (duplicate) {
@@ -367,6 +398,7 @@ export async function runAuditedAgentTurn(options: {
     finalRawText,
     rawMessagesSummary,
     tools: tools.map((tool) => ({ ...tool, input: { ...tool.input } })),
+    toolsTruncated,
     webSearchEvidence: {
       attempts: webSearchAttempts.map((attempt) => ({ ...attempt, urls: [...attempt.urls] })),
       truncated: webSearchEvidenceTruncated
@@ -430,11 +462,22 @@ function boundedLabel(value: string): string {
   return value.slice(0, 80);
 }
 
+function boundedToolAuditLabel(
+  value: string,
+  sensitiveValues: readonly string[]
+): string {
+  if (sensitiveValues.some((sensitive) => value.includes(sensitive))) {
+    return '[REDACTED]';
+  }
+  return privacySafePartialText(value).slice(0, 128);
+}
+
 function privacySafePartialTurn(input: {
   resultText: string;
   assistantText: string;
   rawMessagesSummary: RawAgentMessagesSummary;
   tools: readonly ToolAudit[];
+  toolsTruncated: boolean;
   webSearchAttempts: readonly WebSearchEvidenceAttempt[];
   webSearchEvidenceTruncated: boolean;
   usage: AgentUsage;
@@ -473,6 +516,7 @@ function privacySafePartialTurn(input: {
       correlationId: boundedLabel(tool.correlationId),
       round: tool.round
     })),
+    toolsTruncated: input.toolsTruncated,
     webSearchEvidence: {
       attempts: input.webSearchAttempts.map((attempt) => ({
         toolUseId: boundedLabel(attempt.toolUseId),
@@ -498,23 +542,48 @@ function privacySafePartialText(value: string): string {
 
 function privacySafeToolInput(
   input: Record<string, unknown>,
-  depth = 0
+  sensitiveValues: readonly string[] = [],
+  depth = 0,
+  budget: ToolInputBudget = { nodes: 64, stringCharacters: 320 }
 ): Record<string, unknown> {
-  if (depth >= 4) return {};
+  if (depth >= 4 || budget.nodes <= 0) return {};
   return Object.fromEntries(
     Object.entries(input)
-      .slice(0, 32)
+      .slice(0, 16)
       .map(([key, value]) => [
         boundedLabel(key),
-        privacySafeToolValue(key, value, depth + 1)
+        privacySafeToolValue(
+          key,
+          value,
+          sensitiveValues,
+          depth + 1,
+          budget
+        )
       ])
   );
 }
 
-function privacySafeToolValue(key: string, value: unknown, depth: number): unknown {
+interface ToolInputBudget {
+  nodes: number;
+  stringCharacters: number;
+}
+
+function privacySafeToolValue(
+  key: string,
+  value: unknown,
+  sensitiveValues: readonly string[],
+  depth: number,
+  budget: ToolInputBudget
+): unknown {
+  budget.nodes -= 1;
+  if (budget.nodes < 0) return undefined;
   if (/(?:api.?key|authorization|cookie|secret|token)/iu.test(key)) return '[REDACTED]';
   if (typeof value === 'string') {
-    return privacySafePartialText(value).slice(0, AGENT_TURN_RAW_SUMMARY_PREVIEW_MAX_CHARS);
+    if (sensitiveValues.some((sensitive) => value.includes(sensitive))) return '[REDACTED]';
+    const maxCharacters = Math.min(256, budget.stringCharacters);
+    const sanitized = privacySafePartialText(value).slice(0, maxCharacters);
+    budget.stringCharacters = Math.max(0, budget.stringCharacters - sanitized.length);
+    return sanitized;
   }
   if (
     typeof value === 'number' ||
@@ -526,10 +595,19 @@ function privacySafeToolValue(key: string, value: unknown, depth: number): unkno
   if (Array.isArray(value)) {
     if (depth >= 4) return [];
     return value
-      .slice(0, 32)
-      .map((item) => privacySafeToolValue('', item, depth + 1));
+      .slice(0, 16)
+      .map((item) =>
+        privacySafeToolValue('', item, sensitiveValues, depth + 1, budget)
+      );
   }
-  if (isRecord(value)) return privacySafeToolInput(value, depth);
+  if (isRecord(value)) {
+    return privacySafeToolInput(
+      value,
+      sensitiveValues,
+      depth,
+      budget
+    );
+  }
   return undefined;
 }
 

@@ -619,6 +619,82 @@ describe('runAuditedAgentTurn', () => {
     );
   });
 
+  it('bounds and sanitizes tool audits while collecting a successful turn', async () => {
+    const runner: AuditedAgentRunner = {
+      async *run() {
+        const tools = Array.from(
+          { length: AGENT_TURN_TOOL_AUDIT_MAX + 5 },
+          (_, index) => ({
+            type: 'tool_use',
+            id: `tool-${index}-${'i'.repeat(300)}`,
+            name: 'query_team_knowledge-TOP-SECRET-AUDIT-VALUE',
+            input: {
+              query: `query-${index}`,
+              nested: {
+                values: Array.from({ length: 40 }, () => 'x'.repeat(2_000)),
+                deeper: { one: { two: { three: { four: 'must-not-be-retained' } } } }
+              },
+              apiKey: 'TOP-SECRET-TOOL-KEY'
+            }
+          })
+        );
+        yield {
+          type: 'assistant',
+          message: { content: tools }
+        };
+        yield {
+          type: 'user',
+          message: {
+            content: tools.map(({ id }) => ({
+              type: 'tool_result',
+              tool_use_id: id,
+              is_error: false,
+              content: 'ok'
+            }))
+          }
+        };
+        yield {
+          type: 'result',
+          subtype: 'success',
+          result: '{}',
+          usage: {}
+        };
+      }
+    };
+
+    const turn = await runAuditedAgentTurn({
+      runner,
+      prompt: '{}',
+      sdkOptions: { ...sdkOptions(), apiKey: 'TOP-SECRET-AUDIT-VALUE' },
+      systemPrompt: 'test',
+      auditContext: {
+        correlationId: 'TOP-SECRET-AUDIT-VALUE',
+        round: 'compose'
+      }
+    });
+
+    expect(turn.tools).toHaveLength(AGENT_TURN_TOOL_AUDIT_MAX);
+    expect(turn.toolsTruncated).toBe(true);
+    expect(turn.tools.every(({ succeeded }) => succeeded)).toBe(true);
+    expect(
+      turn.tools.every(
+        ({ id, name, correlationId }) =>
+          id.length <= 128 && name === '[REDACTED]' && correlationId === '[REDACTED]'
+      )
+    ).toBe(true);
+    expect(
+      (
+        turn.tools[0]?.input['nested'] as {
+          values: string[];
+        }
+      ).values
+    ).toHaveLength(16);
+    expect(JSON.stringify(turn.tools)).not.toMatch(
+      /TOP-SECRET-TOOL-KEY|must-not-be-retained/
+    );
+    expect(JSON.stringify(turn.tools).length).toBeLessThan(50_000);
+  });
+
   it('bounds and redacts accumulated partial tool audits', async () => {
     const runner: AuditedAgentRunner = {
       async *run() {
@@ -633,6 +709,10 @@ describe('runAuditedAgentTurn', () => {
                 name: 'WebSearch',
                 input: {
                   query: `原神 配队 攻略 ${index}`,
+                  nested: {
+                    values: Array.from({ length: 40 }, () => 'x'.repeat(2_000)),
+                    deeper: { one: { two: { three: { four: 'must-not-be-retained' } } } }
+                  },
                   apiKey: 'TOP-SECRET-TOOL-KEY'
                 }
               })
@@ -665,9 +745,12 @@ describe('runAuditedAgentTurn', () => {
     expect((failure as AgentTurnError).partialTurn?.tools).toHaveLength(
       AGENT_TURN_TOOL_AUDIT_MAX
     );
-    expect(JSON.stringify((failure as AgentTurnError).partialTurn)).not.toContain(
-      'TOP-SECRET-TOOL-KEY'
+    expect((failure as AgentTurnError).partialTurn?.toolsTruncated).toBe(true);
+    const partialTurnJson = JSON.stringify((failure as AgentTurnError).partialTurn);
+    expect(partialTurnJson).not.toMatch(
+      /TOP-SECRET-TOOL-KEY|must-not-be-retained/
     );
+    expect(partialTurnJson.length).toBeLessThan(50_000);
   });
 
   it.each(['error_during_execution', 'error_max_turns'])(
