@@ -24,7 +24,7 @@ import type {
   MiyoushePartitionLifecycle
 } from '../services/miyoushe/partition-lifecycle.js';
 import type { MiyousheLoginWindow } from '../services/miyoushe-login-window.js';
-import type { ProfileStore } from '../services/profile-store.js';
+import type { ProfileMutationToken, ProfileStore } from '../services/profile-store.js';
 import { mergeProfile } from '../services/profile-merger.js';
 import { registerHandler } from './registry.js';
 
@@ -439,9 +439,9 @@ export function registerProfileIpc({
       if (!partitionLifecycle.isCurrent(generation)) throw staleMiyousheRequestError();
     };
     const uid = parsed.data.uid;
-    const mutationRevision = store.captureMutationRevision(uid);
+    const mutationToken = store.captureMutationToken(uid);
     const assertProfileCurrent = () => {
-      if (store.captureMutationRevision(uid) !== mutationRevision) {
+      if (!store.isMutationTokenCurrent(mutationToken, uid)) {
         throw staleProfileMutationError();
       }
     };
@@ -548,7 +548,7 @@ export function registerProfileIpc({
       coverage: merged.coverage
     };
     assertCurrent();
-    if (!store.upsertIfCurrent(profile, mutationRevision)) {
+    if (!store.upsertIfCurrent(profile, mutationToken)) {
       throw staleProfileMutationError();
     }
 
@@ -584,13 +584,7 @@ export function registerProfileIpc({
       throw new IpcError(IpcErrorCodes.ValidationFailed, formatIssues(parsed.error.issues));
     }
     const generation = partitionLifecycle.capture();
-    const profileMutation =
-      parsed.data.uid === undefined
-        ? undefined
-        : {
-            uid: parsed.data.uid,
-            revision: store.captureMutationRevision(parsed.data.uid)
-          };
+    const profileMutation = store.captureMutationToken(parsed.data.uid);
     const imported = await partitionLifecycle.runAt(generation, () =>
       deviceFp.runWithPersistence('memory-only', async () => {
         const cookie = await ensureManualDeviceCookie(generation, parsed.data.cookie);
@@ -614,13 +608,7 @@ export function registerProfileIpc({
     }
 
     const generation = partitionLifecycle.capture();
-    const profileMutation =
-      parsed.data.uid === undefined
-        ? undefined
-        : {
-            uid: parsed.data.uid,
-            revision: store.captureMutationRevision(parsed.data.uid)
-          };
+    const profileMutation = store.captureMutationToken(parsed.data.uid);
     const cookie = loginSessions.consume(parsed.data.sessionId);
     if (!cookie) {
       throw expiredLoginSessionError();
@@ -645,7 +633,7 @@ export function registerProfileIpc({
     cookie: string;
     uid?: string;
     generation: number;
-    profileMutation?: { uid: string; revision: number };
+    profileMutation: ProfileMutationToken;
     persistence: DeviceFpPersistence;
   }): Promise<PersistedProfile> {
     const assertCurrent = () => {
@@ -673,10 +661,6 @@ export function registerProfileIpc({
       throw new IpcError(IpcErrorCodes.Internal, '无法选择 UID');
     }
 
-    const mutationRevision =
-      input.profileMutation?.uid === target.gameUid
-        ? input.profileMutation.revision
-        : store.captureMutationRevision(target.gameUid);
     const existing = store.get(target.gameUid);
 
     // Cache the verified Cookie under every UID this account owns before the
@@ -686,7 +670,6 @@ export function registerProfileIpc({
     const credentialSource = credentialSourceForPersistence(input.persistence);
     for (const role of bind.roles) {
       rosterSessions.put(role.gameUid, input.cookie, input.persistence);
-      store.setCredentialSource(role.gameUid, credentialSource);
     }
 
     // Pull full roster (game_record HTTP → calculator sync → bridge).
@@ -732,8 +715,11 @@ export function registerProfileIpc({
     };
 
     assertCurrent();
-    if (!store.upsertIfCurrent(profile, mutationRevision, { activate: true })) {
+    if (!store.upsertIfCurrent(profile, input.profileMutation, { activate: true })) {
       throw staleProfileMutationError();
+    }
+    for (const role of bind.roles) {
+      store.setCredentialSource(role.gameUid, credentialSource);
     }
     return profile;
   }

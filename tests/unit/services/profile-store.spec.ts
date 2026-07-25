@@ -223,11 +223,11 @@ describe('ProfileStore', () => {
     store.upsert(deleted);
     store.upsert(survivor);
     store.setActive(survivor.uid);
-    const revision = store.captureMutationRevision(deleted.uid);
+    const token = store.captureMutationToken(deleted.uid);
 
     store.remove(deleted.uid);
 
-    expect(store.upsertIfCurrent({ ...deleted, nickname: 'Stale write' }, revision)).toBe(false);
+    expect(store.upsertIfCurrent({ ...deleted, nickname: 'Stale write' }, token)).toBe(false);
     expect(store.get(deleted.uid)).toBeUndefined();
     expect(store.getActiveUid()).toBe(survivor.uid);
   });
@@ -238,10 +238,10 @@ describe('ProfileStore', () => {
     const profile = makeProfile('111111111');
     store.upsert(profile);
     store.remove(profile.uid);
-    const revision = store.captureMutationRevision(profile.uid);
+    const token = store.captureMutationToken(profile.uid);
 
     expect(
-      store.upsertIfCurrent({ ...profile, nickname: 'Reimported' }, revision, {
+      store.upsertIfCurrent({ ...profile, nickname: 'Reimported' }, token, {
         activate: true
       })
     ).toBe(true);
@@ -254,12 +254,51 @@ describe('ProfileStore', () => {
     const store = new ProfileStore();
     const profile = makeProfile('111111111');
     store.upsert(profile);
-    const revision = store.captureMutationRevision(profile.uid);
+    const token = store.captureMutationToken(profile.uid);
 
     store.clearAll();
 
-    expect(store.upsertIfCurrent(profile, revision)).toBe(false);
+    expect(store.upsertIfCurrent(profile, token)).toBe(false);
     expect(store.getStateView().profiles).toEqual([]);
+  });
+
+  it('treats removing an unknown UID as a global destructive boundary', async () => {
+    const { ProfileStore } = await import('../../../src/main/services/profile-store.js');
+    const store = new ProfileStore();
+    const profile = makeProfile('111111111');
+    const token = store.captureMutationToken(profile.uid);
+
+    expect(store.remove('999999999')).toBe(false);
+
+    expect(store.upsertIfCurrent(profile, token)).toBe(false);
+    expect(store.get(profile.uid)).toBeUndefined();
+  });
+
+  it('invalidates unknown-UID writes when an empty store is cleared', async () => {
+    const { ProfileStore } = await import('../../../src/main/services/profile-store.js');
+    const store = new ProfileStore();
+    const profile = makeProfile('111111111');
+    const token = store.captureMutationToken();
+
+    expect(store.clearAll()).toBe(0);
+
+    expect(store.upsertIfCurrent(profile, token)).toBe(false);
+    const currentToken = store.captureMutationToken();
+    expect(store.upsertIfCurrent(profile, currentToken)).toBe(true);
+  });
+
+  it('does not advance the mutation epoch for reads or failed metadata writes', async () => {
+    const { ProfileStore } = await import('../../../src/main/services/profile-store.js');
+    const store = new ProfileStore();
+    const profile = makeProfile('111111111');
+    const token = store.captureMutationToken(profile.uid);
+
+    expect(store.get(profile.uid)).toBeUndefined();
+    expect(store.getStateView()).toEqual({ activeUid: undefined, profiles: [] });
+    expect(store.setCredentialSource(profile.uid, 'partition')).toBe(false);
+    store.reconcilePartitionCredentialSources([]);
+
+    expect(store.upsertIfCurrent(profile, token)).toBe(true);
   });
 
   it('throws when setting active to an unknown UID', async () => {

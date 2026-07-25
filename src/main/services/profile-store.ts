@@ -208,9 +208,16 @@ function migrateLegacyProfile(value: unknown): PersistedProfile {
   };
 }
 
+export interface ProfileMutationToken {
+  globalEpoch: number;
+  uid?: string;
+  uidRevision?: number;
+}
+
 export class ProfileStore {
   private readonly store: Store<ProfileStoreSchema>;
   private readonly mutationRevisionByUid = new Map<string, number>();
+  private globalMutationEpoch = 0;
 
   constructor() {
     this.store = new Store<ProfileStoreSchema>({ name: 'profiles', defaults: DEFAULTS });
@@ -291,22 +298,34 @@ export class ProfileStore {
   }
 
   upsert(profile: PersistedProfile): void {
-    this.advanceMutationRevision(profile.uid);
     this.writeProfile(profile);
+    this.advanceMutationEpoch([profile.uid]);
   }
 
-  captureMutationRevision(uid: string): number {
-    return this.mutationRevisionByUid.get(uid) ?? 0;
+  captureMutationToken(uid?: string): ProfileMutationToken {
+    return uid === undefined
+      ? { globalEpoch: this.globalMutationEpoch }
+      : {
+          globalEpoch: this.globalMutationEpoch,
+          uid,
+          uidRevision: this.mutationRevision(uid)
+        };
+  }
+
+  isMutationTokenCurrent(token: ProfileMutationToken, targetUid?: string): boolean {
+    if (token.globalEpoch !== this.globalMutationEpoch) return false;
+    if (token.uid === undefined) return true;
+    return token.uid === targetUid && token.uidRevision === this.mutationRevision(token.uid);
   }
 
   upsertIfCurrent(
     profile: PersistedProfile,
-    expectedRevision: number,
+    token: ProfileMutationToken,
     options: { activate?: boolean } = {}
   ): boolean {
-    if (this.captureMutationRevision(profile.uid) !== expectedRevision) return false;
-    this.advanceMutationRevision(profile.uid);
+    if (!this.isMutationTokenCurrent(token, profile.uid)) return false;
     this.writeProfile(profile);
+    this.advanceMutationEpoch([profile.uid]);
     if (options.activate) this.store.set('activeUid', profile.uid);
     return true;
   }
@@ -329,35 +348,42 @@ export class ProfileStore {
     if (profile.credentialSource === credentialSource) return true;
     all[uid] = { ...profile, credentialSource };
     this.store.set('profilesByUid', all);
+    this.advanceMutationEpoch([uid]);
     return true;
   }
 
   reconcilePartitionCredentialSources(verifiedUids: Iterable<string>): void {
     const verified = new Set(verifiedUids);
     const all = this.getAll();
-    let dirty = false;
+    const changedUids: string[] = [];
     for (const [uid, profile] of Object.entries(all)) {
       if (verified.has(uid)) {
         if (profile.credentialSource !== 'partition') {
           all[uid] = { ...profile, credentialSource: 'partition' };
-          dirty = true;
+          changedUids.push(uid);
         }
       } else if (profile.credentialSource === 'partition') {
         const withoutCredentialSource = { ...profile };
         delete withoutCredentialSource.credentialSource;
         all[uid] = withoutCredentialSource;
-        dirty = true;
+        changedUids.push(uid);
       }
     }
-    if (dirty) this.store.set('profilesByUid', all);
+    if (changedUids.length > 0) {
+      this.store.set('profilesByUid', all);
+      this.advanceMutationEpoch(changedUids);
+    }
   }
 
   remove(uid: string): boolean {
-    this.advanceMutationRevision(uid);
     const all = this.getAll();
-    if (!(uid in all)) return false;
+    if (!(uid in all)) {
+      this.advanceMutationEpoch([uid]);
+      return false;
+    }
     delete all[uid];
     this.store.set('profilesByUid', all);
+    this.advanceMutationEpoch([uid]);
     if (this.store.get('activeUid') === uid) {
       const remaining = Object.keys(all);
       if (remaining.length === 0) this.store.delete('activeUid');
@@ -424,15 +450,22 @@ export class ProfileStore {
 
   clearAll(): number {
     const uids = Object.keys(this.getAll());
-    for (const uid of uids) this.advanceMutationRevision(uid);
     const count = uids.length;
     this.store.set('profilesByUid', {});
+    this.advanceMutationEpoch(uids);
     this.store.delete('activeUid');
     return count;
   }
 
-  private advanceMutationRevision(uid: string): void {
-    this.mutationRevisionByUid.set(uid, this.captureMutationRevision(uid) + 1);
+  private mutationRevision(uid: string): number {
+    return this.mutationRevisionByUid.get(uid) ?? 0;
+  }
+
+  private advanceMutationEpoch(uids: Iterable<string>): void {
+    this.globalMutationEpoch += 1;
+    for (const uid of uids) {
+      this.mutationRevisionByUid.set(uid, this.mutationRevision(uid) + 1);
+    }
   }
 
   private getAll(): Record<string, PersistedProfile> {

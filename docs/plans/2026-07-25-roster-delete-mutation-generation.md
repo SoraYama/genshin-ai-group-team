@@ -7,11 +7,13 @@
 **Goal:** Keep deleted profiles deleted when an older refresh or import
 finishes, and keep the current roster usable when account activation fails.
 
-**Architecture:** `ProfileStore` owns an in-memory revision for each UID.
-Long-running IPC handlers capture the UID revision before awaiting external
-work and commit through an atomic `upsertIfCurrent` check. Deletes and
-unconditional writes advance the revision. Renderer account switches retain
-the prior profile until activation and state reload both succeed.
+**Architecture:** `ProfileStore` owns an in-memory global mutation epoch plus a
+revision for each UID. Long-running IPC handlers capture one token before
+awaiting external work and commit through an atomic `upsertIfCurrent` check.
+Every successful profile write advances the global epoch; deletes and
+`clearAll` are destructive boundaries even when their target is already
+absent. Renderer account switches retain the prior profile until activation
+and state reload both succeed.
 
 **Tech Stack:** TypeScript, Electron IPC, React 19, Vitest, Playwright Electron
 
@@ -69,3 +71,27 @@ the prior profile until activation and state reload both succeed.
 2. Run focused ProfileStore, profile IPC, lifecycle, SSR, and Roster tests.
 3. Run full Vitest with two workers, typecheck, lint, and build.
 4. Commit as `fix: preserve roster deletes across in-flight writes`.
+
+### Task 5: Invalidate writes whose UID is not known at request start
+
+**Files:**
+
+- Modify: `tests/unit/services/profile-store.spec.ts`
+- Modify: `tests/unit/ipc/profile.ipc.spec.ts`
+- Modify: `src/main/services/profile-store.ts`
+- Modify: `src/main/ipc/profile.ipc.ts`
+
+1. Add failing Store tests for an unknown-UID token invalidated by removing an
+   absent UID and by clearing an empty store.
+2. Prove reads and failed metadata updates do not advance the global epoch, and
+   a fresh token after a destructive boundary can commit.
+3. Add failing IPC tests for optional-UID target discovery after delete,
+   explicit and optional new-UID imports after empty/nonempty `clearAll`, and a
+   new-profile refresh interrupted by empty `clearAll`.
+4. Capture one global/per-UID token before the first asynchronous work in
+   refresh and both import handlers. Never recapture after `fetchRoles`
+   discovers a target.
+5. Move credential-source profile updates after the guarded import commit so an
+   import cannot invalidate its own start token.
+6. Run focused and full verification, then commit as
+   `fix: invalidate unknown-uid writes after roster deletion`.

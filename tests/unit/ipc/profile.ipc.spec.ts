@@ -235,14 +235,19 @@ function setup(existing: PersistedProfile | undefined) {
     store: {
       get: vi.fn().mockReturnValue(existing),
       upsert: vi.fn(),
-      captureMutationRevision: vi.fn().mockReturnValue(0),
+      captureMutationToken: vi.fn().mockImplementation((uid?: string) => ({
+        globalEpoch: 0,
+        ...(uid === undefined ? {} : { uid, uidRevision: 0 })
+      })),
+      isMutationTokenCurrent: vi.fn().mockReturnValue(true),
       upsertIfCurrent: vi.fn().mockReturnValue(true),
       setCredentialSource: vi.fn().mockReturnValue(false),
       reconcilePartitionCredentialSources: vi.fn(),
       setActive: vi.fn(),
       getActiveUid: vi.fn(),
       getStateView: vi.fn(),
-      remove: vi.fn()
+      remove: vi.fn(),
+      clearAll: vi.fn()
     }
   };
 
@@ -273,27 +278,46 @@ function makeProfileStoreStateful(
 ): Map<string, ProfileWithCredentialSource> {
   const profiles = new Map(initialProfiles.map((profile) => [profile.uid, profile]));
   const revisions = new Map<string, number>();
+  let globalEpoch = 0;
   let activeUid = initialProfiles[0]?.uid;
   const revisionFor = (uid: string) => revisions.get(uid) ?? 0;
-  const advanceRevision = (uid: string) => revisions.set(uid, revisionFor(uid) + 1);
+  const advanceMutation = (uids: Iterable<string>) => {
+    globalEpoch += 1;
+    for (const uid of uids) revisions.set(uid, revisionFor(uid) + 1);
+  };
   deps.store.get.mockImplementation((uid: string) => profiles.get(uid));
   deps.store.upsert.mockImplementation((profile: ProfileWithCredentialSource) => {
-    advanceRevision(profile.uid);
     profiles.set(profile.uid, profile);
     activeUid ??= profile.uid;
+    advanceMutation([profile.uid]);
   });
-  deps.store.captureMutationRevision.mockImplementation((uid: string) => revisionFor(uid));
+  deps.store.captureMutationToken.mockImplementation((uid?: string) => ({
+    globalEpoch,
+    ...(uid === undefined ? {} : { uid, uidRevision: revisionFor(uid) })
+  }));
+  deps.store.isMutationTokenCurrent.mockImplementation(
+    (token: { globalEpoch: number; uid?: string; uidRevision?: number }, targetUid?: string) =>
+      token.globalEpoch === globalEpoch &&
+      (token.uid === undefined ||
+        (token.uid === targetUid && token.uidRevision === revisionFor(token.uid)))
+  );
   deps.store.upsertIfCurrent.mockImplementation(
     (
       profile: ProfileWithCredentialSource,
-      expectedRevision: number,
+      token: number | { globalEpoch: number; uid?: string; uidRevision?: number },
       options: { activate?: boolean } = {}
     ) => {
-      if (revisionFor(profile.uid) !== expectedRevision) return false;
-      advanceRevision(profile.uid);
+      const current =
+        typeof token === 'number'
+          ? revisionFor(profile.uid) === token
+          : token.globalEpoch === globalEpoch &&
+            (token.uid === undefined ||
+              (token.uid === profile.uid && token.uidRevision === revisionFor(profile.uid)));
+      if (!current) return false;
       profiles.set(profile.uid, profile);
       activeUid ??= profile.uid;
       if (options.activate) activeUid = profile.uid;
+      advanceMutation([profile.uid]);
       return true;
     }
   );
@@ -301,22 +325,30 @@ function makeProfileStoreStateful(
     (uid: string, credentialSource: CredentialSourceForTest) => {
       const profile = profiles.get(uid);
       if (!profile) return false;
+      if (profile.credentialSource === credentialSource) return true;
       profiles.set(uid, { ...profile, credentialSource });
+      advanceMutation([uid]);
       return true;
     }
   );
   deps.store.reconcilePartitionCredentialSources.mockImplementation(
     (verifiedUids: Iterable<string>) => {
       const verified = new Set(verifiedUids);
+      const changedUids: string[] = [];
       for (const [uid, profile] of profiles) {
         if (verified.has(uid)) {
-          profiles.set(uid, { ...profile, credentialSource: 'partition' });
+          if (profile.credentialSource !== 'partition') {
+            profiles.set(uid, { ...profile, credentialSource: 'partition' });
+            changedUids.push(uid);
+          }
         } else if (profile.credentialSource === 'partition') {
           const withoutCredentialSource = { ...profile };
           delete withoutCredentialSource.credentialSource;
           profiles.set(uid, withoutCredentialSource);
+          changedUids.push(uid);
         }
       }
+      if (changedUids.length > 0) advanceMutation(changedUids);
     }
   );
   deps.store.getStateView.mockImplementation(() => ({
@@ -337,10 +369,19 @@ function makeProfileStoreStateful(
     activeUid = uid;
   });
   deps.store.remove.mockImplementation((uid: string) => {
-    advanceRevision(uid);
-    if (!profiles.delete(uid)) return false;
+    const removed = profiles.delete(uid);
+    advanceMutation([uid]);
+    if (!removed) return false;
     if (activeUid === uid) activeUid = profiles.keys().next().value;
     return true;
+  });
+  deps.store.clearAll.mockImplementation(() => {
+    const uids = [...profiles.keys()];
+    const count = uids.length;
+    profiles.clear();
+    activeUid = undefined;
+    advanceMutation(uids);
+    return count;
   });
   return profiles;
 }
@@ -386,10 +427,16 @@ async function importFromCookie(cookie = COOKIE): Promise<PersistedProfile> {
   return (await handler({ uid: UID, cookie })) as PersistedProfile;
 }
 
-async function importFromSessionRequest(sessionId: string): Promise<PersistedProfile> {
+async function importFromSessionRequest(
+  sessionId: string,
+  uid: string | null = UID
+): Promise<PersistedProfile> {
   const handler = handlers.get('profile:import-from-session');
   if (!handler) throw new Error('profile:import-from-session handler was not registered');
-  return (await handler({ sessionId, uid: UID })) as PersistedProfile;
+  return (await handler({
+    sessionId,
+    ...(uid === null ? {} : { uid })
+  })) as PersistedProfile;
 }
 
 async function deleteProfile(uid = UID): Promise<unknown> {
@@ -1500,6 +1547,117 @@ describe('profile mutation generations', () => {
     expect(profiles.has(UID)).toBe(true);
     expect(deps.store.getActiveUid()).toBe(UID);
   });
+
+  it('rejects an optional-UID import when its discovered target was deleted while roles loaded', async () => {
+    const deleted = existingProfile();
+    const survivor = { ...existingProfile(), uid: SECOND_UID };
+    const deps = setup(deleted);
+    const profiles = makeProfileStoreStateful(deps, [deleted, survivor]);
+    deps.store.setActive(SECOND_UID);
+    const bind = {
+      ok: true as const,
+      roles: [{ gameUid: UID, region: 'cn_gf01', nickname: 'Traveler', level: 60 }]
+    };
+    const pendingBind = deferred<typeof bind>();
+    deps.miyoushe.fetchRoles.mockReturnValueOnce(pendingBind.promise).mockResolvedValue(bind);
+    configureSuccessfulRoster(deps);
+    const staleSessionId = deps.loginSessions.put(PARTITION_A_COOKIE);
+
+    const staleImport = importFromSessionRequest(staleSessionId, null);
+    await vi.waitFor(() => expect(deps.miyoushe.fetchRoles).toHaveBeenCalledOnce());
+    await deleteProfile(UID);
+    pendingBind.resolve(bind);
+
+    await expect(staleImport).rejects.toMatchObject({
+      code: 'IPC_SELECTION_CHANGED'
+    });
+    expect(profiles.has(UID)).toBe(false);
+    expect(deps.store.getActiveUid()).toBe(SECOND_UID);
+
+    const currentSessionId = deps.loginSessions.put(PARTITION_A_COOKIE);
+    await expect(importFromSessionRequest(currentSessionId, null)).resolves.toMatchObject({
+      uid: UID
+    });
+    expect(profiles.has(UID)).toBe(true);
+    expect(deps.store.getActiveUid()).toBe(UID);
+  });
+
+  it('rejects a new explicit UID import when an empty store was cleared while roles loaded', async () => {
+    const deps = setup(undefined);
+    const profiles = makeProfileStoreStateful(deps);
+    const bind = {
+      ok: true as const,
+      roles: [{ gameUid: UID, region: 'cn_gf01', nickname: 'Traveler', level: 60 }]
+    };
+    const pendingBind = deferred<typeof bind>();
+    deps.miyoushe.fetchRoles.mockReturnValue(pendingBind.promise);
+    configureSuccessfulRoster(deps);
+    const sessionId = deps.loginSessions.put(PARTITION_A_COOKIE);
+
+    const importPromise = importFromSessionRequest(sessionId, UID);
+    await vi.waitFor(() => expect(deps.miyoushe.fetchRoles).toHaveBeenCalledOnce());
+    expect(deps.store.clearAll()).toBe(0);
+    pendingBind.resolve(bind);
+
+    await expect(importPromise).rejects.toMatchObject({
+      code: 'IPC_SELECTION_CHANGED'
+    });
+    expect(profiles.size).toBe(0);
+    expect(deps.store.getActiveUid()).toBeUndefined();
+  });
+
+  it('rejects an optional new-UID import when a nonempty store was cleared before target discovery', async () => {
+    const survivor = { ...existingProfile(), uid: SECOND_UID };
+    const deps = setup(undefined);
+    const profiles = makeProfileStoreStateful(deps, [survivor]);
+    const bind = {
+      ok: true as const,
+      roles: [{ gameUid: UID, region: 'cn_gf01', nickname: 'Traveler', level: 60 }]
+    };
+    const pendingBind = deferred<typeof bind>();
+    deps.miyoushe.fetchRoles.mockReturnValue(pendingBind.promise);
+    configureSuccessfulRoster(deps);
+    const sessionId = deps.loginSessions.put(PARTITION_A_COOKIE);
+
+    const importPromise = importFromSessionRequest(sessionId, null);
+    await vi.waitFor(() => expect(deps.miyoushe.fetchRoles).toHaveBeenCalledOnce());
+    expect(deps.store.clearAll()).toBe(1);
+    pendingBind.resolve(bind);
+
+    await expect(importPromise).rejects.toMatchObject({
+      code: 'IPC_SELECTION_CHANGED'
+    });
+    expect(profiles.size).toBe(0);
+    expect(deps.store.getActiveUid()).toBeUndefined();
+  });
+
+  it('rejects a new-profile refresh when an empty store was cleared during the request', async () => {
+    const deps = setup(undefined);
+    const profiles = makeProfileStoreStateful(deps);
+    const pendingEnka = deferred<{
+      uid: string;
+      ttlSeconds: number;
+      showcaseStatus: 'available';
+      characters: CharacterProfile[];
+    }>();
+    deps.enka.fetchProfile.mockReturnValue(pendingEnka.promise);
+
+    const refreshPromise = refresh(UID);
+    await vi.waitFor(() => expect(deps.enka.fetchProfile).toHaveBeenCalledWith(UID));
+    expect(deps.store.clearAll()).toBe(0);
+    pendingEnka.resolve({
+      uid: UID,
+      ttlSeconds: 60,
+      showcaseStatus: 'available',
+      characters: [enkaCharacter(1)]
+    });
+
+    await expect(refreshPromise).rejects.toMatchObject({
+      code: 'IPC_SELECTION_CHANGED'
+    });
+    expect(profiles.size).toBe(0);
+    expect(deps.store.getActiveUid()).toBeUndefined();
+  });
 });
 
 describe('profile:refresh roster integrity', () => {
@@ -1582,7 +1740,11 @@ describe('profile:refresh roster integrity', () => {
     });
     expect(result.profile.characters).toHaveLength(1);
     expect(result.summary.miyoushe).toBe('no-cookie');
-    expect(deps.store.upsertIfCurrent).toHaveBeenCalledWith(result.profile, 0);
+    expect(deps.store.upsertIfCurrent).toHaveBeenCalledWith(result.profile, {
+      globalEpoch: 0,
+      uid: UID,
+      uidRevision: 0
+    });
     expectNoMiyousheNetwork(deps);
   });
 
