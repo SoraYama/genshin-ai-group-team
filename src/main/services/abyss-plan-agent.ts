@@ -387,8 +387,11 @@ function validateMemberAssignments(
       if (!supportedRoles.has(assignment.role as Exclude<typeof assignment.role, 'unclassified'>)) {
         missing.push(`member-assignment:${characterId}:role-mismatch`);
       }
+      const roleMatches = trustedMatches.filter(
+        ({ role }) => role === assignment.role
+      );
       const supportedCitationIds = new Set(
-        trustedMatches.flatMap(({ citationIds }) => citationIds)
+        roleMatches.flatMap(({ citationIds }) => citationIds)
       );
       if (
         assignment.citationIds.length === 0 ||

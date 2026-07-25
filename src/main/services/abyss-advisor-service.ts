@@ -344,12 +344,14 @@ export class AbyssAdvisorService {
             .map(({ id }) => id);
           const firstGap = researchResult.gaps[0];
           if (firstGap !== undefined || researchResult.failure !== undefined) {
+            const failure = researchFailure(
+              firstGap?.code ?? 'SEARCH_UNAVAILABLE',
+              researchResult.failure
+            );
+            terminalFailure = failure;
             trace.failStage(
               'research',
-              researchFailure(
-                firstGap?.code ?? 'SEARCH_UNAVAILABLE',
-                researchResult.failure
-              ),
+              failure,
               {
                 ...researchTraceInput(researchResult),
                 citationIds: researchCitationIds
@@ -363,11 +365,13 @@ export class AbyssAdvisorService {
           }
         } catch (error) {
           if (requestAbort.signal.aborted) throw error;
-          trace.failStage('research', {
+          const failure: AgentFailure = {
             code: 'SEARCH_UNAVAILABLE',
             message: 'Guide research was unavailable.',
             retryable: true
-          });
+          };
+          terminalFailure = failure;
+          trace.failStage('research', failure);
         }
       } else {
         trace.skipStage(

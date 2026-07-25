@@ -660,7 +660,7 @@ describe('AbyssAdvisorService', () => {
           role: 'on-field',
           summary: 'Wrong-role same-character reason.',
           factStatements: ['This match uses a different role.'],
-          citationIds: ['trusted-citation-1']
+          citationIds: ['trusted-citation-wrong-role']
         }
       ],
       citations: [
@@ -670,6 +670,14 @@ describe('AbyssAdvisorService', () => {
           sourceId: 'trusted-test-source',
           url: 'https://example.test/character-1001-unreferenced',
           title: 'Unreferenced strategy',
+          reviewedAt: '2026-07-24T00:00:00.000Z',
+          trust: 'trusted-local'
+        },
+        {
+          id: 'trusted-citation-wrong-role',
+          sourceId: 'trusted-test-source',
+          url: 'https://example.test/character-1001-wrong-role',
+          title: 'Wrong-role strategy',
           reviewedAt: '2026-07-24T00:00:00.000Z',
           trust: 'trusted-local'
         }
@@ -685,8 +693,17 @@ describe('AbyssAdvisorService', () => {
 
     if (result.status !== 'planned') throw new Error('Expected a planned result');
     expect(
-      result.memberEvidence.find(({ characterId }) => characterId === '1001')?.fitReasons
-    ).toEqual(['Reviewed strategy for 1001.']);
+      result.memberEvidence.find(({ characterId }) => characterId === '1001')
+    ).toMatchObject({
+      fitReasons: ['Reviewed strategy for 1001.'],
+      sources: [
+        expect.objectContaining({
+          citationId: 'trusted-citation-1',
+          title: 'Reviewed strategy 1',
+          trust: 'trusted-local'
+        })
+      ]
+    });
   });
 
   it('uses complete trusted knowledge without research and keeps one trace owner', async () => {
@@ -1012,7 +1029,20 @@ describe('AbyssAdvisorService', () => {
         attempts: [expect.objectContaining({ toolUseId: 'search-partial' })]
       }),
       tools: [expect.objectContaining({ name: 'WebSearch', status: 'completed' })],
+      citationIds: ['web-citation-gap'],
       usage: { inputTokens: 5, outputTokens: 3 }
+    });
+    expect(trace.latest()).toMatchObject({
+      status: 'failed',
+      finalSource: 'smart-service',
+      failure: {
+        code: 'SEARCH_UNAVAILABLE',
+        details: {
+          sdkCode: 'AGENT_TURN_RESULT_ERROR',
+          httpStatus: '503'
+        }
+      },
+      knowledge: { searched: true, ephemeral: 1, unknown: 1 }
     });
     expect(cacheGet).toHaveBeenCalledTimes(2);
     expect(JSON.stringify(trace.latest())).not.toContain('TOP-SECRET-PROVIDER-BODY');

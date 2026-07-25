@@ -489,6 +489,12 @@ describe('abyss in-process business tools', () => {
       kind: 'missing',
       reason: 'Second-half scenario knowledge is missing.'
     });
+    scopedPacket.unknowns.push({
+      id: 'gap-first-payload-truncated',
+      subjectId: 'scenario:first-only-truncation',
+      kind: 'payload-truncated',
+      reason: 'Only the first-half target packet was truncated.'
+    });
     scopedPacket.citations.push(
       {
         id: 'citation-wave-efficient',
@@ -537,7 +543,7 @@ describe('abyss in-process business tools', () => {
         '12:1:first': {
           trustedMatchIds: ['match-shield-breaking'],
           ephemeralMatchIds: ['ephemeral-first-bound'],
-          unknownIds: ['gap-scenario-unknown']
+          unknownIds: ['gap-scenario-unknown', 'gap-first-payload-truncated']
         },
         '12:1:second': {
           trustedMatchIds: ['match-wave-efficient'],
@@ -576,7 +582,10 @@ describe('abyss in-process business tools', () => {
       'ephemeral-first-bound'
     ]);
     expect(firstPayload.ephemeralScenarioStrategies).toEqual([]);
-    expect(firstPayload.unknown.map(({ id }) => id)).toEqual(['gap-scenario-unknown']);
+    expect(firstPayload.unknown.map(({ id }) => id)).toEqual([
+      'gap-scenario-unknown',
+      'gap-first-payload-truncated'
+    ]);
     expect(firstPayload.citationIds).toEqual([
       'citation-1001',
       'citation-first-ephemeral',
@@ -597,8 +606,59 @@ describe('abyss in-process business tools', () => {
       'citation-wave-efficient'
     ]);
     expect(JSON.stringify(secondPayload)).not.toMatch(
-      /match-shield-breaking|ephemeral-first-bound|gap-scenario-unknown|ephemeral-unbound/
+      /match-shield-breaking|ephemeral-first-bound|gap-scenario-unknown|gap-first-payload-truncated|ephemeral-unbound/
     );
+  });
+
+  it('returns no unknowns for second half when a truncation marker is bound only to first half', async () => {
+    const scopedPacket = structuredClone(packet);
+    scopedPacket.unknowns.push({
+      id: 'gap-first-only-truncation',
+      subjectId: 'scenario:first-only-truncation',
+      kind: 'payload-truncated',
+      reason: 'Only the first-half target packet was truncated.'
+    });
+    const tools = createAbyssBusinessTools({
+      getProfile: () => null,
+      getScenario: () => abyssScenario(),
+      knowledgePacket: scopedPacket,
+      knowledgeScope: {
+        floor: 12,
+        chambers: [1],
+        eligibleCharacterIds: ['1001', '1002']
+      },
+      knowledgeTargetScopes: {
+        '12:1:first': {
+          trustedMatchIds: [],
+          ephemeralMatchIds: [],
+          unknownIds: ['gap-first-only-truncation']
+        },
+        '12:1:second': {
+          trustedMatchIds: [],
+          ephemeralMatchIds: [],
+          unknownIds: []
+        }
+      }
+    });
+
+    const first = textPayload(
+      await tools[2]!.handler(
+        { characterIds: ['1001'], floor: 12, chamber: 1, half: 'first' },
+        {}
+      )
+    ) as { unknown: Array<{ id: string }> };
+    const second = textPayload(
+      await tools[2]!.handler(
+        { characterIds: ['1002'], floor: 12, chamber: 1, half: 'second' },
+        {}
+      )
+    ) as { unknown: Array<{ id: string }> };
+
+    expect(first.unknown).toEqual([
+      expect.objectContaining({ id: 'gap-first-only-truncation' })
+    ]);
+    expect(second.unknown).toEqual([]);
+    expect(JSON.stringify(second)).not.toContain('gap-first-only-truncation');
   });
 
   it('fails closed for unknown characters, duplicate ids, target drift, and cross-run scope', async () => {
@@ -730,6 +790,60 @@ describe('abyss in-process business tools', () => {
       },
       targetScope: {
         trustedMatchIds: ['match-shield-breaking'],
+        ephemeralMatchIds: [],
+        unknownIds: []
+      }
+    },
+    {
+      name: 'mixed-trust citations on a trusted target match',
+      mutatePacket: (candidate: KnowledgeContextPacket) => {
+        candidate.trustedMatches
+          .find(({ id }) => id === 'match-shield-breaking')!
+          .citationIds.push('citation-wrong-trust');
+        candidate.citations.push({
+          id: 'citation-wrong-trust',
+          sourceId: 'reviewed-source',
+          url: 'https://example.test/wrong-trust',
+          title: 'citation-wrong-trust',
+          reviewedAt: '2026-07-24T00:00:00.000Z',
+          trust: 'ephemeral-web'
+        });
+      },
+      targetScope: {
+        trustedMatchIds: ['match-shield-breaking'],
+        ephemeralMatchIds: [],
+        unknownIds: []
+      }
+    },
+    {
+      name: 'mixed-trust citations on an ephemeral target match',
+      mutatePacket: (candidate: KnowledgeContextPacket) => {
+        candidate.ephemeralMatches.push({
+          id: 'ephemeral-mechanic-mixed-trust',
+          subjectId: 'mechanic:shield-breaking',
+          summary: 'Runtime mechanic evidence with mixed citation trust.',
+          citationIds: ['citation-ephemeral-correct', 'citation-shield-breaking']
+        });
+        candidate.citations.push({
+          id: 'citation-ephemeral-correct',
+          sourceId: 'reviewed-source',
+          url: 'https://example.test/ephemeral-correct',
+          title: 'citation-ephemeral-correct',
+          reviewedAt: '2026-07-24T00:00:00.000Z',
+          trust: 'ephemeral-web'
+        });
+      },
+      targetScope: {
+        trustedMatchIds: [],
+        ephemeralMatchIds: ['ephemeral-mechanic-mixed-trust'],
+        unknownIds: []
+      }
+    },
+    {
+      name: 'duplicate target scope IDs',
+      mutatePacket: (_candidate: KnowledgeContextPacket) => {},
+      targetScope: {
+        trustedMatchIds: ['match-shield-breaking', 'match-shield-breaking'],
         ephemeralMatchIds: [],
         unknownIds: []
       }

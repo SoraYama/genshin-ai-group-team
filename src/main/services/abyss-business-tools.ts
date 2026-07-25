@@ -310,9 +310,7 @@ function teamKnowledgeSubset(
     subjectId.startsWith('scenario:')
   );
   const unknown = packet.unknowns.filter(
-    ({ subjectId, kind }) =>
-      characterIds.has(subjectId) ||
-      kind === 'payload-truncated'
+    ({ subjectId }) => characterIds.has(subjectId)
   );
   scopedUnknown.forEach((gap) => {
     if (!unknown.some(({ id }) => id === gap.id)) unknown.push(gap);
@@ -336,7 +334,8 @@ function teamKnowledgeSubset(
   });
   mechanicStrategies.forEach((match) => {
     if (
-      !match.citationIds.some(
+      match.citationIds.length === 0 ||
+      !match.citationIds.every(
         (id) => citationsById.get(id)?.trust === 'trusted-local'
       )
     ) {
@@ -345,7 +344,8 @@ function teamKnowledgeSubset(
   });
   scopedEphemeralStrategies.forEach((match) => {
     if (
-      !match.citationIds.some(
+      match.citationIds.length === 0 ||
+      !match.citationIds.every(
         (id) => citationsById.get(id)?.trust === 'ephemeral-web'
       )
     ) {

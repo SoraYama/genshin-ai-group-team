@@ -825,6 +825,72 @@ describe('AbyssPlanAgent', () => {
     });
   });
 
+  it('binds every trusted assignment citation to its selected role provenance', async () => {
+    const currentContext = pipelineContext();
+    currentContext.knowledge.trustedMatches.push({
+      id: 'match-1001-on-field',
+      characterId: '1001',
+      archetypeId: 'role-1',
+      role: 'on-field',
+      summary: 'Reviewed on-field strategy for 1001.',
+      citationIds: ['citation-1001-on-field']
+    });
+    currentContext.knowledge.citations.push({
+      id: 'citation-1001-on-field',
+      sourceId: 'reviewed-source',
+      url: 'https://example.test/1001-on-field',
+      title: 'reviewed 1001 on-field',
+      reviewedAt: '2026-07-24T00:00:00.000Z',
+      trust: 'trusted-local'
+    });
+    currentContext.knowledge.coverage = {
+      requested: 9,
+      trusted: 9,
+      ephemeral: 0,
+      unknown: 0
+    };
+    const wrongPlan = withSmartAssignments(validAbyssPlan()) as Record<string, unknown>;
+    const wrongAssignment = (
+      wrongPlan['memberAssignments'] as Array<Record<string, unknown>>
+    ).find(({ characterId }) => characterId === '1001')!;
+    wrongAssignment['citationIds'] = ['citation-1001-on-field'];
+
+    const rejected = await new AbyssPlanAgent(
+      new FixtureRunner([wrongPlan, wrongPlan, wrongPlan], false)
+    ).compose({
+      input: abyssInput(),
+      scenario: abyssScenario(),
+      characters: ABYSS_CHARACTERS,
+      pipelineContext: currentContext,
+      sdkOptions: sdkOptions()
+    });
+
+    expect(rejected).toMatchObject({
+      ok: false,
+      issues: [
+        expect.objectContaining({
+          details: expect.objectContaining({
+            missing: expect.arrayContaining([
+              'member-assignment:1001:citation-subject-mismatch'
+            ])
+          })
+        })
+      ]
+    });
+
+    const correctPlan = withSmartAssignments(validAbyssPlan()) as Record<string, unknown>;
+    const accepted = await new AbyssPlanAgent(
+      new FixtureRunner([correctPlan], false)
+    ).compose({
+      input: abyssInput(),
+      scenario: abyssScenario(),
+      characters: ABYSS_CHARACTERS,
+      pipelineContext: currentContext,
+      sdkOptions: sdkOptions()
+    });
+    expect(accepted).toMatchObject({ ok: true });
+  });
+
   it('rejects current-build assignment when the selected build requires adjustment', async () => {
     const currentContext = pipelineContext();
     const interpretation = currentContext.knowledge.buildInterpretations.find(
