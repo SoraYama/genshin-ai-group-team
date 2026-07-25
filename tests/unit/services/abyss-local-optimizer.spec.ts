@@ -65,7 +65,27 @@ describe('buildLocalAbyssPlan', () => {
   });
 
   it('recomputes only the requested half and preserves the other half byte-for-byte', () => {
-    const prior = validAbyssPlan();
+    const basePrior = validAbyssPlan();
+    const prior = validAbyssPlan({
+      memberAssignments: [
+        ...basePrior.firstHalfTeam.characterIds.map((characterId) => ({
+          characterId,
+          half: 'first' as const,
+          archetypeId: 'old-smart-archetype',
+          role: 'support' as const,
+          buildStatus: 'current-build' as const,
+          citationIds: ['old-smart-citation']
+        })),
+        ...basePrior.secondHalfTeam.characterIds.map((characterId) => ({
+          characterId,
+          half: 'second' as const,
+          archetypeId: 'old-smart-archetype',
+          role: 'support' as const,
+          buildStatus: 'current-build' as const,
+          citationIds: ['old-smart-citation']
+        }))
+      ]
+    });
     const input = abyssInput({
       priorPlan: prior,
       recomputeHalf: 'firstHalf',
@@ -84,6 +104,8 @@ describe('buildLocalAbyssPlan', () => {
       prior.chambers.map(({ secondHalf }) => secondHalf)
     );
     expect(result.plan.firstHalfTeam.characterIds).not.toContain(input.excludedCharacterIds[0]);
+    expect(result.plan.firstHalfTeam.characterIds).not.toEqual(prior.firstHalfTeam.characterIds);
+    expect(result.plan.memberAssignments).toEqual([]);
     expect(result.narrative.sections.map(({ targetKey }) => targetKey)).toEqual([
       'abyss-team:first',
       'abyss-team:second',

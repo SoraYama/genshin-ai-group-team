@@ -36,7 +36,7 @@ import {
   type AbyssPlanAgentRunner
 } from './abyss-plan-agent.js';
 import { buildV2PipelineContext } from './v2-agent-context.js';
-import type { V2AgentStage } from './v2-agent-pipeline.js';
+import type { V2AgentStage, V2PipelineContext } from './v2-agent-pipeline.js';
 import { renderAbyssTeamRisks, renderV2Narrative } from './v2-narrative.js';
 import type {
   AdvisorKnowledgePacketInput,
@@ -343,11 +343,17 @@ export class AbyssAdvisorService {
             .filter(({ trust }) => trust === 'ephemeral-web')
             .map(({ id }) => id);
           const firstGap = researchResult.gaps[0];
-          if (researchResult.entries.length === 0 && firstGap !== undefined) {
+          if (firstGap !== undefined || researchResult.failure !== undefined) {
             trace.failStage(
               'research',
-              researchFailure(firstGap.code, researchResult.failure),
-              researchTraceInput(researchResult)
+              researchFailure(
+                firstGap?.code ?? 'SEARCH_UNAVAILABLE',
+                researchResult.failure
+              ),
+              {
+                ...researchTraceInput(researchResult),
+                citationIds: researchCitationIds
+              }
             );
           } else {
             trace.completeStage('research', {
@@ -403,7 +409,11 @@ export class AbyssAdvisorService {
               preferences: input.preferences,
               ...(input.recomputeHalf ? { recomputeHalf: input.recomputeHalf } : {})
             },
-            knowledge: finalPacket
+            knowledge: characterKnowledgeOnly(finalPacket),
+            targetKnowledgeViews: buildAbyssTargetKnowledgeViews(
+              finalPacket,
+              finalTargetScopes
+            )
           });
           const baseSdkOptions = {
             apiKey,
@@ -480,9 +490,9 @@ export class AbyssAdvisorService {
               warnings: agent.plan.warnings,
               assumptions: checkedPlan.assumptions,
               knowledgeSummary: {
-                trusted: pipelineContext.knowledge.coverage.trusted,
-                ephemeral: pipelineContext.knowledge.coverage.ephemeral,
-                unknown: pipelineContext.knowledge.coverage.unknown,
+                trusted: finalPacket.coverage.trusted,
+                ephemeral: finalPacket.coverage.ephemeral,
+                unknown: finalPacket.coverage.unknown,
                 searched
               },
               plan: checkedPlan,
@@ -912,7 +922,7 @@ function buildAbyssKnowledgeRuntime(options: {
       targetPackets.push(targetPacket);
       targetScopes[targetKey] = {
         trustedMatchIds: targetPacket.trustedMatches.map(({ id }) => id),
-        ephemeralMatchIds: [],
+        ephemeralMatchIds: targetPacket.ephemeralMatches.map(({ id }) => id),
         unknownIds: targetPacket.unknowns.map(({ id }) => id)
       };
       coverageParts.push({
@@ -984,12 +994,16 @@ function characterKnowledgeOnly(packet: KnowledgeContextPacket): KnowledgeContex
   const trustedMatches = packet.trustedMatches.filter(
     ({ characterId }) => characterId !== undefined
   );
+  const ephemeralMatches = packet.ephemeralMatches.filter(({ subjectId }) =>
+    /^[1-9]\d*$/u.test(subjectId)
+  );
   const unknowns = packet.unknowns.filter(
     ({ subjectId, kind }) => /^\d+$/u.test(subjectId) || kind === 'payload-truncated'
   );
   return packetSubset(packet, {
     buildInterpretations: packet.buildInterpretations,
     trustedMatches,
+    ephemeralMatches,
     unknowns
   });
 }
@@ -997,6 +1011,9 @@ function characterKnowledgeOnly(packet: KnowledgeContextPacket): KnowledgeContex
 function mechanicKnowledgeOnly(packet: KnowledgeContextPacket): KnowledgeContextPacket {
   const trustedMatches = packet.trustedMatches.filter(
     ({ mechanicId }) => mechanicId !== undefined
+  );
+  const ephemeralMatches = packet.ephemeralMatches.filter(({ subjectId }) =>
+    /^(?:mechanic|scenario):/u.test(subjectId)
   );
   const unknowns = packet.unknowns.filter(
     ({ subjectId, kind }) =>
@@ -1007,29 +1024,75 @@ function mechanicKnowledgeOnly(packet: KnowledgeContextPacket): KnowledgeContext
   return packetSubset(packet, {
     buildInterpretations: [],
     trustedMatches,
+    ephemeralMatches,
     unknowns
   });
 }
 
 function packetSubset(
   packet: KnowledgeContextPacket,
-  subset: Pick<KnowledgeContextPacket, 'buildInterpretations' | 'trustedMatches' | 'unknowns'>
+  subset: Pick<
+    KnowledgeContextPacket,
+    'buildInterpretations' | 'trustedMatches' | 'ephemeralMatches' | 'unknowns'
+  >
 ): KnowledgeContextPacket {
-  const citationIds = new Set(subset.trustedMatches.flatMap(({ citationIds }) => citationIds));
+  const citationIds = new Set(
+    [...subset.trustedMatches, ...subset.ephemeralMatches].flatMap(
+      ({ citationIds }) => citationIds
+    )
+  );
   return knowledgeContextPacketSchema.parse({
     knowledgeVersion: packet.knowledgeVersion,
     buildInterpretations: structuredClone(subset.buildInterpretations),
     trustedMatches: structuredClone(subset.trustedMatches),
-    ephemeralMatches: [],
+    ephemeralMatches: structuredClone(subset.ephemeralMatches),
     unknowns: structuredClone(subset.unknowns),
     coverage: {
-      requested: subset.trustedMatches.length + subset.unknowns.length,
+      requested:
+        subset.trustedMatches.length +
+        subset.ephemeralMatches.length +
+        subset.unknowns.length,
       trusted: subset.trustedMatches.length,
-      ephemeral: 0,
+      ephemeral: subset.ephemeralMatches.length,
       unknown: subset.unknowns.length
     },
     citations: packet.citations.filter(({ id }) => citationIds.has(id))
   });
+}
+
+function buildAbyssTargetKnowledgeViews(
+  packet: KnowledgeContextPacket,
+  targetScopes: AbyssKnowledgeTargetScopes
+): NonNullable<V2PipelineContext['targetKnowledgeViews']> {
+  const trustedById = new Map(packet.trustedMatches.map((match) => [match.id, match]));
+  const ephemeralById = new Map(packet.ephemeralMatches.map((match) => [match.id, match]));
+  const unknownById = new Map(packet.unknowns.map((gap) => [gap.id, gap]));
+  return Object.entries(targetScopes)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .flatMap(([targetKey, scope]) =>
+      scope === undefined
+        ? []
+        : [
+            {
+              targetKey: targetKey as AbyssKnowledgeTargetKey,
+              knowledge: packetSubset(packet, {
+                buildInterpretations: [],
+                trustedMatches: scope.trustedMatchIds.flatMap((id) => {
+                  const match = trustedById.get(id);
+                  return match === undefined ? [] : [match];
+                }),
+                ephemeralMatches: scope.ephemeralMatchIds.flatMap((id) => {
+                  const match = ephemeralById.get(id);
+                  return match === undefined ? [] : [match];
+                }),
+                unknowns: scope.unknownIds.flatMap((id) => {
+                  const gap = unknownById.get(id);
+                  return gap === undefined ? [] : [gap];
+                })
+              })
+            }
+          ]
+    );
 }
 
 function namespaceTargetPacket(
@@ -1097,6 +1160,10 @@ function combineKnowledgePackets(
     ...characterPacket.trustedMatches,
     ...targetPackets.flatMap(({ trustedMatches: matches }) => matches)
   ]);
+  const ephemeralMatches = uniqueRecordsById([
+    ...characterPacket.ephemeralMatches,
+    ...targetPackets.flatMap(({ ephemeralMatches: matches }) => matches)
+  ]);
   const unknowns = uniqueRecordsById([
     ...characterPacket.unknowns,
     ...targetPackets.flatMap(({ unknowns: gaps }) => gaps)
@@ -1109,12 +1176,12 @@ function combineKnowledgePackets(
     knowledgeVersion: characterPacket.knowledgeVersion,
     buildInterpretations: characterPacket.buildInterpretations,
     trustedMatches,
-    ephemeralMatches: [],
+    ephemeralMatches,
     unknowns,
     coverage: {
-      requested: trustedMatches.length + unknowns.length,
+      requested: trustedMatches.length + ephemeralMatches.length + unknowns.length,
       trusted: trustedMatches.length,
-      ephemeral: 0,
+      ephemeral: ephemeralMatches.length,
       unknown: unknowns.length
     },
     citations

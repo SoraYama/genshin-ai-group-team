@@ -141,6 +141,7 @@ export function buildLocalAbyssPlan({
     confidence: confidenceFor(selectedAssignment) as 'low' | 'medium' | 'high',
     warnings,
     assumptions,
+    memberAssignments: [],
     firstHalfTeam: {
       id: 'first-half',
       characterIds: selectedAssignment.first.map(({ id }) => String(id)),
@@ -325,6 +326,7 @@ function buildPartialPlan({
     confidence: confidenceFor(assignment),
     warnings,
     assumptions,
+    memberAssignments: [],
     [recomputeTeamKey]: recomputedTeam,
     [preservedTeamKey]: prior[preservedTeamKey],
     chambers: chambers.map((chamber) => {

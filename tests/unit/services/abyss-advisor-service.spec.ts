@@ -483,6 +483,18 @@ function service(options: {
     reason: 'missing';
     scenarioTags: string[];
   }>;
+  coverageEvaluate?: (
+    packet: KnowledgeContextPacket,
+    context: { targetKey?: string }
+  ) => {
+    required: boolean;
+    tasks: Array<{ key: string; reason: 'missing'; scenarioTags: string[] }>;
+    bindings: Array<{
+      taskKey: string;
+      unknownIndexes: number[];
+      targetKeys?: string[];
+    }>;
+  };
 }) {
   const strategyKnowledge = new Proxy({} as AdvisorKnowledgeReader, {
     get() {
@@ -517,10 +529,11 @@ function service(options: {
     },
     coverageGate: {
       evaluate: vi.fn(
-        (
-          currentPacket: KnowledgeContextPacket,
-          context: { targetKey?: string }
-        ) => ({
+        options.coverageEvaluate ??
+          ((
+            currentPacket: KnowledgeContextPacket,
+            context: { targetKey?: string }
+          ) => ({
           required:
             (options.coverageTasks?.length ?? 0) > 0 && currentPacket.unknowns.length > 0,
           tasks: currentPacket.unknowns.length > 0 ? (options.coverageTasks ?? []) : [],
@@ -532,7 +545,7 @@ function service(options: {
                   ...(context.targetKey ? { targetKeys: [context.targetKey] } : {})
                 }))
               : []
-        })
+          }))
       )
     },
     research: options.research,
@@ -746,6 +759,119 @@ describe('AbyssAdvisorService', () => {
     expect(trace.latest()?.usage.outputTokens).toBeGreaterThanOrEqual(3);
   });
 
+  it('records mixed cache success and live provider failure as a partial failed research stage', async () => {
+    const first = packetWithTargetMechanic({ gap: true });
+    const second = packetWithTargetMechanic({ gap: true });
+    const base = trustedPacket();
+    const partial = successfulResearch() as GuideResearchAgentResult & {
+      audit?: NonNullable<GuideResearchAgentResult['audit']>;
+    };
+    partial.entries[0]!.taskKey = 'first-task';
+    partial.entries[0]!.origin = 'cache';
+    partial.entries[0]!.value.matches[0]!.subjectId = 'mechanic:shield-breaking';
+    partial.gaps = [{ taskKey: 'second-task', code: 'SEARCH_UNAVAILABLE' }];
+    partial.failure = {
+      sdkCode: 'AGENT_TURN_STREAM_FAILED',
+      httpStatus: 503
+    };
+    partial.usage = { inputTokens: 5, outputTokens: 3, estimatedCostUsd: 0.01 };
+    partial.audit = {
+      text: '{"partial":true}',
+      finalRawText: '{"partial":true}',
+      rawMessagesSummary: {
+        totalMessages: 1,
+        messages: [
+          {
+            type: 'result',
+            subtype: 'error',
+            textPreview: '{"partial":true}',
+            textTruncated: false
+          }
+        ],
+        truncated: false
+      },
+      tools: [
+        {
+          id: 'search-partial',
+          name: 'WebSearch',
+          input: { query: '原神 机制攻略' },
+          succeeded: true,
+          correlationId: 'unscoped',
+          round: 'single'
+        }
+      ],
+      webSearchEvidence: {
+        attempts: [
+          {
+            toolUseId: 'search-partial',
+            query: '原神 机制攻略',
+            status: 'resolved',
+            urls: ['https://example.test/guide-gap']
+          }
+        ],
+        truncated: false
+      },
+      usage: partial.usage
+    };
+    const trace = new AgentRunTraceStore();
+    const result = await service({
+      runner: new FixtureRunner([validAbyssPlan({ confidence: 'high' })]),
+      apiKey: 'secret',
+      trace,
+      buildPacket: vi.fn((input: { scenarioTarget: { id: string } }) => {
+        const targetKey = input.scenarioTarget.id.split(':').slice(-3).join(':');
+        if (targetKey === '12:1:first') return first;
+        if (targetKey === '12:1:second') return second;
+        return base;
+      }),
+      coverageEvaluate: (packet, { targetKey }) => {
+        if (
+          packet.unknowns.length === 0 ||
+          (targetKey !== '12:1:first' && targetKey !== '12:1:second')
+        ) {
+          return { required: false, tasks: [], bindings: [] };
+        }
+        const taskKey = targetKey === '12:1:first' ? 'first-task' : 'second-task';
+        return {
+          required: true,
+          tasks: [{ key: taskKey, reason: 'missing', scenarioTags: [targetKey] }],
+          bindings: [
+            {
+              taskKey,
+              unknownIndexes: [0],
+              targetKeys: [targetKey]
+            }
+          ]
+        };
+      },
+      research: { research: vi.fn(async () => partial) }
+    }).recommend(abyssInput());
+
+    expect(result).toMatchObject({
+      status: 'planned',
+      source: 'smart-service',
+      plan: { confidence: 'low' },
+      knowledgeSummary: { searched: true, ephemeral: 1, unknown: 1 }
+    });
+    expect(trace.latest()?.stages.find(({ stage }) => stage === 'research')).toMatchObject({
+      status: 'failed',
+      failure: {
+        code: 'SEARCH_UNAVAILABLE',
+        details: {
+          sdkCode: 'AGENT_TURN_STREAM_FAILED',
+          httpStatus: '503'
+        }
+      },
+      rawOutput: '{"partial":true}',
+      rawMessagesSummary: expect.objectContaining({ totalMessages: 1 }),
+      webSearchEvidence: expect.objectContaining({
+        attempts: [expect.objectContaining({ toolUseId: 'search-partial' })]
+      }),
+      tools: [expect.objectContaining({ name: 'WebSearch', status: 'completed' })],
+      usage: { inputTokens: 5, outputTokens: 3 }
+    });
+  });
+
   it('keeps a cache-only research resolution searched false with empty raw audit and zero usage', async () => {
     const cacheOnly = successfulResearch() as GuideResearchAgentResult & {
       searchExecuted?: boolean;
@@ -934,6 +1060,133 @@ describe('AbyssAdvisorService', () => {
     });
     expect(result.assumptions.join(' ')).toContain('12:1:first');
     expect(result.assumptions.join(' ')).toContain('12:1:second');
+  });
+
+  it('serializes target research only inside its canonical half view in every agent stage', async () => {
+    const first = packetWithTargetMechanic({ gap: true });
+    first.unknowns[0] = {
+      ...first.unknowns[0]!,
+      subjectId: 'scenario:first-research',
+      reason: 'First-half research gap.'
+    };
+    const second = packetWithTargetMechanic({ gap: true });
+    second.unknowns[0] = {
+      ...second.unknowns[0]!,
+      subjectId: 'scenario:second-research',
+      reason: 'Second-half research gap.'
+    };
+    const base = trustedPacket();
+    const runner = new FixtureRunner([validAbyssPlan()]);
+    const researchEntry = (
+      taskKey: string,
+      subject: string,
+      summary: string,
+      citationId: string
+    ): GuideResearchAgentResult['entries'][number] => ({
+      taskKey,
+      origin: 'research',
+      value: {
+        trust: 'ephemeral-web',
+        matches: [
+          {
+            id: `match-${taskKey}`,
+            subjectId: subject,
+            summary,
+            citationIds: [citationId]
+          }
+        ],
+        citations: [
+          {
+            id: citationId,
+            sourceId: `source-${taskKey}`,
+            url: `https://example.test/${taskKey}`,
+            title: summary,
+            reviewedAt: '2026-07-24T00:00:00.000Z',
+            trust: 'ephemeral-web'
+          }
+        ],
+        applicability: { characterNames: [], scenarioTags: [], buildSignals: [] },
+        conflicts: [],
+        researchedAt: '2026-07-24T00:00:00.000Z'
+      }
+    });
+    await service({
+      runner,
+      apiKey: 'secret',
+      buildPacket: vi.fn((input: { scenarioTarget: { id: string } }) => {
+        const targetKey = input.scenarioTarget.id.split(':').slice(-3).join(':');
+        if (targetKey === '12:1:first') return first;
+        if (targetKey === '12:1:second') return second;
+        return base;
+      }),
+      coverageEvaluate: (packet, { targetKey }) => {
+        if (
+          packet.unknowns.length === 0 ||
+          (targetKey !== '12:1:first' && targetKey !== '12:1:second')
+        ) {
+          return { required: false, tasks: [], bindings: [] };
+        }
+        const taskKey = targetKey === '12:1:first' ? 'first-task' : 'second-task';
+        return {
+          required: true,
+          tasks: [{ key: taskKey, reason: 'missing', scenarioTags: [targetKey] }],
+          bindings: [
+            {
+              taskKey,
+              unknownIndexes: [0],
+              targetKeys: [targetKey]
+            }
+          ]
+        };
+      },
+      research: {
+        research: vi.fn(async () => ({
+          entries: [
+            researchEntry(
+              'first-task',
+              'scenario:first-research',
+              'FIRST_TARGET_ONLY',
+              'web-first'
+            ),
+            researchEntry(
+              'second-task',
+              'scenario:second-research',
+              'SECOND_TARGET_ONLY',
+              'web-second'
+            )
+          ],
+          gaps: [],
+          searchExecuted: true,
+          usage: { inputTokens: 1, outputTokens: 1, estimatedCostUsd: 0 }
+        }))
+      }
+    }).recommend(abyssInput());
+
+    expect(runner.prompts).toHaveLength(4);
+    for (const prompt of runner.prompts) {
+      const payload = JSON.parse(prompt) as {
+        context: {
+          knowledge: KnowledgeContextPacket;
+          targetKnowledgeViews: Array<{
+            targetKey: string;
+            knowledge: KnowledgeContextPacket;
+          }>;
+        };
+      };
+      expect(JSON.stringify(payload.context.knowledge)).not.toMatch(
+        /FIRST_TARGET_ONLY|SECOND_TARGET_ONLY|web-first|web-second/
+      );
+      const firstView = payload.context.targetKnowledgeViews.find(
+        ({ targetKey }) => targetKey === '12:1:first'
+      );
+      const secondView = payload.context.targetKnowledgeViews.find(
+        ({ targetKey }) => targetKey === '12:1:second'
+      );
+      expect(JSON.stringify(firstView)).toContain('FIRST_TARGET_ONLY');
+      expect(JSON.stringify(firstView)).not.toMatch(/SECOND_TARGET_ONLY|web-second/);
+      expect(JSON.stringify(secondView)).toContain('SECOND_TARGET_ONLY');
+      expect(JSON.stringify(secondView)).not.toMatch(/FIRST_TARGET_ONLY|web-first/);
+    }
   });
 
   it('preserves the provider failure when falling back to a feasible local plan', async () => {

@@ -32,6 +32,7 @@ export interface BuildV2PipelineContextOptions {
   mechanics: V2PipelineContext['mechanics'];
   interventions: Record<string, unknown>;
   knowledge: V2PipelineContext['knowledge'];
+  targetKnowledgeViews?: NonNullable<V2PipelineContext['targetKnowledgeViews']>;
   locale?: 'zh-CN' | 'en-US';
 }
 
@@ -120,7 +121,11 @@ export function buildV2PipelineContext(options: BuildV2PipelineContextOptions): 
     },
     mechanics: options.mechanics,
     interventions: boundedInterventions(options.interventions, options.locale ?? 'zh-CN'),
-    knowledge: knowledgeContextPacketSchema.parse(options.knowledge)
+    knowledge: knowledgeContextPacketSchema.parse(options.knowledge),
+    targetKnowledgeViews: options.targetKnowledgeViews?.map(({ targetKey, knowledge }) => ({
+      targetKey,
+      knowledge: knowledgeContextPacketSchema.parse(knowledge)
+    }))
   };
   let budgetError = contextBudgetError(baseContext);
   if (budgetError !== undefined) {
@@ -141,12 +146,21 @@ export function buildV2PipelineContext(options: BuildV2PipelineContextOptions): 
     budgetError = contextBudgetError(baseContext);
   }
   if (budgetError !== undefined) {
-    if (removeFactStatements(baseContext.knowledge)) {
-      addPayloadTruncationGap(
-        baseContext.knowledge,
-        'Knowledge fact details were removed to fit the bounded agent context.'
-      );
-      synchronizeCoverage(baseContext.knowledge);
+    const knowledgePackets = [
+      baseContext.knowledge,
+      ...(baseContext.targetKnowledgeViews?.map(({ knowledge }) => knowledge) ?? [])
+    ];
+    const compactedPackets = knowledgePackets.filter((knowledge) =>
+      removeFactStatements(knowledge)
+    );
+    if (compactedPackets.length > 0) {
+      compactedPackets.forEach((knowledge) => {
+        addPayloadTruncationGap(
+          knowledge,
+          'Knowledge fact details were removed to fit the bounded agent context.'
+        );
+        synchronizeCoverage(knowledge);
+      });
     }
     budgetError = contextBudgetError(baseContext);
   }

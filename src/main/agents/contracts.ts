@@ -308,6 +308,54 @@ const v2InterventionsSchema = z
   })
   .strict();
 
+export const v2AbyssTargetKnowledgeViewSchema = z
+  .object({
+    targetKey: z
+      .string()
+      .regex(/^[1-9]\d*:[1-9]\d*:(?:first|second)$/u),
+    knowledge: knowledgeContextPacketSchema
+  })
+  .strict()
+  .superRefine(({ knowledge }, context) => {
+    if (knowledge.buildInterpretations.length > 0) {
+      context.addIssue({
+        code: 'custom',
+        path: ['knowledge', 'buildInterpretations'],
+        message: 'Target knowledge cannot contain shared build interpretations'
+      });
+    }
+    knowledge.trustedMatches.forEach((match, index) => {
+      if (match.characterId !== undefined || match.mechanicId === undefined) {
+        context.addIssue({
+          code: 'custom',
+          path: ['knowledge', 'trustedMatches', index],
+          message: 'Target trusted knowledge must be mechanic-scoped'
+        });
+      }
+    });
+    knowledge.ephemeralMatches.forEach((match, index) => {
+      if (!/^(?:mechanic|scenario):/u.test(match.subjectId)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['knowledge', 'ephemeralMatches', index, 'subjectId'],
+          message: 'Target ephemeral knowledge must be mechanic- or scenario-scoped'
+        });
+      }
+    });
+    knowledge.unknowns.forEach((gap, index) => {
+      if (
+        gap.kind !== 'payload-truncated' &&
+        !/^(?:mechanic|scenario):/u.test(gap.subjectId)
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['knowledge', 'unknowns', index, 'subjectId'],
+          message: 'Target unknown knowledge must be mechanic- or scenario-scoped'
+        });
+      }
+    });
+  });
+
 export const v2PipelineContextSchema = z
   .object({
     mode: v2ModeSchema,
@@ -359,10 +407,12 @@ export const v2PipelineContextSchema = z
       )
       .max(32),
     interventions: v2InterventionsSchema,
-    knowledge: knowledgeContextPacketSchema
+    knowledge: knowledgeContextPacketSchema,
+    targetKnowledgeViews: z.array(v2AbyssTargetKnowledgeViewSchema).max(24).optional()
   })
   .strict()
-  .superRefine(({ mode, scenarioId, dataVersion, candidate }, context) => {
+  .superRefine(
+    ({ mode, scenarioId, dataVersion, candidate, knowledge, targetKnowledgeViews }, context) => {
     const baseline = candidate.feasibleBaseline;
     if (
       baseline.mode !== mode ||
@@ -375,7 +425,76 @@ export const v2PipelineContextSchema = z
         message: 'Feasible baseline identity must match the pipeline context'
       });
     }
-  });
+      if (targetKnowledgeViews === undefined) return;
+      knowledge.trustedMatches.forEach((match, index) => {
+        if (match.characterId === undefined || match.mechanicId !== undefined) {
+          context.addIssue({
+            code: 'custom',
+            path: ['knowledge', 'trustedMatches', index],
+            message: 'Shared trusted knowledge must be character-scoped'
+          });
+        }
+      });
+      knowledge.ephemeralMatches.forEach((match, index) => {
+        if (!/^[1-9]\d*$/u.test(match.subjectId)) {
+          context.addIssue({
+            code: 'custom',
+            path: ['knowledge', 'ephemeralMatches', index, 'subjectId'],
+            message: 'Shared ephemeral knowledge must be character-scoped'
+          });
+        }
+      });
+      knowledge.unknowns.forEach((gap, index) => {
+        if (gap.kind !== 'payload-truncated' && !/^[1-9]\d*$/u.test(gap.subjectId)) {
+          context.addIssue({
+            code: 'custom',
+            path: ['knowledge', 'unknowns', index, 'subjectId'],
+            message: 'Shared unknown knowledge must be character-scoped'
+          });
+        }
+      });
+      if (mode !== 'spiral-abyss' || baseline.mode !== 'spiral-abyss') {
+        if (targetKnowledgeViews.length > 0) {
+          context.addIssue({
+            code: 'custom',
+            path: ['targetKnowledgeViews'],
+            message: 'Target knowledge views are only supported for Spiral Abyss'
+          });
+        }
+        return;
+      }
+      const allowedTargetKeys = new Set(
+        baseline.chambers.flatMap(({ floor, chamber }) =>
+          (['first', 'second'] as const).map((half) => `${floor}:${chamber}:${half}`)
+        )
+      );
+      const seenTargetKeys = new Set<string>();
+      targetKnowledgeViews.forEach((view, index) => {
+        if (!allowedTargetKeys.has(view.targetKey)) {
+          context.addIssue({
+            code: 'custom',
+            path: ['targetKnowledgeViews', index, 'targetKey'],
+            message: 'Target knowledge view is outside the feasible Abyss baseline'
+          });
+        }
+        if (seenTargetKeys.has(view.targetKey)) {
+          context.addIssue({
+            code: 'custom',
+            path: ['targetKnowledgeViews', index, 'targetKey'],
+            message: 'Target knowledge views must have unique target keys'
+          });
+        }
+        if (view.knowledge.knowledgeVersion !== knowledge.knowledgeVersion) {
+          context.addIssue({
+            code: 'custom',
+            path: ['targetKnowledgeViews', index, 'knowledge', 'knowledgeVersion'],
+            message: 'Target and shared knowledge versions must match'
+          });
+        }
+        seenTargetKeys.add(view.targetKey);
+      });
+    }
+  );
 
 export const v2CritiqueInputSchema = z
   .object({
@@ -486,6 +605,9 @@ export const v2ExplainOutputSchema = z
   .strict();
 
 export type V2AgentTarget = z.infer<typeof v2AgentTargetSchema>;
+export type V2AbyssTargetKnowledgeView = z.infer<
+  typeof v2AbyssTargetKnowledgeViewSchema
+>;
 export type V2PipelineContext = z.infer<typeof v2PipelineContextSchema>;
 export type V2CritiqueOutput = z.infer<typeof v2CritiqueOutputSchema>;
 export type V2RotationOutput = z.infer<typeof v2RotationOutputSchema>;
