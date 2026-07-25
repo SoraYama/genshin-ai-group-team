@@ -7,12 +7,23 @@ import {
   AGENT_TURN_TOOL_AUDIT_MAX,
   AGENT_TURN_WEB_SEARCH_EVIDENCE_MAX_ATTEMPTS,
   AgentTurnError,
+  auditCorrelationId,
   runAuditedAgentTurn,
   type AuditedAgentRunner
 } from '../../../src/main/services/agent-turn-audit.js';
 import type { AgentSdkRunOptions } from '../../../src/main/services/agent-sdk-adapter.js';
 
 describe('runAuditedAgentTurn', () => {
+  it('derives a stable opaque audit identity for real UI correlation values', () => {
+    const correlation = 'abyss-1784952000000-1';
+    const identity = auditCorrelationId(correlation);
+
+    expect(identity).toMatch(/^audit-correlation-[a-f0-9]{32}$/);
+    expect(identity).toBe(auditCorrelationId(correlation));
+    expect(identity).not.toContain(correlation);
+    expect(identity).not.toBe(auditCorrelationId('abyss-1784952000000-2'));
+  });
+
   it('derives bounded privacy-safe WebSearch evidence from SDK-shaped tool messages', async () => {
     const runner: AuditedAgentRunner = {
       async *run() {
@@ -398,7 +409,7 @@ describe('runAuditedAgentTurn', () => {
     expect(result.tools).toEqual([
       expect.objectContaining({
         id: 'profile',
-        correlationId: 'stygian-correlation',
+        correlationId: auditCorrelationId('stygian-correlation'),
         round: 'repair',
         succeeded: true
       })
@@ -679,7 +690,9 @@ describe('runAuditedAgentTurn', () => {
     expect(
       turn.tools.every(
         ({ id, name, correlationId }) =>
-          id.length <= 128 && name === '[REDACTED]' && correlationId === '[REDACTED]'
+          id.length <= 128 &&
+          name === '[REDACTED]' &&
+          correlationId === auditCorrelationId('TOP-SECRET-AUDIT-VALUE')
       )
     ).toBe(true);
     expect(
@@ -693,6 +706,64 @@ describe('runAuditedAgentTurn', () => {
       /TOP-SECRET-TOOL-KEY|must-not-be-retained/
     );
     expect(JSON.stringify(turn.tools).length).toBeLessThan(50_000);
+  });
+
+  it('redacts dynamic keys and private numeric values in a successful tool audit', async () => {
+    const runner: AuditedAgentRunner = {
+      async *run() {
+        yield {
+          type: 'assistant',
+          message: {
+            content: [
+              {
+                type: 'tool_use',
+                id: 'private-input',
+                name: 'query_team_knowledge',
+                input: privateToolInput()
+              }
+            ]
+          }
+        };
+        yield {
+          type: 'user',
+          message: {
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'private-input',
+                is_error: false,
+                content: 'ok'
+              }
+            ]
+          }
+        };
+        yield { type: 'result', subtype: 'success', result: '{}', usage: {} };
+      }
+    };
+
+    const turn = await runAuditedAgentTurn({
+      runner,
+      prompt: '{}',
+      sdkOptions: privateInputSdkOptions(),
+      systemPrompt: 'test'
+    });
+    const input = turn.tools[0]!.input;
+    const serialized = JSON.stringify(input);
+
+    expect(Object.keys(input)).toContain('[REDACTED_KEY]');
+    expect(input).toMatchObject({
+      timestamp: '[REDACTED]',
+      retryCode: '[REDACTED]',
+      ratio: 0.75,
+      floor: 12,
+      enabled: true,
+      empty: null
+    });
+    expect(serialized).not.toMatch(
+      /123456789|1784952000000|apiKey|dynamic-secret|246813579/
+    );
+    expect(Object.keys(input)).toHaveLength(8);
+    expect(serialized.length).toBeLessThan(1_000);
   });
 
   it('bounds and redacts accumulated partial tool audits', async () => {
@@ -751,6 +822,62 @@ describe('runAuditedAgentTurn', () => {
       /TOP-SECRET-TOOL-KEY|must-not-be-retained/
     );
     expect(partialTurnJson.length).toBeLessThan(50_000);
+  });
+
+  it('redacts dynamic keys and private numeric values in an error partial turn', async () => {
+    const runner: AuditedAgentRunner = {
+      async *run() {
+        yield {
+          type: 'assistant',
+          message: {
+            content: [
+              {
+                type: 'tool_use',
+                id: 'private-input',
+                name: 'query_team_knowledge',
+                input: privateToolInput()
+              }
+            ]
+          }
+        };
+        yield {
+          type: 'result',
+          subtype: 'error_during_execution',
+          result: 'provider failure',
+          usage: {}
+        };
+      }
+    };
+
+    let failure: unknown;
+    try {
+      await runAuditedAgentTurn({
+        runner,
+        prompt: '{}',
+        sdkOptions: privateInputSdkOptions(),
+        systemPrompt: 'test'
+      });
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toBeInstanceOf(AgentTurnError);
+    const input = (failure as AgentTurnError).partialTurn?.tools[0]?.input;
+    const serialized = JSON.stringify(input);
+    expect(Object.keys(input ?? {})).toContain('[REDACTED_KEY]');
+    expect(input).toMatchObject({
+      timestamp: '[REDACTED]',
+      retryCode: '[REDACTED]',
+      ratio: 0.75,
+      floor: 12,
+      enabled: true,
+      empty: null
+    });
+    expect(serialized).not.toMatch(
+      /123456789|1784952000000|apiKey|dynamic-secret|246813579/
+    );
+    expect(Object.keys(input ?? {})).toHaveLength(8);
+    expect(serialized.length).toBeLessThan(1_000);
   });
 
   it.each(['error_during_execution', 'error_max_turns'])(
@@ -1002,6 +1129,30 @@ function sdkOptions(): AgentSdkRunOptions {
     cwd: '/tmp',
     abortController: new AbortController(),
     maxTurns: 1
+  };
+}
+
+function privateInputSdkOptions(): AgentSdkRunOptions {
+  return {
+    ...sdkOptions(),
+    apiKey: 'dynamic-secret',
+    customHeaders: { 'X-Private-Pin': '42' }
+  };
+}
+
+function privateToolInput(): Record<string, unknown> {
+  return {
+    '123456789': 'x',
+    uid: 123456789,
+    apiKey: 'secret',
+    'field-dynamic-secret-key': 'dynamic-secret-value',
+    timestamp: 1784952000000,
+    retryCode: 42,
+    longCode: 246813579,
+    ratio: 0.75,
+    floor: 12,
+    enabled: true,
+    empty: null
   };
 }
 

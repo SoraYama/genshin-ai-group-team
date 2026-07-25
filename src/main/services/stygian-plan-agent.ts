@@ -17,7 +17,12 @@ import type {
   V2RotationOutput
 } from '../agents/contracts.js';
 import type { AgentSdkRunOptions } from './agent-sdk-adapter.js';
-import { type AgentUsage, type AuditedAgentRunner, type ToolAudit } from './agent-turn-audit.js';
+import {
+  AGENT_TURN_REDACTED_KEY,
+  type AgentUsage,
+  type AuditedAgentRunner,
+  type ToolAudit
+} from './agent-turn-audit.js';
 import { validateStygianPlan } from './stygian-plan-validator.js';
 import { runV2AgentPipeline, type V2AgentStage } from './v2-agent-pipeline.js';
 
@@ -136,7 +141,10 @@ function validateRequiredTools(
       .filter(
         ({ name, input }) =>
           name === 'mcp__genshin__read_profile_cache' &&
-          auditedUidMatches(input['uid'], context.input.uid)
+          auditedUidMatches(
+            input['uid'] ?? input[AGENT_TURN_REDACTED_KEY],
+            context.input.uid
+          )
       )
       .flatMap(({ input }) =>
         Array.isArray(input['characterIds'])

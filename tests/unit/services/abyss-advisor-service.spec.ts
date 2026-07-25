@@ -741,6 +741,20 @@ describe('AbyssAdvisorService', () => {
     expect(trace.latest()?.stages.filter(({ stage }) => stage === 'research')).toHaveLength(1);
   });
 
+  it('keeps a real UI correlation on the smart-service path', async () => {
+    const correlationId = 'abyss-1784952000000-1';
+    const result = await service({
+      runner: new FixtureRunner([validAbyssPlan()]),
+      apiKey: 'secret',
+      packet: trustedPacket()
+    }).recommend(abyssInput({ correlationId }));
+
+    expect(result).toMatchObject({
+      status: 'planned',
+      source: 'smart-service'
+    });
+  });
+
   it('researches only anonymous gaps and keeps accepted results ephemeral', async () => {
     const research = { research: vi.fn(async () => successfulResearch()) };
     const trace = new AgentRunTraceStore();

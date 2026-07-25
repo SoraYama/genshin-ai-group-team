@@ -16,7 +16,12 @@ import type {
   V2RotationOutput
 } from '../agents/contracts.js';
 import type { AgentSdkRunOptions } from './agent-sdk-adapter.js';
-import type { AgentUsage, ToolAudit } from './agent-turn-audit.js';
+import {
+  AGENT_TURN_REDACTED_KEY,
+  auditCorrelationId,
+  type AgentUsage,
+  type ToolAudit
+} from './agent-turn-audit.js';
 import { validateAbyssPlan } from './abyss-plan-validator.js';
 import type { CharacterKnowledgeReader } from '../../shared/character-knowledge.js';
 import { runV2AgentPipeline, type V2AgentStage } from './v2-agent-pipeline.js';
@@ -179,7 +184,7 @@ function validateRequiredTools(
   plan: Record<string, unknown>
 ): AbyssPlanIssue | undefined {
   const correlationTools = tools.filter(
-    ({ correlationId }) => correlationId === context.input.correlationId
+    ({ correlationId }) => correlationId === auditCorrelationId(context.input.correlationId)
   );
   const duplicateToolIds =
     correlationTools.length !== new Set(correlationTools.map(({ id }) => id)).size;
@@ -200,7 +205,10 @@ function validateRequiredTools(
       .filter(
         ({ name, input }) =>
           name === 'mcp__genshin__read_profile_cache' &&
-          auditedUidMatches(input['uid'], context.input.uid)
+          auditedUidMatches(
+            input['uid'] ?? input[AGENT_TURN_REDACTED_KEY],
+            context.input.uid
+          )
       )
       .flatMap(({ input }) =>
         Array.isArray(input['characterIds'])

@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import type { WebSearchOutput } from '@anthropic-ai/claude-agent-sdk/sdk-tools';
 import { z } from 'zod';
 
@@ -11,6 +13,19 @@ export const AGENT_TURN_TOOL_AUDIT_MAX = 64;
 export const AGENT_TURN_WEB_SEARCH_EVIDENCE_MAX_ATTEMPTS = 4;
 export const AGENT_TURN_WEB_SEARCH_MAX_RESULTS = 32;
 export const AGENT_TURN_WEB_SEARCH_MAX_URLS = 32;
+export const AGENT_TURN_REDACTED_KEY = '[REDACTED_KEY]';
+
+const REDACTED_AUDIT_VALUE = '[REDACTED]';
+const SENSITIVE_TOOL_AUDIT_KEY_PATTERN =
+  /(?:api.?key|authorization|cookie|credentials?|secret|token|uid|account|player.?id|user.?id)/iu;
+
+export function auditCorrelationId(value: string): string {
+  const digest = createHash('sha256')
+    .update(`genshin-team-advisor:tool-audit-correlation:v1\u0000${value}`)
+    .digest('hex')
+    .slice(0, 32);
+  return `audit-correlation-${digest}`;
+}
 
 const webSearchOutputSchema = z
   .object({
@@ -257,9 +272,8 @@ export async function runAuditedAgentTurn(options: {
                 ? privacySafeToolInput(block['input'], sensitiveAuditValues)
                 : {},
               succeeded: false,
-              correlationId: boundedToolAuditLabel(
-                options.auditContext?.correlationId ?? 'unscoped',
-                sensitiveAuditValues
+              correlationId: auditCorrelationId(
+                options.auditContext?.correlationId ?? 'unscoped'
               ),
               round: options.auditContext?.round ?? 'single'
             };
@@ -547,20 +561,21 @@ function privacySafeToolInput(
   budget: ToolInputBudget = { nodes: 64, stringCharacters: 320 }
 ): Record<string, unknown> {
   if (depth >= 4 || budget.nodes <= 0) return {};
-  return Object.fromEntries(
-    Object.entries(input)
-      .slice(0, 16)
-      .map(([key, value]) => [
-        boundedLabel(key),
-        privacySafeToolValue(
-          key,
-          value,
-          sensitiveValues,
-          depth + 1,
-          budget
-        )
-      ])
-  );
+  const output = Object.create(null) as Record<string, unknown>;
+  for (const [key, value] of Object.entries(input).slice(0, 16)) {
+    const safeKey = privacySafeToolKey(key, sensitiveValues);
+    const safeValue = privacySafeToolValue(
+      key,
+      value,
+      sensitiveValues,
+      depth + 1,
+      budget
+    );
+    output[safeKey] = Object.hasOwn(output, safeKey)
+      ? REDACTED_AUDIT_VALUE
+      : safeValue;
+  }
+  return output;
 }
 
 interface ToolInputBudget {
@@ -577,19 +592,26 @@ function privacySafeToolValue(
 ): unknown {
   budget.nodes -= 1;
   if (budget.nodes < 0) return undefined;
-  if (/(?:api.?key|authorization|cookie|secret|token)/iu.test(key)) return '[REDACTED]';
+  if (typeof value === 'boolean' || value === null) return value;
+  if (isSensitiveToolAuditKey(key, sensitiveValues)) return REDACTED_AUDIT_VALUE;
   if (typeof value === 'string') {
-    if (sensitiveValues.some((sensitive) => value.includes(sensitive))) return '[REDACTED]';
+    if (containsSensitiveAuditValue(value, sensitiveValues)) {
+      return REDACTED_AUDIT_VALUE;
+    }
     const maxCharacters = Math.min(256, budget.stringCharacters);
     const sanitized = privacySafePartialText(value).slice(0, maxCharacters);
     budget.stringCharacters = Math.max(0, budget.stringCharacters - sanitized.length);
     return sanitized;
   }
-  if (
-    typeof value === 'number' ||
-    typeof value === 'boolean' ||
-    value === null
-  ) {
+  if (typeof value === 'number') {
+    const representation = String(value);
+    if (
+      !Number.isFinite(value) ||
+      containsSensitiveAuditValue(representation, sensitiveValues) ||
+      privacySafeResearchText(representation) === undefined
+    ) {
+      return REDACTED_AUDIT_VALUE;
+    }
     return value;
   }
   if (Array.isArray(value)) {
@@ -609,6 +631,34 @@ function privacySafeToolValue(
     );
   }
   return undefined;
+}
+
+function privacySafeToolKey(
+  key: string,
+  sensitiveValues: readonly string[]
+): string {
+  if (isSensitiveToolAuditKey(key, sensitiveValues)) {
+    return AGENT_TURN_REDACTED_KEY;
+  }
+  return privacySafeResearchText(key)?.slice(0, 80) ?? AGENT_TURN_REDACTED_KEY;
+}
+
+function isSensitiveToolAuditKey(
+  key: string,
+  sensitiveValues: readonly string[]
+): boolean {
+  return (
+    SENSITIVE_TOOL_AUDIT_KEY_PATTERN.test(key) ||
+    containsSensitiveAuditValue(key, sensitiveValues) ||
+    privacySafeResearchText(key) === undefined
+  );
+}
+
+function containsSensitiveAuditValue(
+  value: string,
+  sensitiveValues: readonly string[]
+): boolean {
+  return sensitiveValues.some((sensitive) => value.includes(sensitive));
 }
 
 function assertBoundedFinalText(value: string): void {

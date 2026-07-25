@@ -252,9 +252,12 @@ function groundedKnowledge(): KnowledgeContextPacket {
   };
 }
 
-function pipelineContext(feasibleBaseline = validAbyssPlan()) {
+function pipelineContext(
+  feasibleBaseline = validAbyssPlan(),
+  correlationId = 'abyss-test-request'
+) {
   return buildV2PipelineContext({
-    correlationId: 'abyss-test-request',
+    correlationId,
     profile: {
       schemaVersion: 2,
       uid: '123456789',
@@ -280,6 +283,46 @@ function pipelineContext(feasibleBaseline = validAbyssPlan()) {
 }
 
 describe('AbyssPlanAgent', () => {
+  it('accepts required tool evidence for a privacy-sensitive UI correlation', async () => {
+    const correlationId = 'abyss-1784952000000-1';
+    const runner = new FixtureRunner([validAbyssPlan()]);
+
+    const result = await new AbyssPlanAgent(runner).compose({
+      input: abyssInput({ correlationId }),
+      scenario: abyssScenario(),
+      characters: ABYSS_CHARACTERS,
+      pipelineContext: pipelineContext(validAbyssPlan(), correlationId),
+      sdkOptions: sdkOptions()
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(runner.calls).toHaveLength(4);
+  });
+
+  it('keeps required tool evidence isolated from a different correlation', async () => {
+    const runner = new FixtureRunner([
+      validAbyssPlan(),
+      validAbyssPlan(),
+      validAbyssPlan()
+    ]);
+
+    const result = await new AbyssPlanAgent(runner).compose({
+      input: abyssInput({ correlationId: 'abyss-1784952000000-1' }),
+      scenario: abyssScenario(),
+      characters: ABYSS_CHARACTERS,
+      pipelineContext: pipelineContext(
+        validAbyssPlan(),
+        'abyss-1784952000000-2'
+      ),
+      sdkOptions: sdkOptions()
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      issues: [expect.objectContaining({ path: ['tools'] })]
+    });
+  });
+
   it('continues an existing trace lease without starting or finishing a second run', async () => {
     const runner = new FixtureRunner([validAbyssPlan()]);
     const trace = new AgentRunTraceStore();
