@@ -323,7 +323,7 @@ describe('AbyssPlanAgent', () => {
     });
   });
 
-  it.each(['authorization', 'token', '123456789'])(
+  it.each(['authorization', 'token', '123456789', '%75id', 'ｕｉｄ'])(
     'does not accept a successful %s-only profile call as UID evidence',
     async (credentialKey) => {
       class NonUidProfileRunner extends FixtureRunner {
@@ -377,6 +377,58 @@ describe('AbyssPlanAgent', () => {
       });
     }
   );
+
+  it('does not accept a canonicalization-changed profile tool name', async () => {
+    class EncodedProfileToolRunner extends FixtureRunner {
+      override async *run(
+        prompt: string,
+        options: AgentSdkRunOptions
+      ): AsyncIterable<unknown> {
+        for await (const message of super.run(prompt, options)) {
+          if (
+            typeof message === 'object' &&
+            message !== null &&
+            (message as { type?: string }).type === 'assistant'
+          ) {
+            const current = structuredClone(message) as {
+              message: {
+                content: Array<{
+                  id?: string;
+                  name?: string;
+                }>;
+              };
+            };
+            const profile = current.message.content.find(({ id }) => id === 'profile');
+            if (profile !== undefined) {
+              profile.name =
+                'mcp%5F%5Fgenshin%5F%5Fread%5Fprofile%5Fcache';
+            }
+            yield current;
+          } else {
+            yield message;
+          }
+        }
+      }
+    }
+    const runner = new EncodedProfileToolRunner([
+      validAbyssPlan(),
+      validAbyssPlan(),
+      validAbyssPlan()
+    ]);
+
+    const result = await new AbyssPlanAgent(runner).compose({
+      input: abyssInput(),
+      scenario: abyssScenario(),
+      characters: ABYSS_CHARACTERS,
+      pipelineContext: pipelineContext(),
+      sdkOptions: sdkOptions()
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      issues: [expect.objectContaining({ path: ['tools'] })]
+    });
+  });
 
   it('continues an existing trace lease without starting or finishing a second run', async () => {
     const runner = new FixtureRunner([validAbyssPlan()]);

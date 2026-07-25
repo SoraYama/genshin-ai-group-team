@@ -35,10 +35,15 @@ export function auditToolInputKey(
   key: string,
   sensitiveValues: readonly string[] = []
 ): string {
-  return auditToolInputKeyFromCanonicalValues(
+  return auditToolInputKeyFromPolicy(
     key,
-    canonicalSensitiveAuditValues(sensitiveValues)
+    canonicalSensitiveAuditPolicy(sensitiveValues)
   );
+}
+
+interface SensitiveAuditPolicy {
+  canonicalValues: readonly string[];
+  failClosed: boolean;
 }
 
 const webSearchOutputSchema = z
@@ -188,7 +193,7 @@ export async function runAuditedAgentTurn(options: {
   const webSearchAttempts: WebSearchEvidenceAttempt[] = [];
   const toolResultIds = new Set<string>();
   const pendingToolResultIds = new Set<string>();
-  const sensitiveAuditValues = canonicalSensitiveAuditValues([
+  const sensitivePolicy = canonicalSensitiveAuditPolicy([
     options.sdkOptions.apiKey,
     ...Object.values(options.sdkOptions.customHeaders ?? {})
   ]);
@@ -215,7 +220,8 @@ export async function runAuditedAgentTurn(options: {
       toolsTruncated,
       webSearchAttempts,
       webSearchEvidenceTruncated,
-      usage
+      usage,
+      sensitivePolicy
     });
   if (options.sdkOptions.abortController.signal.aborted) {
     throw new AgentTurnError('AGENT_TURN_CANCELLED', 'Agent turn was cancelled', {
@@ -278,12 +284,13 @@ export async function runAuditedAgentTurn(options: {
               toolsTruncated = true;
               continue;
             }
-            const toolUseId = boundedToolAuditId(block['id'], sensitiveAuditValues);
+            const protocolId = toolProtocolIdentity(block['id']);
+            const toolUseId = boundedToolAuditId(block['id'], sensitivePolicy);
             const audit: ToolAudit = {
               id: toolUseId,
-              name: boundedToolAuditLabel(block['name'], sensitiveAuditValues),
+              name: boundedToolAuditLabel(block['name'], sensitivePolicy),
               input: isRecord(block['input'])
-                ? privacySafeToolInput(block['input'], sensitiveAuditValues)
+                ? privacySafeToolInput(block['input'], sensitivePolicy)
                 : {},
               succeeded: false,
               correlationId: auditCorrelationId(
@@ -292,35 +299,39 @@ export async function runAuditedAgentTurn(options: {
               round: options.auditContext?.round ?? 'single'
             };
             tools.push(audit);
-            const matchingAudits = toolsById.get(toolUseId) ?? [];
+            const matchingAudits = toolsById.get(protocolId) ?? [];
             matchingAudits.push(audit);
-            toolsById.set(toolUseId, matchingAudits);
-            if (pendingToolResultIds.delete(toolUseId)) {
-              toolResultIds.add(toolUseId);
+            toolsById.set(protocolId, matchingAudits);
+            if (pendingToolResultIds.delete(protocolId)) {
+              toolResultIds.add(protocolId);
             }
             if (block['name'] === 'WebSearch') {
-              const id = webSearchToolUseId(toolUseId);
+              const id =
+                webSearchToolUseId(block['id']) === undefined ? undefined : toolUseId;
               const query =
                 isRecord(block['input']) && typeof block['input']['query'] === 'string'
-                  ? boundedResearchQuery(block['input']['query'])
+                  ? boundedResearchQuery(block['input']['query'], sensitivePolicy)
                   : undefined;
               if (webSearchAttempts.length >= AGENT_TURN_WEB_SEARCH_EVIDENCE_MAX_ATTEMPTS) {
                 webSearchEvidenceTruncated = true;
               } else if (
                 id === undefined ||
                 query === undefined ||
-                webSearchById.has(id) ||
-                toolResultIds.has(id)
+                webSearchById.has(protocolId) ||
+                toolResultIds.has(protocolId)
               ) {
                 const evidence: WebSearchEvidenceAttempt = {
                   toolUseId: id ?? 'invalid',
                   ...(query === undefined ? {} : { query }),
-                  status: id !== undefined && toolResultIds.has(id) ? 'duplicate' : 'invalid',
+                  status:
+                    id !== undefined && toolResultIds.has(protocolId)
+                      ? 'duplicate'
+                      : 'invalid',
                   urls: []
                 };
                 webSearchAttempts.push(evidence);
-                if (id !== undefined && !webSearchById.has(id)) {
-                  webSearchById.set(id, evidence);
+                if (id !== undefined && !webSearchById.has(protocolId)) {
+                  webSearchById.set(protocolId, evidence);
                 }
               } else {
                 const evidence: WebSearchEvidenceAttempt = {
@@ -329,7 +340,7 @@ export async function runAuditedAgentTurn(options: {
                   status: 'unresolved',
                   urls: []
                 };
-                webSearchById.set(id, evidence);
+                webSearchById.set(protocolId, evidence);
                 webSearchAttempts.push(evidence);
               }
             }
@@ -345,23 +356,20 @@ export async function runAuditedAgentTurn(options: {
             block['type'] === 'tool_result' &&
             typeof block['tool_use_id'] === 'string'
           ) {
-            const toolUseId = boundedToolAuditId(
-              block['tool_use_id'],
-              sensitiveAuditValues
-            );
-            const matchingAudits = toolsById.get(toolUseId);
+            const protocolId = toolProtocolIdentity(block['tool_use_id']);
+            const matchingAudits = toolsById.get(protocolId);
             if (matchingAudits === undefined) {
               if (pendingToolResultIds.size < AGENT_TURN_TOOL_AUDIT_MAX) {
-                pendingToolResultIds.add(toolUseId);
+                pendingToolResultIds.add(protocolId);
               }
               continue;
             }
-            const duplicate = toolResultIds.has(toolUseId);
-            toolResultIds.add(toolUseId);
+            const duplicate = toolResultIds.has(protocolId);
+            toolResultIds.add(protocolId);
             matchingAudits.forEach(
               (use) => (use.succeeded = !duplicate && block['is_error'] !== true)
             );
-            const search = webSearchById.get(toolUseId);
+            const search = webSearchById.get(protocolId);
             if (search) {
               if (duplicate) {
                 search.status = 'duplicate';
@@ -373,6 +381,7 @@ export async function runAuditedAgentTurn(options: {
                 const urls = parseWebSearchUrls(
                   message['tool_use_result'],
                   search,
+                  protocolId,
                   options.normalizeResearchUrl
                 );
                 search.status = urls === undefined ? 'invalid' : 'resolved';
@@ -420,11 +429,17 @@ export async function runAuditedAgentTurn(options: {
       partialTurn: accumulatedPartialTurn()
     });
   }
-  const finalRawText = resultText || assistantText;
+  const finalRawText = privacySafeSuccessfulText(
+    resultText || assistantText,
+    sensitivePolicy
+  );
   return {
     text: finalRawText,
     finalRawText,
-    rawMessagesSummary,
+    rawMessagesSummary: privacySafeRawMessagesSummary(
+      rawMessagesSummary,
+      sensitivePolicy
+    ),
     tools: tools.map((tool) => ({ ...tool, input: { ...tool.input } })),
     toolsTruncated,
     webSearchEvidence: {
@@ -492,12 +507,22 @@ function boundedLabel(value: string): string {
 
 function boundedToolAuditLabel(
   value: string,
-  sensitiveValues: readonly string[]
+  sensitivePolicy: SensitiveAuditPolicy
 ): string {
   const canonical = canonicalizeResearchPrivacyText(value);
   if (
+    sensitivePolicy.failClosed ||
     canonical === undefined ||
-    containsCanonicalSensitiveAuditValue(canonical, sensitiveValues)
+    canonical !== value
+  ) {
+    return opaqueAuditIdentity(
+      'genshin-team-advisor:tool-audit-name:v1',
+      'audit-tool-name',
+      value
+    );
+  }
+  if (
+    containsCanonicalSensitiveAuditValue(canonical, sensitivePolicy)
   ) {
     return REDACTED_AUDIT_VALUE;
   }
@@ -506,19 +531,21 @@ function boundedToolAuditLabel(
 
 function boundedToolAuditId(
   value: string,
-  sensitiveValues: readonly string[]
+  sensitivePolicy: SensitiveAuditPolicy
 ): string {
   const canonical = canonicalizeResearchPrivacyText(value);
   if (
+    sensitivePolicy.failClosed ||
     canonical === undefined ||
+    canonical !== value ||
     canonical.length === 0 ||
     canonical.length > 128 ||
-    containsCanonicalSensitiveAuditValue(canonical, sensitiveValues)
+    containsCanonicalSensitiveAuditValue(canonical, sensitivePolicy)
   ) {
     return opaqueAuditIdentity(
       'genshin-team-advisor:tool-audit-id:v1',
       'audit-tool-id',
-      canonical ?? value
+      value
     );
   }
   const safe = privacySafeResearchText(canonical);
@@ -540,37 +567,23 @@ function privacySafePartialTurn(input: {
   webSearchAttempts: readonly WebSearchEvidenceAttempt[];
   webSearchEvidenceTruncated: boolean;
   usage: AgentUsage;
+  sensitivePolicy: SensitiveAuditPolicy;
 }): AuditedAgentTurn {
-  const finalRawText = privacySafePartialText(input.resultText || input.assistantText);
+  const finalRawText = privacySafePartialText(
+    input.resultText || input.assistantText,
+    input.sensitivePolicy
+  );
   return {
     text: finalRawText,
     finalRawText,
-    rawMessagesSummary: {
-      totalMessages: input.rawMessagesSummary.totalMessages,
-      messages: input.rawMessagesSummary.messages.map((message) => {
-        const textPreview =
-          message.textPreview === undefined
-            ? undefined
-            : message.type === 'result' && message.subtype !== 'success'
-              ? '[REDACTED]'
-              : privacySafePartialText(message.textPreview);
-        return {
-          type: boundedLabel(message.type),
-          ...(message.subtype === undefined
-            ? {}
-            : { subtype: boundedLabel(message.subtype) }),
-          ...(textPreview === undefined ? {} : { textPreview }),
-          textTruncated:
-            message.textTruncated ||
-            (message.textPreview !== undefined && textPreview === '[REDACTED]')
-        };
-      }),
-      truncated: input.rawMessagesSummary.truncated
-    },
+    rawMessagesSummary: privacySafeRawMessagesSummary(
+      input.rawMessagesSummary,
+      input.sensitivePolicy
+    ),
     tools: input.tools.slice(0, AGENT_TURN_TOOL_AUDIT_MAX).map((tool) => ({
       id: boundedLabel(tool.id),
       name: boundedLabel(tool.name),
-      input: privacySafeToolInput(tool.input),
+      input: privacySafeToolInput(tool.input, input.sensitivePolicy),
       succeeded: tool.succeeded,
       correlationId: boundedLabel(tool.correlationId),
       round: tool.round
@@ -581,7 +594,12 @@ function privacySafePartialTurn(input: {
         toolUseId: boundedLabel(attempt.toolUseId),
         ...(attempt.query === undefined
           ? {}
-          : { query: privacySafePartialText(attempt.query).slice(0, 300) }),
+          : {
+              query: privacySafePartialText(
+                attempt.query,
+                input.sensitivePolicy
+              ).slice(0, 300)
+            }),
         status: attempt.status,
         urls: attempt.urls
           .map((url) => privacySafeResearchUrl(url))
@@ -594,25 +612,71 @@ function privacySafePartialTurn(input: {
   };
 }
 
-function privacySafePartialText(value: string): string {
+function privacySafeRawMessagesSummary(
+  summary: RawAgentMessagesSummary,
+  sensitivePolicy: SensitiveAuditPolicy
+): RawAgentMessagesSummary {
+  return {
+    totalMessages: summary.totalMessages,
+    messages: summary.messages.map((message) => {
+      const textPreview =
+        message.textPreview === undefined
+          ? undefined
+          : message.type === 'result' && message.subtype !== 'success'
+            ? REDACTED_AUDIT_VALUE
+            : privacySafePartialText(message.textPreview, sensitivePolicy);
+      return {
+        type: boundedLabel(message.type),
+        ...(message.subtype === undefined
+          ? {}
+          : { subtype: boundedLabel(message.subtype) }),
+        ...(textPreview === undefined ? {} : { textPreview }),
+        textTruncated:
+          message.textTruncated ||
+          (message.textPreview !== undefined && textPreview === REDACTED_AUDIT_VALUE)
+      };
+    }),
+    truncated: summary.truncated
+  };
+}
+
+function privacySafeSuccessfulText(
+  value: string,
+  sensitivePolicy: SensitiveAuditPolicy
+): string {
+  return sensitivePolicy.failClosed ? REDACTED_AUDIT_VALUE : value;
+}
+
+function privacySafePartialText(
+  value: string,
+  sensitivePolicy: SensitiveAuditPolicy
+): string {
   if (value.length === 0) return '';
-  return privacySafeResearchText(value) ?? '[REDACTED]';
+  const canonical = canonicalizeResearchPrivacyText(value);
+  if (
+    sensitivePolicy.failClosed ||
+    canonical === undefined ||
+    containsCanonicalSensitiveAuditValue(canonical, sensitivePolicy)
+  ) {
+    return REDACTED_AUDIT_VALUE;
+  }
+  return privacySafeResearchText(canonical) ?? REDACTED_AUDIT_VALUE;
 }
 
 function privacySafeToolInput(
   input: Record<string, unknown>,
-  sensitiveValues: readonly string[] = [],
+  sensitivePolicy: SensitiveAuditPolicy,
   depth = 0,
   budget: ToolInputBudget = { nodes: 64, stringCharacters: 320 }
 ): Record<string, unknown> {
   if (depth >= 4 || budget.nodes <= 0) return {};
   const output = Object.create(null) as Record<string, unknown>;
   for (const [key, value] of Object.entries(input).slice(0, 16)) {
-    const safeKey = auditToolInputKeyFromCanonicalValues(key, sensitiveValues);
+    const safeKey = auditToolInputKeyFromPolicy(key, sensitivePolicy);
     const safeValue = privacySafeToolValue(
       key,
       value,
-      sensitiveValues,
+      sensitivePolicy,
       depth + 1,
       budget
     );
@@ -631,19 +695,20 @@ interface ToolInputBudget {
 function privacySafeToolValue(
   key: string,
   value: unknown,
-  sensitiveValues: readonly string[],
+  sensitivePolicy: SensitiveAuditPolicy,
   depth: number,
   budget: ToolInputBudget
 ): unknown {
   budget.nodes -= 1;
   if (budget.nodes < 0) return undefined;
+  if (sensitivePolicy.failClosed) return REDACTED_AUDIT_VALUE;
   if (typeof value === 'boolean' || value === null) return value;
-  if (isSensitiveToolAuditKey(key, sensitiveValues)) return REDACTED_AUDIT_VALUE;
+  if (isSensitiveToolAuditKey(key, sensitivePolicy)) return REDACTED_AUDIT_VALUE;
   if (typeof value === 'string') {
     const canonical = canonicalizeResearchPrivacyText(value);
     if (
       canonical === undefined ||
-      containsCanonicalSensitiveAuditValue(canonical, sensitiveValues)
+      containsCanonicalSensitiveAuditValue(canonical, sensitivePolicy)
     ) {
       return REDACTED_AUDIT_VALUE;
     }
@@ -660,7 +725,7 @@ function privacySafeToolValue(
       !Number.isFinite(value) ||
       !Number.isSafeInteger(value) ||
       representation === undefined ||
-      containsCanonicalSensitiveAuditValue(representation, sensitiveValues) ||
+      containsCanonicalSensitiveAuditValue(representation, sensitivePolicy) ||
       privacySafeResearchText(representation) === undefined
     ) {
       return REDACTED_AUDIT_VALUE;
@@ -672,13 +737,13 @@ function privacySafeToolValue(
     return value
       .slice(0, 16)
       .map((item) =>
-        privacySafeToolValue('', item, sensitiveValues, depth + 1, budget)
+        privacySafeToolValue('', item, sensitivePolicy, depth + 1, budget)
       );
   }
   if (isRecord(value)) {
     return privacySafeToolInput(
       value,
-      sensitiveValues,
+      sensitivePolicy,
       depth,
       budget
     );
@@ -686,21 +751,23 @@ function privacySafeToolValue(
   return undefined;
 }
 
-function auditToolInputKeyFromCanonicalValues(
+function auditToolInputKeyFromPolicy(
   key: string,
-  sensitiveValues: readonly string[]
+  sensitivePolicy: SensitiveAuditPolicy
 ): string {
   const canonical = canonicalizeResearchPrivacyText(key);
   if (
+    sensitivePolicy.failClosed ||
     canonical === undefined ||
+    canonical !== key ||
     canonical.length === 0 ||
     canonical.length > 80 ||
-    isSensitiveToolAuditKey(canonical, sensitiveValues)
+    isSensitiveToolAuditKey(canonical, sensitivePolicy)
   ) {
     return opaqueAuditIdentity(
       'genshin-team-advisor:tool-audit-key:v1',
       'audit-key',
-      canonical ?? key
+      key
     );
   }
   return canonical;
@@ -708,29 +775,43 @@ function auditToolInputKeyFromCanonicalValues(
 
 function isSensitiveToolAuditKey(
   key: string,
-  sensitiveValues: readonly string[]
+  sensitivePolicy: SensitiveAuditPolicy
 ): boolean {
   const canonical = canonicalizeResearchPrivacyText(key);
   return (
+    sensitivePolicy.failClosed ||
     canonical === undefined ||
     SENSITIVE_TOOL_AUDIT_KEY_PATTERN.test(canonical) ||
-    containsCanonicalSensitiveAuditValue(canonical, sensitiveValues) ||
+    containsCanonicalSensitiveAuditValue(canonical, sensitivePolicy) ||
     privacySafeResearchText(canonical) === undefined
   );
 }
 
 function containsCanonicalSensitiveAuditValue(
   value: string,
-  sensitiveValues: readonly string[]
+  sensitivePolicy: SensitiveAuditPolicy
 ): boolean {
-  return sensitiveValues.some((sensitive) => value.includes(sensitive));
+  return sensitivePolicy.canonicalValues.some((sensitive) => value.includes(sensitive));
 }
 
-function canonicalSensitiveAuditValues(values: readonly string[]): string[] {
-  return values.flatMap((value) => {
+function canonicalSensitiveAuditPolicy(
+  values: readonly string[]
+): SensitiveAuditPolicy {
+  const canonicalValues: string[] = [];
+  let failClosed = false;
+  for (const value of values) {
+    if (value.length === 0) continue;
     const canonical = canonicalizeResearchPrivacyText(value);
-    return canonical === undefined || canonical.length === 0 ? [] : [canonical];
-  });
+    if (canonical === undefined || canonical.length === 0) {
+      failClosed = true;
+    } else {
+      canonicalValues.push(canonical);
+    }
+  }
+  return {
+    canonicalValues: [...new Set(canonicalValues)],
+    failClosed
+  };
 }
 
 function opaqueAuditIdentity(domain: string, prefix: string, value: string): string {
@@ -739,6 +820,12 @@ function opaqueAuditIdentity(domain: string, prefix: string, value: string): str
     .digest('hex')
     .slice(0, 32);
   return `${prefix}-${digest}`;
+}
+
+function toolProtocolIdentity(value: string): string {
+  return createHash('sha256')
+    .update(`genshin-team-advisor:tool-protocol-id:v1\u0000${value}`)
+    .digest('hex');
 }
 
 function assertBoundedFinalText(value: string): void {
@@ -779,15 +866,27 @@ function webSearchToolUseId(value: string): string | undefined {
   return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(value) ? value : undefined;
 }
 
-function boundedResearchQuery(value: string): string | undefined {
+function boundedResearchQuery(
+  value: string,
+  sensitivePolicy: SensitiveAuditPolicy
+): string | undefined {
+  if (sensitivePolicy.failClosed) return undefined;
   if (value.length > 300) return undefined;
-  const query = privacySafeResearchText(value);
+  const canonical = canonicalizeResearchPrivacyText(value);
+  if (
+    canonical === undefined ||
+    containsCanonicalSensitiveAuditValue(canonical, sensitivePolicy)
+  ) {
+    return undefined;
+  }
+  const query = privacySafeResearchText(canonical);
   return query === undefined || query.length === 0 ? undefined : query;
 }
 
 function parseWebSearchUrls(
   value: unknown,
   expected: Pick<WebSearchEvidenceAttempt, 'toolUseId' | 'query'>,
+  expectedProtocolId: string,
   normalizeResearchUrl: ((url: string) => string | undefined) | undefined
 ): string[] | undefined {
   if (expected.query === undefined || normalizeResearchUrl === undefined) return undefined;
@@ -798,7 +897,7 @@ function parseWebSearchUrls(
   const urls: string[] = [];
   for (const result of output.results) {
     if (typeof result === 'string') continue;
-    if (result.tool_use_id !== expected.toolUseId) return undefined;
+    if (toolProtocolIdentity(result.tool_use_id) !== expectedProtocolId) return undefined;
     for (const content of result.content) {
       if (privacySafeResearchUrl(content.url) === undefined) return undefined;
       const normalizedUrl = normalizeResearchUrl(content.url);

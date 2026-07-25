@@ -25,19 +25,26 @@ describe('runAuditedAgentTurn', () => {
     expect(identity).not.toBe(auditCorrelationId('abyss-1784952000000-2'));
   });
 
-  it('derives distinct canonical identities for sensitive and unsafe tool-input keys', () => {
+  it('derives distinct exact identities for sensitive and unsafe tool-input keys', () => {
     const sensitiveKeys = ['uid', 'authorization', 'token', '123456789'];
     const identities = sensitiveKeys.map((key) => auditToolInputKey(key));
+    const uidIdentities = ['uid', '%75id', 'ｕｉｄ'].map((key) =>
+      auditToolInputKey(key)
+    );
 
     expect(identities.every((identity) => /^audit-key-[a-f0-9]{32}$/.test(identity))).toBe(
       true
     );
     expect(new Set(identities).size).toBe(sensitiveKeys.length);
-    expect(auditToolInputKey('%75id')).toBe(auditToolInputKey('uid'));
+    expect(uidIdentities.every((identity) => /^audit-key-[a-f0-9]{32}$/.test(identity))).toBe(
+      true
+    );
+    expect(new Set(uidIdentities).size).toBe(uidIdentities.length);
     expect(auditToolInputKey('floor')).toBe('floor');
+    expect(auditToolInputKey('floor', ['   '])).toMatch(/^audit-key-[a-f0-9]{32}$/);
     expect(
       auditToolInputKey('field-%733nsitivev4lue', ['s3nsitivev4lue'])
-    ).toBe(auditToolInputKey('field-s3nsitivev4lue', ['s3nsitivev4lue']));
+    ).not.toBe(auditToolInputKey('field-s3nsitivev4lue', ['s3nsitivev4lue']));
   });
 
   it('derives bounded privacy-safe WebSearch evidence from SDK-shaped tool messages', async () => {
@@ -517,6 +524,35 @@ describe('runAuditedAgentTurn', () => {
     });
   });
 
+  it('preserves a successful final above the privacy canonicalizer limit', async () => {
+    const finalText = JSON.stringify({ padding: 'p'.repeat(20_000) });
+    const runner: AuditedAgentRunner = {
+      async *run() {
+        yield {
+          type: 'result',
+          subtype: 'success',
+          result: finalText,
+          usage: {}
+        };
+      }
+    };
+
+    const turn = await runAuditedAgentTurn({
+      runner,
+      prompt: '{}',
+      sdkOptions: sdkOptions(),
+      systemPrompt: 'test'
+    });
+
+    expect(turn.text).toBe(finalText);
+    expect(turn.finalRawText).toBe(finalText);
+    expect(turn.rawMessagesSummary.messages[0]).toMatchObject({
+      type: 'result',
+      textPreview: finalText.slice(0, AGENT_TURN_RAW_SUMMARY_PREVIEW_MAX_CHARS),
+      textTruncated: true
+    });
+  });
+
   it('caps the number of raw-message summaries without retaining raw messages', async () => {
     const runner: AuditedAgentRunner = {
       async *run() {
@@ -645,6 +681,67 @@ describe('runAuditedAgentTurn', () => {
       'TOP-SECRET-PROVIDER-BODY'
     );
   });
+
+  it.each(['result-error', 'stream-error'] as const)(
+    'redacts a configured secret echoed before a %s',
+    async (failureMode) => {
+      const configuredSecret = 'ordinary-private-value';
+      const echoedText = `assistant echoed ${configuredSecret}`;
+      const runner: AuditedAgentRunner = {
+        async *run() {
+          yield {
+            type: 'assistant',
+            message: { content: [{ type: 'text', text: echoedText }] }
+          };
+          if (failureMode === 'result-error') {
+            yield {
+              type: 'result',
+              subtype: 'error_during_execution',
+              result: `provider body ${configuredSecret}`,
+              errors: [`provider body ${configuredSecret}`],
+              usage: {}
+            };
+            return;
+          }
+          throw new Error(`provider stream ${configuredSecret}`);
+        }
+      };
+
+      let failure: unknown;
+      try {
+        await runAuditedAgentTurn({
+          runner,
+          prompt: '{}',
+          sdkOptions: { ...sdkOptions(), apiKey: configuredSecret },
+          systemPrompt: 'test'
+        });
+      } catch (error) {
+        failure = error;
+      }
+
+      expect(failure).toBeInstanceOf(AgentTurnError);
+      const partialTurn = (failure as AgentTurnError).partialTurn!;
+      expect(partialTurn.text).toBe('[REDACTED]');
+      expect(partialTurn.finalRawText).toBe('[REDACTED]');
+      expect(partialTurn.rawMessagesSummary.messages[0]).toMatchObject({
+        type: 'assistant',
+        textPreview: '[REDACTED]',
+        textTruncated: true
+      });
+      if (failureMode === 'result-error') {
+        expect(partialTurn.rawMessagesSummary.messages[1]).toMatchObject({
+          type: 'result',
+          textPreview: '[REDACTED]',
+          textTruncated: true
+        });
+      }
+      const serialized = JSON.stringify(partialTurn);
+      expect(serialized).not.toContain(configuredSecret);
+      expect(serialized).not.toContain('provider body');
+      expect(serialized).not.toContain('provider stream');
+      expect(serialized.length).toBeLessThan(5_000);
+    }
+  );
 
   it('bounds and sanitizes tool audits while collecting a successful turn', async () => {
     const runner: AuditedAgentRunner = {
@@ -896,6 +993,79 @@ describe('runAuditedAgentTurn', () => {
     expectCanonicalSecretAbsent(serialized);
   });
 
+  it('fails closed across a successful turn when a nonempty secret cannot be canonicalized', async () => {
+    const encodedCandidate = layeredPercentSecret(8);
+    const runner: AuditedAgentRunner = {
+      async *run() {
+        yield {
+          type: 'assistant',
+          message: {
+            content: [
+              {
+                type: 'tool_use',
+                id: 'fail-closed-call',
+                name: 'query_team_knowledge',
+                input: {
+                  visibleKey: 'visible-value',
+                  encodedCandidate,
+                  enabled: true,
+                  empty: null
+                }
+              }
+            ]
+          }
+        };
+        yield {
+          type: 'user',
+          message: {
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'fail-closed-call',
+                is_error: false,
+                content: 'ok'
+              }
+            ]
+          }
+        };
+        yield { type: 'result', subtype: 'success', result: '{}', usage: {} };
+      }
+    };
+
+    const turn = await runAuditedAgentTurn({
+      runner,
+      prompt: '{}',
+      sdkOptions: {
+        ...sdkOptions(),
+        apiKey: layeredPercentSecret(9)
+      },
+      systemPrompt: 'test'
+    });
+    const tool = turn.tools[0]!;
+    const serialized = JSON.stringify(turn);
+
+    expect(turn.text).toBe('[REDACTED]');
+    expect(turn.finalRawText).toBe('[REDACTED]');
+    expect(
+      turn.rawMessagesSummary.messages
+        .filter(({ textPreview }) => textPreview !== undefined)
+        .every(({ textPreview }) => textPreview === '[REDACTED]')
+    ).toBe(true);
+    expect(tool).toMatchObject({
+      id: expect.stringMatching(/^audit-tool-id-[a-f0-9]{32}$/),
+      name: expect.stringMatching(/^audit-tool-name-[a-f0-9]{32}$/),
+      succeeded: true
+    });
+    expect(Object.keys(tool.input).every((key) => /^audit-key-[a-f0-9]{32}$/.test(key))).toBe(
+      true
+    );
+    expect(Object.values(tool.input).every((value) => value === '[REDACTED]')).toBe(true);
+    expect(serialized).not.toContain('visible-value');
+    expect(serialized).not.toContain('visibleKey');
+    expect(serialized).not.toContain(encodedCandidate);
+    expect(serialized.length).toBeLessThan(5_000);
+  });
+
   it('keeps canonically sensitive tool IDs distinct while pairing their results', async () => {
     const toolIds = [
       'tool-s3nsitivev4lue-first',
@@ -943,6 +1113,114 @@ describe('runAuditedAgentTurn', () => {
     expect(new Set(turn.tools.map(({ id }) => id)).size).toBe(2);
     expect(turn.tools.every(({ succeeded }) => succeeded)).toBe(true);
     expectCanonicalSecretAbsent(JSON.stringify(turn.tools));
+  });
+
+  it('pairs tool results only with the exact raw protocol ID', async () => {
+    const runner: AuditedAgentRunner = {
+      async *run() {
+        yield {
+          type: 'assistant',
+          message: {
+            content: [
+              {
+                type: 'tool_use',
+                id: 'call%2D1',
+                name: 'query_team_knowledge',
+                input: { floor: 12 }
+              },
+              {
+                type: 'tool_use',
+                id: 'call-1',
+                name: 'query_team_knowledge',
+                input: { floor: 12 }
+              }
+            ]
+          }
+        };
+        yield {
+          type: 'user',
+          message: {
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'call-1',
+                is_error: false,
+                content: 'ok'
+              }
+            ]
+          }
+        };
+        yield { type: 'result', subtype: 'success', result: '{}', usage: {} };
+      }
+    };
+
+    const turn = await runAuditedAgentTurn({
+      runner,
+      prompt: '{}',
+      sdkOptions: sdkOptions(),
+      systemPrompt: 'test'
+    });
+
+    expect(turn.tools).toEqual([
+      expect.objectContaining({
+        id: expect.stringMatching(/^audit-tool-id-[a-f0-9]{32}$/),
+        succeeded: false
+      }),
+      expect.objectContaining({
+        id: 'call-1',
+        succeeded: true
+      })
+    ]);
+    expect(new Set(turn.tools.map(({ id }) => id)).size).toBe(2);
+  });
+
+  it('keeps a canonicalization-changed tool name opaque', async () => {
+    const encodedName = 'mcp%5F%5Fgenshin%5F%5Fread%5Fprofile%5Fcache';
+    const runner: AuditedAgentRunner = {
+      async *run() {
+        yield {
+          type: 'assistant',
+          message: {
+            content: [
+              {
+                type: 'tool_use',
+                id: 'encoded-name',
+                name: encodedName,
+                input: { floor: 12 }
+              }
+            ]
+          }
+        };
+        yield {
+          type: 'user',
+          message: {
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'encoded-name',
+                is_error: false,
+                content: 'ok'
+              }
+            ]
+          }
+        };
+        yield { type: 'result', subtype: 'success', result: '{}', usage: {} };
+      }
+    };
+
+    const turn = await runAuditedAgentTurn({
+      runner,
+      prompt: '{}',
+      sdkOptions: sdkOptions(),
+      systemPrompt: 'test'
+    });
+
+    expect(turn.tools[0]).toMatchObject({
+      name: expect.stringMatching(/^audit-tool-name-[a-f0-9]{32}$/),
+      succeeded: true
+    });
+    expect(turn.tools[0]!.name).not.toBe('mcp__genshin__read_profile_cache');
+    expect(JSON.stringify(turn.tools)).not.toContain(encodedName);
   });
 
   it('bounds and redacts accumulated partial tool audits', async () => {
@@ -1102,6 +1380,80 @@ describe('runAuditedAgentTurn', () => {
     const input = (failure as AgentTurnError).partialTurn?.tools[0]?.input ?? {};
     expect(Object.values(input).every((value) => value === '[REDACTED]')).toBe(true);
     expectCanonicalSecretAbsent(JSON.stringify(input));
+  });
+
+  it('fails closed across a partial turn when a nonempty secret cannot be canonicalized', async () => {
+    const encodedCandidate = layeredPercentSecret(8);
+    const runner: AuditedAgentRunner = {
+      async *run() {
+        yield {
+          type: 'assistant',
+          message: {
+            content: [
+              { type: 'text', text: 'ordinary-visible-text' },
+              {
+                type: 'tool_use',
+                id: 'fail-closed-partial',
+                name: 'query_team_knowledge',
+                input: {
+                  visibleKey: 'visible-value',
+                  encodedCandidate,
+                  enabled: true,
+                  empty: null
+                }
+              }
+            ]
+          }
+        };
+        yield {
+          type: 'result',
+          subtype: 'error_during_execution',
+          result: 'provider failure',
+          usage: {}
+        };
+      }
+    };
+
+    let failure: unknown;
+    try {
+      await runAuditedAgentTurn({
+        runner,
+        prompt: '{}',
+        sdkOptions: {
+          ...sdkOptions(),
+          apiKey: layeredPercentSecret(9)
+        },
+        systemPrompt: 'test'
+      });
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toBeInstanceOf(AgentTurnError);
+    const partialTurn = (failure as AgentTurnError).partialTurn!;
+    const tool = partialTurn.tools[0]!;
+    const serialized = JSON.stringify(partialTurn);
+    expect(partialTurn.text).toBe('[REDACTED]');
+    expect(partialTurn.finalRawText).toBe('[REDACTED]');
+    expect(
+      partialTurn.rawMessagesSummary.messages
+        .filter(({ textPreview }) => textPreview !== undefined)
+        .every(({ textPreview }) => textPreview === '[REDACTED]')
+    ).toBe(true);
+    expect(tool).toMatchObject({
+      id: expect.stringMatching(/^audit-tool-id-[a-f0-9]{32}$/),
+      name: expect.stringMatching(/^audit-tool-name-[a-f0-9]{32}$/),
+      succeeded: false
+    });
+    expect(Object.keys(tool.input).every((key) => /^audit-key-[a-f0-9]{32}$/.test(key))).toBe(
+      true
+    );
+    expect(Object.values(tool.input).every((value) => value === '[REDACTED]')).toBe(true);
+    expect(serialized).not.toContain('ordinary-visible-text');
+    expect(serialized).not.toContain('visible-value');
+    expect(serialized).not.toContain('visibleKey');
+    expect(serialized).not.toContain(encodedCandidate);
+    expect(serialized.length).toBeLessThan(5_000);
   });
 
   it.each(['error_during_execution', 'error_max_turns'])(
@@ -1391,6 +1743,14 @@ function expectCanonicalSecretAbsent(serialized: string): void {
   ]) {
     expect(serialized).not.toContain(secretVariant);
   }
+}
+
+function layeredPercentSecret(rounds: number): string {
+  let value = '%733nsitivev4lue';
+  for (let round = 1; round < rounds; round += 1) {
+    value = value.replaceAll('%', '%25');
+  }
+  return value;
 }
 
 function privateToolInput(): Record<string, unknown> {
