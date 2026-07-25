@@ -1,4 +1,7 @@
 import { sanitizeTraceText } from '../../shared/agent-run-trace.js';
+import { terminateSavedGate } from './saved-gate-runtime.js';
+
+export { gateExitCode } from './saved-gate-runtime.js';
 
 const AGENT_GATE_RAW_TEXT_MAX_BYTES = 4_096;
 const AGENT_GATE_MODEL_MAX_BYTES = 256;
@@ -28,6 +31,14 @@ interface AgentGateUsageInput {
   inputTokens: number;
   outputTokens: number;
   estimatedCostUsd: number;
+}
+
+export function createAgentGateUsageRecorder(
+  recordUsage: (inputTokens: number, outputTokens: number, estimatedCostUsd: number) => void
+): (usage: AgentGateUsageInput) => void {
+  return ({ inputTokens, outputTokens, estimatedCostUsd }) => {
+    recordUsage(inputTokens, outputTokens, estimatedCostUsd);
+  };
 }
 
 export type AgentGateEvaluationInput =
@@ -111,10 +122,6 @@ export function evaluateAgentGate(input: AgentGateEvaluationInput): AgentGateOut
   };
 }
 
-export function gateExitCode(output: { status: 'passed' | 'failed' }): 0 | 1 {
-  return output.status === 'passed' ? 0 : 1;
-}
-
 function failed(code: AgentGateFailureCode): AgentGateOutput {
   return { gate: 'agent-saved', status: 'failed', code };
 }
@@ -191,13 +198,11 @@ async function runAgentSavedGate(): Promise<AgentGateOutput> {
         maxTurns: 1,
         allowedBusinessTools: [],
         stderr: () => undefined
-      }
+      },
+      onUsageDelta: createAgentGateUsageRecorder((inputTokens, outputTokens, estimatedCostUsd) =>
+        config.recordUsage(inputTokens, outputTokens, estimatedCostUsd)
+      )
     });
-    config.recordUsage(
-      turn.usage.inputTokens,
-      turn.usage.outputTokens,
-      turn.usage.estimatedCostUsd
-    );
     return evaluateAgentGate({
       kind: 'turn',
       model: config.getModel(),
@@ -234,10 +239,11 @@ async function main(): Promise<void> {
   } catch {
     output = failed('PROVIDER_ERROR');
   }
-  process.stdout.write(`${JSON.stringify(output)}\n`);
-  process.exitCode = gateExitCode(output);
-  const { app } = await import('electron');
-  app.quit();
+  const [{ app }, { writeFileSync }] = await Promise.all([import('electron'), import('node:fs')]);
+  terminateSavedGate(output, {
+    write: (line) => writeFileSync(process.stdout.fd, line, 'utf8'),
+    exit: (code) => app.exit(code)
+  });
 }
 
 if (process.versions.electron !== undefined) {

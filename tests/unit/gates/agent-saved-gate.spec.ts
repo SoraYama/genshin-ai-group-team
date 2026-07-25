@@ -1,7 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   AGENT_GATE_FAILURE_CODES,
+  createAgentGateUsageRecorder,
   evaluateAgentGate,
   gateExitCode,
   type AgentGateEvaluationInput
@@ -106,5 +110,23 @@ describe('evaluateAgentGate', () => {
       sdkCode: 'AGENT_TURN_RESULT_ERROR',
       httpStatus: 429
     });
+  });
+
+  it('records every SDK result usage delta, including a failed result, without whole-turn replay', () => {
+    const recordUsage = vi.fn();
+    const onUsageDelta = createAgentGateUsageRecorder(recordUsage);
+
+    onUsageDelta({ inputTokens: 13, outputTokens: 2, estimatedCostUsd: 0.01 });
+    onUsageDelta({ inputTokens: 7, outputTokens: 0, estimatedCostUsd: 0.004 });
+
+    expect(recordUsage).toHaveBeenNthCalledWith(1, 13, 2, 0.01);
+    expect(recordUsage).toHaveBeenNthCalledWith(2, 7, 0, 0.004);
+
+    const source = readFileSync(
+      path.resolve(import.meta.dirname, '../../../src/main/gates/agent-saved-gate.ts'),
+      'utf8'
+    );
+    expect(source).toContain('onUsageDelta: createAgentGateUsageRecorder(');
+    expect(source).not.toMatch(/config\.recordUsage\(\s*turn\.usage\./);
   });
 });

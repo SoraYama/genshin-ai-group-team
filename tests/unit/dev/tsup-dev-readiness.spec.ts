@@ -65,10 +65,10 @@ describe('tsup dev readiness', () => {
     ) as { scripts: Record<string, string> };
 
     expect(packageJson.scripts['gate:agent-saved']).toBe(
-      'npm run build:main && electron dist/main/agent-saved-gate.mjs'
+      'npm run --silent build:main -- --silent && electron dist/main/agent-saved-gate.mjs'
     );
     expect(packageJson.scripts['gate:advisor-saved']).toBe(
-      'npm run build:main && electron dist/main/advisor-saved-gate.mjs'
+      'npm run --silent build:main -- --silent && electron dist/main/advisor-saved-gate.mjs'
     );
   });
 });

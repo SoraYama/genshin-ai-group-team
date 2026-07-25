@@ -1,8 +1,21 @@
 import { sanitizeTraceText } from '../../shared/agent-run-trace.js';
+import { terminateSavedGate } from './saved-gate-runtime.js';
 
 const REQUIRED_ADVISOR_STAGES = ['compose', 'critique', 'rotation', 'explain'] as const;
+const STABLE_ADVISOR_STAGES = new Set([
+  'knowledge',
+  'research',
+  'compose',
+  'repair-1',
+  'repair-2',
+  'critique',
+  'rotation',
+  'explain'
+]);
+const ADVISOR_GATE_TIMEOUT_MS = 180_000;
 
 export const ADVISOR_GATE_FAILURE_CODES = [
+  'ADVISOR_TIMEOUT',
   'MISSING_SAVED_API_KEY',
   'SAVED_KEY_DECRYPT_FAILED',
   'SAFE_STORAGE_UNAVAILABLE',
@@ -33,6 +46,7 @@ export type AdvisorGateFailureCode = (typeof ADVISOR_GATE_FAILURE_CODES)[number]
 
 type AdvisorSetupFailureCode = Extract<
   AdvisorGateFailureCode,
+  | 'ADVISOR_TIMEOUT'
   | 'MISSING_SAVED_API_KEY'
   | 'SAVED_KEY_DECRYPT_FAILED'
   | 'SAFE_STORAGE_UNAVAILABLE'
@@ -67,12 +81,21 @@ interface AdvisorGateTraceEvidence {
   model: string;
   knowledge: KnowledgeSummary;
   usage: { inputTokens: number; outputTokens: number };
+  failure?: AdvisorGateFailureEvidence;
   stages: Array<{
     stage: string;
     status: 'started' | 'completed' | 'failed' | 'skipped';
     rawOutput?: string;
     usage: { inputTokens: number; outputTokens: number };
+    failure?: AdvisorGateFailureEvidence;
   }>;
+}
+
+interface AdvisorGateFailureEvidence {
+  code: string;
+  message?: string;
+  retryable?: boolean;
+  details?: Record<string, string>;
 }
 
 interface CharacterOwnershipEvidence {
@@ -114,33 +137,43 @@ export type AdvisorGateOutput =
       gate: 'advisor-saved';
       status: 'failed';
       code: AdvisorGateFailureCode;
+      failedStage?: string;
+      traceFailureCode?: string;
+      sdkCode?: string;
+      httpStatus?: number;
     };
 
 export function evaluateAdvisorGate(input: AdvisorGateEvaluationInput): AdvisorGateOutput {
   if (input.kind === 'unavailable') return failed(input.code);
   if (input.result.status !== 'planned' || input.result.plan === undefined) {
-    return failed('ADVISOR_NOT_PLANNED');
+    return failed('ADVISOR_NOT_PLANNED', input.trace);
   }
-  if (input.result.source !== 'smart-service') return failed('ADVISOR_FELL_BACK');
+  if (input.result.source !== 'smart-service') return failed('ADVISOR_FELL_BACK', input.trace);
   if (input.trace === null) return failed('TRACE_UNAVAILABLE');
-  if (input.trace.status !== 'completed') return failed('TRACE_NOT_COMPLETED');
-  if (input.trace.finalSource !== 'smart-service') return failed('TRACE_SOURCE_MISMATCH');
+  if (input.trace.status !== 'completed') return failed('TRACE_NOT_COMPLETED', input.trace);
+  if (input.trace.finalSource !== 'smart-service') {
+    return failed('TRACE_SOURCE_MISMATCH', input.trace);
+  }
 
   const model = sanitizeTraceText(input.trace.model, { maxBytes: 256 }).text.trim();
   if (model.length === 0) return failed('AGENT_MODEL_MISSING');
 
   for (const stageName of REQUIRED_ADVISOR_STAGES) {
-    const stage = input.trace.stages.find(({ stage: candidate }) => candidate === stageName);
-    if (stage === undefined) return failed('REQUIRED_STAGE_MISSING');
-    if (stage.status !== 'completed') return failed('REQUIRED_STAGE_NOT_COMPLETED');
-    if ((stage.rawOutput ?? '').trim().length === 0) {
-      return failed('STAGE_RAW_OUTPUT_MISSING');
-    }
-    if (!positiveFinite(stage.usage.inputTokens)) {
-      return failed('STAGE_INPUT_USAGE_MISSING');
-    }
-    if (!positiveFinite(stage.usage.outputTokens)) {
-      return failed('STAGE_OUTPUT_USAGE_MISSING');
+    const stages = input.trace.stages.filter(({ stage: candidate }) => candidate === stageName);
+    if (stages.length === 0) return failed('REQUIRED_STAGE_MISSING');
+    for (const stage of stages) {
+      if (stage.status !== 'completed') {
+        return failed('REQUIRED_STAGE_NOT_COMPLETED', input.trace);
+      }
+      if ((stage.rawOutput ?? '').trim().length === 0) {
+        return failed('STAGE_RAW_OUTPUT_MISSING');
+      }
+      if (!positiveFinite(stage.usage.inputTokens)) {
+        return failed('STAGE_INPUT_USAGE_MISSING');
+      }
+      if (!positiveFinite(stage.usage.outputTokens)) {
+        return failed('STAGE_OUTPUT_USAGE_MISSING');
+      }
     }
   }
 
@@ -204,12 +237,91 @@ export function createNoopAdvisorGateHistory(): {
   return { appendAbyss: () => undefined };
 }
 
-function failed(code: AdvisorGateFailureCode): AdvisorGateOutput {
-  return { gate: 'advisor-saved', status: 'failed', code };
+function failed(
+  code: AdvisorGateFailureCode,
+  trace?: AdvisorGateTraceEvidence | null
+): AdvisorGateOutput {
+  return {
+    gate: 'advisor-saved',
+    status: 'failed',
+    code,
+    ...traceFailureDiagnostics(trace)
+  };
+}
+
+function traceFailureDiagnostics(
+  trace: AdvisorGateTraceEvidence | null | undefined
+): Pick<
+  Extract<AdvisorGateOutput, { status: 'failed' }>,
+  'failedStage' | 'traceFailureCode' | 'sdkCode' | 'httpStatus'
+> {
+  if (trace === null || trace === undefined) return {};
+  const failedStage = [...trace.stages]
+    .reverse()
+    .find(({ status, stage }) => status === 'failed' && STABLE_ADVISOR_STAGES.has(stage));
+  const rootFailure = trace.failure;
+  const stageFailure = failedStage?.failure;
+  const traceFailureCode =
+    stableDiagnosticCode(rootFailure?.code) ?? stableDiagnosticCode(stageFailure?.code);
+  const sdkCode =
+    stableDiagnosticCode(rootFailure?.details?.['sdkCode']) ??
+    stableDiagnosticCode(stageFailure?.details?.['sdkCode']);
+  const httpStatus =
+    stableDiagnosticHttpStatus(rootFailure?.details?.['httpStatus']) ??
+    stableDiagnosticHttpStatus(stageFailure?.details?.['httpStatus']);
+  return {
+    ...(failedStage === undefined ? {} : { failedStage: failedStage.stage }),
+    ...(traceFailureCode === undefined ? {} : { traceFailureCode }),
+    ...(sdkCode === undefined ? {} : { sdkCode }),
+    ...(httpStatus === undefined ? {} : { httpStatus })
+  };
+}
+
+function stableDiagnosticCode(value: string | undefined): string | undefined {
+  return value && /^[A-Z][A-Z0-9_]{0,79}$/u.test(value) ? value : undefined;
+}
+
+function stableDiagnosticHttpStatus(value: string | undefined): number | undefined {
+  if (value === undefined || !/^[1-5]\d{2}$/u.test(value)) return undefined;
+  const status = Number(value);
+  return status >= 100 && status <= 599 ? status : undefined;
 }
 
 function positiveFinite(value: number): boolean {
   return Number.isFinite(value) && value > 0;
+}
+
+export async function runAdvisorGateWithDeadline<T>(input: {
+  run: () => Promise<T>;
+  cancel: () => void;
+  timeoutMs: number;
+}): Promise<{ status: 'completed'; value: T } | { status: 'timed-out' }> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const runOutcome = Promise.resolve()
+    .then(input.run)
+    .then(
+      (value) => ({ status: 'completed' as const, value }),
+      (error: unknown) => ({ status: 'rejected' as const, error })
+    );
+  const timeoutOutcome = new Promise<{ status: 'timed-out' }>((resolve) => {
+    timeout = setTimeout(() => {
+      try {
+        input.cancel();
+      } catch {
+        // The deadline result is authoritative even if cancellation bookkeeping fails.
+      } finally {
+        resolve({ status: 'timed-out' });
+      }
+    }, input.timeoutMs);
+  });
+
+  try {
+    const outcome = await Promise.race([runOutcome, timeoutOutcome]);
+    if (outcome.status === 'rejected') throw outcome.error;
+    return outcome;
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
 }
 
 function knowledgeMatches(left: KnowledgeSummary, right: KnowledgeSummary): boolean {
@@ -420,27 +532,38 @@ async function runAdvisorSavedGate(): Promise<AdvisorGateOutput> {
   });
 
   const floor = Math.max(...scenarioView.scenario.floors.map(({ floor }) => floor));
+  const correlationId = `advisor-saved-gate-${Date.now().toString(36)}`;
   const startedAt = Date.now();
-  const result = await advisor.recommend({
-    correlationId: `advisor-saved-gate-${Date.now().toString(36)}`,
-    uid: profile.uid,
-    scenarioId: scenarioView.scenario.id,
-    dataVersion: scenarioView.scenario.meta.dataVersion,
-    locale: 'zh-CN',
-    floor,
-    preferences: {
-      comfort: 'medium',
-      survival: 'medium',
-      lowInvestment: 'low',
-      noBuildChange: true
+  const deadline = await runAdvisorGateWithDeadline({
+    run: () =>
+      advisor.recommend({
+        correlationId,
+        uid: profile.uid,
+        scenarioId: scenarioView.scenario.id,
+        dataVersion: scenarioView.scenario.meta.dataVersion,
+        locale: 'zh-CN',
+        floor,
+        preferences: {
+          comfort: 'medium',
+          survival: 'medium',
+          lowInvestment: 'low',
+          noBuildChange: true
+        },
+        lockedCharacterIds: [],
+        excludedCharacterIds: []
+      }),
+    cancel: () => {
+      advisor.cancel(correlationId);
     },
-    lockedCharacterIds: [],
-    excludedCharacterIds: []
+    timeoutMs: ADVISOR_GATE_TIMEOUT_MS
   });
+  if (deadline.status === 'timed-out') {
+    return evaluateAdvisorGate({ kind: 'unavailable', code: 'ADVISOR_TIMEOUT' });
+  }
 
   return evaluateAdvisorGate({
     kind: 'run',
-    result,
+    result: deadline.value,
     trace: trace.latest(),
     ownedCharacterIds: profile.characters.map(({ id }) => String(id)),
     latencyMs: Date.now() - startedAt
@@ -465,10 +588,11 @@ async function main(): Promise<void> {
   } catch {
     output = failed('PROVIDER_ERROR');
   }
-  process.stdout.write(`${JSON.stringify(output)}\n`);
-  process.exitCode = output.status === 'passed' ? 0 : 1;
-  const { app } = await import('electron');
-  app.quit();
+  const [{ app }, { writeFileSync }] = await Promise.all([import('electron'), import('node:fs')]);
+  terminateSavedGate(output, {
+    write: (line) => writeFileSync(process.stdout.fd, line, 'utf8'),
+    exit: (code) => app.exit(code)
+  });
 }
 
 if (process.versions.electron !== undefined) {

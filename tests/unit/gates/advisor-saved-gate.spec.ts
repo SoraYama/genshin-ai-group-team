@@ -1,12 +1,13 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   ADVISOR_GATE_FAILURE_CODES,
   createNoopAdvisorGateHistory,
   evaluateAdvisorGate,
+  runAdvisorGateWithDeadline,
   selectAuthoritativeOwnedCharacters,
   type AdvisorGateEvaluationInput
 } from '../../../src/main/gates/advisor-saved-gate.js';
@@ -47,6 +48,10 @@ function successfulRun(): Extract<AdvisorGateEvaluationInput, { kind: 'run' }> {
 }
 
 describe('evaluateAdvisorGate', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('requires smart-service for the advisor gate', () => {
     const input = successfulRun();
     expect(
@@ -90,6 +95,7 @@ describe('evaluateAdvisorGate', () => {
     const stage = (name: (typeof requiredStages)[number]) =>
       base.trace?.stages.find(({ stage: stageName }) => stageName === name);
     const cases: Array<[string, AdvisorGateEvaluationInput]> = [
+      ['ADVISOR_TIMEOUT', { kind: 'unavailable', code: 'ADVISOR_TIMEOUT' }],
       ['MISSING_SAVED_API_KEY', { kind: 'unavailable', code: 'MISSING_SAVED_API_KEY' }],
       ['SAVED_KEY_DECRYPT_FAILED', { kind: 'unavailable', code: 'SAVED_KEY_DECRYPT_FAILED' }],
       ['SAFE_STORAGE_UNAVAILABLE', { kind: 'unavailable', code: 'SAFE_STORAGE_UNAVAILABLE' }],
@@ -225,12 +231,122 @@ describe('evaluateAdvisorGate', () => {
     expect(stage('compose')).toBeDefined();
     expect(cases.map(([code]) => code)).toEqual([...ADVISOR_GATE_FAILURE_CODES]);
     for (const [code, input] of cases) {
-      expect(evaluateAdvisorGate(input)).toEqual({
+      expect(evaluateAdvisorGate(input)).toMatchObject({
         gate: 'advisor-saved',
         status: 'failed',
         code
       });
     }
+  });
+
+  it('keeps only stable sanitized diagnostics from a real failed trace fixture', () => {
+    const input = successfulRun();
+    input.result = {
+      ...input.result,
+      source: 'local-rules'
+    };
+    input.trace = {
+      ...input.trace!,
+      status: 'failed',
+      finalSource: 'local-rules',
+      failure: {
+        code: 'PROVIDER_ERROR',
+        message: 'secret provider response body',
+        retryable: true,
+        details: {
+          sdkCode: 'AGENT_TURN_RESULT_ERROR',
+          httpStatus: '429',
+          providerBody: 'secret raw response'
+        }
+      },
+      stages: input.trace!.stages.map((stage) =>
+        stage.stage === 'critique'
+          ? {
+              ...stage,
+              status: 'failed' as const,
+              rawOutput: 'secret raw profile and prompt',
+              failure: {
+                code: 'CRITIQUE_PROVIDER_ERROR',
+                message: 'secret stage body',
+                retryable: true
+              }
+            }
+          : stage
+      )
+    };
+
+    const output = evaluateAdvisorGate(input);
+
+    expect(output).toEqual({
+      gate: 'advisor-saved',
+      status: 'failed',
+      code: 'ADVISOR_FELL_BACK',
+      failedStage: 'critique',
+      traceFailureCode: 'PROVIDER_ERROR',
+      sdkCode: 'AGENT_TURN_RESULT_ERROR',
+      httpStatus: 429
+    });
+    expect(JSON.stringify(output)).not.toMatch(/secret|body|raw|profile|prompt/i);
+  });
+
+  it('rejects a later invalid duplicate stage even when an earlier occurrence is valid', () => {
+    const input = successfulRun();
+    input.trace!.stages.push({
+      stage: 'critique',
+      status: 'completed',
+      rawOutput: '{"issues":[]}',
+      usage: {
+        inputTokens: 0,
+        outputTokens: 2
+      }
+    });
+
+    expect(evaluateAdvisorGate(input)).toEqual({
+      gate: 'advisor-saved',
+      status: 'failed',
+      code: 'STAGE_INPUT_USAGE_MISSING'
+    });
+  });
+
+  it('accepts multiple completed occurrences when every one has raw output and positive usage', () => {
+    const input = successfulRun();
+    input.trace!.stages.push({
+      stage: 'critique',
+      status: 'completed',
+      rawOutput: '{"issues":[]}',
+      usage: {
+        inputTokens: 4,
+        outputTokens: 2
+      }
+    });
+
+    expect(evaluateAdvisorGate(input)).toMatchObject({
+      gate: 'advisor-saved',
+      status: 'passed'
+    });
+  });
+
+  it('times out a hanging advisor run, cancels it, clears the timer, and handles late rejection', async () => {
+    vi.useFakeTimers();
+    const cancel = vi.fn();
+    let rejectRun: ((reason?: unknown) => void) | undefined;
+    const hangingRun = new Promise<never>((_resolve, reject) => {
+      rejectRun = reject;
+    });
+
+    const outcomePromise = runAdvisorGateWithDeadline({
+      run: () => hangingRun,
+      cancel,
+      timeoutMs: 50
+    });
+
+    await vi.advanceTimersByTimeAsync(50);
+    await expect(outcomePromise).resolves.toEqual({ status: 'timed-out' });
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+
+    rejectRun?.(new Error('late rejection after timeout'));
+    await Promise.resolve();
   });
 
   it('accepts only MiHoYo roster ownership and keeps Enka as detail enrichment', () => {
