@@ -44,13 +44,13 @@
 
 .abyss-workbench-toolbar span {
   color: rgba(220, 232, 235, 0.58);
-  font-size: 10px;
+  font-size: 0.75rem;
   letter-spacing: 0.08em;
 }
 
 .abyss-workbench-toolbar h2 {
   margin: 0;
-  font-size: 17px;
+  font-size: 1.125rem;
   letter-spacing: 0.07em;
 }
 
@@ -60,13 +60,13 @@
   align-items: center;
   gap: 10px;
   overflow: hidden;
-  font-size: 10px;
+  font-size: 0.75rem;
   white-space: nowrap;
 }
 
 .abyss-workbench-status strong {
   color: #d9c58c;
-  font-size: 10px;
+  font-size: 0.75rem;
   font-weight: 600;
 }
 
@@ -76,7 +76,7 @@
   border: 1px solid rgba(211, 192, 137, 0.42);
   color: #eadcae;
   background: transparent;
-  font-size: 9px;
+  font-size: 0.75rem;
   cursor: pointer;
 }
 
@@ -130,7 +130,7 @@
 .abyss-panel-header span,
 .abyss-result-header span {
   color: rgba(220, 232, 235, 0.52);
-  font-size: 9px;
+  font-size: 0.75rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -139,7 +139,7 @@
 .abyss-result-header h3 {
   margin: 0;
   color: #f0f5f6;
-  font-size: 14px;
+  font-size: 0.9375rem;
   letter-spacing: 0.05em;
 }
 
@@ -147,7 +147,7 @@
   overflow: hidden;
   color: #b8c8cc;
   font-family: var(--gta-font-mono);
-  font-size: 9px;
+  font-size: 0.75rem;
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -179,7 +179,7 @@
   border: 1px solid rgba(198, 216, 222, 0.2);
   color: rgba(232, 240, 242, 0.72);
   background: rgba(10, 22, 35, 0.68);
-  font-size: 10px;
+  font-size: 0.75rem;
   cursor: pointer;
 }
 
@@ -206,7 +206,7 @@
   border-radius: 0;
   color: #edf4f6;
   background: rgba(5, 15, 27, 0.72);
-  font-size: 10px;
+  font-size: 0.75rem;
 }
 
 .abyss-roster-grid {
@@ -248,7 +248,7 @@
   border: 1px solid rgba(202, 184, 132, 0.4);
   color: #d8c486;
   background: #132639;
-  font-size: 11px;
+  font-size: 0.75rem;
 }
 
 .abyss-roster-grid .gta-abyss-character > span:nth-child(2) {
@@ -259,7 +259,7 @@
 
 .abyss-roster-grid .gta-abyss-character strong {
   overflow: hidden;
-  font-size: 10px;
+  font-size: 0.75rem;
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -269,7 +269,7 @@
 .abyss-roster-grid .gta-abyss-character em {
   color: rgba(220, 232, 235, 0.5);
   font-family: var(--gta-font-mono);
-  font-size: 8px;
+  font-size: 0.75rem;
   font-style: normal;
 }
 
@@ -291,11 +291,11 @@
 
 .abyss-selection-summary span {
   color: rgba(220, 232, 235, 0.45);
-  font-size: 8px;
+  font-size: 0.75rem;
 }
 
 .abyss-selection-summary strong {
-  font-size: 9px;
+  font-size: 0.75rem;
   font-weight: 500;
 }
 
@@ -309,7 +309,7 @@
 .abyss-run-actions .gta-button {
   min-height: 30px;
   padding-inline: 10px;
-  font-size: 9px;
+  font-size: 0.75rem;
 }
 
 .abyss-scenario-selectors {
@@ -335,7 +335,7 @@
   align-items: center;
   gap: 7px;
   color: rgba(220, 232, 235, 0.56);
-  font-size: 9px;
+  font-size: 0.75rem;
 }
 
 .abyss-scenario-block {
@@ -344,7 +344,7 @@
   border-bottom: 1px solid rgba(211, 192, 137, 0.3);
   color: #eadcae;
   background: rgba(124, 92, 42, 0.15);
-  font-size: 9px;
+  font-size: 0.75rem;
 }
 
 .abyss-enemy-columns {
@@ -369,7 +369,7 @@
   padding: 5px 0;
   color: #d8c486;
   background: #102337;
-  font-size: 10px;
+  font-size: 0.75rem;
 }
 
 .abyss-enemy-columns .gta-abyss-chamber + .gta-abyss-chamber {
@@ -382,7 +382,7 @@
   display: flex;
   justify-content: space-between;
   color: rgba(230, 239, 241, 0.66);
-  font-size: 9px;
+  font-size: 0.75rem;
 }
 
 .abyss-enemy-columns .gta-abyss-wave {
@@ -397,7 +397,7 @@
   left: 0;
   color: rgba(220, 232, 235, 0.38);
   font-family: var(--gta-font-mono);
-  font-size: 7px;
+  font-size: 0.6875rem;
   writing-mode: vertical-rl;
 }
 
@@ -409,13 +409,13 @@
   display: flex;
   justify-content: space-between;
   gap: 6px;
-  font-size: 9px;
+  font-size: 0.75rem;
 }
 
 .abyss-enemy-columns .gta-abyss-enemy > div > span {
   color: rgba(220, 232, 235, 0.45);
   font-family: var(--gta-font-mono);
-  font-size: 8px;
+  font-size: 0.75rem;
 }
 
 .abyss-enemy-columns .gta-abyss-enemy ul {
@@ -432,7 +432,7 @@
   border-left: 1px solid rgba(211, 192, 137, 0.5);
   color: rgba(220, 232, 235, 0.54);
   background: rgba(196, 215, 220, 0.05);
-  font-size: 7px;
+  font-size: 0.6875rem;
 }
 
 .abyss-scenario-meta {
@@ -444,7 +444,7 @@
   gap: 8px;
   padding: 5px 10px;
   border-top: 1px solid rgba(198, 216, 222, 0.14);
-  font-size: 8px;
+  font-size: 0.75rem;
 }
 
 .abyss-scenario-meta > span {
@@ -461,7 +461,7 @@
 
 .abyss-scenario-meta code {
   color: rgba(220, 232, 235, 0.38);
-  font-size: 7px;
+  font-size: 0.6875rem;
 }
 
 .abyss-result-panel {
@@ -492,7 +492,7 @@
   padding: 0 7px;
   border: 1px solid rgba(198, 216, 222, 0.25);
   color: rgba(229, 238, 240, 0.7);
-  font-size: 9px;
+  font-size: 0.75rem;
 }
 
 .abyss-result-panel .gta-abyss-source.is-smart-service {
@@ -515,7 +515,7 @@
   align-items: center;
   gap: 4px;
   color: rgba(220, 232, 235, 0.34);
-  font-size: 7px;
+  font-size: 0.6875rem;
   white-space: nowrap;
 }
 
@@ -545,7 +545,7 @@
   place-items: center;
   border: 1px solid currentcolor;
   font-family: var(--gta-font-mono);
-  font-size: 7px;
+  font-size: 0.6875rem;
 }
 
 .abyss-result-skeleton,
@@ -574,7 +574,7 @@
 
 .abyss-result-team-skeleton > strong {
   color: rgba(220, 232, 235, 0.54);
-  font-size: 10px;
+  font-size: 0.75rem;
 }
 
 .abyss-result-roster,
@@ -620,7 +620,7 @@
 .abyss-result-panel .gta-abyss-result-roster strong {
   overflow: hidden;
   max-width: 100%;
-  font-size: 8px;
+  font-size: 0.75rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -628,7 +628,7 @@
 .abyss-result-roster small,
 .abyss-result-panel .gta-abyss-result-roster small {
   color: rgba(220, 232, 235, 0.42);
-  font-size: 7px;
+  font-size: 0.6875rem;
 }
 
 .abyss-result-skeleton aside,
@@ -644,13 +644,13 @@
 .abyss-result-skeleton aside span,
 .abyss-result-metrics span {
   color: rgba(220, 232, 235, 0.42);
-  font-size: 8px;
+  font-size: 0.75rem;
 }
 
 .abyss-result-skeleton aside strong,
 .abyss-result-metrics strong {
   color: rgba(235, 242, 244, 0.72);
-  font-size: 8px;
+  font-size: 0.75rem;
   font-weight: 500;
 }
 
@@ -666,7 +666,7 @@
   overflow: hidden;
   margin: 0;
   color: rgba(232, 240, 242, 0.7);
-  font-size: 9px;
+  font-size: 0.75rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -674,7 +674,7 @@
 .gta-abyss-pending-badge {
   flex: none;
   color: #dfc986;
-  font-size: 9px;
+  font-size: 0.75rem;
 }
 
 .abyss-result-panel .gta-abyss-result-teams {
@@ -692,14 +692,14 @@
 .abyss-result-panel .gta-abyss-result-teams h4 {
   margin: 0;
   color: #dec98b;
-  font-size: 10px;
+  font-size: 0.75rem;
 }
 
 .abyss-result-panel .gta-abyss-result-teams section > p {
   overflow: hidden;
   margin: 5px 0 0;
   color: rgba(224, 234, 236, 0.58);
-  font-size: 8px;
+  font-size: 0.75rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -717,7 +717,7 @@
 .abyss-result-tabpanel {
   padding: 6px 12px 10px;
   color: rgba(229, 238, 240, 0.65);
-  font-size: 8px;
+  font-size: 0.75rem;
 }
 
 .abyss-result-overview {
@@ -780,7 +780,17 @@
 .abyss-result-empty p,
 .abyss-result-empty ul {
   color: rgba(229, 238, 240, 0.64);
-  font-size: 10px;
+  font-size: 0.75rem;
+}
+
+.abyss-result-empty li {
+  display: grid;
+  gap: 0.2rem;
+  margin-block: 0.55rem;
+}
+
+.abyss-result-empty li span {
+  color: rgba(229, 238, 240, 0.56);
 }
 
 @keyframes abyss-skeleton-pulse {
@@ -809,6 +819,50 @@
   }
 
   .abyss-result-panel .gta-abyss-progress li {
-    font-size: 0;
+    font-size: 0.6875rem;
+  }
+}
+
+@media (max-width: 900px), (max-height: 680px) {
+  .gta-advisor-page:has(> .abyss-workbench) {
+    padding-bottom: 2rem;
+  }
+
+  .abyss-workbench {
+    height: auto;
+    min-height: calc(100dvh - var(--app-shell-offset));
+    grid-template-rows: auto auto;
+    overflow: visible;
+  }
+
+  .abyss-input-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .abyss-input-grid > .abyss-panel + .abyss-panel {
+    border-top: 1px solid rgba(198, 216, 222, 0.18);
+    border-left: 0;
+  }
+
+  .abyss-constraint-panel,
+  .abyss-scenario-panel {
+    min-height: 30rem;
+  }
+
+  .abyss-result-panel {
+    min-height: 34rem;
+  }
+
+  .abyss-panel,
+  .abyss-panel-scroll,
+  .abyss-result-skeleton,
+  .abyss-result-content,
+  .abyss-result-empty {
+    overflow: visible;
+  }
+
+  .abyss-result-panel .gta-abyss-progress {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.35rem 0;
   }
 }

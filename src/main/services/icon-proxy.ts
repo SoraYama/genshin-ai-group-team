@@ -66,7 +66,7 @@ export class IconProxyService {
   }
 
   private imageResponse(buf: Buffer): Response {
-    return new Response(buf, {
+    return new Response(Uint8Array.from(buf), {
       headers: {
         'content-type': 'image/png',
         'cache-control': 'public, max-age=86400'

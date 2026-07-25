@@ -152,6 +152,7 @@ export function AbyssWorkspace({
           running={workbench.running}
           activeStep={workbench.activeStep}
           generationError={workbench.loadError === 'generate'}
+          cancelled={workbench.cancelled}
           onOpenTrace={workbench.openTrace}
           traceButtonRef={traceButtonRef}
         />

@@ -51,6 +51,7 @@ export function useAbyssWorkbench({
   const [resultNeedsUpdate, setResultNeedsUpdate] = useState(false);
   const [activeStep, setActiveStep] = useState<AbyssAdvisorProgressStep | null>(null);
   const [running, setRunning] = useState(false);
+  const [cancelled, setCancelled] = useState(false);
   const [historyNotice, setHistoryNotice] = useState('');
   const [traceOpen, setTraceOpen] = useState(false);
   const [trace, setTrace] = useState<AgentRunTrace | null>(null);
@@ -85,6 +86,7 @@ export function useAbyssWorkbench({
     setResultNeedsUpdate(false);
     setActiveStep(null);
     setRunning(false);
+    setCancelled(false);
 
     void Promise.all([api.abyssAdvisor.getScenario(), api.profile.get({ uid })])
       .then(([nextScenario, nextProfile]) => {
@@ -192,6 +194,7 @@ export function useAbyssWorkbench({
   function invalidateResult(reset = false) {
     requestSequence.current += 1;
     setActiveStep(null);
+    setCancelled(false);
     setResultNeedsUpdate(!reset && result?.status === 'planned');
     if (reset || result?.status !== 'planned') setResult(null);
     if (running) {
@@ -237,6 +240,7 @@ export function useAbyssWorkbench({
     requestSequence.current = requestId;
     activeCorrelation.current = correlationId;
     setRunning(true);
+    setCancelled(false);
     setLoadError('');
     if (!recomputeHalf) setResult(null);
     setActiveStep('reading-roster');
@@ -271,7 +275,7 @@ export function useAbyssWorkbench({
   function cancelPlan() {
     requestSequence.current += 1;
     setRunning(false);
-    setActiveStep(null);
+    setCancelled(true);
     cancelActiveRequest();
   }
 
@@ -319,6 +323,7 @@ export function useAbyssWorkbench({
     resultNeedsUpdate,
     activeStep,
     running,
+    cancelled,
     historyNotice,
     lockedCharacterIds,
     excludedCharacterIds,

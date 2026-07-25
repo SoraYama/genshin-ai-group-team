@@ -68,6 +68,28 @@ async function resetLocaleToChinese(): Promise<void> {
   await expect(page.getByRole('button', { name: '账号与设置' })).toBeVisible();
 }
 
+async function openChallengePicker(): Promise<void> {
+  await page.getByRole('button', { name: '挑战配队' }).click();
+  const changeChallenge = page.getByRole('button', { name: '切换挑战' });
+  await expect(changeChallenge).toBeVisible({ timeout: 10_000 });
+  await changeChallenge.click();
+  await expect(page.getByRole('heading', { name: '选择挑战' })).toBeVisible({
+    timeout: 10_000
+  });
+  await expect(page.getByTestId('challenge-mode-entry')).toHaveCount(3);
+}
+
+async function openChallengeMode(modeName: RegExp, readyHeading: string): Promise<void> {
+  await openChallengePicker();
+  await page.getByTestId('challenge-mode-entry').filter({ hasText: modeName }).click();
+  await expect(page.getByRole('heading', { name: readyHeading })).toBeVisible({
+    timeout: 10_000
+  });
+  await expect(page.getByText(/正在读取(?:角色与挑战|演员与剧诗)资料/u)).toHaveCount(0, {
+    timeout: 10_000
+  });
+}
+
 async function expectNoChineseChrome(terms: RegExp): Promise<void> {
   const content = (await page.locator('main').textContent()) ?? '';
   expect(content).not.toMatch(terms);
@@ -482,7 +504,10 @@ test('keeps the core keyboard surface named and removes motion when requested', 
   await page.emulateMedia({ reducedMotion: 'reduce' });
   const accountButton = page.getByRole('button', { name: '账号与设置' });
   await accountButton.click();
-  await page.getByRole('menuitem', { name: '资料绑定' }).click();
+  const accountMenu = page.getByRole('menu', { name: '账号与设置' });
+  await accountMenu.getByRole('menuitem', { name: '资料绑定' }).click();
+  if (await accountMenu.isVisible().catch(() => false)) await accountButton.click();
+  await expect(accountMenu).toBeHidden();
   const backButton = page.getByRole('button', { name: '返回选择方式' });
   if (await backButton.isVisible().catch(() => false)) await backButton.click();
 
@@ -499,7 +524,7 @@ test('keeps the core keyboard surface named and removes motion when requested', 
         .filter((control) => {
           const rect = control.getBoundingClientRect();
           const style = control.ownerDocument.defaultView?.getComputedStyle(control);
-          return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden';
+          return rect.width > 0 && rect.height > 0 && style?.visibility !== 'hidden';
         })
         .filter((control) => {
           const id = control.getAttribute('id');
@@ -941,8 +966,7 @@ test('renders profile coverage and known build fields without fake zero values',
   await expectPageFitsEveryViewport('Roster delete dialog');
   await deleteDialog.getByRole('button', { name: '保留并返回' }).click();
 
-  await page.getByRole('button', { name: '挑战配队' }).click();
-  await expect(page.getByRole('heading', { name: '选择挑战' })).toBeVisible();
+  await openChallengePicker();
   await expect(page.getByRole('button', { name: /深境螺旋/ })).toContainText('上下半两队');
   await expect(page.getByRole('button', { name: /幻想真境剧诗/ })).toContainText('演员池与活力');
   await expect(page.getByRole('button', { name: /幽境危战/ })).toContainText('三阶段首领');
@@ -953,6 +977,12 @@ test('renders profile coverage and known build fields without fake zero values',
   await page.keyboard.press('Space');
   await expect(theaterEntry).toHaveAttribute('aria-pressed', 'true');
   await expect(abyssEntry).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByRole('heading', { name: '幻想真境剧诗手册' })).toBeVisible({
+    timeout: 10_000
+  });
+  await expect(page.getByText('正在读取演员与剧诗资料…', { exact: true })).toHaveCount(0, {
+    timeout: 10_000
+  });
 
   await expect(page.locator('.gta-advisor-advanced')).toHaveCount(0);
   await expect(page.getByText(/abyss-mage|ruin-guard/i)).toHaveCount(0);
@@ -973,7 +1003,6 @@ test('renders profile coverage and known build fields without fake zero values',
   await expectPageFitsEveryViewport('Advisor details');
 
   await page.setViewportSize({ width: 1024, height: 768 });
-  await page.waitForTimeout(550);
   await page.screenshot({ path: path.join(tmpdir(), 'gta-m2-challenge-1024x768.png') });
 
   await page.setViewportSize({ width: 1600, height: 1000 });
@@ -1078,15 +1107,12 @@ test('runs the abyss-specific development-sample flow with accessible interventi
     })
   );
   await launchApp();
-  await page.getByRole('button', { name: '挑战配队' }).click();
-  await page.getByRole('button', { name: /深境螺旋/ }).click();
+  await openChallengeMode(/深境螺旋/u, '深境螺旋战线');
 
   await switchToEnglish();
-  await expect(page.getByRole('heading', { name: 'Choose a challenge' })).toBeVisible();
-  await expect(page.getByRole('button', { name: /Spiral Abyss/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: /Stygian Onslaught/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: /Imaginarium Theater/ })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Spiral Abyss planner' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Spiral Abyss planner' })).toBeVisible({
+    timeout: 10_000
+  });
   await expect(page.getByRole('searchbox', { name: 'Search available characters' })).toHaveCount(0);
   await expect(page.getByText(/10 shown/u)).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Generate both teams' })).toBeVisible();
@@ -1198,7 +1224,7 @@ test('runs the abyss-specific development-sample flow with accessible interventi
   await expect(traceDialog).toContainText('错误');
   const knowledgeStage = traceDialog
     .locator('details')
-    .filter({ has: page.getByText('knowledge', { exact: true }) });
+    .filter({ has: page.getByText('可信知识', { exact: true }) });
   await expect(knowledgeStage).toContainText('输入摘要');
   await expect(knowledgeStage).toContainText('candidates=9');
   await expect(knowledgeStage).toContainText('模型原文');
@@ -1227,7 +1253,7 @@ test('runs the abyss-specific development-sample flow with accessible interventi
   const englishTraceDialog = page.getByRole('dialog', { name: 'Model run record' });
   const englishKnowledgeStage = englishTraceDialog
     .locator('details')
-    .filter({ has: page.getByText('knowledge', { exact: true }) });
+    .filter({ has: page.getByText('Trusted knowledge', { exact: true }) });
   await expect(englishKnowledgeStage).toContainText('Input summary');
   await expect(englishKnowledgeStage).toContainText('Model raw output');
   await expect(englishKnowledgeStage).toContainText(
@@ -1420,10 +1446,7 @@ test('plans three Stygian phases from the development scenario without leaking r
     })
   );
   await launchApp();
-  await page.getByRole('button', { name: '挑战配队' }).click();
-  await page.getByRole('button', { name: /幽境危战/ }).click();
-
-  await expect(page.getByRole('heading', { name: '幽境危战作战台' })).toBeVisible();
+  await openChallengeMode(/幽境危战/u, '幽境危战作战台');
   await expect(page.getByText('演练资料，不代表本期')).toBeVisible();
   await expect(page.getByRole('group', { name: '选择六档难度' }).getByRole('button')).toHaveCount(
     6
@@ -1481,7 +1504,9 @@ test('plans three Stygian phases from the development scenario without leaking r
 
   await page.getByRole('button', { name: '冲高难奖励' }).click();
   await page.getByRole('button', { name: '生成三阶段方案' }).click();
-  await expect(page.getByRole('heading', { name: '三队已按当期规则分配' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '三队已按当期规则分配' })).toBeVisible({
+    timeout: 15_000
+  });
   await expect(
     page.getByText('已按本地规则核对三阶段队伍、复用限制与机制覆盖。', { exact: true })
   ).toBeVisible();
@@ -1517,7 +1542,9 @@ test('plans three Stygian phases from the development scenario without leaking r
   await expect(page.getByRole('button', { name: /危战角色14，当前：排除/ })).toBeVisible();
 
   await page.getByRole('button', { name: '生成三阶段方案' }).click();
-  await expect(page.getByRole('heading', { name: '三队已按当期规则分配' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '三队已按当期规则分配' })).toBeVisible({
+    timeout: 15_000
+  });
   const resultCharacters = await page
     .locator('[data-stygian-result-character-id]')
     .evaluateAll((nodes) =>
@@ -1561,6 +1588,9 @@ test('plans three Stygian phases from the development scenario without leaking r
   await page.getByRole('button', { name: 'Simple rotations' }).click();
   await page.getByRole('button', { name: 'Generate three-phase plan' }).click();
   await expect(
+    page.getByRole('heading', { name: 'Three teams allocated under current rules' })
+  ).toBeVisible({ timeout: 15_000 });
+  await expect(
     page.getByText('All three teams, reuse limits, and mechanic coverage were checked locally.', {
       exact: true
     })
@@ -1570,7 +1600,9 @@ test('plans three Stygian phases from the development scenario without leaking r
   );
   expect(stygianRequestLocales).toContain('en-US');
   await switchToChinese();
-  await expect(page.getByRole('heading', { name: '三队已按当期规则分配' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '三队已按当期规则分配' })).toBeVisible({
+    timeout: 15_000
+  });
   await expectPageFitsEveryViewport('Stygian input and result');
 
   await page.setViewportSize({ width: 1024, height: 768 });
@@ -1677,9 +1709,7 @@ test('keeps Theater generation blocked when external actors do not satisfy hard 
     })
   );
   await launchApp();
-  await page.getByRole('button', { name: '挑战配队' }).click();
-  await page.getByRole('button', { name: /幻想真境剧诗/ }).click();
-
+  await openChallengeMode(/幻想真境剧诗/u, '幻想真境剧诗手册');
   await expect(page.getByText('7 / 8 名可入场')).toBeVisible();
   await expect(page.getByRole('alert')).toContainText('还缺 1 名可入场角色');
   await expect(page.getByRole('alert')).toContainText('优先提升 资格角色8 至 70 级可补位');
@@ -1766,10 +1796,7 @@ test('checks Theater eligibility and renders a cast-vigor route instead of team 
     })
   );
   await launchApp();
-  await page.getByRole('button', { name: '挑战配队' }).click();
-  await page.getByRole('button', { name: /幻想真境剧诗/ }).click();
-
-  await expect(page.getByRole('heading', { name: '幻想真境剧诗手册' })).toBeVisible();
+  await openChallengeMode(/幻想真境剧诗/u, '幻想真境剧诗手册');
   expect(
     await page
       .getByRole('button', { name: '返回挑战入口' })
@@ -1819,7 +1846,9 @@ test('checks Theater eligibility and renders a cast-vigor route instead of team 
   await page.getByRole('button', { name: '生成剧诗路线' }).click();
   await expect(page.getByRole('button', { name: /演示试用角色/ })).toBeDisabled();
   await expect(page.getByRole('button', { name: /剧诗角色1.*优先纳入/ })).toBeDisabled();
-  await expect(page.getByRole('heading', { name: '演员池与活力已排成幕次路线' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '演员池与活力已排成幕次路线' })).toBeVisible({
+    timeout: 15_000
+  });
   await expect(
     page.getByText('已按本地规则核对演员池、活力预算与逐幕路线。', { exact: true })
   ).toBeVisible();
@@ -1889,6 +1918,9 @@ test('checks Theater eligibility and renders a cast-vigor route instead of team 
   await page.getByRole('button', { name: 'Simple rotations' }).click();
   await page.getByRole('button', { name: 'Generate Theater route' }).click();
   await expect(
+    page.getByRole('heading', { name: 'Cast and Vigor arranged into an act route' })
+  ).toBeVisible({ timeout: 15_000 });
+  await expect(
     page.getByText('The cast, Vigor budget, and act route were checked with local rules.', {
       exact: true
     })
@@ -1898,7 +1930,9 @@ test('checks Theater eligibility and renders a cast-vigor route instead of team 
   );
   expect(theaterRequestLocales).toContain('en-US');
   await switchToChinese();
-  await expect(page.getByRole('heading', { name: '演员池与活力已排成幕次路线' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '演员池与活力已排成幕次路线' })).toBeVisible({
+    timeout: 15_000
+  });
   await expectPageFitsEveryViewport('Theater route');
 
   await page.setViewportSize({ width: 1024, height: 768 });

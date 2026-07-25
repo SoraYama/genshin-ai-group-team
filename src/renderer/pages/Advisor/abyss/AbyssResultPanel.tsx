@@ -6,7 +6,9 @@ import type {
 } from '../../../../shared/abyss-advisor';
 import type { CharacterProfile, PersistedProfile } from '../../../../shared/domain';
 import {
+  blockedIssuePresentation,
   characterElementLabel,
+  localizedEvidenceReason,
   localizedPlanText,
   localizedProfileName,
   narrativeTargetBody,
@@ -37,6 +39,7 @@ interface AbyssResultPanelProps {
   running: boolean;
   activeStep: AbyssAdvisorProgressStep | null;
   generationError: boolean;
+  cancelled: boolean;
   onOpenTrace: () => void;
   traceButtonRef: React.RefObject<HTMLButtonElement | null>;
 }
@@ -49,10 +52,16 @@ export function AbyssResultPanel({
   running,
   activeStep,
   generationError,
+  cancelled,
   onOpenTrace,
   traceButtonRef
 }: AbyssResultPanelProps) {
   const isEnglish = locale === 'en';
+  const progressState: ProgressState = generationError
+    ? 'error'
+    : cancelled
+      ? 'cancelled'
+      : result?.status ?? (running ? 'running' : 'idle');
   return (
     <section
       className="abyss-panel abyss-result-panel"
@@ -63,17 +72,25 @@ export function AbyssResultPanel({
         <div>
           <span>{isEnglish ? '03 · Result' : '03 · 双队结果'}</span>
           <h3 id="abyss-results-title">
-            {result?.status === 'planned'
+            {generationError
               ? isEnglish
-                ? 'No character overlap between halves'
-                : '上下半零重复'
-              : result?.status === 'blocked'
+                ? 'Generation stopped'
+                : '生成已停止'
+              : cancelled
                 ? isEnglish
-                  ? 'No valid plan'
-                  : '暂时无法组成两支完整队伍'
-                : isEnglish
-                  ? 'Ready for generation'
-                  : '等待生成方案'}
+                  ? 'Generation cancelled'
+                  : '生成已取消'
+                : result?.status === 'planned'
+                  ? isEnglish
+                    ? 'No character overlap between halves'
+                    : '上下半零重复'
+                  : result?.status === 'blocked'
+                    ? isEnglish
+                      ? 'No valid plan'
+                      : '暂时无法组成两支完整队伍'
+                    : isEnglish
+                      ? 'Ready for generation'
+                      : '等待生成方案'}
           </h3>
         </div>
         <div className="abyss-result-header-actions">
@@ -92,7 +109,7 @@ export function AbyssResultPanel({
         locale={locale}
         activeStep={activeStep}
         running={running}
-        complete={Boolean(result)}
+        state={progressState}
       />
 
       {generationError ? (
@@ -102,6 +119,15 @@ export function AbyssResultPanel({
             {isEnglish
               ? 'Character and challenge data were not changed. Try again.'
               : '角色与挑战资料没有被修改，可以直接重试。'}
+          </p>
+        </div>
+      ) : cancelled ? (
+        <div className="abyss-result-empty" role="status">
+          <strong>{isEnglish ? 'Generation cancelled' : '生成已取消'}</strong>
+          <p>
+            {isEnglish
+              ? 'The current choices are unchanged. Generate again when ready.'
+              : '当前选择没有改变，准备好后可重新生成。'}
           </p>
         </div>
       ) : result?.status === 'blocked' ? (
@@ -115,30 +141,51 @@ export function AbyssResultPanel({
   );
 }
 
+type ProgressState = 'idle' | 'running' | 'planned' | 'blocked' | 'error' | 'cancelled';
+
 function ProgressRail({
   locale,
   activeStep,
   running,
-  complete
+  state
 }: {
   locale: PresentationLocale;
   activeStep: AbyssAdvisorProgressStep | null;
   running: boolean;
-  complete: boolean;
+  state: ProgressState;
 }) {
   const isEnglish = locale === 'en';
   const currentIndex = activeStep ? PROGRESS_STEPS.indexOf(activeStep) : -1;
+  const statusLabel: Record<ProgressState, { zh: string; en: string }> = {
+    idle: { zh: '等待开始', en: 'Ready' },
+    running: { zh: '执行中', en: 'Running' },
+    planned: { zh: '已完成', en: 'Completed' },
+    blocked: { zh: '已阻断', en: 'Blocked' },
+    error: { zh: '执行出错', en: 'Stopped with an error' },
+    cancelled: { zh: '已取消', en: 'Cancelled' }
+  };
   return (
     <ol
       className="gta-abyss-progress"
-      aria-label={isEnglish ? 'Team planning progress' : '配队进度'}
+      aria-label={`${isEnglish ? 'Team planning progress' : '配队进度'} · ${statusLabel[state][locale]}`}
       aria-live="polite"
       data-running={running}
+      data-state={state}
     >
       {PROGRESS_STEPS.map((step, index) => {
-        const done = complete || index < currentIndex;
+        const done = state === 'planned' || index < currentIndex;
+        const active = index === currentIndex && !done;
         return (
-          <li key={step} className={done ? 'is-done' : index === currentIndex ? 'is-active' : ''}>
+          <li
+            key={step}
+            className={
+              done
+                ? 'is-done'
+                : active
+                  ? `is-active${state === 'running' ? '' : ` is-${state}`}`
+                  : ''
+            }
+          >
             <span aria-hidden="true">{done ? '✓' : index + 1}</span>
             {progressStepLabel(step, locale)}
           </li>
@@ -192,24 +239,20 @@ function BlockedResult({
   result: Extract<AbyssAdvisorResult, { status: 'blocked' }>;
   locale: PresentationLocale;
 }) {
-  const isEnglish = locale === 'en';
   return (
     <div className="abyss-result-empty gta-abyss-result--blocked">
       <span className="gta-abyss-source is-blocked">{sourceBadge('blocked', locale)}</span>
       <ul>
-        {result.issues.map((issue, index) => (
-          <li key={`${issue.code}-${index}`}>
-            {isEnglish
-              ? `Constraint ${index + 1} is not satisfied by the current choices.`
-              : issue.message}
-          </li>
-        ))}
+        {result.issues.map((issue, index) => {
+          const presentation = blockedIssuePresentation(issue.code, locale);
+          return (
+            <li key={`${issue.code}-${index}`}>
+              <strong>{presentation.message}</strong>
+              <span>{presentation.action}</span>
+            </li>
+          );
+        })}
       </ul>
-      <p>
-        {isEnglish
-          ? 'Reduce locked or excluded characters and try again.'
-          : '请减少锁定或排除角色，或补充角色资料后再试。'}
-      </p>
     </div>
   );
 }
@@ -414,9 +457,22 @@ function PlannedResult({
             {result.memberEvidence.map((evidence) => (
               <article key={evidence.characterId}>
                 <strong>
-                  {characterById.get(evidence.characterId)?.name ?? evidence.characterId}
+                  {characterById.has(evidence.characterId)
+                    ? localizedProfileName(
+                        characterById.get(evidence.characterId)!.name,
+                        evidence.characterId,
+                        selectedCharacterIds,
+                        locale
+                      )
+                    : isEnglish
+                      ? 'Unknown'
+                      : '未知'}
                 </strong>
-                <span>{evidence.fitReasons.join('；')}</span>
+                <span>
+                  {evidence.fitReasons
+                    .map((reason) => localizedEvidenceReason(reason, locale))
+                    .join(isEnglish ? '; ' : '；')}
+                </span>
               </article>
             ))}
             {result.memberEvidence.length === 0 && (

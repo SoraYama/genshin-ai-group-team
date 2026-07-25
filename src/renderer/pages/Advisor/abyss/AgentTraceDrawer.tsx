@@ -1,7 +1,14 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
 
 import type { AgentRunTrace, AgentStageTrace } from '../../../../shared/agent-run-trace';
-import { sourceBadge, type PresentationLocale } from '../abyss-presentation';
+import {
+  agentFailureLabel,
+  agentStageLabel,
+  agentStatusLabel,
+  agentToolLabel,
+  sourceBadge,
+  type PresentationLocale
+} from '../abyss-presentation';
 import './agent-trace-drawer.css';
 
 interface AgentTraceDrawerProps {
@@ -167,7 +174,7 @@ function TraceContents({ trace, locale }: { trace: AgentRunTrace; locale: Presen
       {trace.failure && (
         <p className="agent-trace-failure" role="alert">
           <strong>{isEnglish ? 'Error' : '错误'}</strong>
-          {trace.failure.code}: {trace.failure.message}
+          {agentFailureLabel(trace.failure.code, locale)}: {trace.failure.message}
         </p>
       )}
 
@@ -194,27 +201,31 @@ function StageDetails({
   locale: PresentationLocale;
   defaultOpen: boolean;
 }) {
-  const [copied, setCopied] = useState(false);
+  const [copyState, setCopyState] = useState<'idle' | 'success' | 'error'>('idle');
   const isEnglish = locale === 'en';
   const raw = stage.rawOutput;
 
   async function copyRaw() {
     if (!raw) return;
-    await navigator.clipboard.writeText(raw);
-    setCopied(true);
+    try {
+      await navigator.clipboard.writeText(raw);
+      setCopyState('success');
+    } catch {
+      setCopyState('error');
+    }
   }
 
   return (
     <details open={defaultOpen}>
       <summary>
-        <span>{stage.stage}</span>
-        <strong>{stage.status}</strong>
+        <span>{agentStageLabel(stage.stage, locale)}</span>
+        <strong>{agentStatusLabel(stage.status, locale)}</strong>
         <small>{stage.durationMs === undefined ? '—' : formatDuration(stage.durationMs)}</small>
       </summary>
       <dl>
         <div>
           <dt>{isEnglish ? 'Status' : '状态'}</dt>
-          <dd>{stage.status}</dd>
+          <dd>{agentStatusLabel(stage.status, locale)}</dd>
         </div>
         <div>
           <dt>{isEnglish ? 'Duration' : '耗时'}</dt>
@@ -227,7 +238,12 @@ function StageDetails({
               ? isEnglish
                 ? 'None'
                 : '无'
-              : stage.tools.map(({ name, status }) => `${name} · ${status}`).join('；')}
+              : stage.tools
+                  .map(
+                    ({ name, status }) =>
+                      `${agentToolLabel(name, locale)} · ${agentStatusLabel(status, locale)}`
+                  )
+                  .join(isEnglish ? '; ' : '；')}
           </dd>
         </div>
         <div>
@@ -243,7 +259,11 @@ function StageDetails({
         </div>
         <div>
           <dt>{isEnglish ? 'Error' : '错误'}</dt>
-          <dd>{stage.failure ? `${stage.failure.code}: ${stage.failure.message}` : '—'}</dd>
+          <dd>
+            {stage.failure
+              ? `${agentFailureLabel(stage.failure.code, locale)}: ${stage.failure.message}`
+              : '—'}
+          </dd>
         </div>
       </dl>
       {stage.inputSummary && (
@@ -261,10 +281,27 @@ function StageDetails({
               aria-label={isEnglish ? 'Copy model raw output' : '复制模型原文'}
               onClick={() => void copyRaw()}
             >
-              {copied ? (isEnglish ? 'Copied' : '已复制') : isEnglish ? 'Copy' : '复制'}
+              {copyState === 'success'
+                ? isEnglish
+                  ? 'Copied'
+                  : '已复制'
+                : isEnglish
+                  ? 'Copy'
+                  : '复制'}
             </button>
           )}
         </div>
+        <p className="agent-trace-copy-status" role="status" aria-live="polite">
+          {copyState === 'success'
+            ? isEnglish
+              ? 'Model raw output copied.'
+              : '模型原文已复制。'
+            : copyState === 'error'
+              ? isEnglish
+                ? 'Copy failed. Check the system clipboard permission.'
+                : '复制失败，请检查系统剪贴板权限。'
+              : ''}
+        </p>
         <pre>
           {raw ||
             (isEnglish ? 'No model raw output was recorded for this stage.' : '该阶段无模型原文。')}
