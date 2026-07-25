@@ -82,6 +82,7 @@ export interface AgentRunTraceLease {
 
 export interface AgentRunTraceWriter {
   start(input: StartTraceInput): AgentRunTraceLease;
+  updateKnowledge(lease: AgentRunTraceLease, knowledge: AgentTraceKnowledgeSummary): void;
   startStage(lease: AgentRunTraceLease, input: StartStageInput): void;
   completeStage(lease: AgentRunTraceLease, input: CompleteStageInput): void;
   failStage(lease: AgentRunTraceLease, input: FailStageInput): void;
@@ -141,6 +142,13 @@ export class AgentRunTraceStore implements AgentRunTraceWriter {
     this.sensitiveRegistry = registry;
     this.stageStartedAt.clear();
     return lease;
+  }
+
+  updateKnowledge(lease: AgentRunTraceLease, knowledge: AgentTraceKnowledgeSummary): void {
+    this.updateRunning(lease, (candidate) => {
+      candidate.knowledge = structuredClone(knowledge);
+      return true;
+    });
   }
 
   startStage(lease: AgentRunTraceLease, input: StartStageInput): void {

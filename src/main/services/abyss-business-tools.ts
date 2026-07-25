@@ -3,15 +3,13 @@ import { z } from 'zod';
 
 import type { PersistedProfile } from '../../shared/domain.js';
 import type { AbyssScenario } from '../../shared/abyss-advisor.js';
+import type { KnowledgeContextPacket } from '../../shared/advisor-knowledge.js';
 import {
   abyssElementLabel,
   localizedMechanicTerm,
   parseRequiredCapabilities
 } from '../../shared/abyss-mechanics.js';
-import type { CharacterKnowledgeReader } from '../../shared/character-knowledge.js';
 import {
-  UNKNOWN_CHARACTER_KNOWLEDGE,
-  characterKnowledgeView,
   errorToolResult,
   profileCacheToolInput,
   profileCacheView,
@@ -21,11 +19,11 @@ import {
 export const ABYSS_MCP_TOOL_NAMES = [
   'mcp__genshin__read_profile_cache',
   'mcp__genshin__query_enemy_data',
-  'mcp__genshin__query_genshin_db'
+  'mcp__genshin__query_team_knowledge'
 ] as const;
 
 export interface AbyssBusinessToolLog {
-  tool: 'read_profile_cache' | 'query_enemy_data' | 'query_genshin_db';
+  tool: 'read_profile_cache' | 'query_enemy_data' | 'query_team_knowledge';
   itemCount: number;
   ok: boolean;
   durationMs: number;
@@ -48,7 +46,12 @@ export interface AbyssBusinessToolAuditContext {
 export interface AbyssBusinessToolsOptions {
   getProfile: (uid: string) => PersistedProfile | null;
   getScenario: () => AbyssScenario;
-  knowledge?: CharacterKnowledgeReader;
+  knowledgePacket?: KnowledgeContextPacket;
+  knowledgeScope?: Readonly<{
+    floor: number;
+    chambers: readonly number[];
+    eligibleCharacterIds: readonly string[];
+  }>;
   auditContext?: AbyssBusinessToolAuditContext;
   maxCharacters?: number;
   log?: (event: AbyssBusinessToolLog) => void;
@@ -58,7 +61,7 @@ export interface AbyssBusinessToolsOptions {
 export function createAbyssBusinessTools(options: AbyssBusinessToolsOptions) {
   const maxCharacters = Math.min(Math.max(options.maxCharacters ?? 100, 1), 100);
   const now = options.now ?? Date.now;
-  const knowledge = options.knowledge ?? UNKNOWN_CHARACTER_KNOWLEDGE;
+  const knowledgeVersion = options.knowledgePacket?.knowledgeVersion ?? 'unavailable';
   const auditContext = {
     correlationId: options.auditContext?.correlationId ?? 'unscoped',
     scenarioId: options.auditContext?.scenarioId ?? options.getScenario().id,
@@ -68,7 +71,9 @@ export function createAbyssBusinessTools(options: AbyssBusinessToolsOptions) {
   const run = async <T>(
     toolName: AbyssBusinessToolLog['tool'],
     itemCount: number,
-    parameterSummary: AbyssBusinessToolLog['parameterSummary'],
+    parameterSummary:
+      | AbyssBusinessToolLog['parameterSummary']
+      | (() => AbyssBusinessToolLog['parameterSummary']),
     failureIssueCode: string,
     operation: () => T
   ) => {
@@ -82,8 +87,9 @@ export function createAbyssBusinessTools(options: AbyssBusinessToolsOptions) {
         ok: true,
         durationMs: Math.max(0, now() - startedAt),
         ...auditContext,
-        knowledgeVersion: knowledge.version,
-        parameterSummary,
+        knowledgeVersion,
+        parameterSummary:
+          typeof parameterSummary === 'function' ? parameterSummary() : parameterSummary,
         issueCodes: []
       });
       return result;
@@ -94,8 +100,9 @@ export function createAbyssBusinessTools(options: AbyssBusinessToolsOptions) {
         ok: false,
         durationMs: Math.max(0, now() - startedAt),
         ...auditContext,
-        knowledgeVersion: knowledge.version,
-        parameterSummary,
+        knowledgeVersion,
+        parameterSummary:
+          typeof parameterSummary === 'function' ? parameterSummary() : parameterSummary,
         issueCodes: [failureIssueCode]
       });
       return errorToolResult(error);
@@ -161,25 +168,118 @@ export function createAbyssBusinessTools(options: AbyssBusinessToolsOptions) {
       { annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } }
     ),
     tool(
-      'query_genshin_db',
-      '查询当前本地角色资料中可确认的有限角色知识；未知职责与技能必须返回 unknown。',
+      'query_team_knowledge',
+      '查询当前推荐运行已预构建的知识包子集；只读，不搜索、不联网、不写入知识库。',
       {
         characterIds: z
           .array(z.string().regex(/^[1-9]\d*$/))
           .min(1)
           .max(8)
+          .refine((ids) => new Set(ids).size === ids.length, 'Character IDs must be unique'),
+        floor: z.number().int().positive(),
+        chamber: z.number().int().positive(),
+        half: z.enum(['first', 'second'])
       },
-      async ({ characterIds }) =>
-        run(
-          'query_genshin_db',
+      async ({ characterIds, floor, chamber, half }) => {
+        let returnedCitationIds: string[] = [];
+        return run(
+          'query_team_knowledge',
           characterIds.length,
-          { requestedCount: characterIds.length },
+          () => ({
+            requestedCount: characterIds.length,
+            floor,
+            chamber,
+            half,
+            returnedCitationIds: returnedCitationIds.join(',')
+          }),
           'KNOWLEDGE_LOOKUP_FAILED',
-          () => characterKnowledgeView(knowledge, characterIds)
-        ),
+          () => {
+            const packet = options.knowledgePacket;
+            const scope = options.knowledgeScope;
+            if (packet === undefined || scope === undefined) {
+              throw new Error('Knowledge packet unavailable');
+            }
+            if (new Set(characterIds).size !== characterIds.length) {
+              throw new Error('Knowledge character IDs must be unique');
+            }
+            if (floor !== scope.floor || !scope.chambers.includes(chamber)) {
+              throw new Error('Knowledge target outside current run scope');
+            }
+            const eligible = new Set(scope.eligibleCharacterIds);
+            if (characterIds.some((id) => !eligible.has(id))) {
+              throw new Error('Knowledge character outside current run scope');
+            }
+            const value = teamKnowledgeSubset(packet, {
+              characterIds,
+              floor,
+              chamber,
+              half
+            });
+            returnedCitationIds = value.citationIds;
+            return value;
+          }
+        );
+      },
       { annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } }
     )
   ] as const;
+}
+
+function teamKnowledgeSubset(
+  packet: KnowledgeContextPacket,
+  target: {
+    characterIds: string[];
+    floor: number;
+    chamber: number;
+    half: 'first' | 'second';
+  }
+) {
+  const characterIds = new Set(target.characterIds);
+  const buildInterpretations = packet.buildInterpretations.filter(({ characterId }) =>
+    characterIds.has(characterId)
+  );
+  const characterStrategies = packet.trustedMatches.filter(
+    ({ characterId }) => characterId !== undefined && characterIds.has(characterId)
+  );
+  const ephemeralCharacterStrategies = packet.ephemeralMatches.filter(({ subjectId }) =>
+    characterIds.has(subjectId)
+  );
+  const mechanicStrategies = packet.trustedMatches.filter(
+    ({ mechanicId }) => mechanicId !== undefined
+  );
+  const unknown = packet.unknowns.filter(
+    ({ subjectId, kind }) =>
+      characterIds.has(subjectId) ||
+      subjectId.startsWith('mechanic:') ||
+      subjectId.startsWith('scenario:') ||
+      kind === 'payload-truncated'
+  );
+  const citationIds = Array.from(
+    new Set(
+      [...characterStrategies, ...ephemeralCharacterStrategies, ...mechanicStrategies].flatMap(
+        ({ citationIds: ids }) => ids
+      )
+    )
+  ).sort();
+  const citationsById = new Map(packet.citations.map((citation) => [citation.id, citation]));
+  return structuredClone({
+    knowledgeVersion: packet.knowledgeVersion,
+    target: {
+      floor: target.floor,
+      chamber: target.chamber,
+      half: target.half
+    },
+    buildInterpretations,
+    characterStrategies,
+    ephemeralCharacterStrategies,
+    mechanicStrategies,
+    unknown,
+    citationIds,
+    citations: citationIds.flatMap((id) => {
+      const citation = citationsById.get(id);
+      return citation === undefined ? [] : [citation];
+    })
+  });
 }
 
 export function createAbyssBusinessMcpServer(options: AbyssBusinessToolsOptions) {

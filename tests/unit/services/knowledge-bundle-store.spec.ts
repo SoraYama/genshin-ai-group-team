@@ -94,6 +94,49 @@ describe('KnowledgeBundleStore', () => {
     expect(store.citations(['kqm-raiden-quickguide'])[0]?.title).toBe('Raiden Shogun Quick Guide');
   });
 
+  it('exposes a cloned research registry/catalog and enforces committed character-archetype citation bindings', async () => {
+    const store = await KnowledgeBundleStore.load(knowledgeDirectory);
+
+    const registry = store.getSourceRegistry();
+    expect(registry.sources).toContainEqual({
+      id: 'kqm-guides',
+      host: 'keqingmains.com',
+      trust: 'trusted-local'
+    });
+    registry.sources[0]!.host = 'mutated.example';
+    expect(store.getSourceRegistry().sources[0]!.host).not.toBe('mutated.example');
+
+    const catalog = store.getCanonicalCharacterCatalog();
+    expect(catalog).toContainEqual({ name: '雷电将军', element: 'electro' });
+    catalog[0]!.name = 'mutated outside store';
+    expect(store.getCanonicalCharacterCatalog()[0]!.name).not.toBe('mutated outside store');
+
+    expect(
+      store.supportsCharacterCitation(
+        'kqm-raiden-quickguide',
+        '10000052',
+        'raiden-em-hyperbloom'
+      )
+    ).toBe(true);
+    expect(
+      store.supportsCharacterCitation(
+        'kqm-raiden-quickguide',
+        '10000054',
+        'raiden-em-hyperbloom'
+      )
+    ).toBe(false);
+    expect(
+      store.supportsCharacterCitation(
+        'kqm-raiden-quickguide',
+        '10000052',
+        'raiden-unreviewed-archetype'
+      )
+    ).toBe(false);
+    expect(
+      store.supportsCharacterCitation('missing-citation', '10000052', 'raiden-em-hyperbloom')
+    ).toBe(false);
+  });
+
   it('matches reviewed scenario mechanics by normalized tags and returns fresh clones', async () => {
     const store = await KnowledgeBundleStore.load(knowledgeDirectory);
 

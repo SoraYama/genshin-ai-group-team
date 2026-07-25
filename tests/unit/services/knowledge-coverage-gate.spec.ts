@@ -210,7 +210,8 @@ describe('KnowledgeCoverageGate', () => {
 
     expect(gate().evaluate(complete, { characters: [], scenarioTags: [] })).toEqual({
       required: false,
-      tasks: []
+      tasks: [],
+      bindings: []
     });
   });
 
@@ -239,7 +240,8 @@ describe('KnowledgeCoverageGate', () => {
   it('does not trigger research for payload truncation', () => {
     expect(gate().evaluate(packet([gap(1, 'payload-truncated')]), safeContext)).toEqual({
       required: false,
-      tasks: []
+      tasks: [],
+      bindings: []
     });
   });
 
@@ -293,7 +295,7 @@ describe('KnowledgeCoverageGate', () => {
 
     const first = gate().evaluate(unsafePacket, maliciousContext);
     const second = gate().evaluate(unsafePacket, maliciousContext);
-    const serialized = JSON.stringify(first);
+    const serialized = JSON.stringify(first.tasks);
 
     expect(first).toEqual(second);
     expect(first.required).toBe(true);
@@ -336,6 +338,13 @@ describe('KnowledgeCoverageGate', () => {
     });
 
     expect(evaluation.tasks).toHaveLength(1);
+    expect(evaluation.bindings).toEqual([
+      {
+        taskKey: evaluation.tasks[0]!.key,
+        unknownIndexes: [0, 1]
+      }
+    ]);
+    expect(evaluation.tasks[0]).not.toHaveProperty('subjectIds');
     expect(evaluation.tasks[0]?.key).toMatch(/^guide-missing-[a-f0-9]{24}$/);
     expect(JSON.stringify(evaluation)).not.toMatch(/private-one|private-two|NICKNAME|COOKIE/i);
   });

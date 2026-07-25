@@ -238,6 +238,65 @@ function directive<T>(target: T) {
   };
 }
 
+function trustedKnowledgePacket(characterId: string): V2PipelineContext['knowledge'] {
+  return {
+    knowledgeVersion: 'trusted-test',
+    buildInterpretations: [
+      {
+        characterId,
+        archetypeId: 'tested-role',
+        confidence: 'high',
+        candidateArchetypeIds: ['tested-role'],
+        contextRequired: false,
+        matchedSignals: ['current-build-match'],
+        conflictingSignals: [],
+        currentBuildUsable: true,
+        adjustment: 'none',
+        unknowns: []
+      }
+    ],
+    trustedMatches: [
+      {
+        id: 'trusted-character',
+        characterId,
+        archetypeId: 'tested-role',
+        summary: 'Trusted character facts are available.',
+        citationIds: ['trusted-citation']
+      }
+    ],
+    ephemeralMatches: [],
+    unknowns: [],
+    coverage: { requested: 1, trusted: 1, ephemeral: 0, unknown: 0 },
+    citations: [
+      {
+        id: 'trusted-citation',
+        sourceId: 'trusted-source',
+        url: 'https://example.com/trusted-character',
+        title: 'Trusted character review',
+        reviewedAt: '2026-07-24T10:00:00+08:00',
+        trust: 'trusted-local'
+      }
+    ]
+  };
+}
+
+function withKnowledgeFact(
+  output: V2ExplainOutput,
+  characterId: string
+): V2ExplainOutput {
+  return {
+    explanations: output.explanations.map((item, index) =>
+      index === 0
+        ? {
+            ...item,
+            reasonCodes: ['reaction-chain'],
+            factRefs: [{ kind: 'knowledge' as const, characterId }]
+          }
+        : item
+    )
+  };
+}
+
 function run(
   runner: StageRunner,
   baseline: RecommendationPlan,
@@ -248,12 +307,18 @@ function run(
     | { ok: true; plan: RecommendationPlan }
     | { ok: false; issues: Array<{ code: string; path: Array<string | number>; message: string }> },
   pipelineContext: V2PipelineContext = context(baseline),
-  trace?: AgentRunTraceWriter
+  trace?: AgentRunTraceWriter,
+  supportsKnowledgeRef?: (
+    characterId: string,
+    citationId: string,
+    archetypeId: string
+  ) => boolean
 ) {
   return runV2AgentPipeline({
     runner,
     context: pipelineContext,
     trace,
+    supportsKnowledgeRef,
     sdkOptionsForStage: () => sdkOptions(),
     composer: {
       initialPrompt: JSON.stringify({ request: 'compose' }),
@@ -314,9 +379,15 @@ describe.each([
     });
     expect(runner.calls.map(({ options }) => options.systemPrompt)).toEqual([
       `composer:${baseline.mode}`,
-      expect.stringContaining('CritiqueAgent v2'),
-      expect.stringContaining('RotationCoachAgent v2'),
-      expect.stringContaining('ExplainAgent v2')
+      expect.stringContaining(
+        baseline.mode === 'spiral-abyss' ? 'CritiqueAgent v3' : 'CritiqueAgent v2'
+      ),
+      expect.stringContaining(
+        baseline.mode === 'spiral-abyss' ? 'RotationCoachAgent v3' : 'RotationCoachAgent v2'
+      ),
+      expect.stringContaining(
+        baseline.mode === 'spiral-abyss' ? 'ExplainAgent v3' : 'ExplainAgent v2'
+      )
     ]);
     const composePayload = JSON.parse(runner.calls[0]!.prompt) as Record<string, unknown>;
     expect(JSON.stringify(composePayload)).toContain('"kind":"feasibleBaseline"');
@@ -500,11 +571,11 @@ describe('V2 agent pipeline repair and grounding', () => {
     expect(runner.calls.map(({ options }) => options.systemPrompt)).toEqual([
       'composer:spiral-abyss',
       expect.stringContaining('repair'),
-      expect.stringContaining('CritiqueAgent v2'),
+      expect.stringContaining('CritiqueAgent v3'),
       expect.stringContaining('repair'),
-      expect.stringContaining('CritiqueAgent v2'),
-      expect.stringContaining('RotationCoachAgent v2'),
-      expect.stringContaining('ExplainAgent v2')
+      expect.stringContaining('CritiqueAgent v3'),
+      expect.stringContaining('RotationCoachAgent v3'),
+      expect.stringContaining('ExplainAgent v3')
     ]);
     expect(runner.calls[1]!.prompt).toContain('PLAN_SCHEMA_INVALID');
     expect(runner.calls[3]!.prompt).toContain('rotation-fragile');
@@ -750,11 +821,25 @@ describe('V2 agent pipeline repair and grounding', () => {
     const characterId = String(pipelineContext.profile.detailedProfiles[0]!.id);
     pipelineContext.knowledge = {
       knowledgeVersion: 'trusted-test',
-      buildInterpretations: [],
+      buildInterpretations: [
+        {
+          characterId,
+          archetypeId: 'tested-role',
+          confidence: 'high',
+          candidateArchetypeIds: ['tested-role'],
+          contextRequired: false,
+          matchedSignals: ['current-build-match'],
+          conflictingSignals: [],
+          currentBuildUsable: true,
+          adjustment: 'none',
+          unknowns: []
+        }
+      ],
       trustedMatches: [
         {
           id: 'trusted-character',
           characterId,
+          archetypeId: 'tested-role',
           summary: 'Trusted character facts are available.',
           citationIds: ['trusted-citation']
         }
@@ -798,6 +883,163 @@ describe('V2 agent pipeline repair and grounding', () => {
     );
 
     expect(result).toMatchObject({ ok: true });
+  });
+
+  it('rejects cross-character citation substitution for an actual knowledge fact reference', async () => {
+    const baseline = validAbyssPlan();
+    const pipelineContext = structuredClone(context(baseline));
+    const characterId = String(pipelineContext.profile.detailedProfiles[0]!.id);
+    pipelineContext.knowledge = trustedKnowledgePacket(characterId);
+    const explanation = withKnowledgeFact(explainOutput(baseline), characterId);
+    const runner = new StageRunner([
+      baseline,
+      { decision: 'accept', issues: [] },
+      rotationOutput(baseline),
+      explanation
+    ]);
+
+    const result = await run(
+      runner,
+      baseline,
+      (text) => ({ ok: true, plan: JSON.parse(text) as RecommendationPlan }),
+      pipelineContext,
+      undefined,
+      (candidateId, citationId, archetypeId) =>
+        candidateId === 'different-character' &&
+        citationId === 'trusted-citation' &&
+        archetypeId === 'tested-role'
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      issues: [
+        expect.objectContaining({
+          path: ['explain'],
+          message: expect.stringContaining('positive cited match')
+        })
+      ]
+    });
+  });
+
+  it('rejects a cited positive match when the current build conflicts with its archetype', async () => {
+    const baseline = validAbyssPlan();
+    const pipelineContext = structuredClone(context(baseline));
+    const characterId = String(pipelineContext.profile.detailedProfiles[0]!.id);
+    pipelineContext.knowledge = trustedKnowledgePacket(characterId);
+    pipelineContext.knowledge.buildInterpretations[0]!.currentBuildUsable = false;
+    pipelineContext.knowledge.buildInterpretations[0]!.adjustment = 'required';
+    pipelineContext.knowledge.buildInterpretations[0]!.conflictingSignals = [
+      'build-role-conflict'
+    ];
+    const runner = new StageRunner([
+      baseline,
+      { decision: 'accept', issues: [] },
+      rotationOutput(baseline),
+      withKnowledgeFact(explainOutput(baseline), characterId)
+    ]);
+
+    const result = await run(
+      runner,
+      baseline,
+      (text) => ({ ok: true, plan: JSON.parse(text) as RecommendationPlan }),
+      pipelineContext
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      issues: [
+        expect.objectContaining({
+          path: ['explain'],
+          message: expect.stringContaining('positive cited match')
+        })
+      ]
+    });
+  });
+
+  it('accepts a runtime-remapped ephemeral-web match for the same character', async () => {
+    const baseline = validAbyssPlan();
+    const pipelineContext = structuredClone(context(baseline));
+    const characterId = String(pipelineContext.profile.detailedProfiles[0]!.id);
+    pipelineContext.knowledge = trustedKnowledgePacket(characterId);
+    pipelineContext.knowledge.trustedMatches = [];
+    pipelineContext.knowledge.ephemeralMatches = [
+      {
+        id: 'ephemeral-character',
+        subjectId: characterId,
+        summary: 'Runtime guide evidence for the same character.',
+        citationIds: ['ephemeral-citation']
+      }
+    ];
+    pipelineContext.knowledge.citations = [
+      {
+        id: 'ephemeral-citation',
+        sourceId: 'reviewed-source',
+        url: 'https://example.com/ephemeral-character',
+        title: 'Runtime guide',
+        reviewedAt: '2026-07-24T10:00:00+08:00',
+        trust: 'ephemeral-web'
+      }
+    ];
+    pipelineContext.knowledge.coverage = {
+      requested: 1,
+      trusted: 0,
+      ephemeral: 1,
+      unknown: 0
+    };
+    const runner = new StageRunner([
+      baseline,
+      { decision: 'accept', issues: [] },
+      rotationOutput(baseline),
+      withKnowledgeFact(explainOutput(baseline), characterId)
+    ]);
+
+    const result = await run(
+      runner,
+      baseline,
+      (text) => ({ ok: true, plan: JSON.parse(text) as RecommendationPlan }),
+      pipelineContext
+    );
+
+    expect(result).toMatchObject({ ok: true });
+  });
+
+  it.each([
+    'build-role-conflict',
+    'reaction-ownership-conflict',
+    'field-time-conflict',
+    'energy-facts-missing',
+    'enemy-immunity-conflict',
+    'survival-insufficient'
+  ])('routes a real Critique %s issue through a bounded repair', async (code) => {
+    const baseline = validAbyssPlan();
+    const target = targets(baseline);
+    const runner = new StageRunner([
+      baseline,
+      {
+        decision: 'repair',
+        issues: [
+          {
+            code,
+            severity: 'soft',
+            target: target.critique,
+            message: `Critique detected ${code}.`
+          }
+        ]
+      },
+      baseline,
+      { decision: 'accept', issues: [] },
+      rotationOutput(baseline),
+      explainOutput(baseline)
+    ]);
+
+    const result = await run(runner, baseline, (text) => ({
+      ok: true,
+      plan: JSON.parse(text) as RecommendationPlan
+    }));
+
+    expect(result).toMatchObject({ ok: true, repairs: 1 });
+    expect(runner.calls).toHaveLength(6);
+    expect(runner.calls[2]!.prompt).toContain(code);
   });
 
   it('rejects a reason code that has no compatible supporting fact reference', async () => {

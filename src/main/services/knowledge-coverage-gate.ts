@@ -51,6 +51,7 @@ export interface KnowledgeResearchContext {
 export interface KnowledgeCoverageEvaluation {
   required: boolean;
   tasks: GuideResearchTask[];
+  bindings: Array<{ taskKey: string; unknownIndexes: number[] }>;
 }
 
 export interface KnowledgeCoverageKnowledge {
@@ -76,8 +77,8 @@ export class KnowledgeCoverageGate {
     packet: KnowledgeContextPacket,
     context: KnowledgeResearchContext
   ): KnowledgeCoverageEvaluation {
-    const tasks = this.buildTasks(packet, context);
-    return { required: tasks.length > 0, tasks };
+    const { tasks, bindings } = this.buildTasks(packet, context);
+    return { required: tasks.length > 0, tasks, bindings };
   }
 
   plan(packet: KnowledgeContextPacket, context: KnowledgeResearchContext): GuideResearchTask[] {
@@ -87,7 +88,7 @@ export class KnowledgeCoverageGate {
   private buildTasks(
     packet: KnowledgeContextPacket,
     context: KnowledgeResearchContext
-  ): GuideResearchTask[] {
+  ): Pick<KnowledgeCoverageEvaluation, 'tasks' | 'bindings'> {
     const candidateIds = new Set(
       context.characters
         .map(({ id }) => id)
@@ -101,8 +102,9 @@ export class KnowledgeCoverageGate {
     );
     const contextScenarioTags = safeScenarioMechanicTags(context.scenarioTags);
     const tasksByKey = new Map<string, GuideResearchTask>();
+    const unknownIndexesByTaskKey = new Map<string, number[]>();
 
-    for (const knowledgeGap of packet.unknowns) {
+    for (const [unknownIndex, knowledgeGap] of packet.unknowns.entries()) {
       if (!isResearchReason(knowledgeGap.kind)) continue;
       const catalogCharacter = this.catalogCharacter(knowledgeGap.subjectId, candidateIds);
       const mechanic = this.mechanicForGap(knowledgeGap.subjectId);
@@ -130,9 +132,19 @@ export class KnowledgeCoverageGate {
         scenarioTags
       });
       tasksByKey.set(key, task);
+      const unknownIndexes = unknownIndexesByTaskKey.get(key) ?? [];
+      unknownIndexes.push(unknownIndex);
+      unknownIndexesByTaskKey.set(key, unknownIndexes);
     }
 
-    return Array.from(tasksByKey.values());
+    const tasks = Array.from(tasksByKey.values());
+    return {
+      tasks,
+      bindings: tasks.map(({ key }) => ({
+        taskKey: key,
+        unknownIndexes: unknownIndexesByTaskKey.get(key) ?? []
+      }))
+    };
   }
 
   private catalogCharacter(

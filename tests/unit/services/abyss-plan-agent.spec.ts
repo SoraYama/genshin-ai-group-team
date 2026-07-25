@@ -2,11 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import { AbyssPlanAgent } from '../../../src/main/services/abyss-plan-agent.js';
 import type { AgentSdkRunOptions } from '../../../src/main/services/agent-sdk-adapter.js';
-import {
-  buildUnknownKnowledgeContext,
-  buildV2PipelineContext
-} from '../../../src/main/services/v2-agent-context.js';
+import { buildV2PipelineContext } from '../../../src/main/services/v2-agent-context.js';
 import { AgentRunTraceStore } from '../../../src/main/services/agent-run-trace-store.js';
+import type { KnowledgeContextPacket } from '../../../src/shared/advisor-knowledge.js';
 import {
   ABYSS_CHARACTERS,
   abyssInput,
@@ -31,7 +29,7 @@ class FixtureRunner {
 
   async *run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown> {
     this.calls.push({ prompt, options });
-    if (options.systemPrompt.includes('CritiqueAgent v2')) {
+    if (options.systemPrompt.includes('CritiqueAgent v3')) {
       yield {
         type: 'result',
         subtype: 'success',
@@ -39,7 +37,7 @@ class FixtureRunner {
       };
       return;
     }
-    if (options.systemPrompt.includes('RotationCoachAgent v2')) {
+    if (options.systemPrompt.includes('RotationCoachAgent v3')) {
       yield {
         type: 'result',
         subtype: 'success',
@@ -52,7 +50,7 @@ class FixtureRunner {
       };
       return;
     }
-    if (options.systemPrompt.includes('ExplainAgent v2')) {
+    if (options.systemPrompt.includes('ExplainAgent v3')) {
       yield {
         type: 'result',
         subtype: 'success',
@@ -101,11 +99,19 @@ class FixtureRunner {
           chamber
         }
       })),
-      {
-        id: 'characters',
-        name: 'mcp__genshin__query_genshin_db',
-        input: { characterIds: [...new Set(selectedIds)] }
-      }
+      ...[1, 2].flatMap((chamber) =>
+        (['first', 'second'] as const).map((half) => ({
+          id: `knowledge-${chamber}-${half}`,
+          name: 'mcp__genshin__query_team_knowledge',
+          input: {
+            characterIds:
+              half === 'first' ? selectedIds.slice(0, 4) : selectedIds.slice(4, 8),
+            floor: 12,
+            chamber,
+            half
+          }
+        }))
+      )
     ];
     yield {
       type: 'assistant',
@@ -168,8 +174,45 @@ function sdkOptions(): AgentSdkRunOptions {
     allowedBusinessTools: [
       'mcp__genshin__read_profile_cache',
       'mcp__genshin__query_enemy_data',
-      'mcp__genshin__query_genshin_db'
+      'mcp__genshin__query_team_knowledge'
     ]
+  };
+}
+
+function groundedKnowledge(): KnowledgeContextPacket {
+  const ids = ABYSS_CHARACTERS.slice(0, 8).map(({ id }) => String(id));
+  return {
+    knowledgeVersion: 'grounded-v1',
+    buildInterpretations: ids.map((characterId, index) => ({
+      characterId,
+      archetypeId: `role-${index + 1}`,
+      confidence: 'high',
+      candidateArchetypeIds: [`role-${index + 1}`],
+      contextRequired: false,
+      matchedSignals: ['current-build-match'],
+      conflictingSignals: [],
+      currentBuildUsable: true,
+      adjustment: 'none',
+      unknowns: []
+    })),
+    trustedMatches: ids.map((characterId, index) => ({
+      id: `match-${characterId}`,
+      characterId,
+      archetypeId: `role-${index + 1}`,
+      summary: `reviewed strategy ${characterId}`,
+      citationIds: [`citation-${characterId}`]
+    })),
+    ephemeralMatches: [],
+    unknowns: [],
+    coverage: { requested: 8, trusted: 8, ephemeral: 0, unknown: 0 },
+    citations: ids.map((characterId) => ({
+      id: `citation-${characterId}`,
+      sourceId: 'reviewed-source',
+      url: `https://example.test/${characterId}`,
+      title: `reviewed ${characterId}`,
+      reviewedAt: '2026-07-24T00:00:00.000Z',
+      trust: 'trusted-local'
+    }))
   };
 }
 
@@ -196,30 +239,32 @@ function pipelineContext(feasibleBaseline = validAbyssPlan()) {
     eligibleCharacterIds: ABYSS_CHARACTERS.map(({ id }) => String(id)),
     mechanics: [{ target: '12 层所选房间', facts: ['上下半固定双队'], unknowns: ['精确输出未知'] }],
     interventions: { noBuildChange: true },
-    knowledge: buildUnknownKnowledgeContext(
-      'unavailable',
-      ABYSS_CHARACTERS.map(({ id }) => String(id))
-    )
+    knowledge: groundedKnowledge()
   });
 }
 
 describe('AbyssPlanAgent', () => {
-  it('injects a trace writer and closes a successful run with complete and skipped stages', async () => {
+  it('continues an existing trace lease without starting or finishing a second run', async () => {
     const runner = new FixtureRunner([validAbyssPlan()]);
     const trace = new AgentRunTraceStore();
-    const result = await new AbyssPlanAgent(runner, trace).compose({
+    const lease = trace.start({
+      correlationId: 'abyss-test-request',
+      model: 'test-model',
+      knowledge: { trusted: 8, ephemeral: 0, unknown: 0, searched: false }
+    });
+    const result = await new AbyssPlanAgent(runner).compose({
       input: abyssInput(),
       scenario: abyssScenario(),
       characters: ABYSS_CHARACTERS,
       pipelineContext: pipelineContext(),
-      sdkOptions: sdkOptions()
+      sdkOptions: sdkOptions(),
+      trace: { writer: trace, lease }
     });
 
     expect(result.ok).toBe(true);
     expect(trace.latest()).toMatchObject({
       correlationId: 'abyss-test-request',
-      status: 'completed',
-      finalSource: 'smart-service'
+      status: 'running'
     });
     expect(trace.latest()?.stages.map(({ stage, status }) => `${stage}:${status}`)).toEqual([
       'compose:completed',
@@ -235,12 +280,18 @@ describe('AbyssPlanAgent', () => {
   it('retains invalid compose model text in a failed latest trace', async () => {
     const runner = new RawInvalidRunner();
     const trace = new AgentRunTraceStore();
-    const result = await new AbyssPlanAgent(runner, trace).compose({
+    const lease = trace.start({
+      correlationId: 'abyss-test-request',
+      model: 'test-model',
+      knowledge: { trusted: 8, ephemeral: 0, unknown: 0, searched: false }
+    });
+    const result = await new AbyssPlanAgent(runner).compose({
       input: abyssInput(),
       scenario: abyssScenario(),
       characters: ABYSS_CHARACTERS,
       pipelineContext: pipelineContext(),
-      sdkOptions: sdkOptions()
+      sdkOptions: sdkOptions(),
+      trace: { writer: trace, lease }
     });
 
     expect(result).toMatchObject({
@@ -248,9 +299,7 @@ describe('AbyssPlanAgent', () => {
       issues: [{ code: 'AGENT_OUTPUT_INVALID' }]
     });
     expect(trace.latest()).toMatchObject({
-      status: 'failed',
-      finalSource: 'blocked',
-      failure: { code: 'AGENT_OUTPUT_INVALID' }
+      status: 'running'
     });
     expect(trace.latest()?.stages.find(({ stage }) => stage === 'compose')).toMatchObject({
       status: 'failed',
@@ -378,5 +427,288 @@ describe('AbyssPlanAgent', () => {
       issues: [{ code: 'AGENT_OUTPUT_INVALID' }]
     });
     expect(runner.calls).toBe(3);
+  });
+
+  it('fails closed when knowledge queries do not cover every final character and target half', async () => {
+    class IncompleteKnowledgeRunner extends FixtureRunner {
+      override async *run(
+        prompt: string,
+        options: AgentSdkRunOptions
+      ): AsyncIterable<unknown> {
+        for await (const message of super.run(prompt, options)) {
+          if (
+            typeof message === 'object' &&
+            message !== null &&
+            (message as { type?: string }).type === 'assistant'
+          ) {
+            const current = structuredClone(message) as {
+              message: { content: Array<{ id?: string }> };
+            };
+            current.message.content = current.message.content.filter(
+              ({ id }) => id !== 'knowledge-2-second'
+            );
+            yield current;
+          } else if (
+            typeof message === 'object' &&
+            message !== null &&
+            (message as { type?: string }).type === 'user'
+          ) {
+            const current = structuredClone(message) as {
+              message: { content: Array<{ tool_use_id?: string }> };
+            };
+            current.message.content = current.message.content.filter(
+              ({ tool_use_id }) => tool_use_id !== 'knowledge-2-second'
+            );
+            yield current;
+          } else {
+            yield message;
+          }
+        }
+      }
+    }
+    const runner = new IncompleteKnowledgeRunner([
+      validAbyssPlan(),
+      validAbyssPlan(),
+      validAbyssPlan()
+    ]);
+    const result = await new AbyssPlanAgent(runner).compose({
+      input: abyssInput(),
+      scenario: abyssScenario(),
+      characters: ABYSS_CHARACTERS,
+      pipelineContext: pipelineContext(),
+      sdkOptions: sdkOptions()
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      issues: [
+        expect.objectContaining({
+          path: ['tools'],
+          details: expect.objectContaining({
+            missing: expect.arrayContaining(['query_team_knowledge:12-2-second'])
+          })
+        })
+      ]
+    });
+  });
+
+  it('fails closed when a half knowledge query includes an unselected extra character', async () => {
+    class OverbroadKnowledgeRunner extends FixtureRunner {
+      override async *run(
+        prompt: string,
+        options: AgentSdkRunOptions
+      ): AsyncIterable<unknown> {
+        for await (const message of super.run(prompt, options)) {
+          if (
+            typeof message === 'object' &&
+            message !== null &&
+            (message as { type?: string }).type === 'assistant'
+          ) {
+            const current = structuredClone(message) as {
+              message: {
+                content: Array<{ id?: string; input?: { characterIds?: string[] } }>;
+              };
+            };
+            const knowledge = current.message.content.find(
+              ({ id }) => id === 'knowledge-1-first'
+            );
+            knowledge?.input?.characterIds?.push('1009');
+            yield current;
+          } else {
+            yield message;
+          }
+        }
+      }
+    }
+    const runner = new OverbroadKnowledgeRunner([
+      validAbyssPlan(),
+      validAbyssPlan(),
+      validAbyssPlan()
+    ]);
+    const result = await new AbyssPlanAgent(runner).compose({
+      input: abyssInput(),
+      scenario: abyssScenario(),
+      characters: ABYSS_CHARACTERS,
+      pipelineContext: pipelineContext(),
+      sdkOptions: sdkOptions()
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      issues: [
+        expect.objectContaining({
+          details: expect.objectContaining({
+            missing: expect.arrayContaining(['query_team_knowledge:12-1-first'])
+          })
+        })
+      ]
+    });
+  });
+
+  it.each([
+    {
+      name: 'current build conflict',
+      mutate(packet: KnowledgeContextPacket) {
+        const interpretation = packet.buildInterpretations.find(
+          ({ characterId }) => characterId === '1008'
+        )!;
+        interpretation.currentBuildUsable = false;
+        interpretation.adjustment = 'required';
+        interpretation.conflictingSignals = ['build-role-conflict'];
+      }
+    }
+  ])('fails closed for a $name instead of accepting unrelated cited knowledge', async ({ mutate }) => {
+    const packet = groundedKnowledge();
+    mutate(packet);
+    const currentContext = pipelineContext();
+    currentContext.knowledge = packet;
+    const runner = new FixtureRunner([
+      validAbyssPlan(),
+      validAbyssPlan(),
+      validAbyssPlan()
+    ]);
+    const result = await new AbyssPlanAgent(runner).compose({
+      input: abyssInput(),
+      scenario: abyssScenario(),
+      characters: ABYSS_CHARACTERS,
+      pipelineContext: currentContext,
+      sdkOptions: sdkOptions()
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      issues: [expect.objectContaining({ path: ['tools'] })]
+    });
+  });
+
+  it('allows a selected knowledge gap only when the plan preserves low confidence and an explicit marker', async () => {
+    const currentContext = pipelineContext();
+    currentContext.knowledge.trustedMatches = currentContext.knowledge.trustedMatches.filter(
+      ({ characterId }) => characterId !== '1008'
+    );
+    currentContext.knowledge.unknowns = [
+      {
+        id: 'gap-1008',
+        subjectId: '1008',
+        kind: 'missing',
+        reason: 'No build-compatible reviewed strategy is available.'
+      }
+    ];
+    currentContext.knowledge.coverage = {
+      requested: 8,
+      trusted: 7,
+      ephemeral: 0,
+      unknown: 1
+    };
+    const unmarked = validAbyssPlan();
+    const runner = new FixtureRunner([
+      unmarked,
+      unmarked,
+      unmarked
+    ]);
+    const result = await new AbyssPlanAgent(runner).compose({
+      input: abyssInput(),
+      scenario: abyssScenario(),
+      characters: ABYSS_CHARACTERS,
+      pipelineContext: currentContext,
+      sdkOptions: sdkOptions()
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      issues: [
+        expect.objectContaining({
+          path: ['tools'],
+          details: expect.objectContaining({
+            missing: expect.arrayContaining([
+              'knowledge-grounding:1008:unknown-marker-missing'
+            ])
+          })
+        })
+      ]
+    });
+
+    const markedPlan = validAbyssPlan({
+      confidence: 'low',
+      assumptions: ['1008：知识缺口，按低置信度保守使用。']
+    });
+    const marked = await new AbyssPlanAgent(new FixtureRunner([markedPlan])).compose({
+      input: abyssInput(),
+      scenario: abyssScenario(),
+      characters: ABYSS_CHARACTERS,
+      pipelineContext: currentContext,
+      sdkOptions: sdkOptions()
+    });
+    expect(marked).toMatchObject({ ok: true, plan: { confidence: 'low' } });
+  });
+
+  it('requires an explicit per-character adjustment marker when build changes are allowed', async () => {
+    const currentContext = pipelineContext();
+    const interpretation = currentContext.knowledge.buildInterpretations.find(
+      ({ characterId }) => characterId === '1008'
+    )!;
+    interpretation.currentBuildUsable = false;
+    interpretation.adjustment = 'required';
+    interpretation.conflictingSignals = ['build-role-conflict'];
+    const input = abyssInput({
+      preferences: { ...abyssInput().preferences, noBuildChange: false }
+    });
+    const unmarked = validAbyssPlan();
+
+    const rejected = await new AbyssPlanAgent(
+      new FixtureRunner([unmarked, unmarked, unmarked])
+    ).compose({
+      input,
+      scenario: abyssScenario(),
+      characters: ABYSS_CHARACTERS,
+      pipelineContext: currentContext,
+      sdkOptions: sdkOptions()
+    });
+    expect(rejected).toMatchObject({
+      ok: false,
+      issues: [
+        expect.objectContaining({
+          details: expect.objectContaining({
+            missing: expect.arrayContaining([
+              'knowledge-grounding:1008:requires-adjustment-marker-missing'
+            ])
+          })
+        })
+      ]
+    });
+
+    const markedPlan = validAbyssPlan({
+      warnings: ['1008 requires-adjustment：需要调整装备后才能承担当前职责。']
+    });
+    const accepted = await new AbyssPlanAgent(new FixtureRunner([markedPlan])).compose({
+      input,
+      scenario: abyssScenario(),
+      characters: ABYSS_CHARACTERS,
+      pipelineContext: currentContext,
+      sdkOptions: sdkOptions()
+    });
+    expect(accepted).toMatchObject({ ok: true });
+  });
+
+  it('uses the v3 prompts that prohibit uncited facts and require build-aware critique', async () => {
+    const runner = new FixtureRunner([validAbyssPlan()]);
+    const result = await new AbyssPlanAgent(runner).compose({
+      input: abyssInput(),
+      scenario: abyssScenario(),
+      characters: ABYSS_CHARACTERS,
+      pipelineContext: pipelineContext(),
+      sdkOptions: sdkOptions()
+    });
+
+    expect(result.ok).toBe(true);
+    expect(runner.calls[0]?.options.systemPrompt).toContain('AbyssTeamComposer v3');
+    expect(runner.calls[0]?.options.systemPrompt).toContain('requires-adjustment');
+    expect(runner.calls[1]?.options.systemPrompt).toContain('CritiqueAgent v3');
+    expect(runner.calls[1]?.options.systemPrompt).toContain('反应触发权');
+    expect(runner.calls[1]?.options.systemPrompt).toContain('站场时间');
+    expect(runner.calls[2]?.options.systemPrompt).toContain('RotationCoachAgent v3');
+    expect(runner.calls[3]?.options.systemPrompt).toContain('ExplainAgent v3');
+    expect(runner.calls[3]?.options.systemPrompt).toContain('当前 build');
+    expect(runner.calls[3]?.options.systemPrompt).toContain('来源');
   });
 });

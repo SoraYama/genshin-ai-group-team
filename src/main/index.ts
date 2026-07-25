@@ -65,6 +65,10 @@ import {
 import { DataManagementService } from './services/data-management-service.js';
 import { registerDataManagementIpc } from './ipc/data-management.ipc.js';
 import { GuideResearchCache } from './services/guide-research-cache.js';
+import { GuideResearchAgent } from './services/guide-research-agent.js';
+import { AdvisorKnowledgeService } from './services/advisor-knowledge-service.js';
+import { KnowledgeCoverageGate } from './services/knowledge-coverage-gate.js';
+import { AgentRunTraceStore } from './services/agent-run-trace-store.js';
 import { configureSingleInstance, nonEmptyEnvironmentValue } from './single-instance.js';
 
 const isolatedUserDataDir = nonEmptyEnvironmentValue(process.env.GTA_E2E_USER_DATA_DIR);
@@ -150,11 +154,17 @@ async function bootstrapServices(): Promise<void> {
   const profiles = new ProfileStore();
   const history = new HistoryStore();
   const advisor = new AdvisorAgent(config, profiles, history);
+  const guideResearch = new GuideResearchCache({
+    userDataDirectory: app.getPath('userData')
+  });
   const knowledgeDir = resolveBundledKnowledgeDir();
   const characterKnowledge = await CharacterKnowledgeStore.load(
     path.join(knowledgeDir, 'characters.v1.json')
   );
   const strategyKnowledge = await KnowledgeBundleStore.load(knowledgeDir);
+  const advisorKnowledge = new AdvisorKnowledgeService(strategyKnowledge);
+  const knowledgeCoverageGate = new KnowledgeCoverageGate(strategyKnowledge);
+  const abyssTrace = new AgentRunTraceStore();
   const productionScenarios = await createProductionScenarioPublicationSource({
     userDataDir: app.getPath('userData'),
     packagedConfigPath: app.isPackaged
@@ -182,6 +192,54 @@ async function bootstrapServices(): Promise<void> {
     config,
     knowledge: characterKnowledge,
     strategyKnowledge,
+    advisorKnowledge,
+    coverageGate: knowledgeCoverageGate,
+    research: {
+      research: async (input, { signal }) => {
+        const apiKey = config.getApiKey();
+        if (apiKey === undefined) {
+          throw new Error('Guide research requires an active LLM configuration.');
+        }
+        const abortController = new AbortController();
+        const abortResearch = () => abortController.abort();
+        if (signal.aborted) abortResearch();
+        else signal.addEventListener('abort', abortResearch, { once: true });
+        try {
+          return await new GuideResearchAgent({
+            runner: new AgentSdkAdapter(),
+            cache: {
+              get: (lookup) =>
+                signal.aborted ? Promise.resolve(undefined) : guideResearch.get(lookup),
+              put: (entry) =>
+                signal.aborted
+                  ? Promise.reject(new Error('Guide research was cancelled before cache write.'))
+                  : guideResearch.put(entry)
+            },
+            sourceRegistry: strategyKnowledge,
+            canonicalCharacterCatalog: strategyKnowledge.getCanonicalCharacterCatalog(),
+            sdkOptions: {
+              apiKey,
+              baseUrl: config.getBaseUrl(),
+              model: config.getModel(),
+              customHeaders: config.getCustomHeaders(),
+              systemPrompt: '',
+              cwd: app.getPath('userData'),
+              clientVersion: app.getVersion(),
+              abortController,
+              maxTurns: 4,
+              allowedBusinessTools: []
+            }
+          }).research(input);
+        } finally {
+          signal.removeEventListener('abort', abortResearch);
+        }
+      }
+    },
+    trace: abyssTrace,
+    citationPolicy: {
+      supportsCharacter: (citationId, characterId, archetypeId) =>
+        strategyKnowledge.supportsCharacterCitation(citationId, characterId, archetypeId)
+    },
     toolLog: (event) => console.info('[abyss-business-tool]', event),
     auditLog: (event) => console.info('[abyss-advisor]', event),
     sdkEnvironment: { cwd: app.getPath('userData'), clientVersion: app.getVersion() }
@@ -248,9 +306,6 @@ async function bootstrapServices(): Promise<void> {
   });
   await scenarioStore.init();
   scenarioRefresher = new ScenarioRefresher(scenarioStore);
-  const guideResearch = new GuideResearchCache({
-    userDataDirectory: app.getPath('userData')
-  });
   const dataManagement = new DataManagementService({
     profiles,
     scenarios: scenarioStore,

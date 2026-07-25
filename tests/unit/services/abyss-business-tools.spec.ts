@@ -4,7 +4,7 @@ import {
   ABYSS_MCP_TOOL_NAMES,
   createAbyssBusinessTools
 } from '../../../src/main/services/abyss-business-tools.js';
-import { CharacterKnowledgeStore } from '../../../src/main/services/character-knowledge-store.js';
+import type { KnowledgeContextPacket } from '../../../src/shared/advisor-knowledge.js';
 import { ABYSS_CHARACTERS, abyssScenario } from './abyss-test-fixtures.js';
 
 function textPayload(
@@ -16,6 +16,65 @@ function textPayload(
 }
 
 describe('abyss in-process business tools', () => {
+  const packet: KnowledgeContextPacket = {
+    knowledgeVersion: 'packet-v1',
+    buildInterpretations: ['1001', '1002'].map((characterId, index) => ({
+      characterId,
+      archetypeId: `role-${index + 1}`,
+      confidence: 'high',
+      candidateArchetypeIds: [`role-${index + 1}`],
+      contextRequired: false,
+      matchedSignals: ['build-match'],
+      conflictingSignals: [],
+      currentBuildUsable: true,
+      adjustment: 'none',
+      unknowns: []
+    })),
+    trustedMatches: [
+      ...['1001', '1002'].map((characterId, index) => ({
+        id: `match-${characterId}`,
+        characterId,
+        archetypeId: `role-${index + 1}`,
+        summary: `strategy-${characterId}`,
+        citationIds: [`citation-${characterId}`]
+      })),
+      {
+        id: 'match-shield-breaking',
+        mechanicId: 'shield-breaking',
+        summary: 'Use counter-element application against the selected shield.',
+        citationIds: ['citation-shield-breaking']
+      }
+    ],
+    ephemeralMatches: [],
+    unknowns: [
+      {
+        id: 'gap-scenario-unknown',
+        subjectId: 'scenario:unknown-window',
+        kind: 'missing',
+        reason: 'The exact damage window is not reviewed.'
+      }
+    ],
+    coverage: { requested: 4, trusted: 3, ephemeral: 0, unknown: 1 },
+    citations: [
+      ...['1001', '1002'].map((characterId) => ({
+        id: `citation-${characterId}`,
+        sourceId: 'reviewed-source',
+        url: `https://example.test/${characterId}`,
+        title: `citation-${characterId}`,
+        reviewedAt: '2026-07-24T00:00:00.000Z',
+        trust: 'trusted-local' as const
+      })),
+      {
+        id: 'citation-shield-breaking',
+        sourceId: 'reviewed-source',
+        url: 'https://example.test/shield-breaking',
+        title: 'citation-shield-breaking',
+        reviewedAt: '2026-07-24T00:00:00.000Z',
+        trust: 'trusted-local'
+      }
+    ]
+  };
+
   it('exposes only the three bounded read-only tool names', () => {
     const tools = createAbyssBusinessTools({
       getProfile: () => null,
@@ -24,12 +83,12 @@ describe('abyss in-process business tools', () => {
     expect(tools.map(({ name }) => name)).toEqual([
       'read_profile_cache',
       'query_enemy_data',
-      'query_genshin_db'
+      'query_team_knowledge'
     ]);
     expect(ABYSS_MCP_TOOL_NAMES).toEqual([
       'mcp__genshin__read_profile_cache',
       'mcp__genshin__query_enemy_data',
-      'mcp__genshin__query_genshin_db'
+      'mcp__genshin__query_team_knowledge'
     ]);
     expect(tools.every(({ annotations }) => annotations?.readOnlyHint === true)).toBe(true);
   });
@@ -324,32 +383,17 @@ describe('abyss in-process business tools', () => {
     );
   });
 
-  it('returns versioned character knowledge and records only correlated safe observability fields', async () => {
+  it('returns only the scoped prebuilt knowledge packet subset and exact citation ids', async () => {
     const log = vi.fn();
-    const knowledge = CharacterKnowledgeStore.fromUnknown({
-      schemaVersion: 1,
-      knowledgeVersion: 'test-knowledge-v1',
-      updatedAt: '2026-07-23T00:00:00.000Z',
-      coverage: { characterCount: 1, notes: '测试覆盖。' },
-      characters: [
-        {
-          id: '1001',
-          name: '测试角色1',
-          weaponType: 'bow',
-          roles: ['support'],
-          energyCost: 60,
-          energyNeeds: 'medium',
-          capabilities: ['healing', 'off-field'],
-          applicationNotes: ['后台恢复。'],
-          kitNotes: ['不推断伤害。'],
-          unknownFields: []
-        }
-      ]
-    });
     const tools = createAbyssBusinessTools({
       getProfile: () => null,
       getScenario: () => abyssScenario(),
-      knowledge,
+      knowledgePacket: packet,
+      knowledgeScope: {
+        floor: 12,
+        chambers: [1, 2],
+        eligibleCharacterIds: ['1001', '1002']
+      },
       auditContext: {
         correlationId: 'audit-request-1',
         scenarioId: 'abyss.2026-07',
@@ -357,39 +401,100 @@ describe('abyss in-process business tools', () => {
       },
       log
     });
-    const result = await tools[2]!.handler({ characterIds: ['1001', '9999'] }, {});
+    const result = await tools[2]!.handler(
+      { characterIds: ['1001'], floor: 12, chamber: 1, half: 'first' },
+      {}
+    );
     const payload = textPayload(result) as {
       knowledgeVersion: string;
-      characters: Array<Record<string, unknown>>;
+      target: Record<string, unknown>;
+      buildInterpretations: Array<Record<string, unknown>>;
+      characterStrategies: Array<Record<string, unknown>>;
+      mechanicStrategies: Array<Record<string, unknown>>;
+      unknown: Array<Record<string, unknown>>;
+      citationIds: string[];
     };
-    expect(payload.knowledgeVersion).toBe('test-knowledge-v1');
-    expect(payload.characters[0]).toMatchObject({
-      id: '1001',
-      status: 'known',
-      weaponType: 'bow',
-      roles: ['support'],
-      capabilities: ['healing', 'off-field']
+    expect(payload).toMatchObject({
+      knowledgeVersion: 'packet-v1',
+      target: { floor: 12, chamber: 1, half: 'first' },
+      buildInterpretations: [{ characterId: '1001', archetypeId: 'role-1' }],
+      characterStrategies: [
+        { characterId: '1001', citationIds: ['citation-1001'] }
+      ],
+      mechanicStrategies: [
+        {
+          mechanicId: 'shield-breaking',
+          citationIds: ['citation-shield-breaking']
+        }
+      ],
+      unknown: [{ subjectId: 'scenario:unknown-window', kind: 'missing' }],
+      citationIds: ['citation-1001', 'citation-shield-breaking']
     });
-    expect(payload.characters[1]).toMatchObject({
-      id: '9999',
-      status: 'unknown',
-      unknownFields: expect.arrayContaining(['weaponType', 'roles', 'capabilities', 'kitNotes'])
-    });
+    expect(structuredClone(payload)).toEqual(payload);
+    expect(JSON.stringify(payload)).not.toContain('1002');
     expect(log).toHaveBeenCalledWith(
       expect.objectContaining({
-        tool: 'query_genshin_db',
-        itemCount: 2,
+        tool: 'query_team_knowledge',
+        itemCount: 1,
         ok: true,
         correlationId: 'audit-request-1',
         scenarioId: 'abyss.2026-07',
         dataVersion: '2026.07.1',
-        knowledgeVersion: 'test-knowledge-v1',
-        parameterSummary: { requestedCount: 2 },
+        knowledgeVersion: 'packet-v1',
+        parameterSummary: expect.objectContaining({
+          requestedCount: 1,
+          floor: 12,
+          chamber: 1,
+          half: 'first',
+          returnedCitationIds: 'citation-1001,citation-shield-breaking'
+        }),
         issueCodes: []
       })
     );
-    expect(JSON.stringify(log.mock.calls)).not.toMatch(
-      /123456789|1001|9999|api.?key|authorization/i
-    );
+    expect(JSON.stringify(log.mock.calls)).not.toMatch(/123456789|api.?key|authorization/i);
+  });
+
+  it('fails closed for unknown characters, duplicate ids, target drift, and cross-run scope', async () => {
+    const tools = createAbyssBusinessTools({
+      getProfile: () => null,
+      getScenario: () => abyssScenario(),
+      knowledgePacket: packet,
+      knowledgeScope: {
+        floor: 12,
+        chambers: [1, 2],
+        eligibleCharacterIds: ['1001', '1002']
+      },
+      auditContext: {
+        correlationId: 'run-current',
+        scenarioId: 'abyss.2026-07',
+        dataVersion: '2026.07.1'
+      }
+    });
+    const handler = tools[2]!.handler;
+
+    expect(
+      await handler(
+        { characterIds: ['1001', '1001'], floor: 12, chamber: 1, half: 'first' },
+        {}
+      )
+    ).toMatchObject({ isError: true });
+    expect(
+      await handler(
+        { characterIds: ['9999'], floor: 12, chamber: 1, half: 'first' },
+        {}
+      )
+    ).toMatchObject({ isError: true });
+    expect(
+      await handler(
+        { characterIds: ['1001'], floor: 11, chamber: 1, half: 'first' },
+        {}
+      )
+    ).toMatchObject({ isError: true });
+    expect(
+      await handler(
+        { characterIds: ['1001'], floor: 12, chamber: 3, half: 'second' },
+        {}
+      )
+    ).toMatchObject({ isError: true });
   });
 });

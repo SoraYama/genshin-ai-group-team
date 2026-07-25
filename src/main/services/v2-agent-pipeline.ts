@@ -14,9 +14,12 @@ import {
   type V2PipelineContext,
   type V2RotationOutput
 } from '../agents/contracts.js';
-import { CRITIQUE_PROMPT_V2 } from '../agents/critique/prompt.js';
-import { EXPLAIN_PROMPT_V2 } from '../agents/explain/prompt.js';
-import { ROTATION_COACH_PROMPT_V2 } from '../agents/rotation-coach/prompt.js';
+import { CRITIQUE_PROMPT_V2, CRITIQUE_PROMPT_V3 } from '../agents/critique/prompt.js';
+import { EXPLAIN_PROMPT_V2, EXPLAIN_PROMPT_V3 } from '../agents/explain/prompt.js';
+import {
+  ROTATION_COACH_PROMPT_V2,
+  ROTATION_COACH_PROMPT_V3
+} from '../agents/rotation-coach/prompt.js';
 import type { RecommendationPlan } from '../../shared/scenario-v2.js';
 import type { AdvisorFactRef, AdvisorNarrativeReasonCode } from '../../shared/advisor-narrative.js';
 import type { AgentSdkRunOptions } from './agent-sdk-adapter.js';
@@ -65,7 +68,12 @@ type ValidationResult<P extends RecommendationPlan, I extends PipelineIssue> =
 export interface RunV2AgentPipelineOptions<P extends RecommendationPlan, I extends PipelineIssue> {
   runner: AuditedAgentRunner;
   context: V2PipelineContext;
-  trace?: AgentRunTraceWriter;
+  trace?: AgentRunTraceWriter | AgentPipelineTraceSession;
+  supportsKnowledgeRef?: (
+    characterId: string,
+    citationId: string,
+    archetypeId: string
+  ) => boolean;
   onUsageDelta?: (usage: AgentUsage) => void;
   sdkOptionsForStage: (stage: V2AgentStage) => AgentSdkRunOptions;
   composer: {
@@ -75,6 +83,11 @@ export interface RunV2AgentPipelineOptions<P extends RecommendationPlan, I exten
     validate: (text: string, tools: ToolAudit[]) => ValidationResult<P, I>;
   };
   invalidIssue: (stage: V2AgentStage, message: string) => I;
+}
+
+export interface AgentPipelineTraceSession {
+  writer: AgentRunTraceWriter;
+  lease: AgentRunTraceLease;
 }
 
 export type V2AgentPipelineResult<P extends RecommendationPlan, I extends PipelineIssue> =
@@ -276,7 +289,8 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
       runner: options.runner,
       sdkOptions: critiqueOptions,
       prompt: critiquePrompt,
-      systemPrompt: CRITIQUE_PROMPT_V2,
+      systemPrompt:
+        context.mode === 'spiral-abyss' ? CRITIQUE_PROMPT_V3 : CRITIQUE_PROMPT_V2,
       schema: v2CritiqueOutputSchema,
       correlationId: context.correlationId,
       onUsageDelta: options.onUsageDelta
@@ -353,7 +367,10 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
       runner: options.runner,
       sdkOptions: rotationOptions,
       prompt: rotationPrompt,
-      systemPrompt: ROTATION_COACH_PROMPT_V2,
+      systemPrompt:
+        context.mode === 'spiral-abyss'
+          ? ROTATION_COACH_PROMPT_V3
+          : ROTATION_COACH_PROMPT_V2,
       schema: v2RotationOutputSchema,
       correlationId: context.correlationId,
       onUsageDelta: options.onUsageDelta
@@ -385,7 +402,11 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
         usage
       };
     }
-    const rotationFactError = firstGroundingError(rotationResult.value.rotations, context);
+    const rotationFactError = firstGroundingError(
+      rotationResult.value.rotations,
+      context,
+      options.supportsKnowledgeRef
+    );
     if (rotationFactError) {
       const failure = agentFailure('VALIDATION_FAILED', rotationFactError, false);
       trace.failStage('rotation', failure, rotationResult.turn);
@@ -421,7 +442,8 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
       runner: options.runner,
       sdkOptions: explainOptions,
       prompt: explainPrompt,
-      systemPrompt: EXPLAIN_PROMPT_V2,
+      systemPrompt:
+        context.mode === 'spiral-abyss' ? EXPLAIN_PROMPT_V3 : EXPLAIN_PROMPT_V2,
       schema: v2ExplainOutputSchema,
       correlationId: context.correlationId,
       onUsageDelta: options.onUsageDelta
@@ -453,7 +475,11 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
         usage
       };
     }
-    const explainFactError = firstGroundingError(explainResult.value.explanations, context);
+    const explainFactError = firstGroundingError(
+      explainResult.value.explanations,
+      context,
+      options.supportsKnowledgeRef
+    );
     if (explainFactError) {
       const failure = agentFailure('VALIDATION_FAILED', explainFactError, false);
       trace.failStage('explain', failure, explainResult.turn);
@@ -484,30 +510,70 @@ function firstGroundingError(
     reasonCodes: AdvisorNarrativeReasonCode[];
     factRefs: AdvisorFactRef[];
   }>,
-  context: V2PipelineContext
+  context: V2PipelineContext,
+  supportsKnowledgeRef:
+    | ((
+        characterId: string,
+        citationId: string,
+        archetypeId: string
+      ) => boolean)
+    | undefined
 ): string | undefined {
   const eligibleIds = new Set(context.candidate.eligibleCharacterIds);
   const unknownKnowledgeIds = new Set(context.knowledge.unknowns.map(({ subjectId }) => subjectId));
   const citationsById = new Map(
     context.knowledge.citations.map((citation) => [citation.id, citation])
   );
-  const positivelyGroundedKnowledgeIds = new Set([
-    ...context.knowledge.trustedMatches.flatMap((match) =>
-      match.characterId !== undefined &&
-      match.citationIds.some(
-        (citationId) => citationsById.get(citationId)?.trust === 'trusted-local'
-      )
-        ? [match.characterId]
-        : []
-    ),
-    ...context.knowledge.ephemeralMatches.flatMap((match) =>
+  const interpretationsById = new Map(
+    context.knowledge.buildInterpretations.map((interpretation) => [
+      interpretation.characterId,
+      interpretation
+    ])
+  );
+  const positivelyGroundedKnowledgeIds = new Set(
+    context.knowledge.trustedMatches.flatMap((match) => {
+      const characterId = match.characterId;
+      if (characterId === undefined) return [];
+      const interpretation = interpretationsById.get(characterId);
+      const archetypeId = interpretation?.archetypeId;
+      if (
+        interpretation === undefined ||
+        archetypeId === null ||
+        archetypeId === undefined ||
+        archetypeId !== match.archetypeId ||
+        !interpretation.currentBuildUsable ||
+        interpretation.adjustment === 'required' ||
+        interpretation.contextRequired ||
+        interpretation.conflictingSignals.length > 0 ||
+        unknownKnowledgeIds.has(characterId) ||
+        !match.citationIds.some(
+          (citationId) =>
+            citationsById.get(citationId)?.trust === 'trusted-local' &&
+            (supportsKnowledgeRef?.(characterId, citationId, archetypeId) ?? true)
+        )
+      ) {
+        return [];
+      }
+      return [characterId];
+    })
+  );
+  for (const match of context.knowledge.ephemeralMatches) {
+    const interpretation = interpretationsById.get(match.subjectId);
+    if (
+      interpretation !== undefined &&
+      interpretation.archetypeId !== null &&
+      interpretation.currentBuildUsable &&
+      interpretation.adjustment !== 'required' &&
+      !interpretation.contextRequired &&
+      interpretation.conflictingSignals.length === 0 &&
+      !unknownKnowledgeIds.has(match.subjectId) &&
       match.citationIds.some(
         (citationId) => citationsById.get(citationId)?.trust === 'ephemeral-web'
       )
-        ? [match.subjectId]
-        : []
-    )
-  ]);
+    ) {
+      positivelyGroundedKnowledgeIds.add(match.subjectId);
+    }
+  }
   const detailedProfiles = new Map(
     context.profile.detailedProfiles.map((profile) => [String(profile.id), profile])
   );
@@ -884,16 +950,22 @@ class PipelineTraceObserver {
   private lease: AgentRunTraceLease | undefined;
   private activeStage: V2AgentStage | undefined;
   private terminal = false;
+  private readonly ownsLifecycle: boolean;
 
   constructor(
-    writer: AgentRunTraceWriter | undefined,
+    trace: AgentRunTraceWriter | AgentPipelineTraceSession | undefined,
     private readonly context: V2PipelineContext,
     initialOptions?: AgentSdkRunOptions
   ) {
-    this.writer = writer;
-    if (writer === undefined) return;
+    this.ownsLifecycle = trace !== undefined && !isTraceSession(trace);
+    this.writer = isTraceSession(trace) ? trace.writer : trace;
+    if (trace === undefined) return;
+    if (isTraceSession(trace)) {
+      this.lease = trace.lease;
+      return;
+    }
     try {
-      this.lease = writer.start({
+      this.lease = trace.start({
         correlationId: context.correlationId,
         model: initialOptions?.model ?? '[unavailable]',
         knowledge: {
@@ -982,19 +1054,23 @@ class PipelineTraceObserver {
   complete(): void {
     if (this.terminal) return;
     this.skipUnattempted();
-    this.write((writer, lease) => writer.finish(lease, { finalSource: 'smart-service' }));
+    if (this.ownsLifecycle) {
+      this.write((writer, lease) => writer.finish(lease, { finalSource: 'smart-service' }));
+    }
     this.terminal = true;
   }
 
   fail(failure: AgentFailure): void {
     if (this.terminal) return;
     this.skipUnattempted();
-    this.write((writer, lease) => {
-      writer.finish(lease, {
-        finalSource: 'blocked',
-        failure
+    if (this.ownsLifecycle) {
+      this.write((writer, lease) => {
+        writer.finish(lease, {
+          finalSource: 'blocked',
+          failure
+        });
       });
-    });
+    }
     this.terminal = true;
   }
 
@@ -1025,6 +1101,17 @@ class PipelineTraceObserver {
     this.writer = undefined;
     this.lease = undefined;
   }
+}
+
+function isTraceSession(
+  value: AgentRunTraceWriter | AgentPipelineTraceSession | undefined
+): value is AgentPipelineTraceSession {
+  return (
+    value !== undefined &&
+    typeof value === 'object' &&
+    'writer' in value &&
+    'lease' in value
+  );
 }
 
 function traceStageTerminalInput(

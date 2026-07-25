@@ -123,6 +123,44 @@ export class KnowledgeBundleStore implements AdvisorKnowledgeReader {
     return this.bundle.catalog.catalogVersion;
   }
 
+  getSourceRegistry(): {
+    sources: Array<{ id: string; host: string; trust: 'trusted-local' }>;
+  } {
+    return {
+      sources: this.bundle.sources.sources.map(({ id, host, trust }) => ({
+        id,
+        host,
+        trust
+      }))
+    };
+  }
+
+  getCanonicalCharacterCatalog(): Array<{
+    name: string;
+    element: CommittedCharacterCatalogEntry['element'];
+  }> {
+    return this.bundle.catalog.characters.map(({ name, element }) => ({ name, element }));
+  }
+
+  supportsCharacterCitation(
+    citationId: string,
+    characterId: string,
+    archetypeId: string | null
+  ): boolean {
+    if (archetypeId === null || this.getArchetype(characterId, archetypeId) === undefined) {
+      return false;
+    }
+    const citation = this.citationsById.get(citationId);
+    const evidence = this.bundle.evidence.entries.find(
+      ({ citationId: candidate }) => candidate === citationId
+    );
+    return (
+      citation?.subjectCharacterIds.includes(characterId) === true &&
+      evidence?.subjectCharacterIds.includes(characterId) === true &&
+      evidence.archetypeBindings.some(({ archetypeId: candidate }) => candidate === archetypeId)
+    );
+  }
+
   getCatalogEntry(characterId: string): CommittedCharacterCatalogEntry | undefined {
     const entry = this.catalogById.get(characterId);
     return entry === undefined ? undefined : structuredClone(entry);

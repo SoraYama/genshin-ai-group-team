@@ -2,9 +2,15 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { AbyssAdvisorService } from '../../../src/main/services/abyss-advisor-service.js';
 import { CharacterKnowledgeStore } from '../../../src/main/services/character-knowledge-store.js';
-import type { AdvisorKnowledgeReader } from '../../../src/shared/advisor-knowledge.js';
+import type {
+  AdvisorKnowledgeReader,
+  KnowledgeContextPacket
+} from '../../../src/shared/advisor-knowledge.js';
 import type { AgentSdkRunOptions } from '../../../src/main/services/agent-sdk-adapter.js';
 import type { AbyssScenarioView } from '../../../src/shared/abyss-advisor.js';
+import { AgentRunTraceStore } from '../../../src/main/services/agent-run-trace-store.js';
+import { AgentTurnError } from '../../../src/main/services/agent-turn-audit.js';
+import type { GuideResearchAgentResult } from '../../../src/main/services/guide-research-contract.js';
 import {
   ABYSS_CHARACTERS,
   abyssInput,
@@ -28,7 +34,7 @@ class FixtureRunner {
   async *run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown> {
     this.calls += 1;
     this.prompts.push(prompt);
-    if (options.systemPrompt.includes('CritiqueAgent v2')) {
+    if (options.systemPrompt.includes('CritiqueAgent v3')) {
       yield {
         type: 'result',
         subtype: 'success',
@@ -46,7 +52,7 @@ class FixtureRunner {
       };
       return;
     }
-    if (options.systemPrompt.includes('RotationCoachAgent v2')) {
+    if (options.systemPrompt.includes('RotationCoachAgent v3')) {
       yield {
         type: 'result',
         subtype: 'success',
@@ -58,7 +64,7 @@ class FixtureRunner {
       };
       return;
     }
-    if (options.systemPrompt.includes('ExplainAgent v2')) {
+    if (options.systemPrompt.includes('ExplainAgent v3')) {
       const plan = validAbyssPlan();
       yield {
         type: 'result',
@@ -96,9 +102,44 @@ class FixtureRunner {
         }
       })),
       {
-        id: 'characters',
-        name: 'mcp__genshin__query_genshin_db',
-        input: { characterIds: ABYSS_CHARACTERS.slice(0, 8).map(({ id }) => String(id)) }
+        id: 'knowledge-first-1',
+        name: 'mcp__genshin__query_team_knowledge',
+        input: {
+          characterIds: selectedCharacterIds.slice(0, 4),
+          floor: 12,
+          chamber: 1,
+          half: 'first'
+        }
+      },
+      {
+        id: 'knowledge-second-1',
+        name: 'mcp__genshin__query_team_knowledge',
+        input: {
+          characterIds: selectedCharacterIds.slice(4, 8),
+          floor: 12,
+          chamber: 1,
+          half: 'second'
+        }
+      },
+      {
+        id: 'knowledge-first-2',
+        name: 'mcp__genshin__query_team_knowledge',
+        input: {
+          characterIds: selectedCharacterIds.slice(0, 4),
+          floor: 12,
+          chamber: 2,
+          half: 'first'
+        }
+      },
+      {
+        id: 'knowledge-second-2',
+        name: 'mcp__genshin__query_team_knowledge',
+        input: {
+          characterIds: selectedCharacterIds.slice(4, 8),
+          floor: 12,
+          chamber: 2,
+          half: 'second'
+        }
       }
     ];
     yield {
@@ -123,6 +164,34 @@ class FixtureRunner {
       usage: { input_tokens: 12, output_tokens: 6 },
       total_cost_usd: 0.02
     };
+  }
+}
+
+class ProviderFailureRunner {
+  async *run(): AsyncIterable<unknown> {
+    yield await Promise.reject(
+      new AgentTurnError('AGENT_TURN_STREAM_FAILED', 'upstream 500: TOP-SECRET-BODY')
+    );
+  }
+}
+
+class ZeroUsageRunner extends FixtureRunner {
+  override async *run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown> {
+    for await (const message of super.run(prompt, options)) {
+      if (
+        typeof message === 'object' &&
+        message !== null &&
+        (message as { type?: string }).type === 'result'
+      ) {
+        yield {
+          ...(message as Record<string, unknown>),
+          usage: { input_tokens: 0, output_tokens: 0 },
+          total_cost_usd: 0
+        };
+      } else {
+        yield message;
+      }
+    }
   }
 }
 
@@ -191,8 +260,109 @@ function profile(characters = ABYSS_CHARACTERS) {
   };
 }
 
+function trustedPacket(
+  overrides: Partial<KnowledgeContextPacket> = {}
+): KnowledgeContextPacket {
+  const selected = ABYSS_CHARACTERS.slice(0, 8).map(({ id }) => String(id));
+  const citations = selected.map((characterId, index) => ({
+    id: `trusted-citation-${index + 1}`,
+    sourceId: 'trusted-test-source',
+    url: `https://example.test/character-${characterId}`,
+    title: `Reviewed strategy ${index + 1}`,
+    reviewedAt: '2026-07-24T00:00:00.000Z',
+    trust: 'trusted-local' as const
+  }));
+  const packet: KnowledgeContextPacket = {
+    knowledgeVersion: 'trusted-test-v1',
+    buildInterpretations: selected.map((characterId, index) => ({
+      characterId,
+      archetypeId: `archetype-${index + 1}`,
+      confidence: 'high',
+      candidateArchetypeIds: [`archetype-${index + 1}`],
+      contextRequired: false,
+      matchedSignals: ['reviewed-build-signal'],
+      conflictingSignals: [],
+      currentBuildUsable: true,
+      adjustment: 'none',
+      unknowns: []
+    })),
+    trustedMatches: selected.map((characterId, index) => ({
+      id: `trusted-character-${characterId}`,
+      characterId,
+      archetypeId: `archetype-${index + 1}`,
+      summary: `Reviewed strategy for ${characterId}.`,
+      factStatements: ['Reviewed role and build fit.'],
+      citationIds: [citations[index]!.id]
+    })),
+    ephemeralMatches: [],
+    unknowns: [],
+    coverage: { requested: 8, trusted: 8, ephemeral: 0, unknown: 0 },
+    citations,
+    ...overrides
+  };
+  return packet;
+}
+
+function packetWithGap(): KnowledgeContextPacket {
+  const base = trustedPacket();
+  return {
+    ...base,
+    trustedMatches: base.trustedMatches.slice(0, 7),
+    unknowns: [
+      {
+        id: 'gap-character-1008',
+        subjectId: '1008',
+        kind: 'missing',
+        reason: 'No reviewed local character strategy covers the current candidate build.'
+      }
+    ],
+    coverage: { requested: 8, trusted: 7, ephemeral: 0, unknown: 1 },
+    citations: base.citations.slice(0, 7)
+  };
+}
+
+function successfulResearch(): GuideResearchAgentResult {
+  return {
+    entries: [
+      {
+        taskKey: 'anonymous-gap-task',
+        origin: 'research',
+        value: {
+          trust: 'ephemeral-web',
+          matches: [
+            {
+              id: 'web-match-gap',
+              subjectId: 'guide-subject-gap',
+              summary: 'Validated ephemeral role guidance.',
+              citationIds: ['web-citation-gap']
+            }
+          ],
+          citations: [
+            {
+              id: 'web-citation-gap',
+              sourceId: 'trusted-test-source',
+              url: 'https://example.test/guide-gap',
+              title: 'Guide gap',
+              reviewedAt: '2026-07-24T00:00:00.000Z',
+              trust: 'ephemeral-web'
+            }
+          ],
+          applicability: {
+            characterNames: [],
+            scenarioTags: [],
+            buildSignals: ['build-unknown-present']
+          },
+          conflicts: [],
+          researchedAt: '2026-07-24T00:00:00.000Z'
+        }
+      }
+    ],
+    gaps: []
+  };
+}
+
 function service(options: {
-  runner: FixtureRunner;
+  runner: FixtureRunner | ProviderFailureRunner | ZeroUsageRunner;
   apiKey?: string;
   characters?: typeof ABYSS_CHARACTERS;
   appendAbyss?: ReturnType<typeof vi.fn>;
@@ -203,6 +373,14 @@ function service(options: {
   knowledge?: CharacterKnowledgeStore;
   toolLog?: ReturnType<typeof vi.fn>;
   auditLog?: ReturnType<typeof vi.fn>;
+  packet?: KnowledgeContextPacket;
+  research?: { research: ReturnType<typeof vi.fn> };
+  trace?: AgentRunTraceStore;
+  coverageTasks?: Array<{
+    key: string;
+    reason: 'missing';
+    scenarioTags: string[];
+  }>;
 }) {
   const strategyKnowledge = new Proxy({} as AdvisorKnowledgeReader, {
     get() {
@@ -227,12 +405,221 @@ function service(options: {
     agentTimeoutMs: options.agentTimeoutMs,
     knowledge: options.knowledge,
     strategyKnowledge,
+    advisorKnowledge: {
+      buildPacket: vi.fn(() => options.packet ?? trustedPacket())
+    },
+    coverageGate: {
+      evaluate: vi.fn(() => ({
+        required: (options.coverageTasks?.length ?? 0) > 0,
+        tasks: options.coverageTasks ?? [],
+        bindings: (options.coverageTasks ?? []).map(({ key }) => ({
+          taskKey: key,
+          unknownIndexes: (options.packet ?? trustedPacket()).unknowns.map((_gap, index) => index)
+        }))
+      }))
+    },
+    research: options.research,
+    trace: options.trace,
     toolLog: options.toolLog,
     auditLog: options.auditLog
   });
 }
 
 describe('AbyssAdvisorService', () => {
+  it('uses complete trusted knowledge without research and keeps one trace owner', async () => {
+    const research = { research: vi.fn() };
+    const trace = new AgentRunTraceStore();
+    const progress: string[] = [];
+    const result = await service({
+      runner: new FixtureRunner([validAbyssPlan()]),
+      apiKey: 'secret',
+      packet: trustedPacket(),
+      research,
+      trace
+    }).recommend(abyssInput(), ({ step }) => progress.push(step));
+
+    expect(research.research).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      status: 'planned',
+      source: 'smart-service',
+      knowledgeSummary: { trusted: 8, ephemeral: 0, unknown: 0, searched: false }
+    });
+    expect(progress).toEqual([
+      'reading-roster',
+      'analyzing-rules',
+      'interpreting-builds',
+      'checking-knowledge',
+      'generating-teams',
+      'checking-conflicts',
+      'writing-tactics'
+    ]);
+    expect(trace.latest()).toMatchObject({
+      correlationId: 'abyss-test-request',
+      status: 'completed',
+      finalSource: 'smart-service',
+      knowledge: { trusted: 8, ephemeral: 0, unknown: 0, searched: false }
+    });
+    expect(trace.latest()?.usage.outputTokens).toBeGreaterThan(0);
+    expect(trace.latest()?.stages.filter(({ stage }) => stage === 'knowledge')).toHaveLength(1);
+    expect(trace.latest()?.stages.filter(({ stage }) => stage === 'research')).toHaveLength(1);
+  });
+
+  it('researches only anonymous gaps and keeps accepted results ephemeral', async () => {
+    const research = { research: vi.fn(async () => successfulResearch()) };
+    const trace = new AgentRunTraceStore();
+    const packet = packetWithGap();
+    const result = await service({
+      runner: new FixtureRunner([validAbyssPlan()]),
+      apiKey: 'secret',
+      packet,
+      research,
+      trace,
+      coverageTasks: [
+        { key: 'anonymous-gap-task', reason: 'missing', scenarioTags: ['multi-wave'] }
+      ]
+    }).recommend(abyssInput());
+
+    expect(research.research).toHaveBeenCalledOnce();
+    expect(research.research).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tasks: [
+          {
+            key: 'anonymous-gap-task',
+            reason: 'missing',
+            scenarioTags: ['multi-wave']
+          }
+        ],
+        knowledgeVersion: 'trusted-test-v1'
+      }),
+      expect.any(Object)
+    );
+    expect(result).toMatchObject({
+      status: 'planned',
+      source: 'smart-service',
+      knowledgeSummary: { searched: true, ephemeral: 1, unknown: 0, trusted: 7 }
+    });
+    expect(packet.ephemeralMatches).toEqual([]);
+    expect(packet.trustedMatches).toHaveLength(7);
+    expect(trace.latest()?.knowledge).toEqual({
+      searched: true,
+      ephemeral: 1,
+      unknown: 0,
+      trusted: 7
+    });
+  });
+
+  it('keeps a conflicted research result unknown instead of exposing it as usable ephemeral knowledge', async () => {
+    const conflicted = successfulResearch();
+    conflicted.entries[0]!.value.conflicts = ['Two reviewed guide sections disagree on the role.'];
+    const result = await service({
+      runner: new FixtureRunner([
+        validAbyssPlan({
+          confidence: 'low',
+          assumptions: ['1008：知识缺口，按低置信度保守使用。']
+        })
+      ]),
+      apiKey: 'secret',
+      packet: packetWithGap(),
+      research: { research: vi.fn(async () => conflicted) },
+      coverageTasks: [
+        { key: 'anonymous-gap-task', reason: 'missing', scenarioTags: ['multi-wave'] }
+      ]
+    }).recommend(abyssInput());
+
+    expect(result).toMatchObject({
+      status: 'planned',
+      source: 'smart-service',
+      knowledgeSummary: { searched: true, trusted: 7, ephemeral: 0, unknown: 1 }
+    });
+  });
+
+  it('preserves the provider failure when falling back to a feasible local plan', async () => {
+    const trace = new AgentRunTraceStore();
+    const result = await service({
+      runner: new ProviderFailureRunner(),
+      apiKey: 'secret',
+      packet: trustedPacket(),
+      trace
+    }).recommend(abyssInput());
+
+    expect(result).toMatchObject({ status: 'planned', source: 'local-rules' });
+    expect(result.warnings.join(' ')).toContain('智能服务请求失败');
+    expect(JSON.stringify(result)).not.toMatch(/TOP-SECRET|upstream 500/i);
+    expect(trace.latest()).toMatchObject({
+      status: 'failed',
+      finalSource: 'local-rules',
+      failure: { code: 'PROVIDER_ERROR' }
+    });
+    expect(JSON.stringify(trace.latest())).not.toMatch(/TOP-SECRET|upstream 500/i);
+  });
+
+  it('does not label a schema-valid response smart-service when total model usage is zero', async () => {
+    const trace = new AgentRunTraceStore();
+    const result = await service({
+      runner: new ZeroUsageRunner([validAbyssPlan()]),
+      apiKey: 'secret',
+      packet: trustedPacket(),
+      trace
+    }).recommend(abyssInput());
+
+    expect(result).toMatchObject({ status: 'planned', source: 'local-rules' });
+    expect(trace.latest()).toMatchObject({
+      finalSource: 'local-rules',
+      failure: { code: 'AGENT_OUTPUT_INVALID' }
+    });
+  });
+
+  it('finishes a local infeasibility as blocked without starting the model', async () => {
+    const trace = new AgentRunTraceStore();
+    const runner = new FixtureRunner([validAbyssPlan()]);
+    const result = await service({
+      runner,
+      apiKey: 'secret',
+      characters: ABYSS_CHARACTERS.slice(0, 7),
+      trace
+    }).recommend(abyssInput());
+
+    expect(runner.calls).toBe(0);
+    expect(result.status).toBe('blocked');
+    expect(trace.latest()).toMatchObject({
+      status: 'completed',
+      finalSource: 'blocked'
+    });
+  });
+
+  it('continues with trusted knowledge when guide research fails and keeps the gap explicit', async () => {
+    const research = {
+      research: vi.fn(async (): Promise<GuideResearchAgentResult> => ({
+        entries: [],
+        gaps: [{ taskKey: 'anonymous-gap-task', code: 'SEARCH_UNAVAILABLE' }]
+      }))
+    };
+    const result = await service({
+      runner: new FixtureRunner([
+        validAbyssPlan({
+          confidence: 'low',
+          assumptions: ['1008：知识缺口，按低置信度保守使用。']
+        })
+      ]),
+      apiKey: 'secret',
+      packet: packetWithGap(),
+      research,
+      coverageTasks: [
+        { key: 'anonymous-gap-task', reason: 'missing', scenarioTags: ['multi-wave'] }
+      ]
+    }).recommend(abyssInput());
+
+    expect(result).toMatchObject({
+      status: 'planned',
+      source: 'smart-service',
+      knowledgeSummary: { searched: true, ephemeral: 0, unknown: 1, trusted: 7 }
+    });
+    if (result.status === 'planned') {
+      expect(result.plan.confidence).toBe('low');
+      expect(result.assumptions.join(' ')).toContain('知识');
+    }
+  });
+
   it('records a correlated, redacted result audit with stable issue codes', async () => {
     const auditLog = vi.fn();
     const result = await service({
@@ -284,6 +671,8 @@ describe('AbyssAdvisorService', () => {
     expect(progress).toEqual([
       'abyss-test-request:reading-roster',
       'abyss-test-request:analyzing-rules',
+      'abyss-test-request:interpreting-builds',
+      'abyss-test-request:checking-knowledge',
       'abyss-test-request:generating-teams',
       'abyss-test-request:checking-conflicts',
       'abyss-test-request:writing-tactics'
@@ -333,52 +722,37 @@ describe('AbyssAdvisorService', () => {
   });
 
   it('downgrades smart output when selected-character knowledge coverage is incomplete', async () => {
-    const knowledge = CharacterKnowledgeStore.fromUnknown({
-      schemaVersion: 1,
-      knowledgeVersion: 'partial-knowledge-v1',
-      updatedAt: '2026-07-23T00:00:00.000Z',
-      coverage: { characterCount: 1, notes: '仅覆盖一个测试角色。' },
-      characters: [
-        {
-          id: '1001',
-          name: '测试角色1',
-          weaponType: 'sword',
-          roles: ['support'],
-          energyCost: 60,
-          energyNeeds: 'medium',
-          capabilities: ['off-field'],
-          applicationNotes: [],
-          kitNotes: [],
-          unknownFields: []
-        }
-      ]
-    });
-    const runner = new FixtureRunner([validAbyssPlan({ confidence: 'high' })]);
+    const runner = new FixtureRunner([
+      validAbyssPlan({
+        confidence: 'low',
+        assumptions: ['1008：知识缺口，按低置信度保守使用。']
+      })
+    ]);
     const result = await service({
       runner,
       apiKey: 'secret',
-      knowledge
+      packet: packetWithGap()
     }).recommend(abyssInput());
 
     expect(result.status).toBe('planned');
     if (result.status === 'planned') {
       expect(result.source).toBe('smart-service');
       expect(result.plan.confidence).toBe('low');
-      expect(result.assumptions.join(' ')).toContain('角色知识仅覆盖 1 / 8');
-      expect(result.plan.assumptions.join(' ')).toContain('partial-knowledge-v1');
+      expect(result.assumptions.join(' ')).toContain('1 项知识未知');
+      expect(result.plan.assumptions.join(' ')).toContain('trusted-test-v1');
       expect(result.knowledgeSummary).toEqual({
-        trusted: 0,
+        trusted: 7,
         ephemeral: 0,
-        unknown: ABYSS_CHARACTERS.length,
+        unknown: 1,
         searched: false
       });
     }
     const composePayload = JSON.parse(runner.prompts[0]!) as {
       context: { knowledge: { unknowns: Array<{ subjectId: string }> } };
     };
-    expect(composePayload.context.knowledge.unknowns.map(({ subjectId }) => subjectId)).toEqual(
-      ABYSS_CHARACTERS.map(({ id }) => String(id))
-    );
+    expect(composePayload.context.knowledge.unknowns.map(({ subjectId }) => subjectId)).toEqual([
+      '1008'
+    ]);
   });
 
   it('uses local rules without invoking the agent when the smart service is not configured', async () => {
@@ -476,29 +850,38 @@ describe('AbyssAdvisorService', () => {
 
   it('aborts a hung smart-service request and falls back to local rules', async () => {
     const appendAbyss = vi.fn();
+    const trace = new AgentRunTraceStore();
     const advisor = service({
       runner: new HangingRunner() as never,
       apiKey: 'secret',
       agentTimeoutMs: 10,
-      appendAbyss
+      appendAbyss,
+      trace
     });
     const result = await advisor.recommend(abyssInput());
     expect(result).toMatchObject({ status: 'planned', source: 'local-rules' });
     expect(result.warnings.join(' ')).toContain('智能服务');
     expect(appendAbyss).toHaveBeenCalledTimes(1);
     expect(appendAbyss).toHaveBeenCalledWith(expect.objectContaining({ source: 'local-rules' }));
+    expect(trace.latest()).toMatchObject({
+      status: 'failed',
+      finalSource: 'local-rules',
+      failure: { code: 'AGENT_TIMEOUT' }
+    });
   });
 
   it('cancels a hanging Critique stage without saving a fallback or partial history', async () => {
     const runner = new HangingAfterComposeRunner();
     const appendAbyss = vi.fn();
     const recordUsage = vi.fn();
+    const trace = new AgentRunTraceStore();
     const advisor = service({
       runner: runner as never,
       apiKey: 'secret',
       agentTimeoutMs: 1_000,
       appendAbyss,
-      recordUsage
+      recordUsage,
+      trace
     });
     const pending = advisor.recommend(abyssInput());
     await runner.stageStarted;
@@ -508,6 +891,11 @@ describe('AbyssAdvisorService', () => {
     expect(recordUsage).toHaveBeenCalledTimes(1);
     expect(recordUsage).toHaveBeenCalledWith(12, 6, 0.02);
     expect(appendAbyss).not.toHaveBeenCalled();
+    expect(trace.latest()).toMatchObject({
+      status: 'failed',
+      finalSource: 'blocked',
+      failure: { code: 'AGENT_ABORTED' }
+    });
   });
 
   it('cancels while scenario data is still loading and never starts generation or history writes', async () => {
@@ -544,13 +932,13 @@ describe('AbyssAdvisorService', () => {
       }
     });
     const oldRequest = advisor.recommend(abyssInput({ correlationId: 'stale-request' }));
-    const oldRejection = expect(oldRequest).rejects.toThrow(/cancelled/);
+    const oldOutcome = oldRequest.catch((error: unknown) => error);
     const newRequest = advisor.recommend(abyssInput({ correlationId: 'current-request' }));
 
     expect(advisor.cancel('stale-request')).toBe(false);
     releases[1]?.(readyScenario());
     await expect(newRequest).resolves.toMatchObject({ status: 'planned' });
-    await oldRejection;
+    await expect(oldOutcome).resolves.toMatchObject({ message: expect.stringMatching(/cancelled/) });
   });
 
   it('persists development-sample trust so history cannot present rehearsal data as current', async () => {

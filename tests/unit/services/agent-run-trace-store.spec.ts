@@ -181,6 +181,45 @@ describe('AgentRunTraceStore lifecycle', () => {
     });
   });
 
+  it('updates the single running knowledge summary while ignoring stale and terminal leases', () => {
+    const store = new AgentRunTraceStore();
+    const staleLease = store.start(run('stale'));
+    const activeLease = store.start(run('active'));
+
+    store.updateKnowledge(staleLease, {
+      trusted: 99,
+      ephemeral: 99,
+      unknown: 99,
+      searched: true
+    });
+    store.updateKnowledge(activeLease, {
+      trusted: 7,
+      ephemeral: 1,
+      unknown: 0,
+      searched: true
+    });
+    expect(store.latest()?.knowledge).toEqual({
+      trusted: 7,
+      ephemeral: 1,
+      unknown: 0,
+      searched: true
+    });
+
+    store.finish(activeLease, { finalSource: 'smart-service' });
+    store.updateKnowledge(activeLease, {
+      trusted: 0,
+      ephemeral: 0,
+      unknown: 8,
+      searched: false
+    });
+    expect(store.latest()?.knowledge).toEqual({
+      trusted: 7,
+      ephemeral: 1,
+      unknown: 0,
+      searched: true
+    });
+  });
+
   it('records skipped stages and produces schema-valid completed and failed traces', () => {
     const store = new AgentRunTraceStore();
     const completedLease = store.start(run('completed'));

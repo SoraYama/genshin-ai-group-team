@@ -6,8 +6,8 @@ import {
   type AbyssScenario
 } from '../../shared/abyss-advisor.js';
 import {
-  ABYSS_COMPOSER_PROMPT_V1,
-  ABYSS_REPAIR_PROMPT_V1
+  ABYSS_COMPOSER_PROMPT_V3,
+  ABYSS_REPAIR_PROMPT_V3
 } from '../agents/abyss-composer/prompt.js';
 import type {
   V2CritiqueOutput,
@@ -20,7 +20,8 @@ import type { AgentUsage, ToolAudit } from './agent-turn-audit.js';
 import { validateAbyssPlan } from './abyss-plan-validator.js';
 import type { CharacterKnowledgeReader } from '../../shared/character-knowledge.js';
 import { runV2AgentPipeline, type V2AgentStage } from './v2-agent-pipeline.js';
-import type { AgentRunTraceWriter } from './agent-run-trace-store.js';
+import type { AgentFailure } from '../../shared/agent-run-trace.js';
+import type { AgentPipelineTraceSession } from './v2-agent-pipeline.js';
 
 export interface AbyssPlanAgentRunner {
   run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown>;
@@ -35,6 +36,16 @@ export interface AbyssPlanAgentInput {
   sdkOptions: AgentSdkRunOptions;
   sdkOptionsForStage?: (stage: V2AgentStage) => AgentSdkRunOptions;
   onUsageDelta?: (usage: AgentUsage) => void;
+  trace?: AgentPipelineTraceSession;
+  citationPolicy?: AbyssKnowledgeCitationPolicy;
+}
+
+export interface AbyssKnowledgeCitationPolicy {
+  supportsCharacter: (
+    citationId: string,
+    characterId: string,
+    archetypeId: string | null
+  ) => boolean;
 }
 
 export type AbyssPlanAgentResult =
@@ -48,25 +59,26 @@ export type AbyssPlanAgentResult =
       explanation: V2ExplainOutput;
       usage: AgentUsage;
     }
-  | { ok: false; issues: AbyssPlanIssue[]; usage: AgentUsage };
+  | { ok: false; issues: AbyssPlanIssue[]; usage: AgentUsage; failure: AgentFailure };
 
 export class AbyssPlanAgent {
-  constructor(
-    private readonly runner: AbyssPlanAgentRunner,
-    private readonly trace?: AgentRunTraceWriter
-  ) {}
+  constructor(private readonly runner: AbyssPlanAgentRunner) {}
 
   async compose(context: AbyssPlanAgentInput): Promise<AbyssPlanAgentResult> {
     const result = await runV2AgentPipeline<AbyssPlanOutput, AbyssPlanIssue>({
       runner: this.runner,
       context: context.pipelineContext,
-      trace: this.trace,
+      trace: context.trace,
+      supportsKnowledgeRef: context.citationPolicy
+        ? (characterId, citationId, archetypeId) =>
+            context.citationPolicy!.supportsCharacter(citationId, characterId, archetypeId)
+        : undefined,
       onUsageDelta: context.onUsageDelta,
       sdkOptionsForStage: context.sdkOptionsForStage ?? (() => context.sdkOptions),
       composer: {
         initialPrompt: buildComposePayload(context),
-        systemPrompt: ABYSS_COMPOSER_PROMPT_V1,
-        repairPrompt: ABYSS_REPAIR_PROMPT_V1,
+        systemPrompt: ABYSS_COMPOSER_PROMPT_V3,
+        repairPrompt: ABYSS_REPAIR_PROMPT_V3,
         validate: (text, tools) => validateAgentOutput(text, context, tools)
       },
       invalidIssue: (stage, message) => ({
@@ -75,7 +87,32 @@ export class AbyssPlanAgent {
         message
       })
     });
-    if (!result.ok) return { ok: false, issues: result.issues, usage: result.usage };
+    if (!result.ok) {
+      return {
+        ok: false,
+        issues: result.issues,
+        usage: result.usage,
+        failure: issueFailure(result.issues)
+      };
+    }
+    if (result.usage.outputTokens <= 0) {
+      return {
+        ok: false,
+        issues: [
+          {
+            code: 'AGENT_OUTPUT_INVALID',
+            path: ['usage', 'outputTokens'],
+            message: '智能服务没有返回可验证的模型输出用量。'
+          }
+        ],
+        usage: result.usage,
+        failure: {
+          code: 'AGENT_OUTPUT_INVALID',
+          message: 'Agent output usage was zero.',
+          retryable: false
+        }
+      };
+    }
     const plan = applyAbyssStageOutputs(result.plan, result.critique);
     return {
       ok: true,
@@ -92,7 +129,10 @@ export class AbyssPlanAgent {
 
 function validateAgentOutput(
   raw: string,
-  context: Pick<AbyssPlanAgentInput, 'input' | 'scenario' | 'characters' | 'knowledge'>,
+  context: Pick<
+    AbyssPlanAgentInput,
+    'input' | 'scenario' | 'characters' | 'knowledge' | 'pipelineContext' | 'citationPolicy'
+  >,
   tools: ToolAudit[]
 ): { ok: true; plan: AbyssPlanOutput } | { ok: false; issues: AbyssPlanIssue[] } {
   let parsed: unknown;
@@ -128,11 +168,19 @@ function validateAgentOutput(
 }
 
 function validateRequiredTools(
-  context: Pick<AbyssPlanAgentInput, 'input' | 'scenario' | 'characters'>,
+  context: Pick<
+    AbyssPlanAgentInput,
+    'input' | 'scenario' | 'characters' | 'pipelineContext' | 'citationPolicy'
+  >,
   tools: ToolAudit[],
   plan: Record<string, unknown>
 ): AbyssPlanIssue | undefined {
-  const successful = tools.filter(({ succeeded }) => succeeded);
+  const correlationTools = tools.filter(
+    ({ correlationId }) => correlationId === context.input.correlationId
+  );
+  const duplicateToolIds =
+    correlationTools.length !== new Set(correlationTools.map(({ id }) => id)).size;
+  const successful = correlationTools.filter(({ succeeded }) => succeeded);
   const has = (name: string, predicate: (input: Record<string, unknown>) => boolean = () => true) =>
     successful.some((use) => use.name === name && predicate(use.input));
   const missing: string[] = [];
@@ -159,18 +207,7 @@ function validateRequiredTools(
   if (plannedOwnedIds.length === 0 || plannedOwnedIds.some((id) => !detailedProfileIds.has(id))) {
     missing.push('read_profile_cache:selected-character-details');
   }
-  const queriedCharacterIds = new Set(
-    successful
-      .filter(({ name }) => name === 'mcp__genshin__query_genshin_db')
-      .flatMap(({ input }) =>
-        Array.isArray(input['characterIds'])
-          ? input['characterIds'].filter((id): id is string => typeof id === 'string')
-          : []
-      )
-  );
-  if (plannedIds.length === 0 || plannedIds.some((id) => !queriedCharacterIds.has(id))) {
-    missing.push('query_genshin_db:selected-characters');
-  }
+  if (duplicateToolIds) missing.push('tool-audit:duplicate-id');
 
   const targetFloor = context.scenario.floors.find(({ floor }) => floor === context.input.floor);
   const targetChambers =
@@ -190,12 +227,47 @@ function validateRequiredTools(
     ) {
       missing.push(`query_enemy_data:${context.input.floor}-${chamber}`);
     }
+    (['first', 'second'] as const).forEach((half) => {
+      const expectedIds =
+        half === 'first'
+          ? recordTeamCharacterIds(plan, 'firstHalfTeam')
+          : recordTeamCharacterIds(plan, 'secondHalfTeam');
+      const knowledgeCalls = successful.filter(
+        ({ name, input }) =>
+          name === 'mcp__genshin__query_team_knowledge' &&
+          input['floor'] === context.input.floor &&
+          input['chamber'] === chamber &&
+          input['half'] === half
+      );
+      const queriedIds =
+        knowledgeCalls.length === 1 && Array.isArray(knowledgeCalls[0]!.input['characterIds'])
+          ? knowledgeCalls[0]!.input['characterIds'].filter(
+              (id): id is string => typeof id === 'string'
+            )
+          : [];
+      const coveredIds = new Set(queriedIds);
+      if (
+        expectedIds.length !== 4 ||
+        knowledgeCalls.length !== 1 ||
+        queriedIds.length !== expectedIds.length ||
+        expectedIds.some((id) => !coveredIds.has(id)) ||
+        coveredIds.size !== expectedIds.length
+      ) {
+        missing.push(`query_team_knowledge:${context.input.floor}-${chamber}-${half}`);
+      }
+    });
+  });
+  plannedIds.forEach((characterId) => {
+    const groundingError = characterKnowledgeGroundingError(context, plan, characterId);
+    if (groundingError !== undefined) {
+      missing.push(`knowledge-grounding:${characterId}:${groundingError}`);
+    }
   });
   if (missing.length === 0) return undefined;
   return {
     code: 'AGENT_OUTPUT_INVALID',
     path: ['tools'],
-    message: '智能服务没有成功读取生成方案所需的全部角色与逐房间敌情。',
+    message: '智能服务没有成功读取并验证生成方案所需的角色、逐房间敌情与知识引用。',
     details: { missing }
   };
 }
@@ -206,10 +278,100 @@ function buildComposePayload(context: AbyssPlanAgentInput): string {
     request: publicRequest(context),
     availableCharacterIds: context.characters.map(({ id }) => String(id)),
     toolPolicy: {
-      required: ['read_profile_cache', 'query_enemy_data', 'query_genshin_db'],
+      required: ['read_profile_cache', 'query_enemy_data', 'query_team_knowledge'],
       unknownMeansUnknown: true
     }
   });
+}
+
+function recordTeamCharacterIds(plan: Record<string, unknown>, key: string): string[] {
+  const team = isRecord(plan[key]) ? plan[key] : {};
+  return Array.isArray(team['characterIds'])
+    ? team['characterIds'].filter((id): id is string => typeof id === 'string')
+    : [];
+}
+
+function characterKnowledgeGroundingError(
+  context: Pick<AbyssPlanAgentInput, 'input' | 'pipelineContext'>,
+  plan: Record<string, unknown>,
+  characterId: string
+): string | undefined {
+  const packet = context.pipelineContext.knowledge;
+  const interpretation = packet.buildInterpretations.find(
+    ({ characterId: candidate }) => candidate === characterId
+  );
+  if (
+    interpretation === undefined
+  ) {
+    return 'build-interpretation-missing';
+  }
+  if (
+    !interpretation.currentBuildUsable ||
+    interpretation.adjustment === 'required' ||
+    interpretation.conflictingSignals.length > 0
+  ) {
+    if (context.input.preferences.noBuildChange) return 'current-build-conflict';
+    if (!planContainsAdjustmentMarker(plan, characterId)) {
+      return 'requires-adjustment-marker-missing';
+    }
+  }
+  const explicitGap = packet.unknowns.some(
+    ({ subjectId, kind }) =>
+      subjectId === characterId &&
+      ['missing', 'stale', 'conflict', 'build-unmatched'].includes(kind)
+  );
+  if (explicitGap) {
+    if (plan['confidence'] !== 'low' || !planContainsUnknownMarker(plan, characterId)) {
+      return 'unknown-marker-missing';
+    }
+    return undefined;
+  }
+  const hasKnowledgeEntry =
+    packet.trustedMatches.some(({ characterId: candidate }) => candidate === characterId) ||
+    packet.ephemeralMatches.some(({ subjectId }) => subjectId === characterId);
+  return hasKnowledgeEntry ? undefined : 'positive-match-or-explicit-gap-missing';
+}
+
+function planContainsAdjustmentMarker(
+  plan: Record<string, unknown>,
+  characterId: string
+): boolean {
+  const text = ['warnings', 'assumptions'].flatMap((key) =>
+    Array.isArray(plan[key])
+      ? plan[key].filter((value): value is string => typeof value === 'string')
+      : []
+  );
+  return text.some(
+    (value) => value.includes(characterId) && /requires-adjustment|需要换装|调整装备/iu.test(value)
+  );
+}
+
+function planContainsUnknownMarker(plan: Record<string, unknown>, characterId: string): boolean {
+  const text = ['warnings', 'assumptions'].flatMap((key) =>
+    Array.isArray(plan[key])
+      ? plan[key].filter((value): value is string => typeof value === 'string')
+      : []
+  );
+  return text.some(
+    (value) =>
+      value.includes(characterId) &&
+      /unknown|low-confidence|low confidence|未知|低置信度|知识缺口/iu.test(value)
+  );
+}
+
+function issueFailure(issues: AbyssPlanIssue[]): AgentFailure {
+  if (issues.some(({ path }) => path[0] === 'tools')) {
+    return {
+      code: 'TOOL_REQUIREMENT_FAILED',
+      message: 'Required business tool evidence was incomplete.',
+      retryable: false
+    };
+  }
+  return {
+    code: 'AGENT_OUTPUT_INVALID',
+    message: 'Agent output did not pass deterministic validation.',
+    retryable: false
+  };
 }
 
 function publicRequest(context: Pick<AbyssPlanAgentInput, 'input' | 'scenario'>) {

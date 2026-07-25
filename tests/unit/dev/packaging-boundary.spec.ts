@@ -43,10 +43,35 @@ describe('scenario publisher packaging boundary', () => {
 
   it('fails bootstrap on trusted strategy bundle loading and injects it only into Abyss', async () => {
     const mainSource = await readFile(path.join(process.cwd(), 'src/main/index.ts'), 'utf8');
+    const abyssWiring = mainSource.slice(
+      mainSource.indexOf('const abyssAdvisor = new AbyssAdvisorService({'),
+      mainSource.indexOf('const stygianScenario = new StygianScenarioService({')
+    );
+    const stygianWiring = mainSource.slice(
+      mainSource.indexOf('const stygianAdvisor = new StygianAdvisorService({'),
+      mainSource.indexOf('const theaterScenario = new TheaterScenarioService({')
+    );
+    const theaterWiring = mainSource.slice(
+      mainSource.indexOf('const theaterAdvisor = new TheaterAdvisorService({'),
+      mainSource.indexOf('const updates = new UpdateService({')
+    );
 
     expect(mainSource).toContain('function resolveBundledKnowledgeDir(): string');
     expect(mainSource).toContain('KnowledgeBundleStore.load(knowledgeDir)');
-    expect(mainSource.match(/strategyKnowledge/g)).toHaveLength(2);
+    expect(abyssWiring).toContain('strategyKnowledge');
+    expect(abyssWiring).toContain('advisorKnowledge');
+    expect(abyssWiring).toContain('coverageGate: knowledgeCoverageGate');
+    expect(abyssWiring).toContain('new GuideResearchAgent({');
+    expect(abyssWiring).toContain('supportsCharacterCitation');
+    expect(abyssWiring).toContain("signal.addEventListener('abort', abortResearch");
+    expect(abyssWiring).toContain('signal.aborted');
+    expect(abyssWiring).toContain('Guide research was cancelled before cache write.');
+    for (const unrelatedModeWiring of [stygianWiring, theaterWiring]) {
+      expect(unrelatedModeWiring).not.toContain('strategyKnowledge');
+      expect(unrelatedModeWiring).not.toContain('advisorKnowledge');
+      expect(unrelatedModeWiring).not.toContain('coverageGate');
+      expect(unrelatedModeWiring).not.toContain('GuideResearchAgent');
+    }
     expect(mainSource).toContain("name: 'KnowledgeBundleLoadError'");
     expect(mainSource).toContain('message: error.message');
     expect(mainSource).toContain("message: 'Unexpected startup failure'");
