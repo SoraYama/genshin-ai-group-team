@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 
 import { AbyssAdvisorService } from '../../../src/main/services/abyss-advisor-service.js';
 import { CharacterKnowledgeStore } from '../../../src/main/services/character-knowledge-store.js';
@@ -11,6 +13,7 @@ import type { AgentSdkRunOptions } from '../../../src/main/services/agent-sdk-ad
 import type { AbyssScenarioView } from '../../../src/shared/abyss-advisor.js';
 import { AgentRunTraceStore } from '../../../src/main/services/agent-run-trace-store.js';
 import { AgentTurnError } from '../../../src/main/services/agent-turn-audit.js';
+import { GuideResearchAgent } from '../../../src/main/services/guide-research-agent.js';
 import type { GuideResearchAgentResult } from '../../../src/main/services/guide-research-contract.js';
 import {
   ABYSS_CHARACTERS,
@@ -237,6 +240,50 @@ class ZeroUsageRunner extends FixtureRunner {
         yield message;
       }
     }
+  }
+}
+
+class ProductionMcpProbeRunner extends FixtureRunner {
+  teamKnowledge: unknown;
+
+  override async *run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown> {
+    if (!options.systemPrompt.includes('Agent v3')) {
+      const server = options.mcpServers?.['genshin'];
+      if (server?.type !== 'sdk') throw new Error('Expected production SDK MCP server');
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const client = new Client({ name: 'abyss-service-test', version: '1.0.0' });
+      await server.instance.connect(serverTransport);
+      await client.connect(clientTransport);
+      try {
+        const result = await client.callTool({
+          name: 'query_team_knowledge',
+          arguments: {
+            characterIds: ['1001', '1004', '1005', '1006'],
+            floor: 12,
+            chamber: 1,
+            half: 'first'
+          }
+        });
+        const content = (result as { content?: unknown }).content;
+        const text = Array.isArray(content) ? content[0] : undefined;
+        const textValue =
+          typeof text === 'object' && text !== null
+            ? (text as { text?: unknown }).text
+            : undefined;
+        if (
+          typeof text !== 'object' ||
+          text === null ||
+          (text as { type?: unknown }).type !== 'text' ||
+          typeof textValue !== 'string'
+        ) {
+          throw new Error('Expected MCP text payload');
+        }
+        this.teamKnowledge = JSON.parse(textValue);
+      } finally {
+        await client.close();
+      }
+    }
+    for await (const message of super.run(prompt, options)) yield message;
   }
 }
 
@@ -476,7 +523,7 @@ function service(options: {
   packet?: KnowledgeContextPacket;
   targetPackets?: Record<string, KnowledgeContextPacket>;
   buildPacket?: ReturnType<typeof vi.fn>;
-  research?: { research: ReturnType<typeof vi.fn> };
+  research?: { research: GuideResearchAgent['research'] };
   trace?: AgentRunTraceStore;
   coverageTasks?: Array<{
     key: string;
@@ -590,6 +637,56 @@ describe('AbyssAdvisorService', () => {
     if (result.status !== 'planned') throw new Error('Expected a planned result');
     expect(result.memberEvidence).toHaveLength(8);
     expect(JSON.stringify(result.memberEvidence)).not.toMatch(/model-source|invented-url/i);
+  });
+
+  it('omits same-character fit reasons not supported by the assignment citations and role', async () => {
+    const base = trustedPacket();
+    const packet = trustedPacket({
+      trustedMatches: [
+        ...base.trustedMatches,
+        {
+          id: 'trusted-character-1001-unreferenced',
+          characterId: '1001',
+          archetypeId: 'archetype-1',
+          role: 'support',
+          summary: 'Unreferenced same-character reason.',
+          factStatements: ['This match is not cited by the assignment.'],
+          citationIds: ['trusted-citation-unreferenced']
+        },
+        {
+          id: 'trusted-character-1001-wrong-role',
+          characterId: '1001',
+          archetypeId: 'archetype-1',
+          role: 'on-field',
+          summary: 'Wrong-role same-character reason.',
+          factStatements: ['This match uses a different role.'],
+          citationIds: ['trusted-citation-1']
+        }
+      ],
+      citations: [
+        ...base.citations,
+        {
+          id: 'trusted-citation-unreferenced',
+          sourceId: 'trusted-test-source',
+          url: 'https://example.test/character-1001-unreferenced',
+          title: 'Unreferenced strategy',
+          reviewedAt: '2026-07-24T00:00:00.000Z',
+          trust: 'trusted-local'
+        }
+      ],
+      coverage: { requested: 10, trusted: 10, ephemeral: 0, unknown: 0 }
+    });
+
+    const result = await service({
+      runner: new FixtureRunner([validAbyssPlan()]),
+      apiKey: 'secret',
+      packet
+    }).recommend(abyssInput());
+
+    if (result.status !== 'planned') throw new Error('Expected a planned result');
+    expect(
+      result.memberEvidence.find(({ characterId }) => characterId === '1001')?.fitReasons
+    ).toEqual(['Reviewed strategy for 1001.']);
   });
 
   it('uses complete trusted knowledge without research and keeps one trace owner', async () => {
@@ -763,56 +860,103 @@ describe('AbyssAdvisorService', () => {
     const first = packetWithTargetMechanic({ gap: true });
     const second = packetWithTargetMechanic({ gap: true });
     const base = trustedPacket();
-    const partial = successfulResearch() as GuideResearchAgentResult & {
-      audit?: NonNullable<GuideResearchAgentResult['audit']>;
-    };
-    partial.entries[0]!.taskKey = 'first-task';
-    partial.entries[0]!.origin = 'cache';
-    partial.entries[0]!.value.matches[0]!.subjectId = 'mechanic:shield-breaking';
-    partial.gaps = [{ taskKey: 'second-task', code: 'SEARCH_UNAVAILABLE' }];
-    partial.failure = {
-      sdkCode: 'AGENT_TURN_STREAM_FAILED',
-      httpStatus: 503
-    };
-    partial.usage = { inputTokens: 5, outputTokens: 3, estimatedCostUsd: 0.01 };
-    partial.audit = {
-      text: '{"partial":true}',
-      finalRawText: '{"partial":true}',
-      rawMessagesSummary: {
-        totalMessages: 1,
-        messages: [
-          {
-            type: 'result',
-            subtype: 'error',
-            textPreview: '{"partial":true}',
-            textTruncated: false
+    const cachedValue = structuredClone(successfulResearch().entries[0]!.value);
+    cachedValue.matches[0]!.subjectId = 'mechanic:shield-breaking';
+    const researchRunner = {
+      async *run(prompt: string): AsyncIterable<unknown> {
+        const query = (
+          JSON.parse(prompt) as { searchQueries: string[] }
+        ).searchQueries[0]!;
+        yield {
+          type: 'assistant',
+          message: {
+            content: [
+              {
+                type: 'tool_use',
+                id: 'search-partial',
+                name: 'WebSearch',
+                input: { query }
+              }
+            ]
           }
-        ],
-        truncated: false
-      },
-      tools: [
-        {
-          id: 'search-partial',
-          name: 'WebSearch',
-          input: { query: '原神 机制攻略' },
-          succeeded: true,
-          correlationId: 'unscoped',
-          round: 'single'
-        }
-      ],
-      webSearchEvidence: {
-        attempts: [
-          {
-            toolUseId: 'search-partial',
-            query: '原神 机制攻略',
-            status: 'resolved',
-            urls: ['https://example.test/guide-gap']
+        };
+        yield {
+          type: 'user',
+          tool_use_result: {
+            query,
+            results: [
+              {
+                tool_use_id: 'search-partial',
+                content: [
+                  {
+                    title: 'Guide',
+                    url: 'https://example.test/guide-gap'
+                  }
+                ]
+              }
+            ],
+            durationSeconds: 0.2,
+            searchCount: 1
+          },
+          message: {
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'search-partial',
+                is_error: false,
+                content: 'Search completed'
+              }
+            ]
           }
-        ],
-        truncated: false
-      },
-      usage: partial.usage
+        };
+        yield {
+          type: 'assistant',
+          message: {
+            content: [{ type: 'text', text: '{"partial":true}' }]
+          }
+        };
+        yield {
+          type: 'result',
+          subtype: 'error_during_execution',
+          result: 'TOP-SECRET-PROVIDER-BODY',
+          status: 503,
+          usage: { input_tokens: 5, output_tokens: 3 },
+          total_cost_usd: 0.01
+        };
+      }
     };
+    const cacheGet = vi.fn(
+      async ({ task }: { task: { key: string } }) =>
+        task.key === 'first-task' ? cachedValue : undefined
+    );
+    const research = new GuideResearchAgent({
+      runner: researchRunner,
+      cache: {
+        get: cacheGet,
+        put: vi.fn(async ({ value }) => value)
+      },
+      sourceRegistry: {
+        getSourceRegistry: () => ({
+          sources: [
+            {
+              id: 'trusted-test-source',
+              host: 'example.test',
+              trust: 'trusted-local'
+            }
+          ]
+        })
+      },
+      sdkOptions: {
+        apiKey: 'secret',
+        baseUrl: 'https://example.test',
+        model: 'test-model',
+        systemPrompt: '',
+        cwd: '/tmp/gta-test',
+        abortController: new AbortController(),
+        maxTurns: 4
+      },
+      canonicalCharacterCatalog: []
+    });
     const trace = new AgentRunTraceStore();
     const result = await service({
       runner: new FixtureRunner([validAbyssPlan({ confidence: 'high' })]),
@@ -834,7 +978,7 @@ describe('AbyssAdvisorService', () => {
         const taskKey = targetKey === '12:1:first' ? 'first-task' : 'second-task';
         return {
           required: true,
-          tasks: [{ key: taskKey, reason: 'missing', scenarioTags: [targetKey] }],
+          tasks: [{ key: taskKey, reason: 'missing', scenarioTags: ['single-target'] }],
           bindings: [
             {
               taskKey,
@@ -844,7 +988,7 @@ describe('AbyssAdvisorService', () => {
           ]
         };
       },
-      research: { research: vi.fn(async () => partial) }
+      research
     }).recommend(abyssInput());
 
     expect(result).toMatchObject({
@@ -858,18 +1002,20 @@ describe('AbyssAdvisorService', () => {
       failure: {
         code: 'SEARCH_UNAVAILABLE',
         details: {
-          sdkCode: 'AGENT_TURN_STREAM_FAILED',
+          sdkCode: 'AGENT_TURN_RESULT_ERROR',
           httpStatus: '503'
         }
       },
       rawOutput: '{"partial":true}',
-      rawMessagesSummary: expect.objectContaining({ totalMessages: 1 }),
+      rawMessagesSummary: expect.objectContaining({ totalMessages: 4 }),
       webSearchEvidence: expect.objectContaining({
         attempts: [expect.objectContaining({ toolUseId: 'search-partial' })]
       }),
       tools: [expect.objectContaining({ name: 'WebSearch', status: 'completed' })],
       usage: { inputTokens: 5, outputTokens: 3 }
     });
+    expect(cacheGet).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(trace.latest())).not.toContain('TOP-SECRET-PROVIDER-BODY');
   });
 
   it('keeps a cache-only research resolution searched false with empty raw audit and zero usage', async () => {
@@ -1025,6 +1171,36 @@ describe('AbyssAdvisorService', () => {
     });
     expect(result.assumptions.join(' ')).toContain('12:1:second');
     expect(result.assumptions.join(' ')).not.toContain('12:1:first 知识缺口');
+  });
+
+  it('serves target mechanics through the production-composed MCP server', async () => {
+    const runner = new ProductionMcpProbeRunner([validAbyssPlan()]);
+    const base = trustedPacket();
+    const target = packetWithTargetMechanic({ match: true });
+    const result = await service({
+      runner,
+      apiKey: 'secret',
+      buildPacket: vi.fn((input: { scenarioTarget: { id: string } }) =>
+        input.scenarioTarget.id.endsWith(':12:1:first') ? target : base
+      )
+    }).recommend(abyssInput());
+
+    expect(result).toMatchObject({ status: 'planned', source: 'smart-service' });
+    expect(runner.teamKnowledge).toMatchObject({
+      target: { floor: 12, chamber: 1, half: 'first' },
+      mechanicStrategies: [
+        {
+          mechanicId: 'shield-breaking',
+          summary: 'Reviewed shield-breaking strategy.'
+        }
+      ],
+      citations: expect.arrayContaining([
+        expect.objectContaining({
+          title: 'Reviewed shield strategy',
+          trust: 'trusted-local'
+        })
+      ])
+    });
   });
 
   it('namespaces colliding target gap ids so opposite halves retain their own subjects', async () => {

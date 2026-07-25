@@ -4,6 +4,7 @@ import {
   AGENT_TURN_FINAL_TEXT_MAX_CHARS,
   AGENT_TURN_RAW_SUMMARY_MAX_MESSAGES,
   AGENT_TURN_RAW_SUMMARY_PREVIEW_MAX_CHARS,
+  AGENT_TURN_TOOL_AUDIT_MAX,
   AGENT_TURN_WEB_SEARCH_EVIDENCE_MAX_ATTEMPTS,
   AgentTurnError,
   runAuditedAgentTurn,
@@ -540,6 +541,135 @@ describe('runAuditedAgentTurn', () => {
     await expect(turn).rejects.toMatchObject({ cause: sdkResultError });
   });
 
+  it('attaches a bounded accumulated partial turn without provider error text', async () => {
+    const query = '原神 雷电将军 配队 攻略';
+    const runner: AuditedAgentRunner = {
+      async *run() {
+        yield {
+          type: 'assistant',
+          message: {
+            content: [
+              {
+                type: 'tool_use',
+                id: 'search-partial',
+                name: 'WebSearch',
+                input: { query }
+              }
+            ]
+          }
+        };
+        yield sdkSearchToolResultMessage('search-partial', query, 'success');
+        yield {
+          type: 'assistant',
+          message: { content: [{ type: 'text', text: '{"partial":"safe"}' }] }
+        };
+        yield {
+          type: 'result',
+          subtype: 'error_during_execution',
+          result: 'TOP-SECRET-PROVIDER-BODY',
+          errors: ['TOP-SECRET-PROVIDER-BODY'],
+          status: 503,
+          usage: { input_tokens: 5, output_tokens: 3 },
+          total_cost_usd: 0.01
+        };
+      }
+    };
+
+    let failure: unknown;
+    try {
+      await runAuditedAgentTurn({
+        runner,
+        prompt: '{}',
+        sdkOptions: sdkOptions(),
+        systemPrompt: 'test',
+        normalizeResearchUrl: trustedResearchUrl
+      });
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toBeInstanceOf(AgentTurnError);
+    expect(failure).toMatchObject({
+      code: 'AGENT_TURN_RESULT_ERROR',
+      usage: { inputTokens: 5, outputTokens: 3, estimatedCostUsd: 0.01 },
+      partialTurn: {
+        finalRawText: '{"partial":"safe"}',
+        rawMessagesSummary: { totalMessages: 4 },
+        tools: [
+          expect.objectContaining({
+            id: 'search-partial',
+            name: 'WebSearch',
+            succeeded: true
+          })
+        ],
+        webSearchEvidence: {
+          attempts: [
+            expect.objectContaining({
+              toolUseId: 'search-partial',
+              status: 'resolved'
+            })
+          ],
+          truncated: false
+        },
+        usage: { inputTokens: 5, outputTokens: 3, estimatedCostUsd: 0.01 }
+      }
+    });
+    expect(JSON.stringify((failure as AgentTurnError).partialTurn)).not.toContain(
+      'TOP-SECRET-PROVIDER-BODY'
+    );
+  });
+
+  it('bounds and redacts accumulated partial tool audits', async () => {
+    const runner: AuditedAgentRunner = {
+      async *run() {
+        yield {
+          type: 'assistant',
+          message: {
+            content: Array.from(
+              { length: AGENT_TURN_TOOL_AUDIT_MAX + 5 },
+              (_, index) => ({
+                type: 'tool_use',
+                id: `tool-${index}`,
+                name: 'WebSearch',
+                input: {
+                  query: `原神 配队 攻略 ${index}`,
+                  apiKey: 'TOP-SECRET-TOOL-KEY'
+                }
+              })
+            )
+          }
+        };
+        yield {
+          type: 'result',
+          subtype: 'error_during_execution',
+          result: 'provider failure',
+          usage: {}
+        };
+      }
+    };
+
+    let failure: unknown;
+    try {
+      await runAuditedAgentTurn({
+        runner,
+        prompt: '{}',
+        sdkOptions: sdkOptions(),
+        systemPrompt: 'test',
+        normalizeResearchUrl: trustedResearchUrl
+      });
+    } catch (error) {
+      failure = error;
+    }
+
+    expect(failure).toBeInstanceOf(AgentTurnError);
+    expect((failure as AgentTurnError).partialTurn?.tools).toHaveLength(
+      AGENT_TURN_TOOL_AUDIT_MAX
+    );
+    expect(JSON.stringify((failure as AgentTurnError).partialTurn)).not.toContain(
+      'TOP-SECRET-TOOL-KEY'
+    );
+  });
+
   it.each(['error_during_execution', 'error_max_turns'])(
     'reports sanitized usage exactly once before throwing for %s',
     async (subtype) => {
@@ -882,6 +1012,49 @@ function webSearchSequenceMessage(
           tool_use_id: 'search-duplicate',
           is_error: kind === 'error',
           content: 'not retained'
+        }
+      ]
+    }
+  };
+}
+
+function sdkSearchToolResultMessage(
+  id: string,
+  query: string,
+  status: 'success' | 'error'
+): Record<string, unknown> {
+  return {
+    type: 'user',
+    ...(status === 'success'
+      ? {
+          tool_use_result: {
+            query,
+            results: [
+              {
+                tool_use_id: id,
+                content: [
+                  {
+                    title: 'Guide',
+                    url: 'https://keqingmains.com/q/raiden-quickguide/'
+                  }
+                ]
+              }
+            ],
+            durationSeconds: 0.2,
+            searchCount: 1
+          }
+        }
+      : {}),
+    message: {
+      content: [
+        {
+          type: 'tool_result',
+          tool_use_id: id,
+          is_error: status === 'error',
+          content:
+            status === 'success'
+              ? `Search completed for ${query}`
+              : 'Search failed'
         }
       ]
     }

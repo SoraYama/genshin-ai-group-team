@@ -437,7 +437,7 @@ export class AbyssAdvisorService {
                 genshin: createAbyssBusinessMcpServer({
                   getProfile: (uid) => (uid === input.uid ? profile : null),
                   getScenario: () => scenario,
-                  knowledgePacket: pipelineContext.knowledge,
+                  knowledgePacket: finalPacket,
                   knowledgeScope: {
                     floor: input.floor,
                     chambers: targetChambers(scenario, input),
@@ -697,13 +697,19 @@ function buildAbyssMemberEvidence(
   const citationsById = new Map(packet.citations.map((citation) => [citation.id, citation]));
   const unknownsById = new Map(packet.unknowns.map((gap) => [gap.id, gap]));
   return plan.memberAssignments.map((assignment) => {
+    const assignmentCitationIds = new Set(assignment.citationIds);
     const trustedMatches = packet.trustedMatches.filter(
-      ({ characterId, archetypeId }) =>
+      ({ characterId, archetypeId, role, citationIds }) =>
         characterId === assignment.characterId &&
-        archetypeId === assignment.archetypeId
+        archetypeId === assignment.archetypeId &&
+        role === assignment.role &&
+        citationIds.some((citationId) => assignmentCitationIds.has(citationId))
     );
     const ephemeralMatches = packet.ephemeralMatches.filter(
-      ({ subjectId }) => subjectId === assignment.characterId
+      ({ subjectId, citationIds }) =>
+        assignment.role === 'unclassified' &&
+        subjectId === assignment.characterId &&
+        citationIds.some((citationId) => assignmentCitationIds.has(citationId))
     );
     const characterUnknowns = packet.unknowns.filter(
       ({ subjectId }) => subjectId === assignment.characterId

@@ -7,6 +7,7 @@ import { privacySafeResearchText, privacySafeResearchUrl } from './research-priv
 export const AGENT_TURN_RAW_SUMMARY_MAX_MESSAGES = 64;
 export const AGENT_TURN_RAW_SUMMARY_PREVIEW_MAX_CHARS = 500;
 export const AGENT_TURN_FINAL_TEXT_MAX_CHARS = 100_000;
+export const AGENT_TURN_TOOL_AUDIT_MAX = 64;
 export const AGENT_TURN_WEB_SEARCH_EVIDENCE_MAX_ATTEMPTS = 4;
 export const AGENT_TURN_WEB_SEARCH_MAX_RESULTS = 32;
 export const AGENT_TURN_WEB_SEARCH_MAX_URLS = 32;
@@ -88,14 +89,16 @@ export type AgentTurnErrorCode =
 export class AgentTurnError extends Error {
   override readonly name = 'AgentTurnError';
   readonly usage: AgentUsage | undefined;
+  readonly partialTurn: AuditedAgentTurn | undefined;
 
   constructor(
     readonly code: AgentTurnErrorCode,
     message: string,
-    options?: { cause?: unknown; usage?: AgentUsage }
+    options?: { cause?: unknown; usage?: AgentUsage; partialTurn?: AuditedAgentTurn }
   ) {
     super(message, options);
     this.usage = options?.usage;
+    this.partialTurn = options?.partialTurn;
   }
 }
 
@@ -167,8 +170,21 @@ export async function runAuditedAgentTurn(options: {
       : (options.sdkOptions.allowedBusinessTools?.length ?? 0) > 0
         ? Math.min(Math.max(options.sdkOptions.maxTurns ?? 4, 3), 5)
         : 1;
+  const accumulatedPartialTurn = (): AuditedAgentTurn =>
+    privacySafePartialTurn({
+      resultText,
+      assistantText,
+      rawMessagesSummary,
+      tools,
+      webSearchAttempts,
+      webSearchEvidenceTruncated,
+      usage
+    });
   if (options.sdkOptions.abortController.signal.aborted) {
-    throw new AgentTurnError('AGENT_TURN_CANCELLED', 'Agent turn was cancelled');
+    throw new AgentTurnError('AGENT_TURN_CANCELLED', 'Agent turn was cancelled', {
+      usage,
+      partialTurn: accumulatedPartialTurn()
+    });
   }
   try {
     for await (const message of options.runner.run(options.prompt, {
@@ -309,25 +325,40 @@ export async function runAuditedAgentTurn(options: {
       }
     }
   } catch (error) {
+    const partialTurn =
+      error instanceof AgentTurnError && error.partialTurn !== undefined
+        ? error.partialTurn
+        : accumulatedPartialTurn();
     if (options.sdkOptions.abortController.signal.aborted) {
-      if (error instanceof AgentTurnError && error.code === 'AGENT_TURN_CANCELLED') throw error;
       throw new AgentTurnError('AGENT_TURN_CANCELLED', 'Agent turn was cancelled', {
-        cause: error,
-        usage
+        cause: error instanceof AgentTurnError ? error.cause : error,
+        usage: error instanceof AgentTurnError ? (error.usage ?? usage) : usage,
+        partialTurn
       });
     }
-    if (error instanceof AgentTurnError) throw error;
+    if (error instanceof AgentTurnError) {
+      throw new AgentTurnError(error.code, error.message, {
+        cause: error.cause,
+        usage: error.usage ?? usage,
+        partialTurn
+      });
+    }
     throw new AgentTurnError('AGENT_TURN_STREAM_FAILED', 'Agent turn stream failed', {
       cause: error,
-      usage
+      usage,
+      partialTurn
     });
   }
   if (options.sdkOptions.abortController.signal.aborted) {
-    throw new AgentTurnError('AGENT_TURN_CANCELLED', 'Agent turn was cancelled', { usage });
+    throw new AgentTurnError('AGENT_TURN_CANCELLED', 'Agent turn was cancelled', {
+      usage,
+      partialTurn: accumulatedPartialTurn()
+    });
   }
   if (!sawSuccessResult && assistantText.length === 0) {
     throw new AgentTurnError('AGENT_TURN_INCOMPLETE', 'Agent turn ended without a result', {
-      usage
+      usage,
+      partialTurn: accumulatedPartialTurn()
     });
   }
   const finalRawText = resultText || assistantText;
@@ -397,6 +428,109 @@ function rawSummaryText(message: unknown): string | undefined {
 
 function boundedLabel(value: string): string {
   return value.slice(0, 80);
+}
+
+function privacySafePartialTurn(input: {
+  resultText: string;
+  assistantText: string;
+  rawMessagesSummary: RawAgentMessagesSummary;
+  tools: readonly ToolAudit[];
+  webSearchAttempts: readonly WebSearchEvidenceAttempt[];
+  webSearchEvidenceTruncated: boolean;
+  usage: AgentUsage;
+}): AuditedAgentTurn {
+  const finalRawText = privacySafePartialText(input.resultText || input.assistantText);
+  return {
+    text: finalRawText,
+    finalRawText,
+    rawMessagesSummary: {
+      totalMessages: input.rawMessagesSummary.totalMessages,
+      messages: input.rawMessagesSummary.messages.map((message) => {
+        const textPreview =
+          message.textPreview === undefined
+            ? undefined
+            : message.type === 'result' && message.subtype !== 'success'
+              ? '[REDACTED]'
+              : privacySafePartialText(message.textPreview);
+        return {
+          type: boundedLabel(message.type),
+          ...(message.subtype === undefined
+            ? {}
+            : { subtype: boundedLabel(message.subtype) }),
+          ...(textPreview === undefined ? {} : { textPreview }),
+          textTruncated:
+            message.textTruncated ||
+            (message.textPreview !== undefined && textPreview === '[REDACTED]')
+        };
+      }),
+      truncated: input.rawMessagesSummary.truncated
+    },
+    tools: input.tools.slice(0, AGENT_TURN_TOOL_AUDIT_MAX).map((tool) => ({
+      id: boundedLabel(tool.id),
+      name: boundedLabel(tool.name),
+      input: privacySafeToolInput(tool.input),
+      succeeded: tool.succeeded,
+      correlationId: boundedLabel(tool.correlationId),
+      round: tool.round
+    })),
+    webSearchEvidence: {
+      attempts: input.webSearchAttempts.map((attempt) => ({
+        toolUseId: boundedLabel(attempt.toolUseId),
+        ...(attempt.query === undefined
+          ? {}
+          : { query: privacySafePartialText(attempt.query).slice(0, 300) }),
+        status: attempt.status,
+        urls: attempt.urls
+          .map((url) => privacySafeResearchUrl(url))
+          .filter((url): url is string => url !== undefined)
+          .slice(0, AGENT_TURN_WEB_SEARCH_MAX_URLS)
+      })),
+      truncated: input.webSearchEvidenceTruncated
+    },
+    usage: { ...input.usage }
+  };
+}
+
+function privacySafePartialText(value: string): string {
+  if (value.length === 0) return '';
+  return privacySafeResearchText(value) ?? '[REDACTED]';
+}
+
+function privacySafeToolInput(
+  input: Record<string, unknown>,
+  depth = 0
+): Record<string, unknown> {
+  if (depth >= 4) return {};
+  return Object.fromEntries(
+    Object.entries(input)
+      .slice(0, 32)
+      .map(([key, value]) => [
+        boundedLabel(key),
+        privacySafeToolValue(key, value, depth + 1)
+      ])
+  );
+}
+
+function privacySafeToolValue(key: string, value: unknown, depth: number): unknown {
+  if (/(?:api.?key|authorization|cookie|secret|token)/iu.test(key)) return '[REDACTED]';
+  if (typeof value === 'string') {
+    return privacySafePartialText(value).slice(0, AGENT_TURN_RAW_SUMMARY_PREVIEW_MAX_CHARS);
+  }
+  if (
+    typeof value === 'number' ||
+    typeof value === 'boolean' ||
+    value === null
+  ) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    if (depth >= 4) return [];
+    return value
+      .slice(0, 32)
+      .map((item) => privacySafeToolValue('', item, depth + 1));
+  }
+  if (isRecord(value)) return privacySafeToolInput(value, depth);
+  return undefined;
 }
 
 function assertBoundedFinalText(value: string): void {

@@ -257,36 +257,66 @@ function teamKnowledgeSubset(
   },
   targetScope: AbyssKnowledgeTargetScope
 ) {
+  assertUniqueScopeIds(targetScope);
   const characterIds = new Set(target.characterIds);
+  const trustedById = new Map(packet.trustedMatches.map((match) => [match.id, match]));
+  const ephemeralById = new Map(packet.ephemeralMatches.map((match) => [match.id, match]));
+  const unknownById = new Map(packet.unknowns.map((gap) => [gap.id, gap]));
+  const mechanicStrategies = targetScope.trustedMatchIds.map((id) => {
+    const match = trustedById.get(id);
+    if (
+      match === undefined ||
+      match.characterId !== undefined ||
+      match.mechanicId === undefined
+    ) {
+      throw new Error('Target trusted knowledge reference is invalid');
+    }
+    return match;
+  });
+  const scopedEphemeralStrategies = targetScope.ephemeralMatchIds.map((id) => {
+    const match = ephemeralById.get(id);
+    if (
+      match === undefined ||
+      !/^(?:mechanic|scenario):/u.test(match.subjectId)
+    ) {
+      throw new Error('Target ephemeral knowledge reference is invalid');
+    }
+    return match;
+  });
+  const scopedUnknown = targetScope.unknownIds.map((id) => {
+    const gap = unknownById.get(id);
+    if (
+      gap === undefined ||
+      (gap.kind !== 'payload-truncated' &&
+        !/^(?:mechanic|scenario):/u.test(gap.subjectId))
+    ) {
+      throw new Error('Target unknown knowledge reference is invalid');
+    }
+    return gap;
+  });
   const buildInterpretations = packet.buildInterpretations.filter(({ characterId }) =>
     characterIds.has(characterId)
   );
   const characterStrategies = packet.trustedMatches.filter(
     ({ characterId }) => characterId !== undefined && characterIds.has(characterId)
   );
-  const scopedEphemeralIds = new Set(targetScope.ephemeralMatchIds);
   const ephemeralCharacterStrategies = packet.ephemeralMatches.filter(
     ({ subjectId }) => characterIds.has(subjectId)
   );
-  const ephemeralMechanicStrategies = packet.ephemeralMatches.filter(
-    ({ id, subjectId }) =>
-      subjectId.startsWith('mechanic:') && scopedEphemeralIds.has(id)
+  const ephemeralMechanicStrategies = scopedEphemeralStrategies.filter(({ subjectId }) =>
+    subjectId.startsWith('mechanic:')
   );
-  const ephemeralScenarioStrategies = packet.ephemeralMatches.filter(
-    ({ id, subjectId }) =>
-      subjectId.startsWith('scenario:') && scopedEphemeralIds.has(id)
+  const ephemeralScenarioStrategies = scopedEphemeralStrategies.filter(({ subjectId }) =>
+    subjectId.startsWith('scenario:')
   );
-  const scopedTrustedIds = new Set(targetScope.trustedMatchIds);
-  const mechanicStrategies = packet.trustedMatches.filter(
-    ({ id, mechanicId }) => mechanicId !== undefined && scopedTrustedIds.has(id)
-  );
-  const scopedUnknownIds = new Set(targetScope.unknownIds);
   const unknown = packet.unknowns.filter(
-    ({ id, subjectId, kind }) =>
+    ({ subjectId, kind }) =>
       characterIds.has(subjectId) ||
-      scopedUnknownIds.has(id) ||
       kind === 'payload-truncated'
   );
+  scopedUnknown.forEach((gap) => {
+    if (!unknown.some(({ id }) => id === gap.id)) unknown.push(gap);
+  });
   const citationIds = Array.from(
     new Set(
       [
@@ -299,6 +329,29 @@ function teamKnowledgeSubset(
     )
   ).sort();
   const citationsById = new Map(packet.citations.map((citation) => [citation.id, citation]));
+  const citations = citationIds.map((id) => {
+    const citation = citationsById.get(id);
+    if (citation === undefined) throw new Error('Knowledge citation reference is unresolved');
+    return citation;
+  });
+  mechanicStrategies.forEach((match) => {
+    if (
+      !match.citationIds.some(
+        (id) => citationsById.get(id)?.trust === 'trusted-local'
+      )
+    ) {
+      throw new Error('Target trusted knowledge citation is invalid');
+    }
+  });
+  scopedEphemeralStrategies.forEach((match) => {
+    if (
+      !match.citationIds.some(
+        (id) => citationsById.get(id)?.trust === 'ephemeral-web'
+      )
+    ) {
+      throw new Error('Target ephemeral knowledge citation is invalid');
+    }
+  });
   return structuredClone({
     knowledgeVersion: packet.knowledgeVersion,
     target: {
@@ -314,11 +367,20 @@ function teamKnowledgeSubset(
     mechanicStrategies,
     unknown,
     citationIds,
-    citations: citationIds.flatMap((id) => {
-      const citation = citationsById.get(id);
-      return citation === undefined ? [] : [citation];
-    })
+    citations
   });
+}
+
+function assertUniqueScopeIds(scope: AbyssKnowledgeTargetScope): void {
+  for (const ids of [
+    scope.trustedMatchIds,
+    scope.ephemeralMatchIds,
+    scope.unknownIds
+  ]) {
+    if (new Set(ids).size !== ids.length) {
+      throw new Error('Target knowledge scope IDs must be unique');
+    }
+  }
 }
 
 export function abyssKnowledgeTargetKey(

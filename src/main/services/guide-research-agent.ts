@@ -187,18 +187,25 @@ export class GuideResearchAgent {
       rawOutput = turn.finalRawText;
     } catch (error) {
       const details = safeAgentTurnFailureDetails(error);
+      const safePartialAudit =
+        error instanceof AgentTurnError && error.partialTurn !== undefined
+          ? privacySafeAudit(error.partialTurn)
+          : undefined;
       return {
         ...combineGuideResearchResult(
-        parsed.tasks,
-        cachedByKey,
-        new Map(),
-        gapsFor(runtimeMisses, searchFailureCode(error))
+          parsed.tasks,
+          cachedByKey,
+          new Map(),
+          gapsFor(runtimeMisses, searchFailureCode(error))
         ),
         searchExecuted: true,
         usage:
-          error instanceof AgentTurnError && error.usage !== undefined
+          safePartialAudit !== undefined
+            ? safePartialAudit.usage
+            : error instanceof AgentTurnError && error.usage !== undefined
             ? error.usage
             : EMPTY_RESEARCH_USAGE,
+        ...(safePartialAudit === undefined ? {} : { audit: safePartialAudit }),
         ...(details.sdkCode === undefined
           ? {}
           : {

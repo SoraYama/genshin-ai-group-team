@@ -651,4 +651,109 @@ describe('abyss in-process business tools', () => {
       )
     ).toMatchObject({ isError: true });
   });
+
+  it.each([
+    {
+      name: 'missing trusted match',
+      mutatePacket: (_candidate: KnowledgeContextPacket) => {},
+      targetScope: {
+        trustedMatchIds: ['missing-trusted'],
+        ephemeralMatchIds: [],
+        unknownIds: []
+      }
+    },
+    {
+      name: 'character match masquerading as target trusted knowledge',
+      mutatePacket: (_candidate: KnowledgeContextPacket) => {},
+      targetScope: {
+        trustedMatchIds: ['match-1001'],
+        ephemeralMatchIds: [],
+        unknownIds: []
+      }
+    },
+    {
+      name: 'missing ephemeral match',
+      mutatePacket: (_candidate: KnowledgeContextPacket) => {},
+      targetScope: {
+        trustedMatchIds: [],
+        ephemeralMatchIds: ['missing-ephemeral'],
+        unknownIds: []
+      }
+    },
+    {
+      name: 'character-scoped ephemeral match',
+      mutatePacket: (candidate: KnowledgeContextPacket) => {
+        candidate.ephemeralMatches.push({
+          id: 'ephemeral-character',
+          subjectId: '1001',
+          summary: 'Character-only runtime evidence.',
+          citationIds: ['citation-1001']
+        });
+      },
+      targetScope: {
+        trustedMatchIds: [],
+        ephemeralMatchIds: ['ephemeral-character'],
+        unknownIds: []
+      }
+    },
+    {
+      name: 'missing unknown gap',
+      mutatePacket: (_candidate: KnowledgeContextPacket) => {},
+      targetScope: {
+        trustedMatchIds: [],
+        ephemeralMatchIds: [],
+        unknownIds: ['missing-gap']
+      }
+    },
+    {
+      name: 'character-scoped unknown gap',
+      mutatePacket: (candidate: KnowledgeContextPacket) => {
+        candidate.unknowns.push({
+          id: 'gap-character',
+          subjectId: '1001',
+          kind: 'missing',
+          reason: 'Character-only gap.'
+        });
+      },
+      targetScope: {
+        trustedMatchIds: [],
+        ephemeralMatchIds: [],
+        unknownIds: ['gap-character']
+      }
+    },
+    {
+      name: 'unresolved target citation',
+      mutatePacket: (candidate: KnowledgeContextPacket) => {
+        candidate.citations = candidate.citations.filter(
+          ({ id }) => id !== 'citation-shield-breaking'
+        );
+      },
+      targetScope: {
+        trustedMatchIds: ['match-shield-breaking'],
+        ephemeralMatchIds: [],
+        unknownIds: []
+      }
+    }
+  ])('fails closed for $name in the exact target scope', async ({ mutatePacket, targetScope }) => {
+    const candidate = structuredClone(packet);
+    mutatePacket(candidate);
+    const tools = createAbyssBusinessTools({
+      getProfile: () => null,
+      getScenario: () => abyssScenario(),
+      knowledgePacket: candidate,
+      knowledgeScope: {
+        floor: 12,
+        chambers: [1],
+        eligibleCharacterIds: ['1001']
+      },
+      knowledgeTargetScopes: { '12:1:first': targetScope }
+    });
+
+    expect(
+      await tools[2]!.handler(
+        { characterIds: ['1001'], floor: 12, chamber: 1, half: 'first' },
+        {}
+      )
+    ).toMatchObject({ isError: true });
+  });
 });

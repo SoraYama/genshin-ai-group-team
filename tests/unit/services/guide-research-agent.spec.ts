@@ -1803,6 +1803,101 @@ describe('GuideResearchAgent', () => {
     expect(JSON.stringify(result)).not.toMatch(/TOP-SECRET|private-query|provider-body/i);
   });
 
+  it('keeps cache entries and a privacy-safe partial WebSearch audit on provider failure', async () => {
+    const hitTask = task('guide-partial-hit');
+    const missTask = task('guide-partial-miss', {
+      character: {
+        name: '纳西妲',
+        element: 'dendro',
+        weaponType: 'catalyst',
+        buildSignals: ['build-conflict-present']
+      }
+    });
+    const hit = cachedValue('partial-hit');
+    const researchCache = cache({
+      get: async ({ task: candidate }) =>
+        candidate.key === hitTask.key ? hit : undefined
+    });
+    const runner: AuditedAgentRunner = {
+      async *run(prompt) {
+        const payload = JSON.parse(prompt) as { searchQueries: string[] };
+        const query = payload.searchQueries[0]!;
+        yield {
+          type: 'assistant',
+          message: {
+            content: [
+              {
+                type: 'tool_use',
+                id: 'search-partial',
+                name: 'WebSearch',
+                input: { query }
+              }
+            ]
+          }
+        };
+        yield sdkSearchToolResultMessage('search-partial', query, 'success');
+        yield {
+          type: 'assistant',
+          message: { content: [{ type: 'text', text: '{"partial":"safe"}' }] }
+        };
+        yield {
+          type: 'result',
+          subtype: 'error_during_execution',
+          result: 'TOP-SECRET-PROVIDER-BODY',
+          errors: ['TOP-SECRET-PROVIDER-BODY'],
+          status: 503,
+          usage: { input_tokens: 5, output_tokens: 3 },
+          total_cost_usd: 0.01
+        };
+      }
+    };
+    const result = await new GuideResearchAgent({
+      runner,
+      cache: researchCache,
+      sourceRegistry: sourceRegistry(),
+      sdkOptions: sdkOptions(),
+      canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
+      now: () => NOW
+    }).research({
+      tasks: [hitTask, missTask],
+      knowledgeVersion: 'knowledge-v2'
+    });
+
+    expect(result).toMatchObject({
+      entries: [
+        expect.objectContaining({ taskKey: hitTask.key, origin: 'cache', value: hit })
+      ],
+      gaps: [{ taskKey: missTask.key, code: 'SEARCH_UNAVAILABLE' }],
+      searchExecuted: true,
+      failure: {
+        sdkCode: 'AGENT_TURN_RESULT_ERROR',
+        httpStatus: 503
+      },
+      usage: { inputTokens: 5, outputTokens: 3, estimatedCostUsd: 0.01 },
+      audit: {
+        finalRawText: '{"partial":"safe"}',
+        rawMessagesSummary: { totalMessages: 4 },
+        tools: [
+          expect.objectContaining({
+            id: 'search-partial',
+            name: 'WebSearch',
+            succeeded: true
+          })
+        ],
+        webSearchEvidence: {
+          attempts: [
+            expect.objectContaining({
+              toolUseId: 'search-partial',
+              status: 'resolved'
+            })
+          ],
+          truncated: false
+        }
+      }
+    });
+    expect(JSON.stringify(result)).not.toContain('TOP-SECRET-PROVIDER-BODY');
+  });
+
   it('uses only the registry read method and never reaches a trusted-knowledge writer', async () => {
     const researchTask = task('guide-read-only');
     const trustedWrite = vi.fn();
