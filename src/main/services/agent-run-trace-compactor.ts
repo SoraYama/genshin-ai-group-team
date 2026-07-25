@@ -75,6 +75,34 @@ function compactStageText(stage: AgentStageTrace): void {
     stage.rawOutput = compacted.text;
     changed ||= compacted.truncated;
   }
+  if (stage.rawMessagesSummary !== undefined) {
+    if (stage.rawMessagesSummary.messages.length > 8) {
+      stage.rawMessagesSummary.messages = stage.rawMessagesSummary.messages.slice(0, 8);
+      stage.rawMessagesSummary.truncated = true;
+      changed = true;
+    }
+    for (const message of stage.rawMessagesSummary.messages) {
+      if (message.textPreview === undefined) continue;
+      const compacted = compactText(message.textPreview, 256);
+      message.textPreview = compacted.text;
+      message.textTruncated ||= compacted.truncated;
+      changed ||= compacted.truncated;
+    }
+  }
+  if (stage.webSearchEvidence !== undefined) {
+    for (const attempt of stage.webSearchEvidence.attempts) {
+      if (attempt.query !== undefined) {
+        const compacted = compactText(attempt.query, 256);
+        attempt.query = compacted.text;
+        changed ||= compacted.truncated;
+      }
+      if (attempt.urls.length > 4) {
+        attempt.urls = attempt.urls.slice(0, 4);
+        stage.webSearchEvidence.truncated = true;
+        changed = true;
+      }
+    }
+  }
   if (stage.failure !== undefined) changed ||= compactFailure(stage.failure, 256, 4, 128);
   if (stage.citationIds.length > 16) {
     stage.citationIds = stage.citationIds.slice(0, 16);
@@ -133,6 +161,8 @@ function summarizeOptionalPayload(trace: AgentRunTrace): void {
   for (const stage of trace.stages) {
     delete stage.inputSummary;
     delete stage.rawOutput;
+    delete stage.rawMessagesSummary;
+    delete stage.webSearchEvidence;
     delete stage.durationMs;
     stage.citationIds = [];
     if (stage.failure !== undefined) {

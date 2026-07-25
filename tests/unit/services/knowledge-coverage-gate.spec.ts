@@ -395,4 +395,23 @@ describe('KnowledgeCoverageGate', () => {
       expect.arrayContaining(['high-resistance'])
     ]);
   });
+
+  it('binds a mechanic/scenario research task to its exact runtime target key', () => {
+    const evaluation = gate().evaluate(
+      packet([gap(1, 'stale', 'mechanic:shield-breaking')]),
+      {
+        characters: [],
+        scenarioTags: ['elemental-shield'],
+        targetKey: '12:1:first'
+      }
+    );
+
+    expect(evaluation.bindings).toEqual([
+      {
+        taskKey: evaluation.tasks[0]!.key,
+        unknownIndexes: [0],
+        targetKeys: ['12:1:first']
+      }
+    ]);
+  });
 });

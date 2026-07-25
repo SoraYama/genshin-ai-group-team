@@ -6,6 +6,7 @@ import type {
   AdvisorKnowledgeReader,
   KnowledgeContextPacket
 } from '../../../src/shared/advisor-knowledge.js';
+import { knowledgeContextPacketSchema } from '../../../src/shared/advisor-knowledge.js';
 import type { AgentSdkRunOptions } from '../../../src/main/services/agent-sdk-adapter.js';
 import type { AbyssScenarioView } from '../../../src/shared/abyss-advisor.js';
 import { AgentRunTraceStore } from '../../../src/main/services/agent-run-trace-store.js';
@@ -30,7 +31,10 @@ function directive<T>(target: T) {
 class FixtureRunner {
   calls = 0;
   readonly prompts: string[] = [];
-  constructor(private readonly outputs: unknown[]) {}
+  constructor(
+    private readonly outputs: unknown[],
+    private readonly assignmentMode: 'trusted' | 'unknown-1008' | 'ephemeral-1008' = 'trusted'
+  ) {}
   async *run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown> {
     this.calls += 1;
     this.prompts.push(prompt);
@@ -160,11 +164,52 @@ class FixtureRunner {
     yield {
       type: 'result',
       subtype: 'success',
-      result: JSON.stringify(this.outputs.shift()),
+      result: JSON.stringify(
+        withServiceAssignments(this.outputs.shift(), this.assignmentMode)
+      ),
       usage: { input_tokens: 12, output_tokens: 6 },
       total_cost_usd: 0.02
     };
   }
+}
+
+function withServiceAssignments(
+  value: unknown,
+  mode: 'trusted' | 'unknown-1008' | 'ephemeral-1008'
+): unknown {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return value;
+  const plan = structuredClone(value) as Record<string, unknown>;
+  plan['memberAssignments'] = (
+    [
+      ['first', plan['firstHalfTeam']],
+      ['second', plan['secondHalfTeam']]
+    ] as const
+  ).flatMap(([half, rawTeam]) => {
+    if (typeof rawTeam !== 'object' || rawTeam === null || Array.isArray(rawTeam)) return [];
+    const ids = (rawTeam as { characterIds?: unknown }).characterIds;
+    if (!Array.isArray(ids)) return [];
+    return ids.flatMap((characterId) => {
+      if (typeof characterId !== 'string') return [];
+      const index = ABYSS_CHARACTERS.findIndex(({ id }) => String(id) === characterId);
+      const isSpecial = characterId === '1008' && mode !== 'trusted';
+      return [
+        {
+          characterId,
+          half,
+          archetypeId: index < 0 ? null : `archetype-${index + 1}`,
+          role: isSpecial ? 'unclassified' : 'support',
+          buildStatus: mode === 'unknown-1008' && isSpecial ? 'unknown' : 'current-build',
+          citationIds:
+            mode === 'unknown-1008' && isSpecial
+              ? []
+              : mode === 'ephemeral-1008' && isSpecial
+                ? ['web-citation-gap']
+                : [`trusted-citation-${index + 1}`]
+        }
+      ];
+    });
+  });
+  return plan;
 }
 
 class ProviderFailureRunner {
@@ -205,25 +250,26 @@ class HangingRunner {
   }
 }
 
-class HangingAfterComposeRunner {
+class HangingAtStageRunner {
   calls = 0;
   private releaseStarted!: () => void;
   readonly stageStarted = new Promise<void>((resolve) => {
     this.releaseStarted = resolve;
   });
 
+  constructor(private readonly hangingCall: number) {}
+
   async *run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown> {
     this.calls += 1;
-    if (this.calls === 1) {
-      const compose = new FixtureRunner([validAbyssPlan()]);
-      for await (const message of compose.run(prompt, options)) yield message;
-      return;
+    if (this.calls === this.hangingCall) {
+      this.releaseStarted();
+      await new Promise<void>((resolve) => {
+        options.abortController.signal.addEventListener('abort', () => resolve(), { once: true });
+      });
+      throw new Error('aborted');
     }
-    this.releaseStarted();
-    await new Promise<void>((resolve) => {
-      options.abortController.signal.addEventListener('abort', () => resolve(), { once: true });
-    });
-    throw new Error('aborted');
+    const fixture = new FixtureRunner([validAbyssPlan()]);
+    for await (const message of fixture.run(prompt, options)) yield message;
   }
 }
 
@@ -290,6 +336,7 @@ function trustedPacket(
       id: `trusted-character-${characterId}`,
       characterId,
       archetypeId: `archetype-${index + 1}`,
+      role: 'support',
       summary: `Reviewed strategy for ${characterId}.`,
       factStatements: ['Reviewed role and build fit.'],
       citationIds: [citations[index]!.id]
@@ -319,6 +366,57 @@ function packetWithGap(): KnowledgeContextPacket {
     coverage: { requested: 8, trusted: 7, ephemeral: 0, unknown: 1 },
     citations: base.citations.slice(0, 7)
   };
+}
+
+function packetWithTargetMechanic(options: {
+  match?: boolean;
+  gap?: boolean;
+}): KnowledgeContextPacket {
+  const base = trustedPacket();
+  const mechanicMatch = {
+    id: 'trusted-mechanic-shield-breaking',
+    mechanicId: 'shield-breaking',
+    summary: 'Reviewed shield-breaking strategy.',
+    citationIds: ['citation-shield-breaking']
+  };
+  const mechanicGap = {
+    id: 'gap-mechanic-shield-breaking',
+    subjectId: 'mechanic:shield-breaking',
+    kind: 'conflict' as const,
+    reason: 'This target has contradictory shield tags.'
+  };
+  return knowledgeContextPacketSchema.parse({
+    ...base,
+    trustedMatches: [
+      ...base.trustedMatches,
+      ...(options.match ? [mechanicMatch] : [])
+    ],
+    unknowns: [...base.unknowns, ...(options.gap ? [mechanicGap] : [])],
+    citations: [
+      ...base.citations,
+      ...(options.match
+        ? [
+            {
+              id: 'citation-shield-breaking',
+              sourceId: 'reviewed-source',
+              url: 'https://example.test/shield-breaking',
+              title: 'Reviewed shield strategy',
+              reviewedAt: '2026-07-24T00:00:00.000Z',
+              trust: 'trusted-local' as const
+            }
+          ]
+        : [])
+    ],
+    coverage: {
+      requested:
+        base.trustedMatches.length +
+        (options.match ? 1 : 0) +
+        (options.gap ? 1 : 0),
+      trusted: base.trustedMatches.length + (options.match ? 1 : 0),
+      ephemeral: 0,
+      unknown: options.gap ? 1 : 0
+    }
+  });
 }
 
 function successfulResearch(): GuideResearchAgentResult {
@@ -357,7 +455,9 @@ function successfulResearch(): GuideResearchAgentResult {
         }
       }
     ],
-    gaps: []
+    gaps: [],
+    searchExecuted: true,
+    usage: { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 }
   };
 }
 
@@ -374,6 +474,8 @@ function service(options: {
   toolLog?: ReturnType<typeof vi.fn>;
   auditLog?: ReturnType<typeof vi.fn>;
   packet?: KnowledgeContextPacket;
+  targetPackets?: Record<string, KnowledgeContextPacket>;
+  buildPacket?: ReturnType<typeof vi.fn>;
   research?: { research: ReturnType<typeof vi.fn> };
   trace?: AgentRunTraceStore;
   coverageTasks?: Array<{
@@ -406,17 +508,32 @@ function service(options: {
     knowledge: options.knowledge,
     strategyKnowledge,
     advisorKnowledge: {
-      buildPacket: vi.fn(() => options.packet ?? trustedPacket())
+      buildPacket:
+        options.buildPacket ??
+        vi.fn((input: { scenarioTarget: { id: string } }) => {
+          const targetKey = input.scenarioTarget.id.split(':').slice(-3).join(':');
+          return options.targetPackets?.[targetKey] ?? options.packet ?? trustedPacket();
+        })
     },
     coverageGate: {
-      evaluate: vi.fn(() => ({
-        required: (options.coverageTasks?.length ?? 0) > 0,
-        tasks: options.coverageTasks ?? [],
-        bindings: (options.coverageTasks ?? []).map(({ key }) => ({
-          taskKey: key,
-          unknownIndexes: (options.packet ?? trustedPacket()).unknowns.map((_gap, index) => index)
-        }))
-      }))
+      evaluate: vi.fn(
+        (
+          currentPacket: KnowledgeContextPacket,
+          context: { targetKey?: string }
+        ) => ({
+          required:
+            (options.coverageTasks?.length ?? 0) > 0 && currentPacket.unknowns.length > 0,
+          tasks: currentPacket.unknowns.length > 0 ? (options.coverageTasks ?? []) : [],
+          bindings:
+            currentPacket.unknowns.length > 0
+              ? (options.coverageTasks ?? []).map(({ key }) => ({
+                  taskKey: key,
+                  unknownIndexes: currentPacket.unknowns.map((_gap, index) => index),
+                  ...(context.targetKey ? { targetKeys: [context.targetKey] } : {})
+                }))
+              : []
+        })
+      )
     },
     research: options.research,
     trace: options.trace,
@@ -426,6 +543,42 @@ function service(options: {
 }
 
 describe('AbyssAdvisorService', () => {
+  it('derives five-section member evidence only from validated assignments and citation registry', async () => {
+    const result = await service({
+      runner: new FixtureRunner([validAbyssPlan()]),
+      apiKey: 'secret',
+      packet: trustedPacket()
+    }).recommend(abyssInput());
+
+    expect(result).toMatchObject({
+      status: 'planned',
+      source: 'smart-service',
+      memberEvidence: expect.arrayContaining([
+        {
+          characterId: '1001',
+          half: 'first',
+          fitReasons: ['Reviewed strategy for 1001.'],
+          currentBuild: expect.arrayContaining([expect.stringContaining('current-build')]),
+          riskUnknowns: expect.any(Array),
+          optionalAdjustments: expect.any(Array),
+          sources: [
+            {
+              citationId: 'trusted-citation-1',
+              sourceId: 'trusted-test-source',
+              url: 'https://example.test/character-1001',
+              title: 'Reviewed strategy 1',
+              reviewedAt: '2026-07-24T00:00:00.000Z',
+              trust: 'trusted-local'
+            }
+          ]
+        }
+      ])
+    });
+    if (result.status !== 'planned') throw new Error('Expected a planned result');
+    expect(result.memberEvidence).toHaveLength(8);
+    expect(JSON.stringify(result.memberEvidence)).not.toMatch(/model-source|invented-url/i);
+  });
+
   it('uses complete trusted knowledge without research and keeps one trace owner', async () => {
     const research = { research: vi.fn() };
     const trace = new AgentRunTraceStore();
@@ -451,6 +604,7 @@ describe('AbyssAdvisorService', () => {
       'checking-knowledge',
       'generating-teams',
       'checking-conflicts',
+      'writing-tactics',
       'writing-tactics'
     ]);
     expect(trace.latest()).toMatchObject({
@@ -469,7 +623,7 @@ describe('AbyssAdvisorService', () => {
     const trace = new AgentRunTraceStore();
     const packet = packetWithGap();
     const result = await service({
-      runner: new FixtureRunner([validAbyssPlan()]),
+      runner: new FixtureRunner([validAbyssPlan()], 'ephemeral-1008'),
       apiKey: 'secret',
       packet,
       research,
@@ -508,16 +662,139 @@ describe('AbyssAdvisorService', () => {
     });
   });
 
+  it('propagates live research raw output, messages, WebSearch evidence, tools, and usage into the single trace', async () => {
+    const researchResult = successfulResearch() as GuideResearchAgentResult & {
+      searchExecuted?: boolean;
+      usage?: { inputTokens: number; outputTokens: number; estimatedCostUsd: number };
+      audit?: Record<string, unknown>;
+    };
+    researchResult.searchExecuted = true;
+    researchResult.usage = { inputTokens: 5, outputTokens: 3, estimatedCostUsd: 0.01 };
+    researchResult.audit = {
+      text: '{"schemaVersion":1}',
+      finalRawText: '{"schemaVersion":1}',
+      rawMessagesSummary: {
+        totalMessages: 3,
+        messages: [
+          { type: 'assistant', textTruncated: false },
+          { type: 'user', textTruncated: false },
+          {
+            type: 'result',
+            subtype: 'success',
+            textPreview: '{"schemaVersion":1}',
+            textTruncated: false
+          }
+        ],
+        truncated: false
+      },
+      tools: [
+        {
+          id: 'search-1',
+          name: 'WebSearch',
+          input: { query: '原神 角色攻略' },
+          succeeded: true,
+          correlationId: 'unscoped',
+          round: 'single'
+        }
+      ],
+      webSearchEvidence: {
+        attempts: [
+          {
+            toolUseId: 'search-1',
+            query: '原神 角色攻略',
+            status: 'resolved',
+            urls: ['https://example.test/guide-gap']
+          }
+        ],
+        truncated: false
+      },
+      usage: researchResult.usage
+    };
+    const trace = new AgentRunTraceStore();
+    const result = await service({
+      runner: new FixtureRunner([validAbyssPlan()], 'ephemeral-1008'),
+      apiKey: 'secret',
+      packet: packetWithGap(),
+      research: { research: vi.fn(async () => researchResult) },
+      coverageTasks: [
+        { key: 'anonymous-gap-task', reason: 'missing', scenarioTags: ['multi-wave'] }
+      ],
+      trace
+    }).recommend(abyssInput());
+
+    expect(result).toMatchObject({ status: 'planned', source: 'smart-service' });
+    expect(trace.latest()).toMatchObject({
+      usage: { inputTokens: expect.any(Number), outputTokens: expect.any(Number) },
+      knowledge: { searched: true },
+      stages: expect.arrayContaining([
+        expect.objectContaining({
+          stage: 'research',
+          status: 'completed',
+          rawOutput: '{"schemaVersion":1}',
+          rawMessagesSummary: expect.objectContaining({ totalMessages: 3 }),
+          webSearchEvidence: expect.objectContaining({
+            attempts: [
+              expect.objectContaining({ toolUseId: 'search-1', status: 'resolved' })
+            ]
+          }),
+          tools: [expect.objectContaining({ name: 'WebSearch', status: 'completed' })],
+          usage: { inputTokens: 5, outputTokens: 3 }
+        })
+      ])
+    });
+    expect(trace.latest()?.usage.inputTokens).toBeGreaterThanOrEqual(5);
+    expect(trace.latest()?.usage.outputTokens).toBeGreaterThanOrEqual(3);
+  });
+
+  it('keeps a cache-only research resolution searched false with empty raw audit and zero usage', async () => {
+    const cacheOnly = successfulResearch() as GuideResearchAgentResult & {
+      searchExecuted?: boolean;
+      usage?: { inputTokens: number; outputTokens: number; estimatedCostUsd: number };
+    };
+    cacheOnly.entries[0]!.origin = 'cache';
+    cacheOnly.searchExecuted = false;
+    cacheOnly.usage = { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 };
+    const trace = new AgentRunTraceStore();
+    const result = await service({
+      runner: new FixtureRunner([validAbyssPlan()], 'ephemeral-1008'),
+      apiKey: 'secret',
+      packet: packetWithGap(),
+      research: { research: vi.fn(async () => cacheOnly) },
+      coverageTasks: [
+        { key: 'anonymous-gap-task', reason: 'missing', scenarioTags: ['multi-wave'] }
+      ],
+      trace
+    }).recommend(abyssInput());
+    const researchStage = trace.latest()?.stages.find(({ stage }) => stage === 'research');
+
+    expect(result).toMatchObject({
+      status: 'planned',
+      source: 'smart-service',
+      knowledgeSummary: { searched: false, ephemeral: 1, unknown: 0 }
+    });
+    expect(researchStage).toMatchObject({
+      status: 'completed',
+      tools: [],
+      usage: { inputTokens: 0, outputTokens: 0 }
+    });
+    expect(researchStage).not.toHaveProperty('rawOutput');
+    expect(researchStage).not.toHaveProperty('rawMessagesSummary');
+    expect(researchStage).not.toHaveProperty('webSearchEvidence');
+  });
+
   it('keeps a conflicted research result unknown instead of exposing it as usable ephemeral knowledge', async () => {
     const conflicted = successfulResearch();
     conflicted.entries[0]!.value.conflicts = ['Two reviewed guide sections disagree on the role.'];
     const result = await service({
-      runner: new FixtureRunner([
-        validAbyssPlan({
-          confidence: 'low',
-          assumptions: ['1008：知识缺口，按低置信度保守使用。']
-        })
-      ]),
+      runner: new FixtureRunner(
+        [
+          validAbyssPlan({
+            confidence: 'low',
+            assumptions: ['1008：知识缺口，按低置信度保守使用。']
+          })
+        ],
+        'unknown-1008'
+      ),
       apiKey: 'secret',
       packet: packetWithGap(),
       research: { research: vi.fn(async () => conflicted) },
@@ -531,6 +808,132 @@ describe('AbyssAdvisorService', () => {
       source: 'smart-service',
       knowledgeSummary: { searched: true, trusted: 7, ephemeral: 0, unknown: 1 }
     });
+  });
+
+  it('keeps a research citation-id collision unknown instead of reusing trusted metadata', async () => {
+    const collided = successfulResearch();
+    collided.entries[0]!.value.matches[0]!.citationIds = ['trusted-citation-1'];
+    collided.entries[0]!.value.citations[0]!.id = 'trusted-citation-1';
+    const result = await service({
+      runner: new FixtureRunner(
+        [
+          validAbyssPlan({
+            confidence: 'low',
+            assumptions: ['1008：知识缺口，按低置信度保守使用。']
+          })
+        ],
+        'unknown-1008'
+      ),
+      apiKey: 'secret',
+      packet: packetWithGap(),
+      research: { research: vi.fn(async () => collided) },
+      coverageTasks: [
+        { key: 'anonymous-gap-task', reason: 'missing', scenarioTags: ['multi-wave'] }
+      ]
+    }).recommend(abyssInput());
+
+    expect(result).toMatchObject({
+      status: 'planned',
+      source: 'smart-service',
+      knowledgeSummary: { searched: true, trusted: 7, ephemeral: 0, unknown: 1 }
+    });
+  });
+
+  it('builds mechanic knowledge independently per half and keeps a failed target gap low-confidence', async () => {
+    const base = trustedPacket();
+    const first = packetWithTargetMechanic({ match: true });
+    const second = packetWithTargetMechanic({ gap: true });
+    const buildPacket = vi.fn(
+      (input: { scenarioTarget: { id: string }; candidateIds: string[] }) => {
+      const targetKey = input.scenarioTarget.id.split(':').slice(-3).join(':');
+      if (targetKey === '12:1:first') return first;
+      if (targetKey === '12:1:second') return second;
+      return base;
+      }
+    );
+    const result = await service({
+      runner: new FixtureRunner([validAbyssPlan({ confidence: 'high' })]),
+      apiKey: 'secret',
+      buildPacket,
+      research: {
+        research: vi.fn(async (): Promise<GuideResearchAgentResult> => ({
+          entries: [],
+          gaps: [{ taskKey: 'anonymous-gap-task', code: 'SEARCH_UNAVAILABLE' }],
+          searchExecuted: true,
+          usage: { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 }
+        }))
+      },
+      coverageTasks: [
+        { key: 'anonymous-gap-task', reason: 'missing', scenarioTags: ['elemental-shield'] }
+      ]
+    }).recommend(abyssInput());
+
+    expect(
+      buildPacket.mock.calls.map(
+        ([input]) => (input as { scenarioTarget: { id: string } }).scenarioTarget.id
+      )
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/:characters$/),
+        expect.stringMatching(/:12:1:first$/),
+        expect.stringMatching(/:12:1:second$/)
+      ])
+    );
+    expect(
+      buildPacket.mock.calls
+        .filter(
+          ([input]) =>
+            !(input as { scenarioTarget: { id: string } }).scenarioTarget.id.endsWith(
+              ':characters'
+            )
+        )
+        .every(
+          ([input]) =>
+            input.candidateIds.length === 0
+        )
+    ).toBe(true);
+    expect(result).toMatchObject({
+      status: 'planned',
+      source: 'smart-service',
+      plan: { confidence: 'low' }
+    });
+    expect(result.assumptions.join(' ')).toContain('12:1:second');
+    expect(result.assumptions.join(' ')).not.toContain('12:1:first 知识缺口');
+  });
+
+  it('namespaces colliding target gap ids so opposite halves retain their own subjects', async () => {
+    const first = packetWithTargetMechanic({ gap: true });
+    first.unknowns[0] = {
+      ...first.unknowns[0]!,
+      subjectId: 'scenario:first-only',
+      reason: 'First-half only gap.'
+    };
+    const second = packetWithTargetMechanic({ gap: true });
+    second.unknowns[0] = {
+      ...second.unknowns[0]!,
+      subjectId: 'scenario:second-only',
+      reason: 'Second-half only gap.'
+    };
+    const base = trustedPacket();
+    const result = await service({
+      runner: new FixtureRunner([validAbyssPlan({ confidence: 'high' })]),
+      apiKey: 'secret',
+      buildPacket: vi.fn((input: { scenarioTarget: { id: string } }) => {
+        const targetKey = input.scenarioTarget.id.split(':').slice(-3).join(':');
+        if (targetKey === '12:1:first') return first;
+        if (targetKey === '12:1:second') return second;
+        return base;
+      })
+    }).recommend(abyssInput());
+
+    expect(result).toMatchObject({
+      status: 'planned',
+      source: 'smart-service',
+      plan: { confidence: 'low' },
+      knowledgeSummary: { unknown: 2 }
+    });
+    expect(result.assumptions.join(' ')).toContain('12:1:first');
+    expect(result.assumptions.join(' ')).toContain('12:1:second');
   });
 
   it('preserves the provider failure when falling back to a feasible local plan', async () => {
@@ -588,22 +991,30 @@ describe('AbyssAdvisorService', () => {
   });
 
   it('continues with trusted knowledge when guide research fails and keeps the gap explicit', async () => {
+    const trace = new AgentRunTraceStore();
     const research = {
       research: vi.fn(async (): Promise<GuideResearchAgentResult> => ({
         entries: [],
-        gaps: [{ taskKey: 'anonymous-gap-task', code: 'SEARCH_UNAVAILABLE' }]
+        gaps: [{ taskKey: 'anonymous-gap-task', code: 'SEARCH_UNAVAILABLE' }],
+        searchExecuted: true,
+        usage: { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },
+        failure: { sdkCode: 'AGENT_TURN_STREAM_FAILED', httpStatus: 503 }
       }))
     };
     const result = await service({
-      runner: new FixtureRunner([
-        validAbyssPlan({
-          confidence: 'low',
-          assumptions: ['1008：知识缺口，按低置信度保守使用。']
-        })
-      ]),
+      runner: new FixtureRunner(
+        [
+          validAbyssPlan({
+            confidence: 'low',
+            assumptions: ['1008：知识缺口，按低置信度保守使用。']
+          })
+        ],
+        'unknown-1008'
+      ),
       apiKey: 'secret',
       packet: packetWithGap(),
       research,
+      trace,
       coverageTasks: [
         { key: 'anonymous-gap-task', reason: 'missing', scenarioTags: ['multi-wave'] }
       ]
@@ -618,6 +1029,19 @@ describe('AbyssAdvisorService', () => {
       expect(result.plan.confidence).toBe('low');
       expect(result.assumptions.join(' ')).toContain('知识');
     }
+    expect(
+      trace.latest()?.stages.find(({ stage }) => stage === 'research')
+    ).toMatchObject({
+      status: 'failed',
+      failure: {
+        code: 'SEARCH_UNAVAILABLE',
+        details: {
+          sdkCode: 'AGENT_TURN_STREAM_FAILED',
+          httpStatus: '503'
+        }
+      }
+    });
+    expect(JSON.stringify(trace.latest())).not.toMatch(/body|secret|private-query/i);
   });
 
   it('records a correlated, redacted result audit with stable issue codes', async () => {
@@ -675,6 +1099,7 @@ describe('AbyssAdvisorService', () => {
       'abyss-test-request:checking-knowledge',
       'abyss-test-request:generating-teams',
       'abyss-test-request:checking-conflicts',
+      'abyss-test-request:writing-tactics',
       'abyss-test-request:writing-tactics'
     ]);
     expect(runner.calls).toBe(4);
@@ -722,12 +1147,15 @@ describe('AbyssAdvisorService', () => {
   });
 
   it('downgrades smart output when selected-character knowledge coverage is incomplete', async () => {
-    const runner = new FixtureRunner([
-      validAbyssPlan({
-        confidence: 'low',
-        assumptions: ['1008：知识缺口，按低置信度保守使用。']
-      })
-    ]);
+    const runner = new FixtureRunner(
+      [
+        validAbyssPlan({
+          confidence: 'low',
+          assumptions: ['1008：知识缺口，按低置信度保守使用。']
+        })
+      ],
+      'unknown-1008'
+    );
     const result = await service({
       runner,
       apiKey: 'secret',
@@ -870,11 +1298,35 @@ describe('AbyssAdvisorService', () => {
     });
   });
 
-  it('cancels a hanging Critique stage without saving a fallback or partial history', async () => {
-    const runner = new HangingAfterComposeRunner();
+  it.each([
+    {
+      stage: 'Critique',
+      hangingCall: 2,
+      expectedTail: ['generating-teams', 'checking-conflicts']
+    },
+    {
+      stage: 'Rotation',
+      hangingCall: 3,
+      expectedTail: ['generating-teams', 'checking-conflicts', 'writing-tactics']
+    },
+    {
+      stage: 'Explain',
+      hangingCall: 4,
+      expectedTail: [
+        'generating-teams',
+        'checking-conflicts',
+        'writing-tactics',
+        'writing-tactics'
+      ]
+    }
+  ])(
+    'announces a hanging $stage stage before cancellation without saving partial history',
+    async ({ hangingCall, expectedTail }) => {
+    const runner = new HangingAtStageRunner(hangingCall);
     const appendAbyss = vi.fn();
     const recordUsage = vi.fn();
     const trace = new AgentRunTraceStore();
+    const progress: string[] = [];
     const advisor = service({
       runner: runner as never,
       apiKey: 'secret',
@@ -883,12 +1335,12 @@ describe('AbyssAdvisorService', () => {
       recordUsage,
       trace
     });
-    const pending = advisor.recommend(abyssInput());
+    const pending = advisor.recommend(abyssInput(), ({ step }) => progress.push(step));
     await runner.stageStarted;
+    expect(progress.slice(-expectedTail.length)).toEqual(expectedTail);
     expect(advisor.cancel('abyss-test-request')).toBe(true);
     await expect(pending).rejects.toThrow('cancelled');
-    expect(runner.calls).toBe(2);
-    expect(recordUsage).toHaveBeenCalledTimes(1);
+    expect(runner.calls).toBe(hangingCall);
     expect(recordUsage).toHaveBeenCalledWith(12, 6, 0.02);
     expect(appendAbyss).not.toHaveBeenCalled();
     expect(trace.latest()).toMatchObject({
@@ -896,7 +1348,8 @@ describe('AbyssAdvisorService', () => {
       finalSource: 'blocked',
       failure: { code: 'AGENT_ABORTED' }
     });
-  });
+    }
+  );
 
   it('cancels while scenario data is still loading and never starts generation or history writes', async () => {
     let resolveScenario!: (view: AbyssScenarioView) => void;

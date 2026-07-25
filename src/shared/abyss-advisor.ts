@@ -210,7 +210,39 @@ const resultCommonShape = {
     })
     .strict(),
   narrative: advisorNarrativeSchema.default(defaultAdvisorNarrative('spiral-abyss')),
-  teamRisks: z.array(abyssTeamRiskSchema).max(16).default([])
+  teamRisks: z.array(abyssTeamRiskSchema).max(16).default([]),
+  memberEvidence: z
+    .array(
+      z
+        .object({
+          characterId: canonicalCharacterIdSchema,
+          half: z.enum(['first', 'second']),
+          fitReasons: z.array(z.string().trim().min(1).max(1000)).min(1).max(16),
+          currentBuild: z.array(z.string().trim().min(1).max(1000)).min(1).max(16),
+          riskUnknowns: z.array(z.string().trim().min(1).max(1000)).min(1).max(32),
+          optionalAdjustments: z
+            .array(z.string().trim().min(1).max(1000))
+            .min(1)
+            .max(16),
+          sources: z
+            .array(
+              z
+                .object({
+                  citationId: z.string().trim().min(1).max(128),
+                  sourceId: z.string().trim().min(1).max(128),
+                  url: z.url(),
+                  title: z.string().trim().min(1).max(500),
+                  reviewedAt: z.iso.datetime({ offset: true }),
+                  trust: z.enum(['trusted-local', 'ephemeral-web'])
+                })
+                .strict()
+            )
+            .max(32)
+        })
+        .strict()
+    )
+    .max(8)
+    .default([])
 };
 
 export const abyssAdvisorResultSchema = z.discriminatedUnion('status', [

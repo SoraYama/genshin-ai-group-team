@@ -99,12 +99,51 @@ export const agentToolTraceSchema = z
     }
   });
 
+export const agentRawMessagesSummarySchema = z
+  .object({
+    totalMessages: nonnegativeIntSchema,
+    messages: z
+      .array(
+        z
+          .object({
+            type: z.string().trim().min(1).max(80),
+            subtype: z.string().trim().min(1).max(80).optional(),
+            textPreview: boundedTextSchema.optional(),
+            textTruncated: z.boolean()
+          })
+          .strict()
+      )
+      .max(64),
+    truncated: z.boolean()
+  })
+  .strict();
+
+export const agentWebSearchEvidenceSchema = z
+  .object({
+    attempts: z
+      .array(
+        z
+          .object({
+            toolUseId: boundedIdSchema,
+            query: z.string().trim().min(1).max(300).optional(),
+            status: z.enum(['resolved', 'error', 'unresolved', 'invalid', 'duplicate']),
+            urls: z.array(z.string().trim().min(1).max(2_048)).max(32)
+          })
+          .strict()
+      )
+      .max(4),
+    truncated: z.boolean()
+  })
+  .strict();
+
 export const agentStageTraceSchema = z
   .object({
     stage: agentStageSchema,
     status: z.enum(['started', 'completed', 'failed', 'skipped']),
     inputSummary: boundedTextSchema.optional(),
     rawOutput: boundedTextSchema.optional(),
+    rawMessagesSummary: agentRawMessagesSummarySchema.optional(),
+    webSearchEvidence: agentWebSearchEvidenceSchema.optional(),
     tools: z.array(agentToolTraceSchema).max(64),
     citationIds: z
       .array(boundedIdSchema)
@@ -382,6 +421,8 @@ export type AgentStage = z.infer<typeof agentStageSchema>;
 export type AgentFailure = z.infer<typeof agentFailureSchema>;
 export type AgentUsage = z.infer<typeof agentUsageSchema>;
 export type AgentToolTrace = z.infer<typeof agentToolTraceSchema>;
+export type AgentRawMessagesSummary = z.infer<typeof agentRawMessagesSummarySchema>;
+export type AgentWebSearchEvidence = z.infer<typeof agentWebSearchEvidenceSchema>;
 export type AgentStageTrace = z.infer<typeof agentStageTraceSchema>;
 export type AgentTraceKnowledgeSummary = z.infer<typeof agentTraceKnowledgeSummarySchema>;
 export type AgentFinalSource = z.infer<typeof agentFinalSourceSchema>;

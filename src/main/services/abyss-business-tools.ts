@@ -43,6 +43,18 @@ export interface AbyssBusinessToolAuditContext {
   round?: AbyssBusinessToolLog['round'];
 }
 
+export type AbyssKnowledgeTargetKey = `${number}:${number}:${'first' | 'second'}`;
+
+export interface AbyssKnowledgeTargetScope {
+  trustedMatchIds: string[];
+  ephemeralMatchIds: string[];
+  unknownIds: string[];
+}
+
+export type AbyssKnowledgeTargetScopes = Readonly<
+  Partial<Record<AbyssKnowledgeTargetKey, AbyssKnowledgeTargetScope>>
+>;
+
 export interface AbyssBusinessToolsOptions {
   getProfile: (uid: string) => PersistedProfile | null;
   getScenario: () => AbyssScenario;
@@ -52,6 +64,7 @@ export interface AbyssBusinessToolsOptions {
     chambers: readonly number[];
     eligibleCharacterIds: readonly string[];
   }>;
+  knowledgeTargetScopes?: AbyssKnowledgeTargetScopes;
   auditContext?: AbyssBusinessToolAuditContext;
   maxCharacters?: number;
   log?: (event: AbyssBusinessToolLog) => void;
@@ -209,12 +222,21 @@ export function createAbyssBusinessTools(options: AbyssBusinessToolsOptions) {
             if (characterIds.some((id) => !eligible.has(id))) {
               throw new Error('Knowledge character outside current run scope');
             }
-            const value = teamKnowledgeSubset(packet, {
-              characterIds,
-              floor,
-              chamber,
-              half
-            });
+            const targetKey = abyssKnowledgeTargetKey(floor, chamber, half);
+            const targetScope = options.knowledgeTargetScopes?.[targetKey];
+            if (targetScope === undefined) {
+              throw new Error('Knowledge target scope unavailable');
+            }
+            const value = teamKnowledgeSubset(
+              packet,
+              {
+                characterIds,
+                floor,
+                chamber,
+                half
+              },
+              targetScope
+            );
             returnedCitationIds = value.citationIds;
             return value;
           }
@@ -232,7 +254,8 @@ function teamKnowledgeSubset(
     floor: number;
     chamber: number;
     half: 'first' | 'second';
-  }
+  },
+  targetScope: AbyssKnowledgeTargetScope
 ) {
   const characterIds = new Set(target.characterIds);
   const buildInterpretations = packet.buildInterpretations.filter(({ characterId }) =>
@@ -241,24 +264,38 @@ function teamKnowledgeSubset(
   const characterStrategies = packet.trustedMatches.filter(
     ({ characterId }) => characterId !== undefined && characterIds.has(characterId)
   );
-  const ephemeralCharacterStrategies = packet.ephemeralMatches.filter(({ subjectId }) =>
-    characterIds.has(subjectId)
+  const scopedEphemeralIds = new Set(targetScope.ephemeralMatchIds);
+  const ephemeralCharacterStrategies = packet.ephemeralMatches.filter(
+    ({ subjectId }) => characterIds.has(subjectId)
   );
+  const ephemeralMechanicStrategies = packet.ephemeralMatches.filter(
+    ({ id, subjectId }) =>
+      subjectId.startsWith('mechanic:') && scopedEphemeralIds.has(id)
+  );
+  const ephemeralScenarioStrategies = packet.ephemeralMatches.filter(
+    ({ id, subjectId }) =>
+      subjectId.startsWith('scenario:') && scopedEphemeralIds.has(id)
+  );
+  const scopedTrustedIds = new Set(targetScope.trustedMatchIds);
   const mechanicStrategies = packet.trustedMatches.filter(
-    ({ mechanicId }) => mechanicId !== undefined
+    ({ id, mechanicId }) => mechanicId !== undefined && scopedTrustedIds.has(id)
   );
+  const scopedUnknownIds = new Set(targetScope.unknownIds);
   const unknown = packet.unknowns.filter(
-    ({ subjectId, kind }) =>
+    ({ id, subjectId, kind }) =>
       characterIds.has(subjectId) ||
-      subjectId.startsWith('mechanic:') ||
-      subjectId.startsWith('scenario:') ||
+      scopedUnknownIds.has(id) ||
       kind === 'payload-truncated'
   );
   const citationIds = Array.from(
     new Set(
-      [...characterStrategies, ...ephemeralCharacterStrategies, ...mechanicStrategies].flatMap(
-        ({ citationIds: ids }) => ids
-      )
+      [
+        ...characterStrategies,
+        ...ephemeralCharacterStrategies,
+        ...ephemeralMechanicStrategies,
+        ...ephemeralScenarioStrategies,
+        ...mechanicStrategies
+      ].flatMap(({ citationIds: ids }) => ids)
     )
   ).sort();
   const citationsById = new Map(packet.citations.map((citation) => [citation.id, citation]));
@@ -272,6 +309,8 @@ function teamKnowledgeSubset(
     buildInterpretations,
     characterStrategies,
     ephemeralCharacterStrategies,
+    ephemeralMechanicStrategies,
+    ephemeralScenarioStrategies,
     mechanicStrategies,
     unknown,
     citationIds,
@@ -280,6 +319,14 @@ function teamKnowledgeSubset(
       return citation === undefined ? [] : [citation];
     })
   });
+}
+
+export function abyssKnowledgeTargetKey(
+  floor: number,
+  chamber: number,
+  half: 'first' | 'second'
+): AbyssKnowledgeTargetKey {
+  return `${floor}:${chamber}:${half}`;
 }
 
 export function createAbyssBusinessMcpServer(options: AbyssBusinessToolsOptions) {

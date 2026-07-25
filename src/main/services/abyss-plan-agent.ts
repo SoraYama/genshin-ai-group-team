@@ -22,6 +22,7 @@ import type { CharacterKnowledgeReader } from '../../shared/character-knowledge.
 import { runV2AgentPipeline, type V2AgentStage } from './v2-agent-pipeline.js';
 import type { AgentFailure } from '../../shared/agent-run-trace.js';
 import type { AgentPipelineTraceSession } from './v2-agent-pipeline.js';
+import { abyssMemberAssignmentSchema } from '../../shared/scenario-v2.js';
 
 export interface AbyssPlanAgentRunner {
   run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown>;
@@ -35,6 +36,7 @@ export interface AbyssPlanAgentInput {
   pipelineContext: V2PipelineContext;
   sdkOptions: AgentSdkRunOptions;
   sdkOptionsForStage?: (stage: V2AgentStage) => AgentSdkRunOptions;
+  onStageStart?: (stage: V2AgentStage) => void;
   onUsageDelta?: (usage: AgentUsage) => void;
   trace?: AgentPipelineTraceSession;
   citationPolicy?: AbyssKnowledgeCitationPolicy;
@@ -73,6 +75,7 @@ export class AbyssPlanAgent {
         ? (characterId, citationId, archetypeId) =>
             context.citationPolicy!.supportsCharacter(citationId, characterId, archetypeId)
         : undefined,
+      onStageStart: context.onStageStart,
       onUsageDelta: context.onUsageDelta,
       sdkOptionsForStage: context.sdkOptionsForStage ?? (() => context.sdkOptions),
       composer: {
@@ -257,12 +260,7 @@ function validateRequiredTools(
       }
     });
   });
-  plannedIds.forEach((characterId) => {
-    const groundingError = characterKnowledgeGroundingError(context, plan, characterId);
-    if (groundingError !== undefined) {
-      missing.push(`knowledge-grounding:${characterId}:${groundingError}`);
-    }
-  });
+  missing.push(...validateMemberAssignments(context, plan, plannedIds));
   if (missing.length === 0) return undefined;
   return {
     code: 'AGENT_OUTPUT_INVALID',
@@ -291,59 +289,147 @@ function recordTeamCharacterIds(plan: Record<string, unknown>, key: string): str
     : [];
 }
 
-function characterKnowledgeGroundingError(
-  context: Pick<AbyssPlanAgentInput, 'input' | 'pipelineContext'>,
+function validateMemberAssignments(
+  context: Pick<AbyssPlanAgentInput, 'input' | 'pipelineContext' | 'citationPolicy'>,
   plan: Record<string, unknown>,
-  characterId: string
-): string | undefined {
+  plannedIds: string[]
+): string[] {
+  const missing: string[] = [];
+  const rawAssignments = plan['memberAssignments'];
+  if (!Array.isArray(rawAssignments) || rawAssignments.length !== 8) {
+    return ['member-assignments:exactly-eight'];
+  }
+  const parsedAssignments = rawAssignments.map((assignment, index) => {
+    const parsed = abyssMemberAssignmentSchema.safeParse(assignment);
+    if (!parsed.success) missing.push(`member-assignment:${index}:schema-invalid`);
+    return parsed.success ? parsed.data : undefined;
+  });
+  if (missing.length > 0) return missing;
+  const assignments = parsedAssignments.filter(
+    (assignment): assignment is NonNullable<typeof assignment> => assignment !== undefined
+  );
+  const assignmentIds = assignments.map(({ characterId }) => characterId);
+  if (
+    new Set(assignmentIds).size !== 8 ||
+    new Set(plannedIds).size !== 8 ||
+    plannedIds.some((characterId) => !assignmentIds.includes(characterId))
+  ) {
+    missing.push('member-assignments:team-coverage-mismatch');
+  }
+  const expectedHalfById = new Map<string, 'first' | 'second'>([
+    ...recordTeamCharacterIds(plan, 'firstHalfTeam').map(
+      (characterId) => [characterId, 'first'] as const
+    ),
+    ...recordTeamCharacterIds(plan, 'secondHalfTeam').map(
+      (characterId) => [characterId, 'second'] as const
+    )
+  ]);
   const packet = context.pipelineContext.knowledge;
-  const interpretation = packet.buildInterpretations.find(
-    ({ characterId: candidate }) => candidate === characterId
-  );
-  if (
-    interpretation === undefined
-  ) {
-    return 'build-interpretation-missing';
-  }
-  if (
-    !interpretation.currentBuildUsable ||
-    interpretation.adjustment === 'required' ||
-    interpretation.conflictingSignals.length > 0
-  ) {
-    if (context.input.preferences.noBuildChange) return 'current-build-conflict';
-    if (!planContainsAdjustmentMarker(plan, characterId)) {
-      return 'requires-adjustment-marker-missing';
+  const citationsById = new Map(packet.citations.map((citation) => [citation.id, citation]));
+  for (const assignment of assignments) {
+    const { characterId } = assignment;
+    if (assignment.half !== expectedHalfById.get(characterId)) {
+      missing.push(`member-assignment:${characterId}:half-mismatch`);
     }
-  }
-  const explicitGap = packet.unknowns.some(
-    ({ subjectId, kind }) =>
-      subjectId === characterId &&
-      ['missing', 'stale', 'conflict', 'build-unmatched'].includes(kind)
-  );
-  if (explicitGap) {
-    if (plan['confidence'] !== 'low' || !planContainsUnknownMarker(plan, characterId)) {
-      return 'unknown-marker-missing';
+    const interpretation = packet.buildInterpretations.find(
+      ({ characterId: candidate }) => candidate === characterId
+    );
+    if (interpretation === undefined) {
+      missing.push(`member-assignment:${characterId}:build-interpretation-missing`);
+      continue;
     }
-    return undefined;
-  }
-  const hasKnowledgeEntry =
-    packet.trustedMatches.some(({ characterId: candidate }) => candidate === characterId) ||
-    packet.ephemeralMatches.some(({ subjectId }) => subjectId === characterId);
-  return hasKnowledgeEntry ? undefined : 'positive-match-or-explicit-gap-missing';
-}
+    if (assignment.archetypeId !== interpretation.archetypeId) {
+      missing.push(`member-assignment:${characterId}:archetype-mismatch`);
+    }
+    const explicitGap = packet.unknowns.some(
+      ({ subjectId, kind }) =>
+        subjectId === characterId &&
+        ['missing', 'stale', 'conflict', 'build-unmatched'].includes(kind)
+    );
+    if (explicitGap) {
+      if (
+        assignment.role !== 'unclassified' ||
+        assignment.buildStatus !== 'unknown' ||
+        assignment.citationIds.length !== 0
+      ) {
+        missing.push(`member-assignment:${characterId}:unknown-must-be-unclassified`);
+      }
+      if (plan['confidence'] !== 'low' || !planContainsUnknownMarker(plan, characterId)) {
+        missing.push(`member-assignment:${characterId}:unknown-marker-missing`);
+      }
+      continue;
+    }
+    const requiresAdjustment =
+      !interpretation.currentBuildUsable ||
+      interpretation.adjustment === 'required' ||
+      interpretation.conflictingSignals.length > 0;
+    if (requiresAdjustment && context.input.preferences.noBuildChange) {
+      missing.push(`member-assignment:${characterId}:no-build-change-conflict`);
+    }
+    const expectedBuildStatus = requiresAdjustment
+      ? 'requires-adjustment'
+      : 'current-build';
+    if (assignment.buildStatus !== expectedBuildStatus) {
+      missing.push(`member-assignment:${characterId}:build-status-mismatch`);
+    }
 
-function planContainsAdjustmentMarker(
-  plan: Record<string, unknown>,
-  characterId: string
-): boolean {
-  const text = ['warnings', 'assumptions'].flatMap((key) =>
-    Array.isArray(plan[key])
-      ? plan[key].filter((value): value is string => typeof value === 'string')
-      : []
-  );
-  return text.some(
-    (value) => value.includes(characterId) && /requires-adjustment|需要换装|调整装备/iu.test(value)
-  );
+    const trustedMatches = packet.trustedMatches.filter(
+      ({ characterId: candidate, archetypeId }) =>
+        candidate === characterId && archetypeId === interpretation.archetypeId
+    );
+    const ephemeralMatches = packet.ephemeralMatches.filter(
+      ({ subjectId }) => subjectId === characterId
+    );
+    if (trustedMatches.length > 0) {
+      const supportedRoles = new Set(
+        trustedMatches.flatMap(({ role }) => (role === undefined ? [] : [role]))
+      );
+      if (!supportedRoles.has(assignment.role as Exclude<typeof assignment.role, 'unclassified'>)) {
+        missing.push(`member-assignment:${characterId}:role-mismatch`);
+      }
+      const supportedCitationIds = new Set(
+        trustedMatches.flatMap(({ citationIds }) => citationIds)
+      );
+      if (
+        assignment.citationIds.length === 0 ||
+        assignment.citationIds.some((citationId) => {
+          const citation = citationsById.get(citationId);
+          return (
+            !supportedCitationIds.has(citationId) ||
+            citation?.trust !== 'trusted-local' ||
+            (context.citationPolicy !== undefined &&
+              !context.citationPolicy.supportsCharacter(
+                citationId,
+                characterId,
+                interpretation.archetypeId
+              ))
+          );
+        })
+      ) {
+        missing.push(`member-assignment:${characterId}:citation-subject-mismatch`);
+      }
+      continue;
+    }
+    if (ephemeralMatches.length > 0) {
+      const supportedCitationIds = new Set(
+        ephemeralMatches.flatMap(({ citationIds }) => citationIds)
+      );
+      if (
+        assignment.role !== 'unclassified' ||
+        assignment.citationIds.length === 0 ||
+        assignment.citationIds.some(
+          (citationId) =>
+            !supportedCitationIds.has(citationId) ||
+            citationsById.get(citationId)?.trust !== 'ephemeral-web'
+        )
+      ) {
+        missing.push(`member-assignment:${characterId}:ephemeral-must-be-unclassified`);
+      }
+      continue;
+    }
+    missing.push(`member-assignment:${characterId}:knowledge-missing`);
+  }
+  return missing;
 }
 
 function planContainsUnknownMarker(plan: Record<string, unknown>, characterId: string): boolean {

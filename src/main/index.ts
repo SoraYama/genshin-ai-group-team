@@ -217,6 +217,12 @@ async function bootstrapServices(): Promise<void> {
             },
             sourceRegistry: strategyKnowledge,
             canonicalCharacterCatalog: strategyKnowledge.getCanonicalCharacterCatalog(),
+            onUsageDelta: (usage) =>
+              config.recordUsage(
+                usage.inputTokens,
+                usage.outputTokens,
+                usage.estimatedCostUsd
+              ),
             sdkOptions: {
               apiKey,
               baseUrl: config.getBaseUrl(),

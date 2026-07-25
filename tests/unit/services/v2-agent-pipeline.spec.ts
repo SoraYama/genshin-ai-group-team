@@ -21,10 +21,14 @@ import { validTheaterPlan } from './theater-test-fixtures.js';
 class StageRunner {
   readonly calls: Array<{ prompt: string; options: AgentSdkRunOptions }> = [];
 
-  constructor(private readonly outputs: unknown[]) {}
+  constructor(
+    private readonly outputs: unknown[],
+    private readonly onRunStart?: (options: AgentSdkRunOptions) => void
+  ) {}
 
   async *run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown> {
     this.calls.push({ prompt, options });
+    this.onRunStart?.(options);
     yield {
       type: 'result',
       subtype: 'success',
@@ -312,13 +316,15 @@ function run(
     characterId: string,
     citationId: string,
     archetypeId: string
-  ) => boolean
+  ) => boolean,
+  onStageStart?: (stage: V2AgentStage) => void
 ) {
   return runV2AgentPipeline({
     runner,
     context: pipelineContext,
     trace,
     supportsKnowledgeRef,
+    onStageStart,
     sdkOptionsForStage: () => sdkOptions(),
     composer: {
       initialPrompt: JSON.stringify({ request: 'compose' }),
@@ -1227,6 +1233,53 @@ describe('V2 agent pipeline trace observer', () => {
       'rotation:completed',
       'explain:completed',
       'repair-2:skipped'
+    ]);
+  });
+
+  it('announces every stage before its runner starts', async () => {
+    const baseline = validAbyssPlan();
+    const events: string[] = [];
+    const runner = new StageRunner(
+      [
+        baseline,
+        { decision: 'accept', issues: [] },
+        rotationOutput(baseline),
+        explainOutput(baseline)
+      ],
+      (options) => {
+        const stage = options.systemPrompt.includes('CritiqueAgent')
+          ? 'critique'
+          : options.systemPrompt.includes('RotationCoachAgent')
+            ? 'rotation'
+            : options.systemPrompt.includes('ExplainAgent')
+              ? 'explain'
+              : 'compose';
+        events.push(`run:${stage}`);
+      }
+    );
+
+    await run(
+      runner,
+      baseline,
+      (text) => ({
+        ok: true,
+        plan: JSON.parse(text) as RecommendationPlan
+      }),
+      context(baseline),
+      undefined,
+      undefined,
+      (stage) => events.push(`start:${stage}`)
+    );
+
+    expect(events).toEqual([
+      'start:compose',
+      'run:compose',
+      'start:critique',
+      'run:critique',
+      'start:rotation',
+      'run:rotation',
+      'start:explain',
+      'run:explain'
     ]);
   });
 

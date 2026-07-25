@@ -74,6 +74,7 @@ export interface RunV2AgentPipelineOptions<P extends RecommendationPlan, I exten
     citationId: string,
     archetypeId: string
   ) => boolean;
+  onStageStart?: (stage: V2AgentStage) => void;
   onUsageDelta?: (usage: AgentUsage) => void;
   sdkOptionsForStage: (stage: V2AgentStage) => AgentSdkRunOptions;
   composer: {
@@ -141,6 +142,7 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
       stage === 'compose'
         ? `mode=${context.mode}; candidates=${context.candidate.eligibleCharacterIds.length}`
         : `repair=${repairs}; issues=${pendingIssues.map(({ code }) => code).join(',') || 'none'}`;
+    notifyStageStart(options.onStageStart, stage);
     const composerOptions = startStageWithSdkOptions(
       stage,
       inputSummary,
@@ -269,6 +271,7 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
     }
     trace.completeStage(stage, composerTurn);
 
+    notifyStageStart(options.onStageStart, 'critique');
     const critiqueOptions = startStageWithSdkOptions(
       'critique',
       `plan=${validated.plan.mode}; repairs=${repairs}`,
@@ -346,6 +349,7 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
       continue;
     }
 
+    notifyStageStart(options.onStageStart, 'rotation');
     const rotationOptions = startStageWithSdkOptions(
       'rotation',
       `plan=${validated.plan.mode}; critique=accepted`,
@@ -420,6 +424,7 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
     }
     trace.completeStage('rotation', rotationResult.turn);
 
+    notifyStageStart(options.onStageStart, 'explain');
     const explainOptions = startStageWithSdkOptions(
       'explain',
       `plan=${validated.plan.mode}; rotation=validated`,
@@ -502,6 +507,17 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
       explanation: explainResult.value,
       usage
     };
+  }
+}
+
+function notifyStageStart(
+  onStageStart: ((stage: V2AgentStage) => void) | undefined,
+  stage: V2AgentStage
+): void {
+  try {
+    onStageStart?.(stage);
+  } catch {
+    // Progress reporting is observational and must not change the checked pipeline result.
   }
 }
 

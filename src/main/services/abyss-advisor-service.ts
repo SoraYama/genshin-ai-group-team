@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import type { PersistedProfile } from '../../shared/domain.js';
 import {
   abyssAdvisorPlanInputSchema,
@@ -21,8 +23,11 @@ import {
 import type { AgentFailure } from '../../shared/agent-run-trace.js';
 import {
   ABYSS_MCP_TOOL_NAMES,
+  abyssKnowledgeTargetKey,
   createAbyssBusinessMcpServer,
-  type AbyssBusinessToolLog
+  type AbyssBusinessToolLog,
+  type AbyssKnowledgeTargetKey,
+  type AbyssKnowledgeTargetScopes
 } from './abyss-business-tools.js';
 import { buildLocalAbyssPlan } from './abyss-local-optimizer.js';
 import {
@@ -45,9 +50,13 @@ import type {
 import type { GuideResearchAgentResult } from './guide-research-contract.js';
 import type {
   AgentRunTraceLease,
-  AgentRunTraceWriter
+  AgentRunTraceWriter,
+  CompleteStageInput
 } from './agent-run-trace-store.js';
-import { AgentTurnError } from './agent-turn-audit.js';
+import {
+  AgentTurnError,
+  safeAgentTurnFailureDetails
+} from './agent-turn-audit.js';
 
 export interface AbyssAdvisorServiceOptions {
   runner: AbyssPlanAgentRunner;
@@ -268,24 +277,25 @@ export class AbyssAdvisorService {
       const eligibleCharacterIds = profile.characters
         .map(({ id }) => String(id))
         .filter((id) => !input.excludedCharacterIds.includes(id));
-      const knowledgeInput = abyssKnowledgeInput({
-        profile,
-        scenario,
-        input,
-        candidateIds: eligibleCharacterIds
-      });
       emit('interpreting-builds');
       trace.startStage('knowledge', `candidates=${eligibleCharacterIds.length}`);
       let trustedPacket: KnowledgeContextPacket;
+      let trustedTargetScopes: AbyssKnowledgeTargetScopes;
       let coverage: KnowledgeCoverageEvaluation;
       try {
-        trustedPacket = this.options.advisorKnowledge.buildPacket(knowledgeInput);
+        const runtime = buildAbyssKnowledgeRuntime({
+          advisorKnowledge: this.options.advisorKnowledge,
+          coverageGate: this.options.coverageGate,
+          profile,
+          scenario,
+          input,
+          candidateIds: eligibleCharacterIds
+        });
+        trustedPacket = runtime.packet;
+        trustedTargetScopes = runtime.targetScopes;
+        coverage = runtime.coverage;
         auditKnowledgeVersion = trustedPacket.knowledgeVersion;
         emit('checking-knowledge');
-        coverage = this.options.coverageGate.evaluate(
-          trustedPacket,
-          knowledgeResearchContext(knowledgeInput)
-        );
         trace.completeStage('knowledge', {
           citationIds: trustedPacket.citations.map(({ id }) => id)
         });
@@ -303,10 +313,10 @@ export class AbyssAdvisorService {
       }
 
       let finalPacket = trustedPacket;
+      let finalTargetScopes = trustedTargetScopes;
       let searched = false;
       if (coverage.required && apiKey !== undefined && this.options.research !== undefined) {
         emit('researching-guides');
-        searched = true;
         trace.startStage('research', `tasks=${coverage.tasks.length}`);
         try {
           const researchResult = await abortable(
@@ -320,15 +330,30 @@ export class AbyssAdvisorService {
             requestAbort.signal
           );
           throwIfCancelled();
-          finalPacket = mergeEphemeralResearch(trustedPacket, coverage, researchResult);
+          searched = researchResult.searchExecuted === true;
+          const mergedResearch = mergeEphemeralResearch(
+            trustedPacket,
+            trustedTargetScopes,
+            coverage,
+            researchResult
+          );
+          finalPacket = mergedResearch.packet;
+          finalTargetScopes = mergedResearch.targetScopes;
           const researchCitationIds = finalPacket.citations
             .filter(({ trust }) => trust === 'ephemeral-web')
             .map(({ id }) => id);
           const firstGap = researchResult.gaps[0];
           if (researchResult.entries.length === 0 && firstGap !== undefined) {
-            trace.failStage('research', researchFailure(firstGap.code));
+            trace.failStage(
+              'research',
+              researchFailure(firstGap.code, researchResult.failure),
+              researchTraceInput(researchResult)
+            );
           } else {
-            trace.completeStage('research', { citationIds: researchCitationIds });
+            trace.completeStage('research', {
+              ...researchTraceInput(researchResult),
+              citationIds: researchCitationIds
+            });
           }
         } catch (error) {
           if (requestAbort.signal.aborted) throw error;
@@ -408,6 +433,7 @@ export class AbyssAdvisorService {
                     chambers: targetChambers(scenario, input),
                     eligibleCharacterIds
                   },
+                  knowledgeTargetScopes: finalTargetScopes,
                   auditContext: {
                     correlationId: input.correlationId,
                     scenarioId: scenario.id,
@@ -427,6 +453,10 @@ export class AbyssAdvisorService {
             pipelineContext,
             sdkOptions: baseSdkOptions,
             sdkOptionsForStage,
+            onStageStart: (stage) => {
+              if (stage === 'critique') emit('checking-conflicts');
+              if (stage === 'rotation' || stage === 'explain') emit('writing-tactics');
+            },
             trace: trace.pipelineSession(),
             citationPolicy: this.options.citationPolicy,
             onUsageDelta: (usage) =>
@@ -438,7 +468,11 @@ export class AbyssAdvisorService {
           });
           throwIfCancelled();
           if (agent.ok) {
-            const checkedPlan = applyPacketKnowledgeCoverage(agent.plan, finalPacket);
+            const checkedPlan = applyPacketKnowledgeCoverage(
+              agent.plan,
+              finalPacket,
+              finalTargetScopes
+            );
             result = abyssAdvisorResultSchema.parse({
               status: 'planned',
               source: 'smart-service',
@@ -459,7 +493,12 @@ export class AbyssAdvisorService {
                 rotation: agent.rotation,
                 explanation: agent.explanation
               }),
-              teamRisks: renderAbyssTeamRisks(agent.critique)
+              teamRisks: renderAbyssTeamRisks(agent.critique),
+              memberEvidence: buildAbyssMemberEvidence(
+                checkedPlan,
+                finalPacket,
+                finalTargetScopes
+              )
             });
           } else {
             terminalFailure = agent.failure;
@@ -485,9 +524,6 @@ export class AbyssAdvisorService {
       if (result.status === 'planned' && result.source === 'local-rules') {
         result = withKnowledgeSummary(result, finalPacket, searched);
       }
-      throwIfCancelled();
-      emit('checking-conflicts');
-      emit('writing-tactics');
       throwIfCancelled();
       if (result.status === 'planned') this.persist(input, result, profile, scenarioView);
       return finish(result, terminalFailure);
@@ -605,20 +641,115 @@ function addAgentFallbackWarning(
 
 function applyPacketKnowledgeCoverage(
   plan: AbyssPlanOutput,
-  packet: KnowledgeContextPacket
+  packet: KnowledgeContextPacket,
+  targetScopes: AbyssKnowledgeTargetScopes
 ): AbyssPlanOutput {
   const selectedIds = new Set([
     ...plan.firstHalfTeam.characterIds,
     ...plan.secondHalfTeam.characterIds
   ]);
-  const unknown = packet.unknowns.filter(({ subjectId }) => selectedIds.has(subjectId));
-  if (unknown.length === 0) return plan;
-  const assumption = `当前队伍仍有 ${unknown.length} 项知识未知（版本 ${packet.knowledgeVersion}）；未覆盖的职责、能量与机制结论保持低置信度。`;
+  const characterUnknowns = packet.unknowns.filter(({ subjectId }) =>
+    selectedIds.has(subjectId)
+  );
+  const targetUnknownIds = new Set(
+    Object.values(targetScopes).flatMap((scope) => scope?.unknownIds ?? [])
+  );
+  const targetUnknowns = packet.unknowns.filter(({ id }) => targetUnknownIds.has(id));
+  if (characterUnknowns.length === 0 && targetUnknowns.length === 0) return plan;
+  const assumptions: string[] = [];
+  if (characterUnknowns.length > 0) {
+    assumptions.push(
+      `当前队伍仍有 ${characterUnknowns.length} 项知识未知（角色，版本 ${packet.knowledgeVersion}）；未覆盖的职责与能量结论保持低置信度。`
+    );
+  }
+  const targetKeysWithUnknowns = Object.entries(targetScopes).flatMap(([targetKey, scope]) =>
+    scope !== undefined && scope.unknownIds.some((id) => targetUnknownIds.has(id))
+      ? [targetKey]
+      : []
+  );
+  if (targetUnknowns.length > 0) {
+    assumptions.push(
+      `目标 ${targetKeysWithUnknowns.join('、')} 仍有 ${targetUnknowns.length} 项机制或场景知识缺口；相关结论保持低置信度。`
+    );
+  }
   return {
     ...plan,
     confidence: 'low',
-    assumptions: [assumption, ...plan.assumptions]
+    assumptions: [...assumptions, ...plan.assumptions]
   };
+}
+
+function buildAbyssMemberEvidence(
+  plan: AbyssPlanOutput,
+  packet: KnowledgeContextPacket,
+  targetScopes: AbyssKnowledgeTargetScopes
+): Extract<AbyssAdvisorResult, { status: 'planned' }>['memberEvidence'] {
+  const citationsById = new Map(packet.citations.map((citation) => [citation.id, citation]));
+  const unknownsById = new Map(packet.unknowns.map((gap) => [gap.id, gap]));
+  return plan.memberAssignments.map((assignment) => {
+    const trustedMatches = packet.trustedMatches.filter(
+      ({ characterId, archetypeId }) =>
+        characterId === assignment.characterId &&
+        archetypeId === assignment.archetypeId
+    );
+    const ephemeralMatches = packet.ephemeralMatches.filter(
+      ({ subjectId }) => subjectId === assignment.characterId
+    );
+    const characterUnknowns = packet.unknowns.filter(
+      ({ subjectId }) => subjectId === assignment.characterId
+    );
+    const targetUnknowns = Object.entries(targetScopes).flatMap(([targetKey, scope]) =>
+      scope !== undefined && targetKey.endsWith(`:${assignment.half}`)
+        ? scope.unknownIds.flatMap((id) => {
+            const gap = unknownsById.get(id);
+            return gap === undefined ? [] : [gap];
+          })
+        : []
+    );
+    const fitReasons = uniqueStrings(
+      [...trustedMatches, ...ephemeralMatches].map(({ summary }) => summary)
+    );
+    const riskUnknowns = uniqueStrings(
+      [...characterUnknowns, ...targetUnknowns].map(({ reason }) => reason)
+    );
+    return {
+      characterId: assignment.characterId,
+      half: assignment.half,
+      fitReasons:
+        fitReasons.length > 0 ? fitReasons : ['暂无可验证的正向适配依据，按未知处理。'],
+      currentBuild: [
+        `${assignment.buildStatus}；archetype=${assignment.archetypeId ?? 'unknown'}；role=${assignment.role}。`
+      ],
+      riskUnknowns:
+        riskUnknowns.length > 0 ? riskUnknowns : ['无已记录的角色或当前半场知识缺口。'],
+      optionalAdjustments: [
+        assignment.buildStatus === 'requires-adjustment'
+          ? '需要调整装备后再承担当前职责。'
+          : assignment.buildStatus === 'unknown'
+            ? '缺少可验证依据，不提供确定性换装建议。'
+            : '当前 build 可直接使用；换装仅作为可选优化。'
+      ],
+      sources: assignment.citationIds.flatMap((citationId) => {
+        const citation = citationsById.get(citationId);
+        return citation === undefined
+          ? []
+          : [
+              {
+                citationId,
+                sourceId: citation.sourceId,
+                url: citation.url,
+                title: citation.title,
+                reviewedAt: citation.reviewedAt,
+                trust: citation.trust
+              }
+            ];
+      })
+    };
+  });
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values));
 }
 
 function withKnowledgeSummary(
@@ -703,39 +834,104 @@ function abyssMechanicsContext(
     );
 }
 
-function abyssKnowledgeInput(options: {
+interface AbyssKnowledgeRuntime {
+  packet: KnowledgeContextPacket;
+  targetScopes: AbyssKnowledgeTargetScopes;
+  coverage: KnowledgeCoverageEvaluation;
+}
+
+function buildAbyssKnowledgeRuntime(options: {
+  advisorKnowledge: AbyssAdvisorServiceOptions['advisorKnowledge'];
+  coverageGate: AbyssAdvisorServiceOptions['coverageGate'];
   profile: PersistedProfile;
   scenario: Extract<AbyssScenarioView, { status: 'ready' }>['scenario'];
   input: AbyssAdvisorPlanInput;
   candidateIds: string[];
-}): AdvisorKnowledgePacketInput {
+}): AbyssKnowledgeRuntime {
   const chambers = options.scenario.floors
     .find(({ floor }) => floor === options.input.floor)
     ?.chambers.filter(
       ({ chamber }) => options.input.chamber === undefined || chamber === options.input.chamber
-    );
-  const enemies = (chambers ?? []).flatMap(({ firstHalf, secondHalf }) =>
-    [...firstHalf.waves, ...secondHalf.waves].flatMap(({ enemies: waveEnemies }) => waveEnemies)
-  );
-  return {
+    ) ?? [];
+  const characterInput: AdvisorKnowledgePacketInput = {
     profile: options.profile,
     scenarioTarget: {
-      id: `${options.scenario.id}:${options.input.floor}:${options.input.chamber ?? 'all'}`,
-      tags: Array.from(new Set(enemies.flatMap(({ mechanics }) => mechanics.tags))).slice(0, 24),
-      shields: enemies.flatMap(({ mechanics }) =>
-        mechanics.shields.map(({ element }) => ({ element }))
-      ),
-      resistances: enemies.flatMap(({ mechanics }) => mechanics.resistances),
-      immunities: enemies.flatMap(({ mechanics }) => mechanics.immunities),
-      waveCount: (chambers ?? []).reduce(
-        (count, { firstHalf, secondHalf }) =>
-          count + firstHalf.waves.length + secondHalf.waves.length,
-        0
-      ),
-      enemyCount: enemies.reduce((count, { count: enemyCount }) => count + enemyCount, 0)
+      id: `${options.scenario.id}:characters`,
+      tags: [],
+      shields: [],
+      resistances: [],
+      immunities: []
     },
     candidateIds: options.candidateIds,
     preferences: options.input.preferences
+  };
+  const characterPacket = characterKnowledgeOnly(
+    options.advisorKnowledge.buildPacket(characterInput)
+  );
+  const coverageParts: Array<{
+    packet: KnowledgeContextPacket;
+    evaluation: KnowledgeCoverageEvaluation;
+    targetKey?: AbyssKnowledgeTargetKey;
+  }> = [
+    {
+      packet: characterPacket,
+      evaluation: options.coverageGate.evaluate(
+        characterPacket,
+        knowledgeResearchContext(characterInput)
+      )
+    }
+  ];
+  const targetScopes: Partial<
+    Record<AbyssKnowledgeTargetKey, {
+      trustedMatchIds: string[];
+      ephemeralMatchIds: string[];
+      unknownIds: string[];
+    }>
+  > = {};
+  const targetPackets: KnowledgeContextPacket[] = [];
+
+  for (const chamber of chambers) {
+    for (const half of ['first', 'second'] as const) {
+      const targetKey = abyssKnowledgeTargetKey(options.input.floor, chamber.chamber, half);
+      const combatHalf = half === 'first' ? chamber.firstHalf : chamber.secondHalf;
+      const enemies = combatHalf.waves.flatMap(({ enemies: waveEnemies }) => waveEnemies);
+      const targetInput: AdvisorKnowledgePacketInput = {
+        profile: options.profile,
+        scenarioTarget: scopedScenarioTarget(
+          `${options.scenario.id}:${targetKey}`,
+          enemies,
+          combatHalf.waves.length
+        ),
+        candidateIds: [],
+        preferences: options.input.preferences
+      };
+      const targetPacket = namespaceTargetPacket(
+        mechanicKnowledgeOnly(options.advisorKnowledge.buildPacket(targetInput)),
+        targetKey
+      );
+      targetPackets.push(targetPacket);
+      targetScopes[targetKey] = {
+        trustedMatchIds: targetPacket.trustedMatches.map(({ id }) => id),
+        ephemeralMatchIds: [],
+        unknownIds: targetPacket.unknowns.map(({ id }) => id)
+      };
+      coverageParts.push({
+        packet: targetPacket,
+        evaluation: options.coverageGate.evaluate(targetPacket, {
+          characters: [],
+          scenarioTags: targetInput.scenarioTarget.tags,
+          targetKey
+        }),
+        targetKey
+      });
+    }
+  }
+
+  const packet = combineKnowledgePackets(characterPacket, targetPackets);
+  return {
+    packet,
+    targetScopes,
+    coverage: combineKnowledgeCoverage(packet, coverageParts)
   };
 }
 
@@ -757,6 +953,242 @@ function knowledgeResearchContext(input: AdvisorKnowledgePacketInput): Knowledge
   };
 }
 
+function scopedScenarioTarget(
+  id: string,
+  enemies: Array<
+    Extract<AbyssScenarioView, { status: 'ready' }>['scenario']['floors'][number]['chambers'][number]['firstHalf']['waves'][number]['enemies'][number]
+  >,
+  waveCount: number
+): AdvisorKnowledgePacketInput['scenarioTarget'] {
+  return {
+    id,
+    tags: Array.from(new Set(enemies.flatMap(({ mechanics }) => mechanics.tags))).slice(0, 24),
+    shields: enemies
+      .flatMap(({ mechanics }) => mechanics.shields.map(({ element }) => ({ element })))
+      .slice(0, 16),
+    resistances: enemies
+      .flatMap(({ mechanics }) => mechanics.resistances)
+      .slice(0, 32),
+    immunities: Array.from(
+      new Set(enemies.flatMap(({ mechanics }) => mechanics.immunities))
+    ).slice(0, 32),
+    waveCount: Math.max(1, waveCount),
+    enemyCount: Math.max(
+      1,
+      enemies.reduce((count, { count: enemyCount }) => count + enemyCount, 0)
+    )
+  };
+}
+
+function characterKnowledgeOnly(packet: KnowledgeContextPacket): KnowledgeContextPacket {
+  const trustedMatches = packet.trustedMatches.filter(
+    ({ characterId }) => characterId !== undefined
+  );
+  const unknowns = packet.unknowns.filter(
+    ({ subjectId, kind }) => /^\d+$/u.test(subjectId) || kind === 'payload-truncated'
+  );
+  return packetSubset(packet, {
+    buildInterpretations: packet.buildInterpretations,
+    trustedMatches,
+    unknowns
+  });
+}
+
+function mechanicKnowledgeOnly(packet: KnowledgeContextPacket): KnowledgeContextPacket {
+  const trustedMatches = packet.trustedMatches.filter(
+    ({ mechanicId }) => mechanicId !== undefined
+  );
+  const unknowns = packet.unknowns.filter(
+    ({ subjectId, kind }) =>
+      subjectId.startsWith('mechanic:') ||
+      subjectId.startsWith('scenario:') ||
+      kind === 'payload-truncated'
+  );
+  return packetSubset(packet, {
+    buildInterpretations: [],
+    trustedMatches,
+    unknowns
+  });
+}
+
+function packetSubset(
+  packet: KnowledgeContextPacket,
+  subset: Pick<KnowledgeContextPacket, 'buildInterpretations' | 'trustedMatches' | 'unknowns'>
+): KnowledgeContextPacket {
+  const citationIds = new Set(subset.trustedMatches.flatMap(({ citationIds }) => citationIds));
+  return knowledgeContextPacketSchema.parse({
+    knowledgeVersion: packet.knowledgeVersion,
+    buildInterpretations: structuredClone(subset.buildInterpretations),
+    trustedMatches: structuredClone(subset.trustedMatches),
+    ephemeralMatches: [],
+    unknowns: structuredClone(subset.unknowns),
+    coverage: {
+      requested: subset.trustedMatches.length + subset.unknowns.length,
+      trusted: subset.trustedMatches.length,
+      ephemeral: 0,
+      unknown: subset.unknowns.length
+    },
+    citations: packet.citations.filter(({ id }) => citationIds.has(id))
+  });
+}
+
+function namespaceTargetPacket(
+  packet: KnowledgeContextPacket,
+  targetKey: AbyssKnowledgeTargetKey
+): KnowledgeContextPacket {
+  const citationIdMap = new Map(
+    packet.citations.map(({ id }) => [id, targetRecordId(targetKey, 'citation', id)])
+  );
+  return knowledgeContextPacketSchema.parse({
+    ...structuredClone(packet),
+    trustedMatches: packet.trustedMatches.map((match) => ({
+      ...structuredClone(match),
+      id: targetRecordId(targetKey, 'trusted', match.id),
+      citationIds: match.citationIds.map((id) => {
+        const scopedId = citationIdMap.get(id);
+        if (scopedId === undefined) throw new Error('Target citation reference is unresolved');
+        return scopedId;
+      })
+    })),
+    ephemeralMatches: packet.ephemeralMatches.map((match) => ({
+      ...structuredClone(match),
+      id: targetRecordId(targetKey, 'ephemeral', match.id),
+      citationIds: match.citationIds.map((id) => {
+        const scopedId = citationIdMap.get(id);
+        if (scopedId === undefined) throw new Error('Target citation reference is unresolved');
+        return scopedId;
+      })
+    })),
+    unknowns: packet.unknowns.map((gap) => ({
+      ...structuredClone(gap),
+      id: targetRecordId(targetKey, 'unknown', gap.id)
+    })),
+    citations: packet.citations.map((citation) => ({
+      ...structuredClone(citation),
+      id: citationIdMap.get(citation.id)
+    }))
+  });
+}
+
+function targetRecordId(
+  targetKey: AbyssKnowledgeTargetKey,
+  kind: 'trusted' | 'ephemeral' | 'unknown' | 'citation',
+  originalId: string
+): string {
+  const digest = createHash('sha256')
+    .update(`${targetKey}\u0000${kind}\u0000${originalId}`)
+    .digest('hex')
+    .slice(0, 24);
+  return `target:${targetKey}:${kind}:${digest}`;
+}
+
+function combineKnowledgePackets(
+  characterPacket: KnowledgeContextPacket,
+  targetPackets: KnowledgeContextPacket[]
+): KnowledgeContextPacket {
+  if (
+    targetPackets.some(
+      ({ knowledgeVersion }) => knowledgeVersion !== characterPacket.knowledgeVersion
+    )
+  ) {
+    throw new Error('Knowledge packet version mismatch');
+  }
+  const trustedMatches = uniqueRecordsById([
+    ...characterPacket.trustedMatches,
+    ...targetPackets.flatMap(({ trustedMatches: matches }) => matches)
+  ]);
+  const unknowns = uniqueRecordsById([
+    ...characterPacket.unknowns,
+    ...targetPackets.flatMap(({ unknowns: gaps }) => gaps)
+  ]);
+  const citations = uniqueRecordsById([
+    ...characterPacket.citations,
+    ...targetPackets.flatMap(({ citations: packetCitations }) => packetCitations)
+  ]);
+  return knowledgeContextPacketSchema.parse({
+    knowledgeVersion: characterPacket.knowledgeVersion,
+    buildInterpretations: characterPacket.buildInterpretations,
+    trustedMatches,
+    ephemeralMatches: [],
+    unknowns,
+    coverage: {
+      requested: trustedMatches.length + unknowns.length,
+      trusted: trustedMatches.length,
+      ephemeral: 0,
+      unknown: unknowns.length
+    },
+    citations
+  });
+}
+
+function combineKnowledgeCoverage(
+  packet: KnowledgeContextPacket,
+  parts: Array<{
+    packet: KnowledgeContextPacket;
+    evaluation: KnowledgeCoverageEvaluation;
+    targetKey?: AbyssKnowledgeTargetKey;
+  }>
+): KnowledgeCoverageEvaluation {
+  const tasksByKey = new Map<string, KnowledgeCoverageEvaluation['tasks'][number]>();
+  const bindingsByKey = new Map<
+    string,
+    { unknownIds: Set<string>; targetKeys: Set<string> }
+  >();
+  for (const part of parts) {
+    for (const task of part.evaluation.tasks) tasksByKey.set(task.key, task);
+    for (const binding of part.evaluation.bindings) {
+      const current = bindingsByKey.get(binding.taskKey) ?? {
+        unknownIds: new Set<string>(),
+        targetKeys: new Set<string>()
+      };
+      binding.unknownIndexes.forEach((index) => {
+        const gap = part.packet.unknowns[index];
+        if (gap !== undefined) current.unknownIds.add(gap.id);
+      });
+      binding.unknownIds?.forEach((id) => current.unknownIds.add(id));
+      binding.targetKeys?.forEach((key) => current.targetKeys.add(key));
+      if (part.targetKey !== undefined) current.targetKeys.add(part.targetKey);
+      bindingsByKey.set(binding.taskKey, current);
+    }
+  }
+  const unknownIndexById = new Map(packet.unknowns.map(({ id }, index) => [id, index]));
+  const tasks = Array.from(tasksByKey.values());
+  return {
+    required: tasks.length > 0,
+    tasks,
+    bindings: tasks.map(({ key }) => {
+      const binding = bindingsByKey.get(key) ?? {
+        unknownIds: new Set<string>(),
+        targetKeys: new Set<string>()
+      };
+      const unknownIds = Array.from(binding.unknownIds);
+      return {
+        taskKey: key,
+        unknownIndexes: unknownIds.flatMap((id) => {
+          const index = unknownIndexById.get(id);
+          return index === undefined ? [] : [index];
+        }),
+        unknownIds,
+        ...(binding.targetKeys.size === 0
+          ? {}
+          : { targetKeys: Array.from(binding.targetKeys) })
+      };
+    })
+  };
+}
+
+function uniqueRecordsById<T extends { id: string }>(records: T[]): T[] {
+  const recordsById = new Map<string, T>();
+  for (const record of records) {
+    const existing = recordsById.get(record.id);
+    if (existing !== undefined && JSON.stringify(existing) !== JSON.stringify(record)) {
+      throw new Error(`Conflicting knowledge record id: ${record.id}`);
+    }
+    recordsById.set(record.id, record);
+  }
+  return Array.from(recordsById.values());
+}
+
 function targetChambers(
   scenario: Extract<AbyssScenarioView, { status: 'ready' }>['scenario'],
   input: AbyssAdvisorPlanInput
@@ -773,14 +1205,27 @@ function targetChambers(
 
 function mergeEphemeralResearch(
   packet: KnowledgeContextPacket,
+  targetScopes: AbyssKnowledgeTargetScopes,
   coverage: KnowledgeCoverageEvaluation,
   research: GuideResearchAgentResult
-): KnowledgeContextPacket {
+): { packet: KnowledgeContextPacket; targetScopes: AbyssKnowledgeTargetScopes } {
   const merged = structuredClone(packet);
+  const mergedTargetScopes = structuredClone(targetScopes);
   const bindingByTaskKey = new Map(
-    coverage.bindings.map(({ taskKey, unknownIndexes }) => [taskKey, unknownIndexes])
+    coverage.bindings.map(({ taskKey, unknownIndexes, unknownIds, targetKeys }) => [
+      taskKey,
+      {
+        unknownIds:
+          unknownIds ??
+          unknownIndexes.flatMap((index) => {
+            const gap = packet.unknowns[index];
+            return gap === undefined ? [] : [gap.id];
+          }),
+        targetKeys: targetKeys ?? []
+      }
+    ])
   );
-  const resolvedUnknownIndexes = new Set<number>();
+  const resolvedUnknownIds = new Set<string>();
   const existingMatchIds = new Set([
     ...merged.trustedMatches.map(({ id }) => id),
     ...merged.ephemeralMatches.map(({ id }) => id),
@@ -789,9 +1234,9 @@ function mergeEphemeralResearch(
   const existingCitationIds = new Set(merged.citations.map(({ id }) => id));
 
   for (const entry of research.entries) {
-    const unknownIndexes = bindingByTaskKey.get(entry.taskKey);
+    const binding = bindingByTaskKey.get(entry.taskKey);
     if (
-      unknownIndexes === undefined ||
+      binding === undefined ||
       entry.value.trust !== 'ephemeral-web' ||
       entry.value.conflicts.length > 0
     ) {
@@ -811,11 +1256,14 @@ function mergeEphemeralResearch(
         existingCitationIds.add(citation.id);
       }
     });
-    for (const unknownIndex of unknownIndexes) {
-      const gap = packet.unknowns[unknownIndex];
+    for (const [unknownIndex, unknownId] of binding.unknownIds.entries()) {
+      const gap = packet.unknowns.find(({ id }) => id === unknownId);
       if (gap === undefined) continue;
       validMatches.forEach((match, matchIndex) => {
-        let id = `${match.id.slice(0, 96)}-b${unknownIndex}-${matchIndex}`;
+        let id = `${match.id.slice(0, 72)}-b${unknownIndex}-${matchIndex}-${createHash('sha256')
+          .update(`${entry.taskKey}\u0000${unknownId}\u0000${match.id}`)
+          .digest('hex')
+          .slice(0, 16)}`;
         while (existingMatchIds.has(id)) id = `${id.slice(0, 120)}x`;
         existingMatchIds.add(id);
         merged.ephemeralMatches.push({
@@ -823,14 +1271,24 @@ function mergeEphemeralResearch(
           id,
           subjectId: gap.subjectId
         });
+        for (const targetKeyValue of binding.targetKeys) {
+          const targetKey = targetKeyValue as AbyssKnowledgeTargetKey;
+          const scope = mergedTargetScopes[targetKey];
+          if (scope === undefined) {
+            throw new Error('Research target scope unavailable');
+          }
+          if (!scope.ephemeralMatchIds.includes(id)) scope.ephemeralMatchIds.push(id);
+        }
       });
-      resolvedUnknownIndexes.add(unknownIndex);
+      resolvedUnknownIds.add(unknownId);
     }
   }
 
-  merged.unknowns = merged.unknowns.filter(
-    (_gap, index) => !resolvedUnknownIndexes.has(index)
-  );
+  merged.unknowns = merged.unknowns.filter(({ id }) => !resolvedUnknownIds.has(id));
+  for (const scope of Object.values(mergedTargetScopes)) {
+    if (scope === undefined) continue;
+    scope.unknownIds = scope.unknownIds.filter((id) => !resolvedUnknownIds.has(id));
+  }
   merged.coverage = {
     requested:
       merged.trustedMatches.length +
@@ -840,17 +1298,66 @@ function mergeEphemeralResearch(
     ephemeral: merged.ephemeralMatches.length,
     unknown: merged.unknowns.length
   };
-  return knowledgeContextPacketSchema.parse(merged);
+  return {
+    packet: knowledgeContextPacketSchema.parse(merged),
+    targetScopes: mergedTargetScopes
+  };
 }
 
-function researchFailure(code: GuideResearchAgentResult['gaps'][number]['code']): AgentFailure {
+function researchFailure(
+  code: GuideResearchAgentResult['gaps'][number]['code'],
+  diagnostic?: GuideResearchAgentResult['failure']
+): AgentFailure {
   return {
     code:
       code === 'SEARCH_BUDGET_EXCEEDED' || code === 'SEARCH_OUTPUT_INVALID'
         ? code
         : 'SEARCH_UNAVAILABLE',
     message: 'Guide research did not return a validated result.',
-    retryable: code !== 'SEARCH_OUTPUT_INVALID'
+    retryable: code !== 'SEARCH_OUTPUT_INVALID',
+    ...(diagnostic === undefined
+      ? {}
+      : {
+          details: {
+            sdkCode: diagnostic.sdkCode,
+            ...(diagnostic.httpStatus === undefined
+              ? {}
+              : { httpStatus: String(diagnostic.httpStatus) })
+          }
+        })
+  };
+}
+
+function researchTraceInput(
+  result: GuideResearchAgentResult
+): Omit<CompleteStageInput, 'stage' | 'citationIds'> {
+  const audit = result.audit;
+  return {
+    ...(audit === undefined
+      ? {}
+      : {
+          rawOutput: audit.finalRawText,
+          rawMessagesSummary: audit.rawMessagesSummary,
+          webSearchEvidence: audit.webSearchEvidence,
+          tools: audit.tools.map((tool) => ({
+            name: tool.name,
+            status: tool.succeeded ? ('completed' as const) : ('failed' as const),
+            inputSummary: JSON.stringify(tool.input),
+            ...(tool.succeeded
+              ? {}
+              : {
+                  failure: {
+                    code: 'SEARCH_UNAVAILABLE' as const,
+                    message: 'Research tool call failed.',
+                    retryable: true
+                  }
+                })
+          }))
+        }),
+    usage: {
+      inputTokens: result.usage?.inputTokens ?? audit?.usage.inputTokens ?? 0,
+      outputTokens: result.usage?.outputTokens ?? audit?.usage.outputTokens ?? 0
+    }
   };
 }
 
@@ -863,22 +1370,36 @@ function agentFailureFromError(error: unknown, timedOut: boolean): AgentFailure 
     };
   }
   if (error instanceof AgentTurnError) {
+    const diagnostic = safeAgentTurnFailureDetails(error);
+    const details = {
+      ...(diagnostic.sdkCode === undefined ? {} : { sdkCode: diagnostic.sdkCode }),
+      ...(diagnostic.httpStatus === undefined
+        ? {}
+        : { httpStatus: String(diagnostic.httpStatus) })
+    };
     switch (error.code) {
       case 'AGENT_TURN_CANCELLED':
-        return { code: 'AGENT_ABORTED', message: 'Agent request was cancelled.', retryable: true };
+        return {
+          code: 'AGENT_ABORTED',
+          message: 'Agent request was cancelled.',
+          retryable: true,
+          ...(Object.keys(details).length === 0 ? {} : { details })
+        };
       case 'AGENT_TURN_INCOMPLETE':
       case 'AGENT_TURN_OUTPUT_TOO_LARGE':
         return {
           code: 'AGENT_OUTPUT_INVALID',
           message: 'Agent returned invalid output.',
-          retryable: false
+          retryable: false,
+          ...(Object.keys(details).length === 0 ? {} : { details })
         };
       case 'AGENT_TURN_STREAM_FAILED':
       case 'AGENT_TURN_RESULT_ERROR':
         return {
           code: 'PROVIDER_ERROR',
           message: 'Agent provider request failed.',
-          retryable: true
+          retryable: true,
+          ...(Object.keys(details).length === 0 ? {} : { details })
         };
     }
   }
@@ -919,25 +1440,31 @@ class RecommendationTrace {
 
   completeStage(
     stage: 'knowledge' | 'research',
-    input: { citationIds?: string[] } = {}
+    input: Omit<CompleteStageInput, 'stage'> = {}
   ): void {
     this.write((writer, lease) =>
       writer.completeStage(lease, {
+        ...input,
         stage,
-        tools: [],
+        tools: input.tools ?? [],
         citationIds: input.citationIds ?? [],
-        usage: { inputTokens: 0, outputTokens: 0 }
+        usage: input.usage ?? { inputTokens: 0, outputTokens: 0 }
       })
     );
   }
 
-  failStage(stage: 'knowledge' | 'research', failure: AgentFailure): void {
+  failStage(
+    stage: 'knowledge' | 'research',
+    failure: AgentFailure,
+    input: Omit<CompleteStageInput, 'stage'> = {}
+  ): void {
     this.write((writer, lease) =>
       writer.failStage(lease, {
+        ...input,
         stage,
-        tools: [],
-        citationIds: [],
-        usage: { inputTokens: 0, outputTokens: 0 },
+        tools: input.tools ?? [],
+        citationIds: input.citationIds ?? [],
+        usage: input.usage ?? { inputTokens: 0, outputTokens: 0 },
         failure
       })
     );

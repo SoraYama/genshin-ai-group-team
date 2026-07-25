@@ -181,6 +181,7 @@ export function validAbyssPlan(overrides: Partial<AbyssPlanOutput> = {}): AbyssP
     confidence: 'medium',
     warnings: [],
     assumptions: ['未知角色职责未用于确定性结论。'],
+    memberAssignments: [],
     firstHalfTeam: {
       id: 'first-half',
       characterIds: ['1001', '1004', '1005', '1006'],

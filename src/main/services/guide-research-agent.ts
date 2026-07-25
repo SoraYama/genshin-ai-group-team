@@ -3,6 +3,9 @@ import type { AgentSdkRunOptions } from './agent-sdk-adapter.js';
 import {
   AgentTurnError,
   runAuditedAgentTurn,
+  safeAgentTurnFailureDetails,
+  type AgentUsage,
+  type AuditedAgentTurn,
   type AuditedAgentRunner
 } from './agent-turn-audit.js';
 import {
@@ -56,6 +59,7 @@ export interface GuideResearchAgentOptions {
   sourceRegistry: GuideResearchSourceRegistryReader;
   sdkOptions: AgentSdkRunOptions;
   canonicalCharacterCatalog: readonly GuideResearchCanonicalCharacterIdentity[];
+  onUsageDelta?: (usage: AgentUsage) => void;
   now?: () => number;
 }
 
@@ -65,6 +69,7 @@ export class GuideResearchAgent {
   private readonly sourceRegistry: GuideResearchSourceRegistryReader;
   private readonly sdkOptions: AgentSdkRunOptions;
   private readonly canonicalCharacterCatalog: ReadonlyMap<string, GuideResearchCanonicalElement>;
+  private readonly onUsageDelta: ((usage: AgentUsage) => void) | undefined;
   private readonly now: () => number;
 
   constructor(options: GuideResearchAgentOptions) {
@@ -75,6 +80,7 @@ export class GuideResearchAgent {
     this.canonicalCharacterCatalog = canonicalCharacterCatalogSnapshot(
       options.canonicalCharacterCatalog
     );
+    this.onUsageDelta = options.onUsageDelta;
     this.now = options.now ?? Date.now;
   }
 
@@ -116,7 +122,9 @@ export class GuideResearchAgent {
           origin: 'cache',
           value: cachedByKey.get(task.key)!
         })),
-        gaps: []
+        gaps: [],
+        searchExecuted: false,
+        usage: EMPTY_RESEARCH_USAGE
       };
     }
 
@@ -140,6 +148,7 @@ export class GuideResearchAgent {
 
     let rawOutput: string;
     let searchedUrls: ReadonlySet<string>;
+    let auditedTurn: AuditedAgentTurn;
     try {
       const turn = await runAuditedAgentTurn({
         runner: this.runner,
@@ -158,35 +167,61 @@ export class GuideResearchAgent {
           maxTurns: 4
         },
         systemPrompt: GUIDE_RESEARCH_PROMPT_V1,
+        onUsageDelta: this.onUsageDelta,
         normalizeResearchUrl: (url) => canonicalGuideSource(url, sourcesByHost)?.url
       });
+      auditedTurn = turn;
       const resolvedUrls = resolvedSearchUrls(turn.webSearchEvidence, queries, turn.tools);
       if (resolvedUrls === undefined) {
-        return combineGuideResearchResult(
-          parsed.tasks,
-          cachedByKey,
-          new Map(),
-          gapsFor(runtimeMisses, 'SEARCH_OUTPUT_INVALID')
+        return liveResearchResult(
+          combineGuideResearchResult(
+            parsed.tasks,
+            cachedByKey,
+            new Map(),
+            gapsFor(runtimeMisses, 'SEARCH_OUTPUT_INVALID')
+          ),
+          turn
         );
       }
       searchedUrls = resolvedUrls;
       rawOutput = turn.finalRawText;
     } catch (error) {
-      return combineGuideResearchResult(
+      const details = safeAgentTurnFailureDetails(error);
+      return {
+        ...combineGuideResearchResult(
         parsed.tasks,
         cachedByKey,
         new Map(),
         gapsFor(runtimeMisses, searchFailureCode(error))
-      );
+        ),
+        searchExecuted: true,
+        usage:
+          error instanceof AgentTurnError && error.usage !== undefined
+            ? error.usage
+            : EMPTY_RESEARCH_USAGE,
+        ...(details.sdkCode === undefined
+          ? {}
+          : {
+              failure: {
+                sdkCode: details.sdkCode,
+                ...(details.httpStatus === undefined
+                  ? {}
+                  : { httpStatus: details.httpStatus })
+              }
+            })
+      };
     }
 
     const decoded = parseResearchOutput(rawOutput);
     if (decoded === undefined) {
-      return combineGuideResearchResult(
-        parsed.tasks,
-        cachedByKey,
-        new Map(),
-        gapsFor(runtimeMisses, 'SEARCH_OUTPUT_INVALID')
+      return liveResearchResult(
+        combineGuideResearchResult(
+          parsed.tasks,
+          cachedByKey,
+          new Map(),
+          gapsFor(runtimeMisses, 'SEARCH_OUTPUT_INVALID')
+        ),
+        auditedTurn
       );
     }
 
@@ -201,11 +236,14 @@ export class GuideResearchAgent {
         return false;
       })
     ) {
-      return combineGuideResearchResult(
-        parsed.tasks,
-        cachedByKey,
-        new Map(),
-        gapsFor(runtimeMisses, 'SEARCH_OUTPUT_INVALID')
+      return liveResearchResult(
+        combineGuideResearchResult(
+          parsed.tasks,
+          cachedByKey,
+          new Map(),
+          gapsFor(runtimeMisses, 'SEARCH_OUTPUT_INVALID')
+        ),
+        auditedTurn
       );
     }
 
@@ -258,7 +296,10 @@ export class GuideResearchAgent {
         gapsByKey.set(task.key, 'SEARCH_CACHE_UNAVAILABLE');
       }
     }
-    return combineGuideResearchResult(parsed.tasks, cachedByKey, researchedByKey, gapsByKey);
+    return liveResearchResult(
+      combineGuideResearchResult(parsed.tasks, cachedByKey, researchedByKey, gapsByKey),
+      auditedTurn
+    );
   }
 
   private currentIsoTime(): string {
@@ -268,6 +309,51 @@ export class GuideResearchAgent {
     }
     return new Date(now).toISOString();
   }
+}
+
+const EMPTY_RESEARCH_USAGE: AgentUsage = {
+  inputTokens: 0,
+  outputTokens: 0,
+  estimatedCostUsd: 0
+};
+
+function liveResearchResult(
+  result: Pick<GuideResearchAgentResult, 'entries' | 'gaps'>,
+  audit: AuditedAgentTurn
+): GuideResearchAgentResult {
+  const safeAudit = privacySafeAudit(audit);
+  return {
+    ...result,
+    searchExecuted: true,
+    usage: safeAudit.usage,
+    audit: safeAudit
+  };
+}
+
+function privacySafeAudit(audit: AuditedAgentTurn): AuditedAgentTurn {
+  const finalRawText = safeAuditText(audit.finalRawText);
+  return {
+    ...structuredClone(audit),
+    text: finalRawText,
+    finalRawText,
+    rawMessagesSummary: {
+      ...structuredClone(audit.rawMessagesSummary),
+      messages: audit.rawMessagesSummary.messages.map((message) => ({
+        ...structuredClone(message),
+        ...(message.textPreview === undefined
+          ? {}
+          : { textPreview: safeAuditText(message.textPreview) }),
+        textTruncated:
+          message.textTruncated ||
+          (message.textPreview !== undefined &&
+            privacySafeResearchText(message.textPreview) === undefined)
+      }))
+    }
+  };
+}
+
+function safeAuditText(value: string): string {
+  return privacySafeResearchText(value) ?? '[REDACTED]';
 }
 
 function gapsFor(

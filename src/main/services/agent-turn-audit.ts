@@ -99,6 +99,19 @@ export class AgentTurnError extends Error {
   }
 }
 
+export function safeAgentTurnFailureDetails(
+  error: unknown
+): { sdkCode?: AgentTurnErrorCode; httpStatus?: number } {
+  const sdkCode = error instanceof AgentTurnError ? error.code : undefined;
+  const httpStatus = safeHttpStatus(
+    error instanceof AgentTurnError ? error.cause : error
+  );
+  return {
+    ...(sdkCode === undefined ? {} : { sdkCode }),
+    ...(httpStatus === undefined ? {} : { httpStatus })
+  };
+}
+
 export interface RawAgentMessageSummary {
   type: string;
   subtype?: string;
@@ -397,6 +410,27 @@ function assertBoundedFinalText(value: string): void {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function safeHttpStatus(value: unknown, depth = 0): number | undefined {
+  if (depth > 4 || value === null || typeof value !== 'object') return undefined;
+  const record = value as Record<string, unknown>;
+  for (const key of ['httpStatus', 'statusCode', 'status']) {
+    const candidate = record[key];
+    if (
+      typeof candidate === 'number' &&
+      Number.isInteger(candidate) &&
+      candidate >= 100 &&
+      candidate <= 599
+    ) {
+      return candidate;
+    }
+  }
+  for (const key of ['cause', 'response', 'error']) {
+    const nested = safeHttpStatus(record[key], depth + 1);
+    if (nested !== undefined) return nested;
+  }
+  return undefined;
 }
 
 function webSearchToolUseId(value: string): string | undefined {

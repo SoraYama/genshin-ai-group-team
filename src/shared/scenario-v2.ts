@@ -778,12 +778,47 @@ const abyssChamberPlanSchema = z
   })
   .strict();
 
+export const abyssMemberRoleSchema = z.enum([
+  'on-field',
+  'off-field',
+  'driver',
+  'trigger',
+  'support',
+  'sustain',
+  'healer',
+  'unclassified'
+]);
+
+export const abyssMemberAssignmentSchema = z
+  .object({
+    characterId: nonEmptyIdSchema,
+    half: z.enum(['first', 'second']),
+    archetypeId: nonEmptyIdSchema.nullable(),
+    role: abyssMemberRoleSchema,
+    buildStatus: z.enum(['current-build', 'requires-adjustment', 'unknown']),
+    citationIds: z
+      .array(nonEmptyIdSchema)
+      .max(32)
+      .refine((ids) => new Set(ids).size === ids.length, 'Citation IDs must be unique')
+  })
+  .strict();
+
 const abyssPlanBaseSchema = z
   .object({
     mode: z.literal('spiral-abyss'),
     ...planCommonShape,
     firstHalfTeam: teamAssignmentSchema,
     secondHalfTeam: teamAssignmentSchema,
+    memberAssignments: z
+      .array(abyssMemberAssignmentSchema)
+      .max(8)
+      .refine(
+        (assignments) =>
+          new Set(assignments.map(({ characterId }) => characterId)).size ===
+          assignments.length,
+        'Abyss member assignments must identify unique characters'
+      )
+      .default([]),
     chambers: z
       .array(abyssChamberPlanSchema)
       .min(1)
@@ -931,6 +966,8 @@ export type PlayerPreferences = z.infer<typeof playerPreferencesSchema>;
 export type RecommendationTarget = z.infer<typeof recommendationTargetSchema>;
 export type PlayerIntervention = z.infer<typeof playerInterventionSchema>;
 export type TeamAssignment = z.infer<typeof teamAssignmentSchema>;
+export type AbyssMemberRole = z.infer<typeof abyssMemberRoleSchema>;
+export type AbyssMemberAssignment = z.infer<typeof abyssMemberAssignmentSchema>;
 export type AbyssPlan = z.infer<typeof abyssPlanSchema>;
 export type StygianPlan = z.infer<typeof stygianPlanSchema>;
 export type TheaterPlan = z.infer<typeof theaterPlanSchema>;

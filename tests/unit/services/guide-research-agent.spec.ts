@@ -443,6 +443,23 @@ describe('GuideResearchAgent', () => {
       })
     );
     expect(JSON.stringify(researchCache.put.mock.calls)).not.toContain('rawMessagesSummary');
+    expect(result).toMatchObject({
+      searchExecuted: true,
+      usage: { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },
+      audit: {
+        finalRawText: expect.stringContaining('"schemaVersion":1'),
+        rawMessagesSummary: { totalMessages: 3 },
+        tools: [{ name: 'WebSearch', succeeded: true }],
+        webSearchEvidence: {
+          attempts: [
+            expect.objectContaining({
+              toolUseId: 'search-1',
+              status: 'resolved'
+            })
+          ]
+        }
+      }
+    });
   });
 
   it('does not invoke the model when every task has a valid cache hit', async () => {
@@ -464,6 +481,11 @@ describe('GuideResearchAgent', () => {
 
     expect(result.entries).toHaveLength(1);
     expect(result.entries[0]?.origin).toBe('cache');
+    expect(result).toMatchObject({
+      searchExecuted: false,
+      usage: { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 }
+    });
+    expect(result.audit).toBeUndefined();
     expect(runner.run).not.toHaveBeenCalled();
   });
 
@@ -540,6 +562,14 @@ describe('GuideResearchAgent', () => {
     expect(researchCache.put).not.toHaveBeenCalled();
     expect(result.entries).toEqual([]);
     expect(result.gaps).toEqual([{ taskKey: researchTask.key, code: 'SEARCH_OUTPUT_INVALID' }]);
+    expect(result).toMatchObject({
+      searchExecuted: true,
+      audit: {
+        finalRawText: expect.stringContaining('"schemaVersion":1'),
+        rawMessagesSummary: expect.any(Object),
+        webSearchEvidence: expect.any(Object)
+      }
+    });
   });
 
   it.each([1, 2, 3])(
@@ -602,7 +632,7 @@ describe('GuideResearchAgent', () => {
     });
 
     expect(researchCache.put).not.toHaveBeenCalled();
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       entries: [],
       gaps: [{ taskKey: researchTask.key, code: 'SEARCH_OUTPUT_INVALID' }]
     });
@@ -630,7 +660,7 @@ describe('GuideResearchAgent', () => {
       });
 
       expect(researchCache.put).not.toHaveBeenCalled();
-      expect(result).toEqual({
+      expect(result).toMatchObject({
         entries: [],
         gaps: [{ taskKey: researchTask.key, code: 'SEARCH_OUTPUT_INVALID' }]
       });
@@ -1569,7 +1599,7 @@ describe('GuideResearchAgent', () => {
         knowledgeVersion: 'knowledge-v2'
       });
 
-      expect(result).toEqual({
+      expect(result).toMatchObject({
         entries: [],
         gaps: [{ taskKey: researchTask.key, code: 'SEARCH_OUTPUT_INVALID' }]
       });
@@ -1737,6 +1767,40 @@ describe('GuideResearchAgent', () => {
 
     expect(result.gaps).toEqual([{ taskKey: researchTask.key, code }]);
     expect(JSON.stringify(result)).not.toContain('secret');
+  });
+
+  it('keeps only stable provider diagnostics and safe HTTP status', async () => {
+    const researchTask = task('guide-provider-safe-diagnostic');
+    const runner: AuditedAgentRunner = {
+      async *run() {
+        const cause = Object.assign(new Error('TOP-SECRET-PROVIDER-BODY'), {
+          status: 503,
+          response: { body: 'TOP-SECRET-PROVIDER-BODY', request: 'private-query' }
+        });
+        yield await Promise.reject(cause);
+      }
+    };
+    const result = await new GuideResearchAgent({
+      runner,
+      cache: cache(),
+      sourceRegistry: sourceRegistry(),
+      sdkOptions: sdkOptions(),
+      canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
+      now: () => NOW
+    }).research({
+      tasks: [researchTask],
+      knowledgeVersion: 'knowledge-v2'
+    });
+
+    expect(result).toMatchObject({
+      searchExecuted: true,
+      failure: {
+        sdkCode: 'AGENT_TURN_STREAM_FAILED',
+        httpStatus: 503
+      },
+      usage: { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 }
+    });
+    expect(JSON.stringify(result)).not.toMatch(/TOP-SECRET|private-query|provider-body/i);
   });
 
   it('uses only the registry read method and never reaches a trusted-knowledge writer', async () => {

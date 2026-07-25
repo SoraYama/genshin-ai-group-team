@@ -1220,6 +1220,17 @@ export const trustedKnowledgeMatchSchema = z
     characterId: canonicalCharacterIdSchema.optional(),
     mechanicId: boundedIdSchema.optional(),
     archetypeId: z.string().trim().min(1).max(80).nullable().optional(),
+    role: z
+      .enum([
+        'on-field',
+        'off-field',
+        'driver',
+        'trigger',
+        'support',
+        'sustain',
+        'healer'
+      ])
+      .optional(),
     summary: boundedSummarySchema,
     factStatements: z.array(boundedFactSchema).max(32).optional(),
     requiredCapabilities: uniqueBoundedIdsSchema.optional(),

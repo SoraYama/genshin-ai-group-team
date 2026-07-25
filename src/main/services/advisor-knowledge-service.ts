@@ -134,6 +134,17 @@ export class AdvisorKnowledgeService {
         );
         return [interpretation];
       }
+      if (archetype.role === 'unclassified') {
+        unknowns.push(
+          gap(
+            `gap-character-${characterId}`,
+            characterId,
+            'missing',
+            'The interpreted build only has an unclassified knowledge gap.'
+          )
+        );
+        return [interpretation];
+      }
 
       const archetypeCitationIds = unique(
         archetype.facts.flatMap(({ citationIds: factCitationIds }) => factCitationIds)
@@ -143,6 +154,7 @@ export class AdvisorKnowledgeService {
         id: `trusted-character-${characterId}`,
         characterId,
         archetypeId,
+        role: archetype.role,
         summary: boundedKnowledgeSummary(archetype.facts.map(({ statement }) => statement)),
         factStatements: archetype.facts.map(({ statement }) => statement),
         citationIds: archetypeCitationIds

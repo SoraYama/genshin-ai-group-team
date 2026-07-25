@@ -3,6 +3,11 @@ import { z } from 'zod';
 import { elementalTypeSchema } from '../../shared/scenario-v2.js';
 import type { EphemeralGuideCacheValue } from './guide-research-cache.js';
 import type { GuideResearchTask } from './knowledge-coverage-gate.js';
+import type {
+  AgentTurnErrorCode,
+  AgentUsage,
+  AuditedAgentTurn
+} from './agent-turn-audit.js';
 
 export type GuideResearchGapCode =
   | 'SEARCH_UNAVAILABLE'
@@ -56,6 +61,13 @@ export interface GuideResearchGap {
 export interface GuideResearchAgentResult {
   entries: GuideResearchEntry[];
   gaps: GuideResearchGap[];
+  searchExecuted?: boolean;
+  usage?: AgentUsage;
+  audit?: AuditedAgentTurn;
+  failure?: {
+    sdkCode: AgentTurnErrorCode;
+    httpStatus?: number;
+  };
 }
 
 export interface SanitizedResearchTask {

@@ -394,6 +394,13 @@ describe('abyss in-process business tools', () => {
         chambers: [1, 2],
         eligibleCharacterIds: ['1001', '1002']
       },
+      knowledgeTargetScopes: {
+        '12:1:first': {
+          trustedMatchIds: ['match-shield-breaking'],
+          ephemeralMatchIds: [],
+          unknownIds: ['gap-scenario-unknown']
+        }
+      },
       auditContext: {
         correlationId: 'audit-request-1',
         scenarioId: 'abyss.2026-07',
@@ -454,6 +461,146 @@ describe('abyss in-process business tools', () => {
     expect(JSON.stringify(log.mock.calls)).not.toMatch(/123456789|api.?key|authorization/i);
   });
 
+  it('keeps mechanic, scenario, ephemeral, unknown, and citations isolated to the exact target key', async () => {
+    const scopedPacket = structuredClone(packet);
+    scopedPacket.trustedMatches.push({
+      id: 'match-wave-efficient',
+      mechanicId: 'wave-efficient-rotation',
+      summary: 'Use short rotations in multi-wave content.',
+      citationIds: ['citation-wave-efficient']
+    });
+    scopedPacket.ephemeralMatches.push(
+      {
+        id: 'ephemeral-first-bound',
+        subjectId: 'mechanic:shield-breaking',
+        summary: 'First-half runtime evidence.',
+        citationIds: ['citation-first-ephemeral']
+      },
+      {
+        id: 'ephemeral-unbound',
+        subjectId: 'scenario:unbound',
+        summary: 'This must never leak into a target result.',
+        citationIds: ['citation-unbound']
+      }
+    );
+    scopedPacket.unknowns.push({
+      id: 'gap-second-scenario',
+      subjectId: 'scenario:second-only',
+      kind: 'missing',
+      reason: 'Second-half scenario knowledge is missing.'
+    });
+    scopedPacket.citations.push(
+      {
+        id: 'citation-wave-efficient',
+        sourceId: 'reviewed-source',
+        url: 'https://example.test/wave-efficient',
+        title: 'citation-wave-efficient',
+        reviewedAt: '2026-07-24T00:00:00.000Z',
+        trust: 'trusted-local'
+      },
+      {
+        id: 'citation-first-ephemeral',
+        sourceId: 'reviewed-source',
+        url: 'https://example.test/first-ephemeral',
+        title: 'citation-first-ephemeral',
+        reviewedAt: '2026-07-24T00:00:00.000Z',
+        trust: 'ephemeral-web'
+      },
+      {
+        id: 'citation-unbound',
+        sourceId: 'reviewed-source',
+        url: 'https://example.test/unbound',
+        title: 'citation-unbound',
+        reviewedAt: '2026-07-24T00:00:00.000Z',
+        trust: 'ephemeral-web'
+      }
+    );
+    scopedPacket.coverage = {
+      requested:
+        scopedPacket.trustedMatches.length +
+        scopedPacket.ephemeralMatches.length +
+        scopedPacket.unknowns.length,
+      trusted: scopedPacket.trustedMatches.length,
+      ephemeral: scopedPacket.ephemeralMatches.length,
+      unknown: scopedPacket.unknowns.length
+    };
+    const tools = createAbyssBusinessTools({
+      getProfile: () => null,
+      getScenario: () => abyssScenario(),
+      knowledgePacket: scopedPacket,
+      knowledgeScope: {
+        floor: 12,
+        chambers: [1],
+        eligibleCharacterIds: ['1001', '1002']
+      },
+      knowledgeTargetScopes: {
+        '12:1:first': {
+          trustedMatchIds: ['match-shield-breaking'],
+          ephemeralMatchIds: ['ephemeral-first-bound'],
+          unknownIds: ['gap-scenario-unknown']
+        },
+        '12:1:second': {
+          trustedMatchIds: ['match-wave-efficient'],
+          ephemeralMatchIds: [],
+          unknownIds: ['gap-second-scenario']
+        }
+      }
+    });
+
+    const first = textPayload(
+      await tools[2]!.handler(
+        { characterIds: ['1001'], floor: 12, chamber: 1, half: 'first' },
+        {}
+      )
+    );
+    const second = textPayload(
+      await tools[2]!.handler(
+        { characterIds: ['1002'], floor: 12, chamber: 1, half: 'second' },
+        {}
+      )
+    );
+    const firstPayload = first as {
+      mechanicStrategies: Array<{ id: string }>;
+      ephemeralCharacterStrategies: Array<{ id: string }>;
+      ephemeralMechanicStrategies: Array<{ id: string }>;
+      ephemeralScenarioStrategies: Array<{ id: string }>;
+      unknown: Array<{ id: string }>;
+      citationIds: string[];
+    };
+    const secondPayload = second as typeof firstPayload;
+    expect(firstPayload.mechanicStrategies.map(({ id }) => id)).toEqual([
+      'match-shield-breaking'
+    ]);
+    expect(firstPayload.ephemeralCharacterStrategies).toEqual([]);
+    expect(firstPayload.ephemeralMechanicStrategies.map(({ id }) => id)).toEqual([
+      'ephemeral-first-bound'
+    ]);
+    expect(firstPayload.ephemeralScenarioStrategies).toEqual([]);
+    expect(firstPayload.unknown.map(({ id }) => id)).toEqual(['gap-scenario-unknown']);
+    expect(firstPayload.citationIds).toEqual([
+      'citation-1001',
+      'citation-first-ephemeral',
+      'citation-shield-breaking'
+    ]);
+    expect(JSON.stringify(firstPayload)).not.toMatch(
+      /match-wave-efficient|gap-second-scenario|ephemeral-unbound|citation-unbound/
+    );
+    expect(secondPayload.mechanicStrategies.map(({ id }) => id)).toEqual([
+      'match-wave-efficient'
+    ]);
+    expect(secondPayload.ephemeralCharacterStrategies).toEqual([]);
+    expect(secondPayload.ephemeralMechanicStrategies).toEqual([]);
+    expect(secondPayload.ephemeralScenarioStrategies).toEqual([]);
+    expect(secondPayload.unknown.map(({ id }) => id)).toEqual(['gap-second-scenario']);
+    expect(secondPayload.citationIds).toEqual([
+      'citation-1002',
+      'citation-wave-efficient'
+    ]);
+    expect(JSON.stringify(secondPayload)).not.toMatch(
+      /match-shield-breaking|ephemeral-first-bound|gap-scenario-unknown|ephemeral-unbound/
+    );
+  });
+
   it('fails closed for unknown characters, duplicate ids, target drift, and cross-run scope', async () => {
     const tools = createAbyssBusinessTools({
       getProfile: () => null,
@@ -463,6 +610,13 @@ describe('abyss in-process business tools', () => {
         floor: 12,
         chambers: [1, 2],
         eligibleCharacterIds: ['1001', '1002']
+      },
+      knowledgeTargetScopes: {
+        '12:1:first': {
+          trustedMatchIds: ['match-shield-breaking'],
+          ephemeralMatchIds: [],
+          unknownIds: ['gap-scenario-unknown']
+        }
       },
       auditContext: {
         correlationId: 'run-current',

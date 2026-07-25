@@ -694,6 +694,7 @@ describe('scenario v2 recommendation plan schemas', () => {
 
     expect(result.success).toBe(true);
     expect(recommendationPlanSchema.safeParse(result.data).success).toBe(true);
+    expect(result.data?.memberAssignments).toEqual([]);
   });
 
   it('accepts a three-party Stygian plan with explicit reuse-policy acknowledgement', () => {

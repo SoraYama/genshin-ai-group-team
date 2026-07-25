@@ -5,10 +5,12 @@ import {
   agentStageSchema,
   type AgentFailure,
   type AgentRunTrace,
+  type AgentRawMessagesSummary,
   type AgentStage,
   type AgentToolTrace,
   type AgentTraceKnowledgeSummary,
-  type AgentUsage
+  type AgentUsage,
+  type AgentWebSearchEvidence
 } from '../../shared/agent-run-trace.js';
 import {
   TRACE_REDACTION_MARKER,
@@ -53,6 +55,8 @@ export interface StartStageInput {
 export interface CompleteStageInput {
   stage: AgentStage;
   rawOutput?: string;
+  rawMessagesSummary?: AgentRawMessagesSummary;
+  webSearchEvidence?: AgentWebSearchEvidence;
   tools?: readonly AgentToolTrace[];
   citationIds?: readonly string[];
   usage?: AgentUsage;
@@ -265,6 +269,14 @@ export class AgentRunTraceStore implements AgentRunTraceWriter {
       if (index < 0) return false;
       const stage = candidate.stages[index]!;
       const raw = input.rawOutput === undefined ? undefined : this.sanitize(input.rawOutput);
+      const rawMessages =
+        input.rawMessagesSummary === undefined
+          ? undefined
+          : this.sanitizeRawMessages(input.rawMessagesSummary);
+      const webSearch =
+        input.webSearchEvidence === undefined
+          ? undefined
+          : this.sanitizeWebSearchEvidence(input.webSearchEvidence);
       const tools = (input.tools ?? []).slice(0, 64).map((tool) => this.sanitizeTool(tool));
       const sanitizedFailure = failure === undefined ? undefined : this.sanitizeFailure(failure);
       const durationMs =
@@ -275,12 +287,18 @@ export class AgentRunTraceStore implements AgentRunTraceWriter {
         ...stage,
         status: failure === undefined ? 'completed' : 'failed',
         ...(raw === undefined ? {} : { rawOutput: raw.text }),
+        ...(rawMessages === undefined
+          ? {}
+          : { rawMessagesSummary: rawMessages.value }),
+        ...(webSearch === undefined ? {} : { webSearchEvidence: webSearch.value }),
         tools,
         citationIds: this.sanitizeIds(input.citationIds),
         usage: sanitizeUsage(input.usage),
         durationMs,
         ...(sanitizedFailure === undefined ? {} : { failure: sanitizedFailure }),
         ...(raw?.changed === true ||
+        rawMessages?.changed === true ||
+        webSearch?.changed === true ||
         tools.some(({ truncated }) => truncated === true) ||
         sanitizedFailure?.details?.['redacted'] === REDACTION_MARKER
           ? { truncated: true }
@@ -383,6 +401,76 @@ export class AgentRunTraceStore implements AgentRunTraceWriter {
     };
   }
 
+  private sanitizeRawMessages(
+    summary: AgentRawMessagesSummary,
+    registry: TraceSensitiveRegistry = this.sensitiveRegistry
+  ): { value: AgentRawMessagesSummary; changed: boolean } {
+    let changed = summary.messages.length > 64;
+    const messages = summary.messages.slice(0, 64).map((message) => {
+      const type = this.sanitize(message.type, 80, 512, registry);
+      const subtype =
+        message.subtype === undefined
+          ? undefined
+          : this.sanitize(message.subtype, 80, 512, registry);
+      const preview =
+        message.textPreview === undefined
+          ? undefined
+          : this.sanitize(message.textPreview, 2_048, 4_096, registry);
+      changed ||= type.changed || subtype?.changed === true || preview?.changed === true;
+      return {
+        type: type.text || REDACTION_MARKER,
+        ...(subtype === undefined
+          ? {}
+          : { subtype: subtype.text || REDACTION_MARKER }),
+        ...(preview === undefined ? {} : { textPreview: preview.text }),
+        textTruncated: message.textTruncated || preview?.changed === true
+      };
+    });
+    return {
+      value: {
+        totalMessages: nonnegativeInteger(summary.totalMessages),
+        messages,
+        truncated: summary.truncated || changed
+      },
+      changed
+    };
+  }
+
+  private sanitizeWebSearchEvidence(
+    evidence: AgentWebSearchEvidence,
+    registry: TraceSensitiveRegistry = this.sensitiveRegistry
+  ): { value: AgentWebSearchEvidence; changed: boolean } {
+    let changed = evidence.attempts.length > 4;
+    const attempts = evidence.attempts.slice(0, 4).map((attempt) => {
+      const toolUseId = this.sanitize(attempt.toolUseId, 128, 512, registry);
+      const query =
+        attempt.query === undefined
+          ? undefined
+          : this.sanitize(attempt.query, 300, 1_200, registry);
+      const rawUrls = attempt.urls.slice(0, 32);
+      changed ||= attempt.urls.length > rawUrls.length;
+      const urls = rawUrls.map((url) => {
+        const sanitized = this.sanitize(url, 2_048, 4_096, registry);
+        changed ||= sanitized.changed;
+        return sanitized.text || REDACTION_MARKER;
+      });
+      changed ||= toolUseId.changed || query?.changed === true;
+      return {
+        toolUseId: toolUseId.text || REDACTION_MARKER,
+        ...(query === undefined ? {} : { query: query.text || REDACTION_MARKER }),
+        status: attempt.status,
+        urls
+      };
+    });
+    return {
+      value: {
+        attempts,
+        truncated: evidence.truncated || changed
+      },
+      changed
+    };
+  }
+
   private sanitizeFailure(
     failure: AgentFailure,
     toolFailure = false,
@@ -459,6 +547,8 @@ export class AgentRunTraceStore implements AgentRunTraceWriter {
       if (stage.truncated === true) {
         if (stage.inputSummary !== undefined) stage.inputSummary = REDACTION_MARKER;
         if (stage.rawOutput !== undefined) stage.rawOutput = REDACTION_MARKER;
+        delete stage.rawMessagesSummary;
+        delete stage.webSearchEvidence;
         stage.tools = stage.tools.map((tool) => ({
           ...tool,
           ...(tool.truncated === true ? { name: REDACTION_MARKER } : {}),
@@ -493,6 +583,16 @@ export class AgentRunTraceStore implements AgentRunTraceWriter {
       if (stage.rawOutput !== undefined) {
         const sanitized = this.sanitize(stage.rawOutput, undefined, undefined, registry);
         stage.rawOutput = sanitized.text;
+        changed ||= sanitized.changed;
+      }
+      if (stage.rawMessagesSummary !== undefined) {
+        const sanitized = this.sanitizeRawMessages(stage.rawMessagesSummary, registry);
+        stage.rawMessagesSummary = sanitized.value;
+        changed ||= sanitized.changed;
+      }
+      if (stage.webSearchEvidence !== undefined) {
+        const sanitized = this.sanitizeWebSearchEvidence(stage.webSearchEvidence, registry);
+        stage.webSearchEvidence = sanitized.value;
         changed ||= sanitized.changed;
       }
       const citationIds = this.sanitizeIds(stage.citationIds, registry);

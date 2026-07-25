@@ -46,12 +46,18 @@ export interface KnowledgeResearchContext {
     buildSignals?: readonly string[];
   }>;
   scenarioTags: readonly string[];
+  targetKey?: string;
 }
 
 export interface KnowledgeCoverageEvaluation {
   required: boolean;
   tasks: GuideResearchTask[];
-  bindings: Array<{ taskKey: string; unknownIndexes: number[] }>;
+  bindings: Array<{
+    taskKey: string;
+    unknownIndexes: number[];
+    unknownIds?: string[];
+    targetKeys?: string[];
+  }>;
 }
 
 export interface KnowledgeCoverageKnowledge {
@@ -123,7 +129,8 @@ export class KnowledgeCoverageGate {
         characterId: catalogCharacter?.id,
         mechanicId: mechanic?.id,
         character,
-        scenarioTags
+        scenarioTags,
+        targetKey: context.targetKey
       });
       const task = guideResearchTaskSchema.parse({
         key,
@@ -142,7 +149,8 @@ export class KnowledgeCoverageGate {
       tasks,
       bindings: tasks.map(({ key }) => ({
         taskKey: key,
-        unknownIndexes: unknownIndexesByTaskKey.get(key) ?? []
+        unknownIndexes: unknownIndexesByTaskKey.get(key) ?? [],
+        ...(context.targetKey === undefined ? {} : { targetKeys: [context.targetKey] })
       }))
     };
   }
@@ -206,6 +214,7 @@ function anonymousTaskKey(input: {
   mechanicId?: string;
   character?: GuideResearchTask['character'];
   scenarioTags: readonly string[];
+  targetKey?: string;
 }): string {
   const digest = createHash('sha256')
     .update(
@@ -214,7 +223,8 @@ function anonymousTaskKey(input: {
         characterId: input.characterId ?? null,
         mechanicId: input.mechanicId ?? null,
         buildSignals: input.character?.buildSignals ?? [],
-        scenarioTags: input.scenarioTags
+        scenarioTags: input.scenarioTags,
+        targetKey: input.targetKey ?? null
       })
     )
     .digest('hex')

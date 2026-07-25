@@ -25,7 +25,10 @@ class FixtureRunner {
   readonly calls: Array<{ prompt: string; options: AgentSdkRunOptions }> = [];
   readonly profileInputs: Array<{ uid: string; characterIds: string[] }> = [];
 
-  constructor(private readonly outputs: unknown[]) {}
+  constructor(
+    private readonly outputs: unknown[],
+    private readonly addAssignments = true
+  ) {}
 
   async *run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown> {
     this.calls.push({ prompt, options });
@@ -128,14 +131,46 @@ class FixtureRunner {
         }))
       }
     };
+    const output = this.outputs.shift();
     yield {
       type: 'result',
       subtype: 'success',
-      result: JSON.stringify(this.outputs.shift()),
+      result: JSON.stringify(
+        this.addAssignments ? withSmartAssignments(output) : output
+      ),
       usage: { input_tokens: 10, output_tokens: 5 },
       total_cost_usd: 0.01
     };
   }
+}
+
+function withSmartAssignments(value: unknown): unknown {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return value;
+  const plan = structuredClone(value) as Record<string, unknown>;
+  const halves = [
+    ['first', plan['firstHalfTeam']],
+    ['second', plan['secondHalfTeam']]
+  ] as const;
+  plan['memberAssignments'] = halves.flatMap(([half, rawTeam]) => {
+    if (typeof rawTeam !== 'object' || rawTeam === null || Array.isArray(rawTeam)) return [];
+    const ids = (rawTeam as { characterIds?: unknown }).characterIds;
+    if (!Array.isArray(ids)) return [];
+    return ids.flatMap((characterId) => {
+      if (typeof characterId !== 'string') return [];
+      const index = ABYSS_CHARACTERS.findIndex(({ id }) => String(id) === characterId);
+      return [
+        {
+          characterId,
+          half,
+          archetypeId: index < 0 ? null : `role-${index + 1}`,
+          role: 'support',
+          buildStatus: 'current-build',
+          citationIds: [`citation-${characterId}`]
+        }
+      ];
+    });
+  });
+  return plan;
 }
 
 class NoToolRunner {
@@ -199,6 +234,7 @@ function groundedKnowledge(): KnowledgeContextPacket {
       id: `match-${characterId}`,
       characterId,
       archetypeId: `role-${index + 1}`,
+      role: 'support',
       summary: `reviewed strategy ${characterId}`,
       citationIds: [`citation-${characterId}`]
     })),
@@ -343,7 +379,7 @@ describe('AbyssPlanAgent', () => {
     expect(runner.calls[0]?.prompt).toContain('feasibleBaseline');
     expect(runner.calls[0]?.prompt).toContain('"locale":"zh-CN"');
     expect(runner.calls[0]?.prompt).toContain('missingFields');
-    expect(runner.calls[1]?.prompt).toContain('CROSS_TEAM_DUPLICATE');
+    expect(runner.calls[1]?.prompt).toContain('member-assignments:team-coverage-mismatch');
     expect(runner.calls[1]?.prompt).toContain('只修复');
     expect(runner.profileInputs).toEqual([
       { uid: '123456789', characterIds: expect.any(Array) },
@@ -621,18 +657,28 @@ describe('AbyssPlanAgent', () => {
           path: ['tools'],
           details: expect.objectContaining({
             missing: expect.arrayContaining([
-              'knowledge-grounding:1008:unknown-marker-missing'
+              'member-assignment:1008:unknown-marker-missing'
             ])
           })
         })
       ]
     });
 
-    const markedPlan = validAbyssPlan({
-      confidence: 'low',
-      assumptions: ['1008：知识缺口，按低置信度保守使用。']
-    });
-    const marked = await new AbyssPlanAgent(new FixtureRunner([markedPlan])).compose({
+    const markedPlan = withSmartAssignments(
+      validAbyssPlan({
+        confidence: 'low',
+        assumptions: ['1008：知识缺口，按低置信度保守使用。']
+      })
+    ) as Record<string, unknown>;
+    const markedAssignment = (
+      markedPlan['memberAssignments'] as Array<Record<string, unknown>>
+    ).find(({ characterId }) => characterId === '1008')!;
+    markedAssignment['role'] = 'unclassified';
+    markedAssignment['buildStatus'] = 'unknown';
+    markedAssignment['citationIds'] = [];
+    const marked = await new AbyssPlanAgent(
+      new FixtureRunner([markedPlan], false)
+    ).compose({
       input: abyssInput(),
       scenario: abyssScenario(),
       characters: ABYSS_CHARACTERS,
@@ -670,17 +716,25 @@ describe('AbyssPlanAgent', () => {
         expect.objectContaining({
           details: expect.objectContaining({
             missing: expect.arrayContaining([
-              'knowledge-grounding:1008:requires-adjustment-marker-missing'
+              'member-assignment:1008:build-status-mismatch'
             ])
           })
         })
       ]
     });
 
-    const markedPlan = validAbyssPlan({
-      warnings: ['1008 requires-adjustment：需要调整装备后才能承担当前职责。']
-    });
-    const accepted = await new AbyssPlanAgent(new FixtureRunner([markedPlan])).compose({
+    const markedPlan = withSmartAssignments(
+      validAbyssPlan({
+        warnings: ['1008 requires-adjustment：需要调整装备后才能承担当前职责。']
+      })
+    ) as Record<string, unknown>;
+    const adjustmentAssignment = (
+      markedPlan['memberAssignments'] as Array<Record<string, unknown>>
+    ).find(({ characterId }) => characterId === '1008')!;
+    adjustmentAssignment['buildStatus'] = 'requires-adjustment';
+    const accepted = await new AbyssPlanAgent(
+      new FixtureRunner([markedPlan], false)
+    ).compose({
       input,
       scenario: abyssScenario(),
       characters: ABYSS_CHARACTERS,
@@ -688,6 +742,122 @@ describe('AbyssPlanAgent', () => {
       sdkOptions: sdkOptions()
     });
     expect(accepted).toMatchObject({ ok: true });
+  });
+
+  it('rejects a smart plan that omits the exact eight member assignments', async () => {
+    const plan = validAbyssPlan();
+    const result = await new AbyssPlanAgent(
+      new FixtureRunner([plan, plan, plan], false)
+    ).compose({
+      input: abyssInput(),
+      scenario: abyssScenario(),
+      characters: ABYSS_CHARACTERS,
+      pipelineContext: pipelineContext(),
+      sdkOptions: sdkOptions()
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      issues: [
+        expect.objectContaining({
+          details: expect.objectContaining({
+            missing: expect.arrayContaining(['member-assignments:exactly-eight'])
+          })
+        })
+      ]
+    });
+  });
+
+  it.each([
+    {
+      name: 'cross-character citation',
+      mutate(plan: Record<string, unknown>) {
+        const assignments = plan['memberAssignments'] as Array<Record<string, unknown>>;
+        assignments[0]!['citationIds'] = ['citation-1002'];
+      },
+      expected: 'member-assignment:1001:citation-subject-mismatch'
+    },
+    {
+      name: 'wrong archetype',
+      mutate(plan: Record<string, unknown>) {
+        const assignments = plan['memberAssignments'] as Array<Record<string, unknown>>;
+        assignments[0]!['archetypeId'] = 'role-2';
+      },
+      expected: 'member-assignment:1001:archetype-mismatch'
+    },
+    {
+      name: 'wrong reviewed role',
+      mutate(plan: Record<string, unknown>) {
+        const assignments = plan['memberAssignments'] as Array<Record<string, unknown>>;
+        assignments[0]!['role'] = 'driver';
+      },
+      expected: 'member-assignment:1001:role-mismatch'
+    },
+    {
+      name: 'wrong half',
+      mutate(plan: Record<string, unknown>) {
+        const assignments = plan['memberAssignments'] as Array<Record<string, unknown>>;
+        assignments[0]!['half'] = 'second';
+      },
+      expected: 'member-assignment:1001:half-mismatch'
+    }
+  ])('rejects a $name assignment', async ({ mutate, expected }) => {
+    const plan = withSmartAssignments(validAbyssPlan()) as Record<string, unknown>;
+    mutate(plan);
+    const result = await new AbyssPlanAgent(
+      new FixtureRunner([plan, plan, plan], false)
+    ).compose({
+      input: abyssInput(),
+      scenario: abyssScenario(),
+      characters: ABYSS_CHARACTERS,
+      pipelineContext: pipelineContext(),
+      sdkOptions: sdkOptions()
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      issues: [
+        expect.objectContaining({
+          details: expect.objectContaining({
+            missing: expect.arrayContaining([expected])
+          })
+        })
+      ]
+    });
+  });
+
+  it('rejects current-build assignment when the selected build requires adjustment', async () => {
+    const currentContext = pipelineContext();
+    const interpretation = currentContext.knowledge.buildInterpretations.find(
+      ({ characterId }) => characterId === '1008'
+    )!;
+    interpretation.currentBuildUsable = false;
+    interpretation.adjustment = 'required';
+    interpretation.conflictingSignals = ['build-role-conflict'];
+    const input = abyssInput({
+      preferences: { ...abyssInput().preferences, noBuildChange: false }
+    });
+    const plan = withSmartAssignments(validAbyssPlan()) as Record<string, unknown>;
+    const result = await new AbyssPlanAgent(
+      new FixtureRunner([plan, plan, plan], false)
+    ).compose({
+      input,
+      scenario: abyssScenario(),
+      characters: ABYSS_CHARACTERS,
+      pipelineContext: currentContext,
+      sdkOptions: sdkOptions()
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      issues: [
+        expect.objectContaining({
+          details: expect.objectContaining({
+            missing: expect.arrayContaining([
+              'member-assignment:1008:build-status-mismatch'
+            ])
+          })
+        })
+      ]
+    });
   });
 
   it('uses the v3 prompts that prohibit uncited facts and require build-aware critique', async () => {
