@@ -1,0 +1,841 @@
+.gta-advisor-page:has(> .abyss-workbench) {
+  --app-shell-offset: 136px;
+  padding-bottom: 0;
+}
+
+.gta-advisor-page:has(> .abyss-workbench) > .gta-page-head,
+.gta-advisor-page:has(> .abyss-workbench) > .gta-challenge-path {
+  display: none;
+}
+
+.abyss-workbench {
+  position: relative;
+  height: calc(100dvh - var(--app-shell-offset));
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(260px, 42%) minmax(0, 1fr);
+  overflow: hidden;
+  border-block: 1px solid rgba(198, 216, 222, 0.24);
+  color: #edf4f6;
+  background: rgba(8, 18, 30, 0.93);
+  box-shadow: 0 20px 56px rgba(0, 0, 0, 0.28);
+  animation: abyss-workbench-enter 220ms var(--gta-ease) both;
+}
+
+.abyss-workbench-toolbar {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 4;
+  display: flex;
+  height: 46px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 7px 14px;
+  border-bottom: 1px solid rgba(198, 216, 222, 0.2);
+  background: rgba(11, 25, 39, 0.96);
+}
+
+.abyss-workbench-toolbar > div:first-child {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+
+.abyss-workbench-toolbar span {
+  color: rgba(220, 232, 235, 0.58);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.abyss-workbench-toolbar h2 {
+  margin: 0;
+  font-size: 17px;
+  letter-spacing: 0.07em;
+}
+
+.abyss-workbench-status {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  overflow: hidden;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.abyss-workbench-status strong {
+  color: #d9c58c;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.abyss-workbench-status button {
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid rgba(211, 192, 137, 0.42);
+  color: #eadcae;
+  background: transparent;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.abyss-input-grid {
+  display: grid;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  padding-top: 46px;
+}
+
+.abyss-panel {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: rgba(13, 28, 42, 0.78);
+}
+
+.abyss-input-grid > .abyss-panel + .abyss-panel {
+  border-left: 1px solid rgba(198, 216, 222, 0.18);
+}
+
+.abyss-constraint-panel,
+.abyss-scenario-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.abyss-scenario-panel {
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+}
+
+.abyss-panel-header,
+.abyss-result-header {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 12px;
+  border-bottom: 1px solid rgba(198, 216, 222, 0.14);
+}
+
+.abyss-panel-header > div,
+.abyss-result-header > div:first-child {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.abyss-panel-header span,
+.abyss-result-header span {
+  color: rgba(220, 232, 235, 0.52);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.abyss-panel-header h3,
+.abyss-result-header h3 {
+  margin: 0;
+  color: #f0f5f6;
+  font-size: 14px;
+  letter-spacing: 0.05em;
+}
+
+.abyss-panel-header > strong {
+  overflow: hidden;
+  color: #b8c8cc;
+  font-family: var(--gta-font-mono);
+  font-size: 9px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.abyss-panel-scroll {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: rgba(202, 184, 132, 0.45) transparent;
+  scrollbar-width: thin;
+}
+
+.abyss-constraint-panel > .abyss-panel-scroll {
+  padding: 8px 10px;
+}
+
+.abyss-preference-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.abyss-preference-grid button,
+.abyss-scenario-selectors button,
+.abyss-result-tabs button,
+.abyss-result-header-actions button {
+  min-height: 28px;
+  border: 1px solid rgba(198, 216, 222, 0.2);
+  color: rgba(232, 240, 242, 0.72);
+  background: rgba(10, 22, 35, 0.68);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.abyss-preference-grid button[aria-pressed='true'],
+.abyss-scenario-selectors button[aria-pressed='true'],
+.abyss-result-tabs button[aria-selected='true'] {
+  border-color: rgba(211, 192, 137, 0.76);
+  color: #eadcae;
+  background: rgba(170, 143, 77, 0.13);
+  box-shadow: inset 0 -1px 0 #d8c07f;
+}
+
+.abyss-preference-grid button:disabled,
+.abyss-scenario-selectors button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.abyss-roster-search {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  margin: 7px 0;
+}
+
+.abyss-roster-search input,
+.abyss-scenario-selectors select {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  border: 1px solid rgba(198, 216, 222, 0.2);
+  border-radius: 0;
+  color: #edf4f6;
+  background: rgba(5, 15, 27, 0.72);
+  font-size: 10px;
+}
+
+.abyss-roster-search > span {
+  color: rgba(220, 232, 235, 0.5);
+  font-size: 9px;
+}
+
+.abyss-roster-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.abyss-roster-grid .gta-abyss-character {
+  display: grid;
+  min-height: 38px;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  overflow: hidden;
+  border: 1px solid rgba(198, 216, 222, 0.14);
+  color: rgba(235, 242, 244, 0.8);
+  background: rgba(7, 18, 30, 0.62);
+  text-align: left;
+  cursor: pointer;
+}
+
+.abyss-roster-grid .gta-abyss-character.is-locked {
+  border-color: rgba(211, 192, 137, 0.76);
+  color: #f2e3b2;
+}
+
+.abyss-roster-grid .gta-abyss-character.is-excluded {
+  color: rgba(210, 220, 223, 0.42);
+  opacity: 0.65;
+}
+
+.abyss-avatar {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border: 1px solid rgba(202, 184, 132, 0.4);
+  color: #d8c486;
+  background: #132639;
+  font-size: 11px;
+}
+
+.abyss-roster-grid .gta-abyss-character > span:nth-child(2) {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.abyss-roster-grid .gta-abyss-character strong {
+  overflow: hidden;
+  font-size: 10px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.abyss-roster-grid .gta-abyss-character small,
+.abyss-roster-grid .gta-abyss-character em {
+  color: rgba(220, 232, 235, 0.5);
+  font-family: var(--gta-font-mono);
+  font-size: 8px;
+  font-style: normal;
+}
+
+.abyss-panel-actions {
+  display: grid;
+  min-height: 48px;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-top: 1px solid rgba(198, 216, 222, 0.15);
+  background: rgba(7, 18, 30, 0.72);
+}
+
+.abyss-selection-summary {
+  display: flex;
+  flex-direction: column;
+}
+
+.abyss-selection-summary span {
+  color: rgba(220, 232, 235, 0.45);
+  font-size: 8px;
+}
+
+.abyss-selection-summary strong {
+  font-size: 9px;
+  font-weight: 500;
+}
+
+.abyss-run-actions {
+  display: flex;
+  min-width: 0;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.abyss-run-actions .gta-button {
+  min-height: 30px;
+  padding-inline: 10px;
+  font-size: 9px;
+}
+
+.abyss-scenario-selectors {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 0.48fr);
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid rgba(198, 216, 222, 0.12);
+}
+
+.abyss-scenario-selectors > div {
+  display: flex;
+  gap: 4px;
+}
+
+.abyss-scenario-selectors button {
+  flex: 1;
+}
+
+.abyss-scenario-selectors label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  color: rgba(220, 232, 235, 0.56);
+  font-size: 9px;
+}
+
+.abyss-scenario-block {
+  margin: 0;
+  padding: 5px 10px;
+  border-bottom: 1px solid rgba(211, 192, 137, 0.3);
+  color: #eadcae;
+  background: rgba(124, 92, 42, 0.15);
+  font-size: 9px;
+}
+
+.abyss-enemy-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.abyss-enemy-columns .gta-abyss-half {
+  min-width: 0;
+  padding: 6px 9px;
+}
+
+.abyss-enemy-columns .gta-abyss-half + .gta-abyss-half {
+  border-left: 1px solid rgba(198, 216, 222, 0.12);
+}
+
+.abyss-enemy-columns .gta-abyss-half h4 {
+  position: sticky;
+  top: -6px;
+  z-index: 1;
+  margin: 0 0 5px;
+  padding: 5px 0;
+  color: #d8c486;
+  background: #102337;
+  font-size: 10px;
+}
+
+.abyss-enemy-columns .gta-abyss-chamber + .gta-abyss-chamber {
+  margin-top: 7px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(198, 216, 222, 0.1);
+}
+
+.abyss-enemy-columns .gta-abyss-chamber-title {
+  display: flex;
+  justify-content: space-between;
+  color: rgba(230, 239, 241, 0.66);
+  font-size: 9px;
+}
+
+.abyss-enemy-columns .gta-abyss-wave {
+  position: relative;
+  margin-top: 4px;
+  padding-left: 20px;
+}
+
+.abyss-enemy-columns .gta-abyss-wave-index {
+  position: absolute;
+  top: 3px;
+  left: 0;
+  color: rgba(220, 232, 235, 0.38);
+  font-family: var(--gta-font-mono);
+  font-size: 7px;
+  writing-mode: vertical-rl;
+}
+
+.abyss-enemy-columns .gta-abyss-enemy {
+  padding: 3px 0;
+}
+
+.abyss-enemy-columns .gta-abyss-enemy > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 9px;
+}
+
+.abyss-enemy-columns .gta-abyss-enemy > div > span {
+  color: rgba(220, 232, 235, 0.45);
+  font-family: var(--gta-font-mono);
+  font-size: 8px;
+}
+
+.abyss-enemy-columns .gta-abyss-enemy ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin: 3px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.abyss-enemy-columns .gta-abyss-enemy li {
+  padding: 1px 4px;
+  border-left: 1px solid rgba(211, 192, 137, 0.5);
+  color: rgba(220, 232, 235, 0.54);
+  background: rgba(196, 215, 220, 0.05);
+  font-size: 7px;
+}
+
+.abyss-scenario-meta {
+  position: relative;
+  display: grid;
+  min-height: 39px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-top: 1px solid rgba(198, 216, 222, 0.14);
+  font-size: 8px;
+}
+
+.abyss-scenario-meta > span {
+  color: #d8c486;
+}
+
+.abyss-scenario-meta p {
+  overflow: hidden;
+  margin: 0;
+  color: rgba(220, 232, 235, 0.56);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.abyss-scenario-meta code {
+  color: rgba(220, 232, 235, 0.38);
+  font-size: 7px;
+}
+
+.abyss-result-panel {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  border-top: 1px solid rgba(211, 192, 137, 0.38);
+  background: rgba(7, 17, 28, 0.97);
+}
+
+.abyss-result-header {
+  min-height: 42px;
+}
+
+.abyss-result-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.abyss-result-header-actions button {
+  padding: 0 9px;
+}
+
+.abyss-result-panel .gta-abyss-source {
+  display: inline-flex;
+  min-height: 22px;
+  align-items: center;
+  padding: 0 7px;
+  border: 1px solid rgba(198, 216, 222, 0.25);
+  color: rgba(229, 238, 240, 0.7);
+  font-size: 9px;
+}
+
+.abyss-result-panel .gta-abyss-source.is-smart-service {
+  border-color: rgba(211, 192, 137, 0.72);
+  color: #eadcae;
+}
+
+.abyss-result-panel .gta-abyss-progress {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  margin: 0;
+  padding: 4px 10px;
+  border-bottom: 1px solid rgba(198, 216, 222, 0.12);
+  list-style: none;
+}
+
+.abyss-result-panel .gta-abyss-progress li {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  color: rgba(220, 232, 235, 0.34);
+  font-size: 7px;
+  white-space: nowrap;
+}
+
+.abyss-result-panel .gta-abyss-progress li::after {
+  display: block;
+  height: 1px;
+  flex: 1;
+  margin-inline: 4px;
+  content: '';
+  background: rgba(198, 216, 222, 0.14);
+}
+
+.abyss-result-panel .gta-abyss-progress li:last-child::after {
+  display: none;
+}
+
+.abyss-result-panel .gta-abyss-progress li.is-active,
+.abyss-result-panel .gta-abyss-progress li.is-done {
+  color: #dec98b;
+}
+
+.abyss-result-panel .gta-abyss-progress li span {
+  display: grid;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  place-items: center;
+  border: 1px solid currentcolor;
+  font-family: var(--gta-font-mono);
+  font-size: 7px;
+}
+
+.abyss-result-skeleton,
+.abyss-result-content {
+  min-height: 0;
+  overflow: auto;
+}
+
+.abyss-result-skeleton {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(190px, 0.52fr);
+}
+
+.abyss-result-team-skeleton,
+.abyss-result-panel .gta-abyss-result-teams > section,
+.abyss-result-metrics {
+  min-width: 0;
+  padding: 10px 12px;
+}
+
+.abyss-result-team-skeleton + .abyss-result-team-skeleton,
+.abyss-result-panel .gta-abyss-result-teams > section + section,
+.abyss-result-metrics {
+  border-left: 1px solid rgba(198, 216, 222, 0.12);
+}
+
+.abyss-result-team-skeleton > strong {
+  color: rgba(220, 232, 235, 0.54);
+  font-size: 10px;
+}
+
+.abyss-result-roster,
+.abyss-result-panel .gta-abyss-result-roster {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+  margin-top: 6px;
+}
+
+.abyss-result-roster > span,
+.abyss-result-panel .gta-abyss-result-roster > span {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 4px;
+  border-left: 1px solid rgba(211, 192, 137, 0.48);
+  color: rgba(235, 242, 244, 0.78);
+  background: #13283a;
+  text-align: center;
+}
+
+.abyss-result-roster i,
+.abyss-result-panel .gta-abyss-result-roster i {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid rgba(211, 192, 137, 0.48);
+  color: #dfc986;
+  background: #172b3d;
+  font-size: 13px;
+  font-style: normal;
+}
+
+.abyss-result-team-skeleton i {
+  animation: abyss-skeleton-pulse 1.6s ease-in-out infinite;
+}
+
+.abyss-result-roster strong,
+.abyss-result-panel .gta-abyss-result-roster strong {
+  overflow: hidden;
+  max-width: 100%;
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.abyss-result-roster small,
+.abyss-result-panel .gta-abyss-result-roster small {
+  color: rgba(220, 232, 235, 0.42);
+  font-size: 7px;
+}
+
+.abyss-result-skeleton aside,
+.abyss-result-metrics {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-content: start;
+  gap: 8px;
+  padding: 12px;
+  border-left: 1px solid rgba(198, 216, 222, 0.12);
+}
+
+.abyss-result-skeleton aside span,
+.abyss-result-metrics span {
+  color: rgba(220, 232, 235, 0.42);
+  font-size: 8px;
+}
+
+.abyss-result-skeleton aside strong,
+.abyss-result-metrics strong {
+  color: rgba(235, 242, 244, 0.72);
+  font-size: 8px;
+  font-weight: 500;
+}
+
+.abyss-result-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 12px;
+}
+
+.abyss-result-summary p {
+  overflow: hidden;
+  margin: 0;
+  color: rgba(232, 240, 242, 0.7);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gta-abyss-pending-badge {
+  flex: none;
+  color: #dfc986;
+  font-size: 9px;
+}
+
+.abyss-result-panel .gta-abyss-result-teams {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(190px, 0.52fr);
+  border-block: 1px solid rgba(198, 216, 222, 0.12);
+}
+
+.abyss-result-panel .gta-abyss-result-teams > section,
+.abyss-result-panel .gta-abyss-result-teams > section:first-child,
+.abyss-result-panel .gta-abyss-result-teams > section + section {
+  padding: 10px 12px;
+}
+
+.abyss-result-panel .gta-abyss-result-teams h4 {
+  margin: 0;
+  color: #dec98b;
+  font-size: 10px;
+}
+
+.abyss-result-panel .gta-abyss-result-teams section > p {
+  overflow: hidden;
+  margin: 5px 0 0;
+  color: rgba(224, 234, 236, 0.58);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.abyss-result-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 5px 12px 0;
+}
+
+.abyss-result-tabs button {
+  min-width: 76px;
+}
+
+.abyss-result-tabpanel {
+  padding: 6px 12px 10px;
+  color: rgba(229, 238, 240, 0.65);
+  font-size: 8px;
+}
+
+.abyss-result-overview {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.abyss-result-overview > div + div {
+  padding-left: 12px;
+  border-left: 1px solid rgba(198, 216, 222, 0.12);
+}
+
+.abyss-result-overview strong {
+  color: rgba(239, 244, 246, 0.8);
+}
+
+.abyss-result-overview p {
+  margin: 3px 0 0;
+  line-height: 1.45;
+}
+
+.abyss-result-panel .gta-abyss-tactics {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(230px, 1fr);
+  gap: 10px;
+  overflow: auto;
+}
+
+.abyss-result-panel .gta-abyss-tactics article {
+  padding-right: 10px;
+  border-right: 1px solid rgba(198, 216, 222, 0.12);
+}
+
+.abyss-result-panel .gta-abyss-tactics h5,
+.abyss-result-panel .gta-abyss-tactics p {
+  margin: 0 0 4px;
+}
+
+.abyss-result-evidence {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.abyss-result-evidence article {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.abyss-result-empty {
+  min-height: 0;
+  padding: 14px;
+  overflow: auto;
+}
+
+.abyss-result-empty p,
+.abyss-result-empty ul {
+  color: rgba(229, 238, 240, 0.64);
+  font-size: 10px;
+}
+
+@keyframes abyss-workbench-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes abyss-skeleton-pulse {
+  0%,
+  100% {
+    opacity: 0.38;
+  }
+  50% {
+    opacity: 0.78;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .abyss-workbench,
+  .abyss-result-team-skeleton i {
+    animation: none;
+  }
+}
+
+@media (max-width: 1180px) {
+  .gta-advisor-page:has(> .abyss-workbench) {
+    --app-shell-offset: 176px;
+  }
+
+  .abyss-preference-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .abyss-result-panel .gta-abyss-progress li {
+    font-size: 0;
+  }
+}

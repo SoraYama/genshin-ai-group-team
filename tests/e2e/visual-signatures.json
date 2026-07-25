@@ -1,42 +1,162 @@
 {
-  "onboarding-1024x768": { "hash": "6073607382ff00ff27ff43ff29ffc38f037f039b818901610177017f00f780fb", "maxDistance": 20 },
-  "onboarding-1280x800": { "hash": "607b607b007f1bff33ff3dff219f033f03bf01a70123016f00fd007f806fd0f7", "maxDistance": 20 },
-  "onboarding-1440x900": { "hash": "407bc07b1dff31ff11ff00f7311f031f010f014f017f007f00ef007d80efd0e7", "maxDistance": 20 },
-  "onboarding-1600x1000": { "hash": "e0fb007f0fff19ff09ff31b3033f018f01cf017f007f007f00ee007f80efd0f7", "maxDistance": 20 },
-  "roster-expanded-detail-1024x768": { "hash": "607a607a82fe207f20ff48fb20af364f0e4f0eef5ffd5ffd046f04cf00f700f3", "maxDistance": 20 },
-  "roster-expanded-detail-1280x800": { "hash": "607a617e207f207f50ff20f73b7f197d5bfd187f19bf018f21b1191119191101", "maxDistance": 20 },
-  "roster-expanded-detail-1440x900": { "hash": "407cc17f607f6077407f24ff1a7f5bff193f187f011b012111111101550d5529", "maxDistance": 20 },
-  "roster-expanded-detail-1600x1000": { "hash": "e0f8007f207f407f007f1e7f1bff1aff1a7f01830123191319035d6b3d2b0103", "maxDistance": 20 },
-  "roster-delete-dialog-1024x768": { "hash": "687363630aab0ee3650d293c240f2d492009208b06a92d0919811901112111a1", "maxDistance": 20 },
-  "roster-delete-dialog-1280x800": { "hash": "6163796b191d18ef103715371437155111511591169555153d29090111011101", "maxDistance": 20 },
-  "roster-delete-dialog-1440x900": { "hash": "61f1594f195d08371ac7013710311171113151b552b93d090d011131114131ef", "maxDistance": 20 },
-  "roster-delete-dialog-1600x1000": { "hash": "61d91c7f1a7f18371937013300731273103353b333331d03190301fb21ea11e6", "maxDistance": 20 },
-  "advisor-details-1024x768": { "hash": "607a60fa82fe407f207f08fb00af80ff407f507f007f006f00ef407f00f710f1", "maxDistance": 20 },
-  "advisor-details-1280x800": { "hash": "60fa60fe007f307f00ff8551c471e179706b847382176c0170053c814c216c05", "maxDistance": 20 },
-  "advisor-details-1440x900": { "hash": "40fcc0ff407f20771073c5518561495984638073668131057885482548814001", "maxDistance": 20 },
-  "advisor-details-1600x1000": { "hash": "e0f800ff207f207fc451c471c57161599473830b3c0338051805280740035801", "maxDistance": 20 },
-  "history-1024x768": { "hash": "607b60fb80ff407f007f02fb00af00bf087f087f087f0c6f00ef007f00f7a0f3", "maxDistance": 20 },
-  "history-1280x800": { "hash": "607b607f007f707f00ff00f780bf88ff887f087f007f007f00ff007f806fd0f7", "maxDistance": 20 },
-  "history-1440x900": { "hash": "4079c07f407f207708ff80f780bf88ff887f087f007f007f00ef007d806fd0e7", "maxDistance": 20 },
-  "history-1600x1000": { "hash": "e079007f207f207f007f80f788ef887f803f007f007f007f00fe007f80efd0f7", "maxDistance": 20 },
-  "settings-1024x768": { "hash": "607a607a82fe407f407f40fb00af08ef1fff1d7f04611625818091a0b3308000", "maxDistance": 20 },
-  "settings-1280x800": { "hash": "607a607e007f407f00ff00f719ff1fff1eff04a104ad8500a500a6c080012fff", "maxDistance": 20 },
-  "settings-1440x900": { "hash": "407cc07f407f407708ff00f71bff7fff042104218301a781a4012ffb0cf75dff", "maxDistance": 20 },
-  "settings-1600x1000": { "hash": "e0f8007f407f407f007f1bff1aff04a35caf4a01630140011bff19bf10f731ef", "maxDistance": 20 },
-  "abyss-input-and-result-1024x768": { "hash": "618b628b4287438343834383800100014d270001600760071181018165e91899", "maxDistance": 20 },
-  "abyss-input-and-result-1280x800": { "hash": "408f408f4183418343838001000169256921400520070001018141c118911893", "maxDistance": 20 },
-  "abyss-input-and-result-1440x900": { "hash": "40854087018301834183000149254925000140032003018100c1189318912091", "maxDistance": 20 },
-  "abyss-input-and-result-1600x1000": { "hash": "408f0287038303830383000349270103000340030183018318931893009321c3", "maxDistance": 20 },
-  "stygian-input-and-result-1024x768": { "hash": "6002e082c2a06080600060001001000130313431350501054383438343834283", "maxDistance": 20 },
-  "stygian-input-and-result-1280x800": { "hash": "46cf408f4183418342834283438343834283408300014d254d37000170035003", "maxDistance": 20 },
-  "stygian-input-and-result-1440x900": { "hash": "44c5448701830183408340834183418300830001000149270001600334036001", "maxDistance": 20 },
-  "stygian-input-and-result-1600x1000": { "hash": "70cf0c8f038303830383028303830383028300034d2708276003200320036003", "maxDistance": 20 },
-  "theater-eligibility-1024x768": { "hash": "60626462a2e80089140124870383038303830383038301810387038700010001", "maxDistance": 20 },
-  "theater-eligibility-1280x800": { "hash": "e0d260cf54075cc70c630c630c63046103030307000100014001001100012001", "maxDistance": 20 },
-  "theater-eligibility-1440x900": { "hash": "44d06087180118030c630c630c61020103030303000100010021000130031001", "maxDistance": 20 },
-  "theater-eligibility-1600x1000": { "hash": "ece05883120330630c630c630c63418303030003000300170003400710030003", "maxDistance": 20 },
-  "theater-route-1024x768": { "hash": "238b238b02a70383038703870387000100014001200168016001144190214925", "maxDistance": 20 },
-  "theater-route-1280x800": { "hash": "60ef608f0307000100014001000120016041088100414d254d2501011c031403", "maxDistance": 20 },
-  "theater-route-1440x900": { "hash": "44e5028703030001001100010001200161010041084149a50101108320430021", "maxDistance": 20 },
-  "theater-route-1600x1000": { "hash": "6cef0baf030300030003400300034003508300834d2709235083608301030933", "maxDistance": 20 }
+  "onboarding-1024x768": {
+    "hash": "6073607382ff00ff27ff43ff29ffc38f037f039b818901610177017f00f780fb",
+    "maxDistance": 20
+  },
+  "onboarding-1280x800": {
+    "hash": "607b607b007f1bff33ff3dff219f033f03bf01a70123016f00fd007f806fd0f7",
+    "maxDistance": 20
+  },
+  "onboarding-1440x900": {
+    "hash": "407bc07b1dff31ff11ff00f7311f031f010f014f017f007f00ef007d80efd0e7",
+    "maxDistance": 20
+  },
+  "onboarding-1600x1000": {
+    "hash": "e0fb007f0fff19ff09ff31b3033f018f01cf017f007f007f00ee007f80efd0f7",
+    "maxDistance": 20
+  },
+  "roster-expanded-detail-1024x768": {
+    "hash": "607a607a82fe207f20ff48fb20af364f0e4f0eef5ffd5ffd046f04cf00f700f3",
+    "maxDistance": 20
+  },
+  "roster-expanded-detail-1280x800": {
+    "hash": "607a617e207f207f50ff20f73b7f197d5bfd187f19bf018f21b1191119191101",
+    "maxDistance": 20
+  },
+  "roster-expanded-detail-1440x900": {
+    "hash": "407cc17f607f6077407f24ff1a7f5bff193f187f011b012111111101550d5529",
+    "maxDistance": 20
+  },
+  "roster-expanded-detail-1600x1000": {
+    "hash": "e0f8007f207f407f007f1e7f1bff1aff1a7f01830123191319035d6b3d2b0103",
+    "maxDistance": 20
+  },
+  "roster-delete-dialog-1024x768": {
+    "hash": "687363630aab0ee3650d293c240f2d492009208b06a92d0919811901112111a1",
+    "maxDistance": 20
+  },
+  "roster-delete-dialog-1280x800": {
+    "hash": "6163796b191d18ef103715371437155111511591169555153d29090111011101",
+    "maxDistance": 20
+  },
+  "roster-delete-dialog-1440x900": {
+    "hash": "61f1594f195d08371ac7013710311171113151b552b93d090d011131114131ef",
+    "maxDistance": 20
+  },
+  "roster-delete-dialog-1600x1000": {
+    "hash": "61d91c7f1a7f18371937013300731273103353b333331d03190301fb21ea11e6",
+    "maxDistance": 20
+  },
+  "advisor-details-1024x768": {
+    "hash": "607a60fa82fe407f207f08fb00af80ff407f507f007f006f00ef407f00f710f1",
+    "maxDistance": 20
+  },
+  "advisor-details-1280x800": {
+    "hash": "60fa60fe007f307f00ff8551c471e179706b847382176c0170053c814c216c05",
+    "maxDistance": 20
+  },
+  "advisor-details-1440x900": {
+    "hash": "40fcc0ff407f20771073c5518561495984638073668131057885482548814001",
+    "maxDistance": 20
+  },
+  "advisor-details-1600x1000": {
+    "hash": "e0f800ff207f207fc451c471c57161599473830b3c0338051805280740035801",
+    "maxDistance": 20
+  },
+  "history-1024x768": {
+    "hash": "607b60fb80ff407f007f02fb00af00bf087f087f087f0c6f00ef007f00f7a0f3",
+    "maxDistance": 20
+  },
+  "history-1280x800": {
+    "hash": "607b607f007f707f00ff00f780bf88ff887f087f007f007f00ff007f806fd0f7",
+    "maxDistance": 20
+  },
+  "history-1440x900": {
+    "hash": "4079c07f407f207708ff80f780bf88ff887f087f007f007f00ef007d806fd0e7",
+    "maxDistance": 20
+  },
+  "history-1600x1000": {
+    "hash": "e079007f207f207f007f80f788ef887f803f007f007f007f00fe007f80efd0f7",
+    "maxDistance": 20
+  },
+  "settings-1024x768": {
+    "hash": "607a607a82fe407f407f40fb00af08ef1fff1d7f04611625818091a0b3308000",
+    "maxDistance": 20
+  },
+  "settings-1280x800": {
+    "hash": "607a607e007f407f00ff00f719ff1fff1eff04a104ad8500a500a6c080012fff",
+    "maxDistance": 20
+  },
+  "settings-1440x900": {
+    "hash": "407cc07f407f407708ff00f71bff7fff042104218301a781a4012ffb0cf75dff",
+    "maxDistance": 20
+  },
+  "settings-1600x1000": {
+    "hash": "e0f8007f407f407f007f1bff1aff04a35caf4a01630140011bff19bf10f731ef",
+    "maxDistance": 20
+  },
+  "abyss-input-and-result-1024x768": {
+    "hash": "607a60fa9af6b920a33e23c6d1ced154aaa8aaaa6d6a6d6a7c787b5d20e280fa",
+    "maxDistance": 20
+  },
+  "abyss-input-and-result-1280x800": {
+    "hash": "60fae0fa9122953e55ce11ccc1f6a1a9a2aacd266d2b7d687210504210e8c0f6",
+    "maxDistance": 20
+  },
+  "abyss-input-and-result-1440x900": {
+    "hash": "40fe90faa060d59a11a85d48c9aaa001aaaa6d2f6d6a701032d600010001d0f6",
+    "maxDistance": 20
+  },
+  "abyss-input-and-result-1600x1000": {
+    "hash": "e0f8b0faa16cd5ce19eec482c5e6a000eaa24d3a7ce8729c208e0002000280f6",
+    "maxDistance": 20
+  },
+  "stygian-input-and-result-1024x768": {
+    "hash": "6002e082c2a06080600060001001000130313431350501054383438343834283",
+    "maxDistance": 20
+  },
+  "stygian-input-and-result-1280x800": {
+    "hash": "46cf408f4183418342834283438343834283408300014d254d37000170035003",
+    "maxDistance": 20
+  },
+  "stygian-input-and-result-1440x900": {
+    "hash": "44c5448701830183408340834183418300830001000149270001600334036001",
+    "maxDistance": 20
+  },
+  "stygian-input-and-result-1600x1000": {
+    "hash": "70cf0c8f038303830383028303830383028300034d2708276003200320036003",
+    "maxDistance": 20
+  },
+  "theater-eligibility-1024x768": {
+    "hash": "60626462a2e80089140124870383038303830383038301810387038700010001",
+    "maxDistance": 20
+  },
+  "theater-eligibility-1280x800": {
+    "hash": "e0d260cf54075cc70c630c630c63046103030307000100014001001100012001",
+    "maxDistance": 20
+  },
+  "theater-eligibility-1440x900": {
+    "hash": "44d06087180118030c630c630c61020103030303000100010021000130031001",
+    "maxDistance": 20
+  },
+  "theater-eligibility-1600x1000": {
+    "hash": "ece05883120330630c630c630c63418303030003000300170003400710030003",
+    "maxDistance": 20
+  },
+  "theater-route-1024x768": {
+    "hash": "238b238b02a70383038703870387000100014001200168016001144190214925",
+    "maxDistance": 20
+  },
+  "theater-route-1280x800": {
+    "hash": "60ef608f0307000100014001000120016041088100414d254d2501011c031403",
+    "maxDistance": 20
+  },
+  "theater-route-1440x900": {
+    "hash": "44e5028703030001001100010001200161010041084149a50101108320430021",
+    "maxDistance": 20
+  },
+  "theater-route-1600x1000": {
+    "hash": "6cef0baf030300030003400300034003508300834d2709235083608301030933",
+    "maxDistance": 20
+  }
 }

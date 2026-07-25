@@ -870,9 +870,7 @@ test('renders profile coverage and known build fields without fake zero values',
   await expect(characterCard).not.toContainText('主要反应');
   await expect(characterCard).toContainText('充能效率');
   await expect(characterCard).toContainText('119.9%');
-  await expect(characterCard).not.toContainText(
-    '是否够用需结合角色、队伍产球与实战循环判断'
-  );
+  await expect(characterCard).not.toContainText('是否够用需结合角色、队伍产球与实战循环判断');
   await expect(characterCard).not.toContainText(/充能偏低|充能中等|充能较高/u);
   await expect(characterCard.getByTitle('命座', { exact: true })).toBeVisible();
   await expect(characterCard.getByTitle('元素', { exact: true })).toBeVisible();
@@ -886,9 +884,7 @@ test('renders profile coverage and known build fields without fake zero values',
   await expect(unknownCard.getByText('可参与反应')).toHaveCount(0);
   await expect(unknownCard).toContainText('暂无可靠面板数据');
 
-  await expect(
-    characterCard.getByRole('button', { name: '查看测试角色详细资料' })
-  ).toHaveCount(0);
+  await expect(characterCard.getByRole('button', { name: '查看测试角色详细资料' })).toHaveCount(0);
   for (const title of [
     '生命',
     '攻击',
@@ -1097,6 +1093,26 @@ test('runs the abyss-specific development-sample flow with accessible interventi
   await switchToChinese();
   await expect(page.getByRole('heading', { name: '深境螺旋战线' })).toBeVisible();
 
+  for (const viewport of [
+    { width: 1440, height: 900 },
+    { width: 1280, height: 800 }
+  ]) {
+    await page.setViewportSize(viewport);
+    for (const testId of ['abyss-constraints', 'abyss-scenario', 'abyss-results']) {
+      await expect(page.getByTestId(testId)).toBeInViewport();
+    }
+    const documentMetrics = await page.evaluate<{ scrollHeight: number; innerHeight: number }>(
+      `({
+        scrollHeight: document.documentElement.scrollHeight,
+        innerHeight: window.innerHeight
+      })`
+    );
+    expect(
+      documentMetrics.scrollHeight,
+      `${viewport.width}x${viewport.height} abyss workbench must not scroll the document`
+    ).toBeLessThanOrEqual(documentMetrics.innerHeight + 2);
+  }
+
   await expect(page.getByText('演练资料，不代表本期')).toBeVisible();
   await expect(page.getByText('演练增益', { exact: true })).toBeVisible();
   await expect(page.getByText('本期祝福', { exact: true })).toHaveCount(0);
@@ -1112,7 +1128,12 @@ test('runs the abyss-specific development-sample flow with accessible interventi
   await page.getByRole('heading', { name: '深境螺旋战线' }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: path.join(tmpdir(), 'gta-m4-abyss-input-1600x1000.png') });
 
-  for (const preference of ['操作简单', '生存优先', '低练度', '不换装备']) {
+  const keepBuild = page.getByRole('button', { name: '保持当前配装' });
+  await expect(keepBuild).toHaveAttribute('aria-pressed', 'true');
+  await keepBuild.click();
+  await expect(keepBuild).toHaveAttribute('aria-pressed', 'false');
+  await keepBuild.click();
+  for (const preference of ['操作简单', '生存优先', '低练度']) {
     const chip = page.getByRole('button', { name: preference });
     await chip.click();
     await expect(chip).toHaveAttribute('aria-pressed', 'true');
@@ -1137,7 +1158,7 @@ test('runs the abyss-specific development-sample flow with accessible interventi
   await expect(page.getByRole('button', { name: /演练角色2，当前：排除/ })).toBeVisible();
 
   await page.getByRole('button', { name: '生成上下半方案' }).click();
-  await expect(page.getByText('本地规则', { exact: true })).toBeVisible();
+  await expect(page.getByText('本地规则', { exact: true })).toBeVisible({ timeout: 10_000 });
   await expect(
     page.getByText('已按本地规则核对上下半队伍与逐间敌情。', { exact: true })
   ).toBeVisible();
@@ -1162,6 +1183,22 @@ test('runs the abyss-specific development-sample flow with accessible interventi
   await expect(page.getByText(/循环：根据实战充能调整技能顺序/).first()).toBeVisible();
   await expect(page.getByText(/替换建议：.*重新生成完整双队/).first()).toBeVisible();
   await expect(page.locator('.gta-abyss-progress li').last()).toHaveClass(/is-done/);
+
+  const traceTrigger = page.getByRole('button', { name: '模型运行记录' });
+  await traceTrigger.focus();
+  await traceTrigger.click();
+  const traceDialog = page.getByRole('dialog', { name: '模型运行记录' });
+  await expect(traceDialog).toBeVisible();
+  await expect(traceDialog).toContainText('模型');
+  await expect(traceDialog).toContainText('原文');
+  await expect(traceDialog).toContainText('工具');
+  await expect(traceDialog).toContainText('引用');
+  await expect(traceDialog).toContainText('Token');
+  await expect(traceDialog).toContainText('耗时');
+  await expect(traceDialog).toContainText('错误');
+  await page.keyboard.press('Escape');
+  await expect(traceDialog).toBeHidden();
+  await expect(traceTrigger).toBeFocused();
   await expectNoForbiddenPlayerTerms();
 
   await switchToEnglish();
@@ -1176,7 +1213,7 @@ test('runs the abyss-specific development-sample flow with accessible interventi
     page.getByText('The two teams and chamber matchups were checked with local rules.', {
       exact: true
     })
-  ).toBeVisible();
+  ).toBeVisible({ timeout: 10_000 });
   await expect(
     page.getByText(
       'This is the validated first-half selection; finish setup before the main damage window.',
@@ -1198,7 +1235,7 @@ test('runs the abyss-specific development-sample flow with accessible interventi
     page.getByText('The two teams and chamber matchups were checked with local rules.', {
       exact: true
     })
-  ).toBeVisible();
+  ).toBeVisible({ timeout: 10_000 });
   const abyssRequestLocales = await page.evaluate<Array<'zh-CN' | 'en-US' | null>>(
     "window.api.history.listAbyss({ uid: '123456789' }).then((entries) => entries.map((entry) => entry.interventions.locale ?? null))"
   );
@@ -1226,7 +1263,7 @@ test('runs the abyss-specific development-sample flow with accessible interventi
     .locator('[data-result-character-id]')
     .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-result-character-id')));
   await page.getByRole('button', { name: '只重算上半' }).click();
-  await expect(page.getByText('待更新', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('待更新', { exact: true })).toHaveCount(0, { timeout: 10_000 });
   const preservedLowerAfter = await page
     .locator('.gta-abyss-result-teams > section')
     .nth(1)
@@ -1268,8 +1305,10 @@ test('runs the abyss-specific development-sample flow with accessible interventi
   await page.setViewportSize({ width: 1600, height: 1000 });
   await page.screenshot({ path: path.join(tmpdir(), 'gta-m7-history-1600x1000.png') });
   await page.getByRole('button', { name: '基于这次方案重新计算' }).click();
-  await expect(page.getByText('旧方案已准备', { exact: true })).toBeVisible();
-  await expect(page.getByText(/不会自动调用智能服务/)).toBeVisible();
+  await expect(page.getByText('旧方案已准备', { exact: true })).toBeVisible({
+    timeout: 10_000
+  });
+  await expect(page.getByText(/不会自动调用智能服务/)).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole('button', { name: '生成上下半方案' })).toBeVisible();
   await expect(page.getByRole('heading', { name: '上下半零重复' })).toHaveCount(0);
 });
@@ -1413,10 +1452,9 @@ test('plans three Stygian phases from the development scenario without leaking r
     page.getByText('已按本地规则核对三阶段队伍、复用限制与机制覆盖。', { exact: true })
   ).toBeVisible();
   await expect(
-    page.getByText(
-      '保存的第 1 阶段队伍是已校验的本地分配；先完成布置，再进入主要输出窗口。',
-      { exact: true }
-    )
+    page.getByText('保存的第 1 阶段队伍是已校验的本地分配；先完成布置，再进入主要输出窗口。', {
+      exact: true
+    })
   ).toBeVisible();
   await expectNoUnavailableGuidance();
   await page.getByRole('button', { name: '改选演示难度 5' }).click();

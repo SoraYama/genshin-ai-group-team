@@ -246,26 +246,21 @@ export function AdvisorPage({
       {workspaceOpen && challengeMode === 'spiral-abyss' ? (
         <AbyssWorkspace
           uid={activeUid}
-          historyRerun={
-            historyRerun?.mode === 'spiral-abyss' ? historyRerun : undefined
-          }
+          historyRerun={historyRerun?.mode === 'spiral-abyss' ? historyRerun : undefined}
           onHistoryRerunConsumed={onHistoryRerunConsumed}
+          onBack={() => setWorkspaceOpen(false)}
         />
       ) : workspaceOpen && challengeMode === 'imaginarium-theater' ? (
         <TheaterWorkspace
           uid={activeUid}
-          historyRerun={
-            historyRerun?.mode === 'imaginarium-theater' ? historyRerun : undefined
-          }
+          historyRerun={historyRerun?.mode === 'imaginarium-theater' ? historyRerun : undefined}
           onHistoryRerunConsumed={onHistoryRerunConsumed}
           onBack={() => setWorkspaceOpen(false)}
         />
       ) : workspaceOpen && challengeMode === 'stygian-onslaught' ? (
         <StygianWorkspace
           uid={activeUid}
-          historyRerun={
-            historyRerun?.mode === 'stygian-onslaught' ? historyRerun : undefined
-          }
+          historyRerun={historyRerun?.mode === 'stygian-onslaught' ? historyRerun : undefined}
           onHistoryRerunConsumed={onHistoryRerunConsumed}
           onBack={() => setWorkspaceOpen(false)}
         />

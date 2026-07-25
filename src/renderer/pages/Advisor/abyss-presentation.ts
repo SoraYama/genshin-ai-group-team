@@ -26,9 +26,9 @@ const ELEMENT_LABELS: Record<string, string> = {
 
 const PROGRESS_LABELS: Record<AbyssAdvisorProgressStep, string> = {
   'reading-roster': '读取角色',
-  'interpreting-builds': '理解当前配装',
-  'checking-knowledge': '核对可信知识',
-  'researching-guides': '检索临时攻略',
+  'interpreting-builds': '识别当前配装',
+  'checking-knowledge': '匹配本地攻略知识',
+  'researching-guides': '补充攻略上下文',
   'analyzing-rules': '分析挑战规则',
   'generating-teams': '生成双队',
   'checking-conflicts': '检查冲突',
@@ -210,4 +210,22 @@ export function characterElementLabel(element: string, locale: PresentationLocal
   if (locale === 'en') return EN_ELEMENT_LABELS[element.toLowerCase()] ?? 'Unknown';
   const label = abyssElementLabel(element);
   return label === '其他' ? '未知' : label;
+}
+
+export function sourceBadge(
+  source: 'smart-service' | 'local-rules' | 'blocked',
+  locale: PresentationLocale = 'zh'
+): string {
+  if (locale === 'en') {
+    return source === 'smart-service'
+      ? 'AI verified'
+      : source === 'local-rules'
+        ? 'Local rules'
+        : 'Unavailable';
+  }
+  return source === 'smart-service'
+    ? 'AI 已验证'
+    : source === 'local-rules'
+      ? '本地规则'
+      : '无法生成';
 }

@@ -1,0 +1,191 @@
+.agent-trace-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+}
+
+.agent-trace-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: rgba(2, 8, 14, 0.66);
+  backdrop-filter: blur(3px);
+}
+
+.agent-trace-drawer {
+  position: absolute;
+  inset: 0 0 0 auto;
+  display: grid;
+  width: min(620px, 82vw);
+  grid-template-rows: auto minmax(0, 1fr);
+  border-left: 1px solid rgba(211, 192, 137, 0.58);
+  color: #e9f0f2;
+  background: #0a1928;
+  box-shadow: -24px 0 54px rgba(0, 0, 0, 0.38);
+  animation: agent-trace-enter 180ms var(--gta-ease) both;
+}
+
+.agent-trace-drawer > header {
+  display: flex;
+  min-height: 70px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 18px;
+  border-bottom: 1px solid rgba(198, 216, 222, 0.18);
+}
+
+.agent-trace-drawer > header span {
+  color: rgba(220, 232, 235, 0.45);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.agent-trace-drawer h2 {
+  margin: 3px 0 0;
+  font-size: 18px;
+}
+
+.agent-trace-drawer button {
+  min-height: 30px;
+  border: 1px solid rgba(198, 216, 222, 0.25);
+  color: #e7eef0;
+  background: rgba(197, 216, 221, 0.06);
+  cursor: pointer;
+}
+
+.agent-trace-body {
+  min-height: 0;
+  padding: 14px 18px 30px;
+  overflow: auto;
+}
+
+.agent-trace-summary,
+.agent-trace-stages details dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  background: rgba(198, 216, 222, 0.14);
+}
+
+.agent-trace-summary > div,
+.agent-trace-stages details dl > div {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  padding: 8px 10px;
+  background: #0d2031;
+}
+
+.agent-trace-summary dt,
+.agent-trace-stages dt {
+  color: rgba(220, 232, 235, 0.45);
+  font-size: 9px;
+}
+
+.agent-trace-summary dd,
+.agent-trace-stages dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--gta-font-mono);
+  font-size: 9px;
+}
+
+.agent-trace-failure {
+  padding: 9px 10px;
+  border-left: 2px solid #d19075;
+  color: #efc6b8;
+  background: rgba(135, 65, 47, 0.14);
+  font-size: 10px;
+}
+
+.agent-trace-stages {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.agent-trace-stages details {
+  border-block: 1px solid rgba(198, 216, 222, 0.16);
+}
+
+.agent-trace-stages summary {
+  display: grid;
+  min-height: 38px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 9px;
+  cursor: pointer;
+}
+
+.agent-trace-stages summary span {
+  color: #dcc786;
+  font-family: var(--gta-font-mono);
+  font-size: 10px;
+}
+
+.agent-trace-stages summary strong,
+.agent-trace-stages summary small {
+  color: rgba(220, 232, 235, 0.56);
+  font-size: 9px;
+  font-weight: 500;
+}
+
+.agent-trace-raw {
+  padding: 9px 0;
+}
+
+.agent-trace-raw > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 5px;
+}
+
+.agent-trace-raw pre {
+  max-height: 240px;
+  margin: 0;
+  padding: 10px;
+  overflow: auto;
+  color: rgba(232, 240, 242, 0.7);
+  background: #06121e;
+  font-family: var(--gta-font-mono);
+  font-size: 9px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.agent-trace-truncated {
+  color: #ddc581;
+  font-size: 9px;
+}
+
+.agent-trace-empty {
+  display: grid;
+  min-height: 240px;
+  place-content: center;
+  text-align: center;
+}
+
+@keyframes agent-trace-enter {
+  from {
+    opacity: 0;
+    transform: translateX(22px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-trace-drawer {
+    animation: none;
+  }
+}

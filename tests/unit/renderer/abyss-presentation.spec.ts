@@ -5,7 +5,8 @@ import {
   cycleCharacterIntervention,
   enemyDisplayName,
   mechanicLabels,
-  progressStepLabel
+  progressStepLabel,
+  sourceBadge
 } from '../../../src/renderer/pages/Advisor/abyss-presentation.js';
 import { abyssScenario } from '../services/abyss-test-fixtures.js';
 
@@ -59,9 +60,11 @@ describe('abyss presentation', () => {
   });
 
   it('never lets raw plan prose override a missing exact narrative section', async () => {
-    const presentation = (await import(
-      '../../../src/renderer/pages/Advisor/abyss-presentation.js'
-    )) as Record<string, unknown>;
+    const presentation =
+      (await import('../../../src/renderer/pages/Advisor/abyss-presentation.js')) as Record<
+        string,
+        unknown
+      >;
     expect(presentation.narrativeTargetBody).toBeTypeOf('function');
     const narrativeTargetBody = presentation.narrativeTargetBody as (
       narrative: { sections: [] },
@@ -182,11 +185,21 @@ describe('abyss presentation', () => {
 
   it('maps internal progress steps to player-semantic Chinese copy', () => {
     expect(progressStepLabel('reading-roster')).toBe('读取角色');
+    expect(progressStepLabel('interpreting-builds')).toBe('识别当前配装');
+    expect(progressStepLabel('checking-knowledge')).toBe('匹配本地攻略知识');
+    expect(progressStepLabel('researching-guides')).toBe('补充攻略上下文');
     expect(progressStepLabel('analyzing-rules')).toBe('分析挑战规则');
     expect(progressStepLabel('generating-teams')).toBe('生成双队');
     expect(progressStepLabel('checking-conflicts')).toBe('检查冲突');
     expect(progressStepLabel('writing-tactics')).toBe('整理打法');
     expect(progressStepLabel('reading-roster', 'en')).toBe('Reading roster');
     expect(characterElementLabel('hydro', 'en')).toBe('Hydro');
+  });
+
+  it('labels the recommendation source without leaking service vocabulary', () => {
+    expect(sourceBadge('smart-service')).toBe('AI 已验证');
+    expect(sourceBadge('local-rules')).toBe('本地规则');
+    expect(sourceBadge('blocked')).toBe('无法生成');
+    expect(sourceBadge('smart-service', 'en')).toBe('AI verified');
   });
 });
