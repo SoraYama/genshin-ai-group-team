@@ -1,3 +1,6 @@
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+
 import { describe, expect, it, vi } from 'vitest';
 import { createTsupOptions } from '../../../tsup.config.js';
 
@@ -41,6 +44,32 @@ describe('tsup dev readiness', () => {
 
     expect(main?.sourcemap).toBe(true);
     expect(preload?.sourcemap).toBe(true);
+  });
+
+  it('builds both saved-state verification gates without dropping existing main entries', () => {
+    const [main] = createTsupOptions({ devWatch: false });
+
+    expect(main?.entry).toEqual({
+      index: 'src/main/index.ts',
+      'knowledge-provenance-gate': 'src/main/gates/knowledge-provenance-gate.ts',
+      'miyoushe-detail-gate': 'src/main/gates/miyoushe-detail-gate.ts',
+      'provider-saved-gate': 'src/main/gates/provider-saved-gate.ts',
+      'agent-saved-gate': 'src/main/gates/agent-saved-gate.ts',
+      'advisor-saved-gate': 'src/main/gates/advisor-saved-gate.ts'
+    });
+  });
+
+  it('runs both saved-state gates only through their exact built Electron entries', async () => {
+    const packageJson = JSON.parse(
+      await readFile(path.resolve(import.meta.dirname, '../../../package.json'), 'utf8')
+    ) as { scripts: Record<string, string> };
+
+    expect(packageJson.scripts['gate:agent-saved']).toBe(
+      'npm run build:main && electron dist/main/agent-saved-gate.mjs'
+    );
+    expect(packageJson.scripts['gate:advisor-saved']).toBe(
+      'npm run build:main && electron dist/main/advisor-saved-gate.mjs'
+    );
   });
 });
 

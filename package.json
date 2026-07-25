@@ -45,6 +45,8 @@
     "gate:knowledge-provenance": "npm run build:main && node dist/main/knowledge-provenance-gate.mjs",
     "gate:provider-contract": "node tests/external/provider-gate.mjs",
     "gate:provider-saved": "npm run build:main && electron dist/main/provider-saved-gate.mjs",
+    "gate:agent-saved": "npm run build:main && electron dist/main/agent-saved-gate.mjs",
+    "gate:advisor-saved": "npm run build:main && electron dist/main/advisor-saved-gate.mjs",
     "gate:local": "npm run lint && npm run typecheck && npm run test && npm run build && npm run test:renderer-budget",
     "gate:all": "npm run gate:local && npm run test:e2e:visual && npm run audit:all",
     "pack": "npm run build && electron-builder --publish never",

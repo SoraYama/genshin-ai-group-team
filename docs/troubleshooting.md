@@ -23,6 +23,13 @@
 - 检查 Key、Base URL、Model 是否属于同一个 Messages-compatible Provider。
 - 企业代理或自建网关需要的 header 必须配置为合法的单行 KV。
 - 任一 Agent 阶段超时、结构校验失败或返回未知角色 ID 时，整条编排会终止并回退；不会保存半条 LLM 历史。
+- 维护者应按层运行保存态门禁：先 `npm run gate:provider-saved`，再 `npm run gate:agent-saved`，最后 `npm run gate:advisor-saved`。后两条是真实模型请求，会产生用量；不要在 CI、自动测试或普通构建中执行。
+- Provider 通过而 Agent 返回 `EMPTY_AGENT_RESULT` / usage 缺失，说明 Messages 端点可达但 SDK 子进程没有形成完整成功 turn；`AGENT_TIMEOUT` / `PROVIDER_ERROR` 只提供稳定 code/status，不回显上游 body。
+- Agent 通过而 Advisor 返回 `ADVISOR_FELL_BACK`，说明单轮 SDK 正常，但完整 compose → critique → rotation → explain 中至少一个阶段失败或本地校验拒绝了结果。检查最新 trace 的稳定 stage failure code。
+- `SCENARIO_UNAVAILABLE` 表示没有可用于推荐的正式、已验证且当前有效的深渊发布。门禁不会用 development sample 掩盖这个问题。
+- `ACTIVE_PROFILE_UNAVAILABLE` / `ROSTER_INSUFFICIENT` 要求先在应用内选择本地 active UID，并保证 ownership 角色池至少八人；门禁不会从 Enka 展示柜或 fixture 临时拼出 roster。
+- `REQUIRED_STAGE_*`、`STAGE_*_USAGE_MISSING`、`TRACE_*_USAGE_MISSING`、`TEAM_SIZE_INVALID`、`CHARACTER_NOT_OWNED`、`KNOWLEDGE_SUMMARY_MISMATCH` 都是终态证据不完整，不能当作“模型大致可用”放行。
+- 已知曾出现 `gate:provider-saved` 通过而推荐历史仍为 `local-rules`；这不是矛盾：Provider gate 不经过 Agent SDK 和 Advisor 管线。必须以后两层分别定位。
 
 ## macOS / Windows 安装
 
