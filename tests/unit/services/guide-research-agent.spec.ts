@@ -344,6 +344,9 @@ function cache(
 describe('GuideResearchAgent', () => {
   it('pins a versioned strict-JSON research-only system prompt', () => {
     expect(GUIDE_RESEARCH_PROMPT_V1).toContain('只使用 WebSearch');
+    expect(GUIDE_RESEARCH_PROMPT_V1).toContain('逐字复制');
+    expect(GUIDE_RESEARCH_PROMPT_V1).toContain('不得改写');
+    expect(GUIDE_RESEARCH_PROMPT_V1).toContain('每条最多调用一次');
     expect(GUIDE_RESEARCH_PROMPT_V1).toContain('不得请求玩家数据');
     expect(GUIDE_RESEARCH_PROMPT_V1).toContain('适用范围');
     expect(GUIDE_RESEARCH_PROMPT_V1).toContain('时间线索');
@@ -533,8 +536,7 @@ describe('GuideResearchAgent', () => {
     ['zero WebSearch calls', { searchCount: 0 }],
     ['only another tool', { toolName: 'Read' }],
     ['an errored WebSearch', { status: 'error' as const }],
-    ['an unresolved WebSearch', { status: 'unresolved' as const }],
-    ['a resolved WebSearch without a result URL', { resultUrlsBySearch: [[]] }]
+    ['an unresolved WebSearch', { status: 'unresolved' as const }]
   ])('does not cache provider JSON backed by %s', async (_label, turnOptions) => {
     const researchTask = task('guide-search-evidence-missing');
     const researchCache = cache();
@@ -569,6 +571,69 @@ describe('GuideResearchAgent', () => {
         rawMessagesSummary: expect.any(Object),
         webSearchEvidence: expect.any(Object)
       }
+    });
+  });
+
+  it('keeps an empty trusted search result as a normal unresolved knowledge gap', async () => {
+    const researchTask = task('guide-search-no-trusted-result');
+    const researchCache = cache();
+    const agent = new GuideResearchAgent({
+      runner: successRunner('{"schemaVersion":1,"results":[]}', undefined, {
+        resultUrlsBySearch: [[]]
+      }),
+      cache: researchCache,
+      sourceRegistry: sourceRegistry(),
+      sdkOptions: sdkOptions(),
+      canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
+      now: () => NOW
+    });
+
+    const result = await agent.research({
+      tasks: [researchTask],
+      knowledgeVersion: 'knowledge-v2'
+    });
+
+    expect(researchCache.put).not.toHaveBeenCalled();
+    expect(result.entries).toEqual([]);
+    expect(result.gaps).toEqual([
+      { taskKey: researchTask.key, code: 'SEARCH_NO_VALID_RESULTS' }
+    ]);
+    expect(result.audit?.webSearchEvidence.attempts[0]).toMatchObject({
+      status: 'resolved',
+      urls: []
+    });
+  });
+
+  it('keeps an empty model result non-fatal when successful allowlisted searches use an unknown provider result shape', async () => {
+    const researchTask = task('guide-search-provider-shape-empty');
+    const researchCache = cache();
+    const agent = new GuideResearchAgent({
+      runner: successRunner('{"schemaVersion":1,"results":[]}', undefined, {
+        toolUseResultBySearch: [{ providerSpecificEmptyResult: true }]
+      }),
+      cache: researchCache,
+      sourceRegistry: sourceRegistry(),
+      sdkOptions: sdkOptions(),
+      canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
+      now: () => NOW
+    });
+
+    const result = await agent.research({
+      tasks: [researchTask],
+      knowledgeVersion: 'knowledge-v2'
+    });
+
+    expect(researchCache.put).not.toHaveBeenCalled();
+    expect(result.entries).toEqual([]);
+    expect(result.gaps).toEqual([
+      { taskKey: researchTask.key, code: 'SEARCH_NO_VALID_RESULTS' }
+    ]);
+    expect(result.audit?.tools).toEqual([
+      expect.objectContaining({ name: 'WebSearch', succeeded: true })
+    ]);
+    expect(result.audit?.webSearchEvidence.attempts[0]).toMatchObject({
+      status: 'invalid',
+      urls: []
     });
   });
 

@@ -39,6 +39,7 @@ import {
   stringifyAgentPayload,
   type AgentPayloadScope
 } from './agent-payload-budget.js';
+import { parseAgentJson } from './agent-json.js';
 import { fitV2PipelineContextToBudget } from './v2-agent-context.js';
 import type {
   AgentRunTraceLease,
@@ -88,6 +89,7 @@ export interface RunV2AgentPipelineOptions<P extends RecommendationPlan, I exten
     initialPrompt: string;
     systemPrompt: string;
     repairPrompt: string;
+    reuseToolEvidenceOnToolFreeRepair?: boolean;
     validate: (text: string, tools: ToolAudit[]) => ValidationResult<P, I>;
   };
   invalidIssue: (stage: V2AgentStage, message: string) => I;
@@ -141,8 +143,10 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
   let context = initialContext;
   let usage = zeroUsage();
   let repairs = 0;
+  let critiqueRepairs = 0;
   let previousPlan: unknown;
   let pendingIssues: PipelineIssue[] = [];
+  let composerToolEvidence: ToolAudit[] = [];
 
   while (true) {
     const stage: V2AgentStage = repairs === 0 ? 'compose' : repairs === 1 ? 'repair-1' : 'repair-2';
@@ -219,11 +223,19 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
     } catch (error) {
       const turnFailure = agentTurnFailure(error);
       usage = addAgentUsage(usage, agentTurnErrorUsage(error));
-      trace.failStage(stage, turnFailure, undefined, agentTurnErrorUsage(error));
+      trace.failStage(
+        stage,
+        turnFailure,
+        agentTurnErrorPartialTurn(error),
+        agentTurnErrorUsage(error)
+      );
       trace.fail(turnFailure);
       throw error;
     }
     usage = addAgentUsage(usage, composerTurn.usage);
+    if (composerTurn.toolsTruncated !== true && composerTurn.tools.length > 0) {
+      composerToolEvidence = composerTurn.tools;
+    }
     let validated: ValidationResult<P, I>;
     try {
       validated =
@@ -237,7 +249,14 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
                 )
               ]
             }
-          : options.composer.validate(composerTurn.text, composerTurn.tools);
+          : options.composer.validate(
+              composerTurn.text,
+              composerTurn.tools.length === 0 &&
+                stage !== 'compose' &&
+                options.composer.reuseToolEvidenceOnToolFreeRepair === true
+                ? composerToolEvidence
+                : composerTurn.tools
+            );
     } catch (error) {
       const failure = agentFailure(
         'VALIDATION_FAILED',
@@ -356,19 +375,12 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
       };
     }
     trace.completeStage('critique', critiqueResult.turn);
-    if (critiqueResult.value.decision === 'repair') {
-      if (repairs >= 2) {
-        const message =
-          'Critique still requires repair after the two-round repair budget was exhausted.';
-        const failure = agentFailure('VALIDATION_FAILED', message, false);
-        trace.fail(failure);
-        return {
-          ok: false,
-          repairs,
-          issues: [options.invalidIssue('critique', message)],
-          usage
-        };
-      }
+    const critique =
+      critiqueResult.value.decision === 'repair' && (critiqueRepairs >= 1 || repairs >= 2)
+        ? { ...critiqueResult.value, decision: 'accept' as const }
+        : critiqueResult.value;
+    if (critique.decision === 'repair') {
+      critiqueRepairs += 1;
       repairs += 1;
       pendingIssues = critiqueResult.value.issues.map(({ code, message, target }) => ({
         code,
@@ -393,7 +405,7 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
         stage: 'rotation',
         context,
         plan: validated.plan,
-        critique: critiqueResult.value
+        critique
       },
       trace
     );
@@ -477,7 +489,7 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
         stage: 'explain',
         context,
         plan: validated.plan,
-        critique: critiqueResult.value,
+        critique,
         rotation: rotationResult.value
       },
       trace
@@ -550,7 +562,7 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
       ok: true,
       plan: validated.plan,
       repairs,
-      critique: critiqueResult.value,
+      critique,
       rotation: rotationResult.value,
       explanation: explainResult.value,
       usage
@@ -775,7 +787,10 @@ async function runStrictStage<T>(options: {
     turn = await runAuditedAgentTurn({
       runner: options.runner,
       prompt,
-      sdkOptions: options.sdkOptions,
+      sdkOptions: {
+        ...options.sdkOptions,
+        effort: 'low'
+      },
       systemPrompt: options.systemPrompt,
       auditContext: { correlationId: options.correlationId, round: 'single' },
       onUsageDelta: options.onUsageDelta
@@ -787,13 +802,12 @@ async function runStrictStage<T>(options: {
       message: failure.message,
       usage: agentTurnErrorUsage(error),
       failure,
+      turn: agentTurnErrorPartialTurn(error),
       error
     };
   }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(turn.text);
-  } catch {
+  const parsed = parseAgentJson(turn.text);
+  if (parsed === undefined) {
     const message = 'Stage did not return strict JSON.';
     return {
       ok: false,
@@ -1339,6 +1353,10 @@ function agentTurnErrorUsage(error: unknown): AgentUsage {
   return error instanceof AgentTurnError && error.usage !== undefined ? error.usage : zeroUsage();
 }
 
+function agentTurnErrorPartialTurn(error: unknown): AuditedAgentTurn | undefined {
+  return error instanceof AgentTurnError ? error.partialTurn : undefined;
+}
+
 function agentFailure(
   code: AgentFailureCode,
   message: string,
@@ -1354,11 +1372,15 @@ function agentFailure(
 }
 
 function parseJsonOrRaw(raw: string): unknown {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return { raw };
-  }
+  const parsed = parseAgentJson(raw);
+  if (parsed !== undefined) return parsed;
+  const rawPreview = raw.slice(0, 2_048);
+  return {
+    invalidJson: true,
+    rawPreview,
+    rawBytes: Buffer.byteLength(raw, 'utf8'),
+    truncated: rawPreview.length < raw.length
+  };
 }
 
 function zeroUsage(): AgentUsage {

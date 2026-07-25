@@ -28,6 +28,7 @@ import { runV2AgentPipeline, type V2AgentStage } from './v2-agent-pipeline.js';
 import type { AgentFailure } from '../../shared/agent-run-trace.js';
 import type { AgentPipelineTraceSession } from './v2-agent-pipeline.js';
 import { abyssMemberAssignmentSchema } from '../../shared/scenario-v2.js';
+import { parseAgentJson } from './agent-json.js';
 
 export interface AbyssPlanAgentRunner {
   run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown>;
@@ -87,6 +88,7 @@ export class AbyssPlanAgent {
         initialPrompt: buildComposePayload(context),
         systemPrompt: ABYSS_COMPOSER_PROMPT_V3,
         repairPrompt: ABYSS_REPAIR_PROMPT_V3,
+        reuseToolEvidenceOnToolFreeRepair: true,
         validate: (text, tools) => validateAgentOutput(text, context, tools)
       },
       invalidIssue: (stage, message) => ({
@@ -143,10 +145,8 @@ function validateAgentOutput(
   >,
   tools: ToolAudit[]
 ): { ok: true; plan: AbyssPlanOutput } | { ok: false; issues: AbyssPlanIssue[] } {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
+  const parsed = parseAgentJson(raw);
+  if (parsed === undefined) {
     return {
       ok: false,
       issues: [

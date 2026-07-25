@@ -147,7 +147,6 @@ export class GuideResearchAgent {
     }
 
     let rawOutput: string;
-    let searchedUrls: ReadonlySet<string>;
     let auditedTurn: AuditedAgentTurn;
     try {
       const turn = await runAuditedAgentTurn({
@@ -182,19 +181,6 @@ export class GuideResearchAgent {
           turn
         );
       }
-      const resolvedUrls = resolvedSearchUrls(turn.webSearchEvidence, queries, turn.tools);
-      if (resolvedUrls === undefined) {
-        return liveResearchResult(
-          combineGuideResearchResult(
-            parsed.tasks,
-            cachedByKey,
-            new Map(),
-            gapsFor(runtimeMisses, 'SEARCH_OUTPUT_INVALID')
-          ),
-          turn
-        );
-      }
-      searchedUrls = resolvedUrls;
       rawOutput = turn.finalRawText;
     } catch (error) {
       const details = safeAgentTurnFailureDetails(error);
@@ -232,6 +218,36 @@ export class GuideResearchAgent {
 
     const decoded = parseResearchOutput(rawOutput);
     if (decoded === undefined) {
+      return liveResearchResult(
+        combineGuideResearchResult(
+          parsed.tasks,
+          cachedByKey,
+          new Map(),
+          gapsFor(runtimeMisses, 'SEARCH_OUTPUT_INVALID')
+        ),
+        auditedTurn
+      );
+    }
+    if (
+      decoded.results.length === 0 &&
+      hasSuccessfulAllowlistedSearches(auditedTurn.tools, queries)
+    ) {
+      return liveResearchResult(
+        combineGuideResearchResult(
+          parsed.tasks,
+          cachedByKey,
+          new Map(),
+          gapsFor(runtimeMisses, 'SEARCH_NO_VALID_RESULTS')
+        ),
+        auditedTurn
+      );
+    }
+    const searchedUrls = resolvedSearchUrls(
+      auditedTurn.webSearchEvidence,
+      queries,
+      auditedTurn.tools
+    );
+    if (searchedUrls === undefined) {
       return liveResearchResult(
         combineGuideResearchResult(
           parsed.tasks,
@@ -449,14 +465,41 @@ function resolvedSearchUrls(
     if (
       attempt.status !== 'resolved' ||
       attempt.query === undefined ||
-      !allowed.has(attempt.query) ||
-      attempt.urls.length === 0
+      !allowed.has(attempt.query)
     ) {
       return undefined;
     }
     attempt.urls.forEach((url) => urls.add(url));
   }
-  return urls.size === 0 ? undefined : urls;
+  return urls;
+}
+
+function hasSuccessfulAllowlistedSearches(
+  tools: ReadonlyArray<{
+    name: string;
+    input: Readonly<Record<string, unknown>>;
+    succeeded: boolean;
+  }>,
+  allowedQueries: readonly string[]
+): boolean {
+  if (tools.length < 1 || tools.length > 3) return false;
+  const allowed = new Set(allowedQueries);
+  const seen = new Set<string>();
+  for (const tool of tools) {
+    const query = tool.input['query'];
+    if (
+      tool.name !== 'WebSearch' ||
+      !tool.succeeded ||
+      Object.keys(tool.input).length !== 1 ||
+      typeof query !== 'string' ||
+      !allowed.has(query) ||
+      seen.has(query)
+    ) {
+      return false;
+    }
+    seen.add(query);
+  }
+  return true;
 }
 
 function errorDiagnosticText(error: unknown, depth = 0): string {

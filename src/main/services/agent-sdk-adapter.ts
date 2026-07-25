@@ -240,6 +240,8 @@ export interface AgentSdkRunOptions {
   cwd: string;
   abortController: AbortController;
   maxTurns?: number;
+  effort?: SdkOptions['effort'];
+  outputFormat?: SdkOptions['outputFormat'];
   stderr?: (data: string) => void;
   pathToClaudeCodeExecutable?: string;
   customHeaders?: Record<string, string>;
@@ -255,6 +257,20 @@ function serializeCustomHeaders(headers: Record<string, string> | undefined): st
   if (!validated) return undefined;
   const lines = Object.entries(validated).map(([name, value]) => `${name}: ${value}`);
   return lines.length > 0 ? lines.join('\n') : undefined;
+}
+
+function providerCredentialEnv(
+  baseUrl: string,
+  apiKey: string
+): { ANTHROPIC_API_KEY: string } | { ANTHROPIC_AUTH_TOKEN: string } {
+  try {
+    if (new URL(baseUrl).hostname.toLowerCase() === 'api.anthropic.com') {
+      return { ANTHROPIC_API_KEY: apiKey };
+    }
+  } catch {
+    // The provider request will report the invalid URL; keep compatibility auth semantics here.
+  }
+  return { ANTHROPIC_AUTH_TOKEN: apiKey };
 }
 
 export function resolvePackagedClaudeExecutable(
@@ -315,7 +331,7 @@ export function buildAgentSdkOptions(input: AgentSdkRunOptions): SdkOptions {
   return {
     systemPrompt: input.systemPrompt,
     env: {
-      ANTHROPIC_AUTH_TOKEN: input.apiKey,
+      ...providerCredentialEnv(input.baseUrl, input.apiKey),
       ANTHROPIC_BASE_URL: input.baseUrl,
       ANTHROPIC_MODEL: input.model,
       CLAUDE_AGENT_SDK_CLIENT_APP: `genshin-team-advisor/${input.clientVersion ?? 'development'}`,
@@ -323,6 +339,8 @@ export function buildAgentSdkOptions(input: AgentSdkRunOptions): SdkOptions {
       ...(customHeaders ? { ANTHROPIC_CUSTOM_HEADERS: customHeaders } : {})
     },
     model: input.model,
+    effort: input.effort ?? 'medium',
+    ...(input.outputFormat === undefined ? {} : { outputFormat: input.outputFormat }),
     tools: isResearch ? ['WebSearch'] : [],
     allowedTools,
     disallowedTools,

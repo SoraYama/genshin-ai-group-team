@@ -25,6 +25,7 @@ import {
 } from './agent-turn-audit.js';
 import { validateTheaterPlan } from './theater-plan-validator.js';
 import { runV2AgentPipeline, type V2AgentStage } from './v2-agent-pipeline.js';
+import { parseAgentJson } from './agent-json.js';
 
 export type TheaterPlanAgentRunner = AuditedAgentRunner;
 export interface TheaterPlanAgentInput {
@@ -95,10 +96,8 @@ export class TheaterPlanAgent {
 }
 
 function validateOutput(raw: string, context: TheaterPlanAgentInput, tools: ToolAudit[]) {
-  let plan: unknown;
-  try {
-    plan = JSON.parse(raw);
-  } catch {
+  const plan = parseAgentJson(raw);
+  if (plan === undefined) {
     return invalid('智能服务没有返回完整 JSON 路线。');
   }
   const toolIssue = requiredTools(context, tools, plan);

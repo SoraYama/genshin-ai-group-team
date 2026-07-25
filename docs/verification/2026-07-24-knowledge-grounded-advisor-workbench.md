@@ -2,15 +2,15 @@
 
 ## 结论
 
-- 验证日期：2026-07-25（Asia/Shanghai）
+- 验证日期：2026-07-25–2026-07-26（Asia/Shanghai）
 - 实现提交：
   - `365a5350e33e4e2e928f55c605095bfd4417d49c`（112 角色目录与固定来源）
   - `5c9bf7b1ad8da9b46f608343a97aad13df3e46f9`（exact-112 schema 与 supplemental fail-closed 审查修复）
-- 自动门禁结论：通过。
+- 自动门禁结论：通过；2026-07-26 修复后为 123 个文件、1614 项测试。
 - 固定公开知识来源结论：通过，目录与策略各 112 个 canonical 角色。
-- 真实保存态门禁结论：未执行。`gate:provider-saved`、`gate:agent-saved`、`gate:advisor-saved` 会读取玩家已保存的凭据、访问已配置的第三方 Provider，并产生真实模型用量；当前正在等待用户对此给出明确授权。不得把本记录解释为真实 Agent 或完整 Advisor 管线已经通过。
+- 真实保存态门禁结论：用户已明确授权。`gate:provider-saved` 与 `gate:agent-saved` 已通过，证明保存配置可访问 Provider 且 SDK 子进程确实运行模型；`gate:advisor-saved` 多次到达真实 WebSearch、Compose、Critique 与 Repair，但在最后一次修复后复验前，Provider 返回原文 `Credit balance is too low`。因此完整 Advisor 四阶段仍未通过。
 
-因此，本实现的离线行为、构建、视觉布局和知识来源边界已有可复核证据；`smart-service` 真实端到端成功仍是本任务唯一未闭合项。
+因此，本实现的离线行为、构建、视觉布局、知识来源边界、保存配置与基础 SDK 模型调用已有可复核证据；`smart-service` 从 Compose 到 Explain 的完整真实成功仍待充值后复跑。
 
 ## 自动门禁
 
@@ -26,6 +26,16 @@
 | `npm run test:renderer-budget`      |      0 | `rendererMiB=12.26`、`javascriptKiB=502`、`cssKiB=93`、25 个文件       |
 | `npm run test:e2e:visual`           |      0 | 13/13 Electron E2E 通过，用时约 2.6 分钟                               |
 | `npm run gate:knowledge-provenance` |      0 | 公开固定提交在线复核通过：112 个目录项、5 个排除项、元素与武器类型一致 |
+
+2026-07-26 针对真实模型暴露的问题完成修复后，重新运行：
+
+- `npm run lint`：退出 0；
+- `npm run typecheck`：退出 0；
+- `npm run test`：123/123 文件、1614/1614 测试通过；
+- `npm run test:golden`：6/6 文件、80/80 测试通过；
+- `npm run build`：退出 0；
+- `npm run test:renderer-budget`：`rendererMiB=12.26`、`javascriptKiB=502`、`cssKiB=93`、25 个文件；
+- `npm run gate:knowledge-provenance`：退出 0，公开固定来源摘要与 112 角色目录复核结果不变。
 
 完整单测第一次运行发现一个仍写死为 104 的 unreviewed 数量断言；目录补齐后正确值为 107。更新该机械断言后重新运行完整测试，结果为 120/120 文件、1587/1587 测试通过。
 
@@ -82,14 +92,24 @@ provenance verifier 对 supplemental 使用固定三项 allowlist。任何其他
 - `history.json` 中有 3 条既有深渊方案；
 - 未发现 `rawOutput`、`rawMessagesSummary`、`webSearchEvidence`、`tools`、`stages`、`transcript`、`correlationId` 或 `model` 等 Agent 原文字段；
 - `cache/guide-research.json` 当时不存在，因此没有可声称已用真实搜索结果验证的落盘样本；
-- trace store 的“只保留最近一次”与敏感值脱敏由内存单元测试验证；由于真实 Advisor 门禁尚未获准，不能声称本次已用真实模型运行复核 trace 替换。
+- trace store 的“只保留最近一次”与敏感值脱敏既有内存单元测试覆盖，也在真实 Advisor 门禁的多次运行中观察到最新运行替换；真实搜索均返回空 `results`，没有可声称已验证的 accepted research cache 写入样本。
 
 ## 真实保存态门禁
 
-| 门禁                          | 状态         | 说明                                                                                           |
-| ----------------------------- | ------------ | ---------------------------------------------------------------------------------------------- |
-| `npm run gate:provider-saved` | 等待明确授权 | 工具审批在进程执行前拒绝了使用已保存凭据访问已配置第三方端点；没有新的成功或失败 Provider 证据 |
-| `npm run gate:agent-saved`    | 等待明确授权 | 未启动，不得推断 SDK 子进程成功                                                                |
-| `npm run gate:advisor-saved`  | 等待明确授权 | 未启动，不得推断 `smart-service`、四阶段原文/usage 或真实 trace/cache 边界成功                 |
+| 门禁                          | 状态             | 说明                                                                                                                                                       |
+| ----------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm run gate:provider-saved` | 通过             | 保存配置请求返回 HTTP 200，延迟约 1899 ms                                                                                                                  |
+| `npm run gate:agent-saved`    | 通过             | 模型 `claude-sonnet-5`；模型原文 `agent gate ok`；usage 为 input 184 / output 8；延迟 4953 ms                                                               |
+| `npm run gate:advisor-saved`  | 已运行，尚未通过 | 已真实执行 WebSearch、Compose、Critique 与 Repair 并保留脱敏原文/usage；最终修复后复验被 Provider 余额阻断，原文 `Credit balance is too low`，尚无 Rotation/Explain 成功证据 |
 
-获得用户明确授权后，必须按 Provider → Agent → Advisor 顺序执行并只记录脱敏 JSON 摘要。只有三层全部通过，才能把设计状态提升为“Implemented and verified”并关闭真实链路 blocker。
+真实 Advisor 运行暴露并驱动修复的问题包括：
+
+1. 官方 Anthropic 端点此前错误使用 Bearer token；现仅官方端点注入 `ANTHROPIC_API_KEY`，兼容端点继续使用 `ANTHROPIC_AUTH_TOKEN`。
+2. 141 个检索缺口令 prompt 超过隐私预算；现按锁定角色与本地基线优先级最多检索 3 项，其余保持 unknown，且不自动写入知识库。
+3. 当前 Provider 的 SDK `outputFormat` 不可用；最小 schema 真实请求返回 `AGENT_TURN_RESULT_ERROR`，因此生产链路仍用严格 JSON + Zod，并对单一 JSON fence 和字符串内部明显未转义的中文引号做受限解析。
+4. Critique 曾生成契约外 `target`，现提示词枚举每一种允许形状；真实输出随后正确使用 `abyss-team` / `abyss-chamber`。
+5. 空搜索结果曾被误报为损坏输出；现成功执行 allowlisted WebSearch 且模型返回空 `results` 时记为 `SEARCH_NO_VALID_RESULTS`，不写缓存、不阻断 Composer。
+6. Abyss 文本修复可复用同一次运行内首轮已审计的只读工具证据；若修复轮换角色或重新调用工具，仍按新证据完整校验。Stygian/Theater 保持逐轮独立审计。
+7. 确定性硬校验通过后，Critique 的软风险最多触发一次修复；第二次 Critique 仍有软风险时保留原文和 issue，继续 Rotation/Explain，不再因为无法消除的 unknown 反复扩张 prompt。
+
+充值后应重新按 Provider → Agent → Advisor 顺序运行。只有 `gate:advisor-saved` 同时证明 Compose、Critique、Rotation、Explain 均 completed、均有正 usage 与非空脱敏原文，才能关闭真实链路 blocker。

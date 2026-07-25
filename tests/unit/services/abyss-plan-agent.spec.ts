@@ -1089,6 +1089,11 @@ describe('AbyssPlanAgent', () => {
     expect(result.ok).toBe(true);
     expect(runner.calls[0]?.options.systemPrompt).toContain('AbyssTeamComposer v3');
     expect(runner.calls[0]?.options.systemPrompt).toContain('requires-adjustment');
+    expect(runner.calls[0]?.options.systemPrompt).toContain('warnings 最多 8 条');
+    expect(runner.calls[0]?.options.systemPrompt).toContain('每个房间、每个半场各调用 1 次');
+    expect(runner.calls[0]?.options.systemPrompt).toContain('每个 tactics');
+    expect(runner.calls[0]?.options.systemPrompt).toContain('知识不足，沿用本地可行基线');
+    expect(runner.calls[0]?.options.systemPrompt).toContain('禁止凭角色印象补写');
     expect(runner.calls[1]?.options.systemPrompt).toContain('CritiqueAgent v3');
     expect(runner.calls[1]?.options.systemPrompt).toContain('反应触发权');
     expect(runner.calls[1]?.options.systemPrompt).toContain('站场时间');

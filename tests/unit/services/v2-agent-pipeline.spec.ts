@@ -683,6 +683,65 @@ describe('V2 agent pipeline repair and grounding', () => {
     expect(repairPayload.context.knowledge.trustedMatches[0]?.factStatements).toBeUndefined();
   });
 
+  it('repairs an oversized incomplete JSON result using only a bounded raw preview', async () => {
+    const baseline = validAbyssPlan();
+    const outputs: unknown[] = [
+      `{"mode":"spiral-abyss","warnings":["${'w'.repeat(55_000)}`,
+      baseline,
+      { decision: 'accept', issues: [] },
+      rotationOutput(baseline),
+      explainOutput(baseline)
+    ];
+    const calls: Array<{ prompt: string; options: AgentSdkRunOptions }> = [];
+    const runner = {
+      async *run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown> {
+        calls.push({ prompt, options });
+        const output = outputs.shift();
+        yield {
+          type: 'result',
+          subtype: 'success',
+          result: typeof output === 'string' ? output : JSON.stringify(output),
+          usage: { input_tokens: 10, output_tokens: 5 },
+          total_cost_usd: 0.01
+        };
+      }
+    };
+
+    const result = await run(
+      runner as StageRunner,
+      baseline,
+      (text) => {
+        try {
+          return { ok: true, plan: JSON.parse(text) as RecommendationPlan };
+        } catch {
+          return {
+            ok: false,
+            issues: [{ code: 'PLAN_SCHEMA_INVALID', path: [], message: '结构无效' }]
+          };
+        }
+      }
+    );
+
+    expect(result).toMatchObject({ ok: true, repairs: 1 });
+    expect(Buffer.byteLength(calls[1]!.prompt, 'utf8')).toBeLessThanOrEqual(
+      MAX_AGENT_PAYLOAD_BYTES
+    );
+    const repairPayload = JSON.parse(calls[1]!.prompt) as {
+      previousPlan: {
+        invalidJson: boolean;
+        rawPreview: string;
+        rawBytes: number;
+        truncated: boolean;
+      };
+    };
+    expect(repairPayload.previousPlan).toMatchObject({
+      invalidJson: true,
+      rawBytes: expect.any(Number),
+      truncated: true
+    });
+    expect(repairPayload.previousPlan.rawPreview.length).toBeLessThanOrEqual(2_048);
+  });
+
   it('rebudgets the context for a near-limit strict-stage envelope before Critique', async () => {
     const pipelineContext = envelopeBudgetContext();
     const baseline = validAbyssPlan({ warnings: ['w'.repeat(30_000)] });
@@ -904,7 +963,109 @@ describe('V2 agent pipeline repair and grounding', () => {
     expect(runner.calls[3]!.prompt).toContain('rotation-fragile');
   });
 
-  it('stops before Rotation/Explain when a third repair would be required', async () => {
+  it('reuses audited Composer tool evidence for a text-only repair attempt', async () => {
+    const baseline = validAbyssPlan();
+    const outputs = [
+      baseline,
+      {
+        decision: 'repair',
+        issues: [
+          {
+            code: 'explicit-plan-risk',
+            severity: 'soft',
+            target: { kind: 'abyss-team', half: 'first' },
+            message: 'Make the existing warning explicit.'
+          }
+        ]
+      },
+      baseline,
+      { decision: 'accept', issues: [] },
+      rotationOutput(baseline),
+      explainOutput(baseline)
+    ];
+    const calls: Array<{ prompt: string; options: AgentSdkRunOptions }> = [];
+    const runner = {
+      async *run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown> {
+        calls.push({ prompt, options });
+        if (calls.length === 1) {
+          yield {
+            type: 'assistant',
+            message: {
+              content: [
+                {
+                  type: 'tool_use',
+                  id: 'profile-evidence',
+                  name: 'mcp__genshin__read_profile_cache',
+                  input: { characterIds: ['1001'] }
+                }
+              ]
+            }
+          };
+          yield {
+            type: 'user',
+            message: {
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: 'profile-evidence',
+                  is_error: false,
+                  content: 'ok'
+                }
+              ]
+            }
+          };
+        }
+        yield {
+          type: 'result',
+          subtype: 'success',
+          result: JSON.stringify(outputs.shift()),
+          usage: { input_tokens: 10, output_tokens: 5 },
+          total_cost_usd: 0.01
+        };
+      }
+    };
+    const observedEvidenceCounts: number[] = [];
+
+    const result = await runV2AgentPipeline({
+      runner,
+      context: context(baseline),
+      sdkOptionsForStage: () => sdkOptions(),
+      composer: {
+        initialPrompt: '{}',
+        systemPrompt: 'composer:reusable-evidence',
+        repairPrompt: 'repair',
+        reuseToolEvidenceOnToolFreeRepair: true,
+        validate: (text, tools) => {
+          observedEvidenceCounts.push(tools.length);
+          return tools.some(({ name, succeeded }) =>
+            name === 'mcp__genshin__read_profile_cache' && succeeded
+          )
+            ? { ok: true as const, plan: JSON.parse(text) as RecommendationPlan }
+            : {
+                ok: false as const,
+                issues: [
+                  {
+                    code: 'TOOL_REQUIREMENT_FAILED',
+                    path: ['tools'],
+                    message: 'Missing prior profile evidence.'
+                  }
+                ]
+              };
+        }
+      },
+      invalidIssue: (stage, message) => ({
+        code: 'AGENT_OUTPUT_INVALID',
+        path: [stage],
+        message
+      })
+    });
+
+    expect(result).toMatchObject({ ok: true, repairs: 1 });
+    expect(calls).toHaveLength(6);
+    expect(observedEvidenceCounts).toEqual([1, 1]);
+  });
+
+  it('keeps unresolved soft critique issues after one repair and continues to Rotation/Explain', async () => {
     const baseline = validStygianPlan();
     const target = targets(baseline);
     const runner = new StageRunner([
@@ -932,29 +1093,26 @@ describe('V2 agent pipeline repair and grounding', () => {
           }
         ]
       },
-      baseline,
-      {
-        decision: 'repair',
-        issues: [
-          {
-            code: 'risk-three',
-            severity: 'soft',
-            target: target.critique,
-            message: '风险三'
-          }
-        ]
-      }
+      rotationOutput(baseline),
+      explainOutput(baseline)
     ]);
     const result = await run(runner, baseline, (text) => ({
       ok: true,
       plan: JSON.parse(text) as RecommendationPlan
     }));
 
-    expect(result).toMatchObject({ ok: false, repairs: 2 });
+    expect(result).toMatchObject({
+      ok: true,
+      repairs: 1,
+      critique: {
+        decision: 'accept',
+        issues: [expect.objectContaining({ code: 'risk-two' })]
+      }
+    });
     expect(runner.calls).toHaveLength(6);
     expect(
       runner.calls.some(({ options }) => options.systemPrompt.includes('RotationCoachAgent'))
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('rejects an Explain target that was not present in the validated plan', async () => {
@@ -1598,6 +1756,13 @@ describe('V2 agent pipeline trace observer', () => {
       'start:explain',
       'run:explain'
     ]);
+    expect(runner.calls[0]!.options.outputFormat).toBeUndefined();
+    for (const call of runner.calls.slice(1)) {
+      expect(call.options).toMatchObject({
+        effort: 'low'
+      });
+      expect(call.options.outputFormat).toBeUndefined();
+    }
   });
 
   it('records every invalid composer raw output and closes exhausted repairs as failed', async () => {
@@ -1830,6 +1995,12 @@ describe('V2 agent pipeline trace observer', () => {
     const streamTrace = new AgentRunTraceStore();
     const streamRunner = {
       async *run(): AsyncIterable<unknown> {
+        yield {
+          type: 'assistant',
+          message: {
+            content: [{ type: 'text', text: '{"partial":"safe-progress"}' }]
+          }
+        };
         yield await Promise.reject(new Error('provider cause with apiKey=must-not-leak'));
       }
     };
@@ -1860,6 +2031,7 @@ describe('V2 agent pipeline trace observer', () => {
     expect(streamTrace.latest()?.stages[0]).toMatchObject({
       stage: 'compose',
       status: 'failed',
+      rawOutput: '{"partial":"safe-progress"}',
       failure: { code: 'PROVIDER_ERROR' }
     });
     expect(JSON.stringify(streamTrace.latest())).not.toContain('must-not-leak');

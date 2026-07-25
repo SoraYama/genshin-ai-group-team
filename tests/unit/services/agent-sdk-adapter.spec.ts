@@ -46,7 +46,8 @@ describe('buildAgentSdkOptions', () => {
       persistSession: false,
       settingSources: [],
       strictMcpConfig: true,
-      maxTurns: 1
+      maxTurns: 1,
+      effort: 'medium'
     });
     expect(options.disallowedTools).toEqual(
       expect.arrayContaining(['Agent', 'Task', 'Bash', 'Read', 'Write', 'WebFetch', 'WebSearch'])
@@ -85,6 +86,43 @@ describe('buildAgentSdkOptions', () => {
     });
   });
 
+  it('allows a stage to lower effort without falling back to the SDK high default', () => {
+    const options = buildAgentSdkOptions({
+      apiKey: 'test-key',
+      baseUrl: 'https://llm.example.test',
+      model: 'test-model',
+      systemPrompt: 'system',
+      cwd: '/tmp/genshin-advisor',
+      abortController: new AbortController(),
+      effort: 'low'
+    });
+
+    expect(options.effort).toBe('low');
+  });
+
+  it('passes an explicit JSON Schema output contract to the SDK', () => {
+    const outputFormat = {
+      type: 'json_schema' as const,
+      schema: {
+        type: 'object',
+        properties: { decision: { type: 'string' } },
+        required: ['decision'],
+        additionalProperties: false
+      }
+    };
+    const options = buildAgentSdkOptions({
+      apiKey: 'test-key',
+      baseUrl: 'https://llm.example.test',
+      model: 'test-model',
+      systemPrompt: 'system',
+      cwd: '/tmp/genshin-advisor',
+      abortController: new AbortController(),
+      outputFormat
+    });
+
+    expect(options.outputFormat).toEqual(outputFormat);
+  });
+
   it('does not expose the shared denied-tool policy to caller mutation', () => {
     const input = {
       apiKey: 'test-key',
@@ -102,6 +140,23 @@ describe('buildAgentSdkOptions', () => {
     expect(second.disallowedTools).toEqual(
       expect.arrayContaining(['Agent', 'Task', 'Bash', 'Read', 'Write', 'WebFetch', 'WebSearch'])
     );
+  });
+
+  it('uses Anthropic API-key authentication for the official endpoint', () => {
+    const options = buildAgentSdkOptions({
+      apiKey: 'official-test-key',
+      baseUrl: 'https://api.anthropic.com/',
+      model: 'test-model',
+      systemPrompt: 'system',
+      cwd: '/tmp/genshin-advisor',
+      abortController: new AbortController()
+    });
+
+    expect(options.env).toMatchObject({
+      ANTHROPIC_API_KEY: 'official-test-key',
+      ANTHROPIC_BASE_URL: 'https://api.anthropic.com/'
+    });
+    expect(options.env).not.toHaveProperty('ANTHROPIC_AUTH_TOKEN');
   });
 
   it('resolves and pins the unpacked platform binary in a packaged app', async () => {

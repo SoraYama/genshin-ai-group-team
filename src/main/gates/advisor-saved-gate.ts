@@ -12,7 +12,7 @@ const STABLE_ADVISOR_STAGES = new Set([
   'rotation',
   'explain'
 ]);
-const ADVISOR_GATE_TIMEOUT_MS = 180_000;
+const ADVISOR_GATE_TIMEOUT_MS = 300_000;
 
 export const ADVISOR_GATE_FAILURE_CODES = [
   'ADVISOR_TIMEOUT',

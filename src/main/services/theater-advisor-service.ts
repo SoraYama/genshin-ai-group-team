@@ -22,6 +22,7 @@ import { TheaterPlanAgent, type TheaterPlanAgentRunner } from './theater-plan-ag
 import { buildUnknownKnowledgeContext, buildV2PipelineContext } from './v2-agent-context.js';
 import type { V2AgentStage } from './v2-agent-pipeline.js';
 import { renderV2Narrative } from './v2-narrative.js';
+import { resolveAdvisorAgentTimeoutMs } from './advisor-agent-timeout.js';
 
 export interface TheaterAdvisorServiceOptions {
   runner: TheaterPlanAgentRunner;
@@ -261,7 +262,7 @@ export class TheaterAdvisorService {
             timedOut = true;
             agentAbort.abort();
           },
-          Math.max(1, Math.min(this.options.agentTimeoutMs ?? 60_000, 120_000))
+          resolveAdvisorAgentTimeoutMs(this.options.agentTimeoutMs)
         );
         try {
           const base = {

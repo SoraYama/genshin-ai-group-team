@@ -333,6 +333,75 @@ describe('V2 deterministic context builder', () => {
     }
   });
 
+  it('drops only unselected character gaps when they would overflow the context budget', () => {
+    const baseline = validAbyssPlan();
+    const selectedIds = [
+      ...baseline.firstHalfTeam.characterIds,
+      ...baseline.secondHalfTeam.characterIds
+    ];
+    const selectedGaps = selectedIds.map((subjectId, index) => ({
+      id: `gap-selected-${index}`,
+      subjectId,
+      kind: 'missing' as const,
+      reason: 'Selected baseline knowledge is still unresolved.'
+    }));
+    const scenarioGap = {
+      id: 'gap-current-scenario',
+      subjectId: 'scenario:current-floor',
+      kind: 'missing' as const,
+      reason: 'Current scenario knowledge must remain explicit.'
+    };
+    const unselectedGaps = Array.from({ length: 120 }, (_, index) => ({
+      id: `gap-unselected-${index}`,
+      subjectId: String(8_300_000 + index),
+      kind: 'missing' as const,
+      reason: `Unselected character knowledge ${index}: ${'u'.repeat(400)}`
+    }));
+    const knowledge = knowledgeContextPacketSchema.parse({
+      knowledgeVersion: 'budget-character-gaps',
+      buildInterpretations: [],
+      trustedMatches: [],
+      ephemeralMatches: [],
+      unknowns: [...selectedGaps, scenarioGap, ...unselectedGaps],
+      coverage: {
+        requested: selectedGaps.length + 1 + unselectedGaps.length,
+        trusted: 0,
+        ephemeral: 0,
+        unknown: selectedGaps.length + 1 + unselectedGaps.length
+      },
+      citations: []
+    });
+
+    const context = buildV2PipelineContext({
+      correlationId: 'context-budget-character-gaps',
+      profile: profileFixture(),
+      feasibleBaseline: baseline,
+      eligibleCharacterIds: ABYSS_CHARACTERS.map(({ id }) => String(id)),
+      mechanics: [{ target: '12-1 上半', facts: ['元素盾'], unknowns: [] }],
+      interventions: { noBuildChange: true },
+      knowledge
+    });
+
+    expect(context.knowledge.unknowns).toEqual(
+      expect.arrayContaining([
+        ...selectedGaps,
+        scenarioGap,
+        expect.objectContaining({ kind: 'payload-truncated' })
+      ])
+    );
+    expect(
+      context.knowledge.unknowns.some(({ subjectId }) =>
+        unselectedGaps.some((gap) => gap.subjectId === subjectId)
+      )
+    ).toBe(false);
+    expect(context.knowledge.coverage).toEqual({
+      requested: selectedGaps.length + 2,
+      trusted: 0,
+      ephemeral: 0,
+      unknown: selectedGaps.length + 2
+    });
+  });
+
   it('drops low-priority fact details only after candidates and preserves selected builds, citations, mechanics, and all gaps', () => {
     const baseline = validAbyssPlan();
     const selectedIds = [

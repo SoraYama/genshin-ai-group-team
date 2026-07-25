@@ -808,6 +808,74 @@ describe('AbyssAdvisorService', () => {
     });
   });
 
+  it('limits live guide research to three baseline-priority gaps per recommendation', async () => {
+    const base = trustedPacket();
+    const gaps = ['1005', '1004', '1003', '1002', '1001'].map((subjectId, index) => ({
+      id: `gap-research-budget-${index}`,
+      subjectId,
+      kind: 'missing' as const,
+      reason: 'Character guide coverage is missing.'
+    }));
+    const characterPacket = knowledgeContextPacketSchema.parse({
+      ...base,
+      unknowns: gaps,
+      coverage: {
+        requested: base.trustedMatches.length + gaps.length,
+        trusted: base.trustedMatches.length,
+        ephemeral: 0,
+        unknown: gaps.length
+      }
+    });
+    const tasks = gaps.map((gap) => ({
+      key: `task-${gap.subjectId}`,
+      reason: 'missing' as const,
+      scenarioTags: ['multi-wave']
+    }));
+    const research = vi.fn(
+      async (
+        _input: Parameters<GuideResearchAgent['research']>[0]
+      ): Promise<GuideResearchAgentResult> => ({
+        entries: [],
+        gaps: [],
+        searchExecuted: false,
+        usage: { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 }
+      })
+    );
+
+    const result = await service({
+      runner: new FixtureRunner([validAbyssPlan()]),
+      apiKey: 'secret',
+      buildPacket: vi.fn((input: { scenarioTarget: { id: string } }) =>
+        input.scenarioTarget.id.endsWith(':characters') ? characterPacket : base
+      ),
+      coverageEvaluate: (packet, { targetKey }) =>
+        targetKey !== undefined || packet.unknowns.length === 0
+          ? { required: false, tasks: [], bindings: [] }
+          : {
+              required: true,
+              tasks,
+              bindings: tasks.map(({ key }, index) => ({
+                taskKey: key,
+                unknownIndexes: [index]
+              }))
+            },
+      research: { research }
+    }).recommend(
+      abyssInput({ lockedCharacterIds: ['1001', '1002', '1003'] })
+    );
+
+    expect(research).toHaveBeenCalledOnce();
+    expect(research.mock.calls[0]![0].tasks.map(({ key }) => key)).toEqual([
+      'task-1001',
+      'task-1002',
+      'task-1003'
+    ]);
+    expect(result).toMatchObject({
+      status: 'planned',
+      knowledgeSummary: { unknown: gaps.length }
+    });
+  });
+
   it('binds one anonymous research match to only one of two formerly colliding target gaps', async () => {
     const base = trustedPacket();
     const target = knowledgeContextPacketSchema.parse({
@@ -1612,6 +1680,48 @@ describe('AbyssAdvisorService', () => {
       }
     });
     expect(JSON.stringify(trace.latest())).not.toMatch(/body|secret|private-query/i);
+  });
+
+  it('treats a completed search with no trusted result as a non-fatal unresolved gap', async () => {
+    const trace = new AgentRunTraceStore();
+    const result = await service({
+      runner: new FixtureRunner(
+        [
+          validAbyssPlan({
+            confidence: 'low',
+            assumptions: ['1008：知识缺口，按低置信度保守使用。']
+          })
+        ],
+        'unknown-1008'
+      ),
+      apiKey: 'secret',
+      packet: packetWithGap(),
+      research: {
+        research: vi.fn(async (): Promise<GuideResearchAgentResult> => ({
+          entries: [],
+          gaps: [{ taskKey: 'anonymous-gap-task', code: 'SEARCH_NO_VALID_RESULTS' }],
+          searchExecuted: true,
+          usage: { inputTokens: 5, outputTokens: 2, estimatedCostUsd: 0.01 }
+        }))
+      },
+      trace,
+      coverageTasks: [
+        { key: 'anonymous-gap-task', reason: 'missing', scenarioTags: ['multi-wave'] }
+      ]
+    }).recommend(abyssInput());
+
+    expect(result).toMatchObject({
+      status: 'planned',
+      source: 'smart-service',
+      knowledgeSummary: { searched: true, ephemeral: 0, unknown: 1 }
+    });
+    expect(trace.latest()).toMatchObject({
+      status: 'completed',
+      finalSource: 'smart-service',
+      stages: expect.arrayContaining([
+        expect.objectContaining({ stage: 'research', status: 'completed' })
+      ])
+    });
   });
 
   it('records a correlated, redacted result audit with stable issue codes', async () => {

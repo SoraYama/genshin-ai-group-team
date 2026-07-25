@@ -57,6 +57,9 @@ import {
   AgentTurnError,
   safeAgentTurnFailureDetails
 } from './agent-turn-audit.js';
+import { resolveAdvisorAgentTimeoutMs } from './advisor-agent-timeout.js';
+
+const MAX_LIVE_GUIDE_RESEARCH_TASKS = 3;
 
 export interface AbyssAdvisorServiceOptions {
   runner: AbyssPlanAgentRunner;
@@ -315,14 +318,27 @@ export class AbyssAdvisorService {
       let finalPacket = trustedPacket;
       let finalTargetScopes = trustedTargetScopes;
       let searched = false;
-      if (coverage.required && apiKey !== undefined && this.options.research !== undefined) {
+      const researchCoverage = prioritizeGuideResearchCoverage({
+        coverage,
+        packet: trustedPacket,
+        priorityCharacterIds: [
+          ...input.lockedCharacterIds,
+          ...localPreflight.plan.firstHalfTeam.characterIds,
+          ...localPreflight.plan.secondHalfTeam.characterIds
+        ]
+      });
+      if (
+        researchCoverage.required &&
+        apiKey !== undefined &&
+        this.options.research !== undefined
+      ) {
         emit('researching-guides');
-        trace.startStage('research', `tasks=${coverage.tasks.length}`);
+        trace.startStage('research', `tasks=${researchCoverage.tasks.length}`);
         try {
           const researchResult = await abortable(
             this.options.research.research(
               {
-                tasks: coverage.tasks,
+                tasks: researchCoverage.tasks,
                 knowledgeVersion: trustedPacket.knowledgeVersion
               },
               { signal: requestAbort.signal }
@@ -334,7 +350,7 @@ export class AbyssAdvisorService {
           const mergedResearch = mergeEphemeralResearch(
             trustedPacket,
             trustedTargetScopes,
-            coverage,
+            researchCoverage,
             researchResult
           );
           finalPacket = mergedResearch.packet;
@@ -343,7 +359,10 @@ export class AbyssAdvisorService {
             .filter(({ trust }) => trust === 'ephemeral-web')
             .map(({ id }) => id);
           const firstGap = researchResult.gaps[0];
-          if (firstGap !== undefined || researchResult.failure !== undefined) {
+          const hasFatalGap = researchResult.gaps.some(
+            ({ code }) => code !== 'SEARCH_NO_VALID_RESULTS'
+          );
+          if (hasFatalGap || researchResult.failure !== undefined) {
             const failure = researchFailure(
               firstGap?.code ?? 'SEARCH_UNAVAILABLE',
               researchResult.failure
@@ -376,7 +395,9 @@ export class AbyssAdvisorService {
       } else {
         trace.skipStage(
           'research',
-          coverage.required ? 'Research provider unavailable.' : 'Trusted coverage is complete.'
+          researchCoverage.required
+            ? 'Research provider unavailable.'
+            : 'Trusted coverage is complete.'
         );
       }
       trace.updateKnowledge({
@@ -397,7 +418,7 @@ export class AbyssAdvisorService {
             timedOut = true;
             agentAbort.abort();
           },
-          Math.max(1, Math.min(this.options.agentTimeoutMs ?? 60_000, 120_000))
+          resolveAdvisorAgentTimeoutMs(this.options.agentTimeoutMs)
         );
         try {
           const pipelineContext = buildV2PipelineContext({
@@ -1251,6 +1272,63 @@ function combineKnowledgeCoverage(
           : { targetKeys: Array.from(binding.targetKeys) })
       };
     })
+  };
+}
+
+function prioritizeGuideResearchCoverage(input: {
+  coverage: KnowledgeCoverageEvaluation;
+  packet: KnowledgeContextPacket;
+  priorityCharacterIds: readonly string[];
+}): KnowledgeCoverageEvaluation {
+  if (!input.coverage.required || input.coverage.tasks.length === 0) {
+    return { required: false, tasks: [], bindings: [] };
+  }
+  const priorityIndex = new Map<string, number>();
+  input.priorityCharacterIds.forEach((id, index) => {
+    if (!priorityIndex.has(id)) priorityIndex.set(id, index);
+  });
+  const bindingByTaskKey = new Map(
+    input.coverage.bindings.map((binding) => [binding.taskKey, binding])
+  );
+  const unknownById = new Map(input.packet.unknowns.map((gap) => [gap.id, gap]));
+  const ranked = input.coverage.tasks.map((task, taskIndex) => {
+    const binding = bindingByTaskKey.get(task.key);
+    const subjectIds = new Set([
+      ...(binding?.unknownIds ?? []).flatMap((id) => {
+        const gap = unknownById.get(id);
+        return gap === undefined ? [] : [gap.subjectId];
+      }),
+      ...(binding?.unknownIndexes ?? []).flatMap((unknownIndex) => {
+        const gap = input.packet.unknowns[unknownIndex];
+        return gap === undefined ? [] : [gap.subjectId];
+      })
+    ]);
+    const characterPriority = Math.min(
+      ...Array.from(subjectIds).map((subjectId) => priorityIndex.get(subjectId) ?? Infinity)
+    );
+    return {
+      task,
+      taskIndex,
+      characterPriority,
+      hasCharacter: task.character !== undefined,
+      hasScenarioScope: task.scenarioTags.length > 0
+    };
+  });
+  ranked.sort(
+    (left, right) =>
+      left.characterPriority - right.characterPriority ||
+      Number(right.hasScenarioScope) - Number(left.hasScenarioScope) ||
+      Number(right.hasCharacter) - Number(left.hasCharacter) ||
+      left.taskIndex - right.taskIndex
+  );
+  const tasks = ranked
+    .slice(0, MAX_LIVE_GUIDE_RESEARCH_TASKS)
+    .map(({ task }) => task);
+  const selectedKeys = new Set(tasks.map(({ key }) => key));
+  return {
+    required: tasks.length > 0,
+    tasks,
+    bindings: input.coverage.bindings.filter(({ taskKey }) => selectedKeys.has(taskKey))
   };
 }
 

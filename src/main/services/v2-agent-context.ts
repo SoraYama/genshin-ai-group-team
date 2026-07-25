@@ -258,6 +258,12 @@ function compactUnselectedKnowledge(
   removed ||= ephemeralMatches.length !== knowledge.ephemeralMatches.length;
   knowledge.ephemeralMatches = ephemeralMatches;
 
+  const unknowns = knowledge.unknowns.filter(
+    ({ subjectId }) => !/^[1-9]\d*$/.test(subjectId) || selectedCharacterIds.has(subjectId)
+  );
+  removed ||= unknowns.length !== knowledge.unknowns.length;
+  knowledge.unknowns = unknowns;
+
   removed = removeUnreferencedCitations(knowledge) || removed;
   return removed;
 }

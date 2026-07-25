@@ -262,8 +262,25 @@ export async function runAuditedAgentTurn(options: {
             { cause: message, usage }
           );
         }
-        assertBoundedFinalText(message['result']);
-        resultText = message['result'];
+        let successfulResult = message['result'];
+        if (message['structured_output'] !== undefined) {
+          let structuredResult: string | undefined;
+          try {
+            structuredResult = JSON.stringify(message['structured_output']);
+          } catch {
+            // The SDK contract is JSON-shaped. Fail closed if a custom runner violates it.
+          }
+          if (structuredResult === undefined) {
+            throw new AgentTurnError(
+              'AGENT_TURN_RESULT_ERROR',
+              'Agent structured output could not be serialized',
+              { cause: message, usage }
+            );
+          }
+          successfulResult = structuredResult;
+        }
+        assertBoundedFinalText(successfulResult);
+        resultText = successfulResult;
         sawSuccessResult = true;
       }
       if (message['type'] === 'assistant' && isRecord(message['message'])) {
@@ -901,10 +918,10 @@ function parseWebSearchUrls(
     for (const content of result.content) {
       if (privacySafeResearchUrl(content.url) === undefined) return undefined;
       const normalizedUrl = normalizeResearchUrl(content.url);
-      if (normalizedUrl === undefined) return undefined;
+      if (normalizedUrl === undefined) continue;
       urls.push(normalizedUrl);
       if (urls.length > AGENT_TURN_WEB_SEARCH_MAX_URLS) return undefined;
     }
   }
-  return urls.length === 0 ? undefined : Array.from(new Set(urls));
+  return Array.from(new Set(urls));
 }

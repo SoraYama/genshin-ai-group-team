@@ -25,6 +25,7 @@ import {
 } from './agent-turn-audit.js';
 import { validateStygianPlan } from './stygian-plan-validator.js';
 import { runV2AgentPipeline, type V2AgentStage } from './v2-agent-pipeline.js';
+import { parseAgentJson } from './agent-json.js';
 
 export type StygianPlanAgentRunner = AuditedAgentRunner;
 
@@ -92,10 +93,8 @@ function validateAgentOutput(
   context: Pick<StygianPlanAgentInput, 'input' | 'scenario' | 'characters' | 'knowledge'>,
   tools: ToolAudit[]
 ): { ok: true; plan: StygianPlanOutput } | { ok: false; issues: StygianPlanIssue[] } {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
+  const parsed = parseAgentJson(raw);
+  if (parsed === undefined) {
     return invalidOutput('智能服务没有返回完整 JSON 方案。');
   }
   if (!isRecord(parsed)) return invalidOutput('智能服务返回的内容不是方案对象。');

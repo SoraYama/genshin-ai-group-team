@@ -15,6 +15,34 @@ import {
 import type { AgentSdkRunOptions } from '../../../src/main/services/agent-sdk-adapter.js';
 
 describe('runAuditedAgentTurn', () => {
+  it('uses the SDK structured output as the auditable final model payload', async () => {
+    const runner: AuditedAgentRunner = {
+      async *run() {
+        yield {
+          type: 'result',
+          subtype: 'success',
+          result: 'provider-rendered-placeholder',
+          structured_output: {
+            decision: 'accept',
+            issues: []
+          },
+          usage: { input_tokens: 12, output_tokens: 4 },
+          total_cost_usd: 0.01
+        };
+      }
+    };
+
+    const result = await runAuditedAgentTurn({
+      runner,
+      prompt: '{}',
+      sdkOptions: sdkOptions(),
+      systemPrompt: 'test'
+    });
+
+    expect(result.text).toBe('{"decision":"accept","issues":[]}');
+    expect(result.finalRawText).toBe(result.text);
+  });
+
   it('derives a stable opaque audit identity for real UI correlation values', () => {
     const correlation = 'abyss-1784952000000-1';
     const identity = auditCorrelationId(correlation);
@@ -153,15 +181,6 @@ describe('runAuditedAgentTurn', () => {
 
   it.each([
     [
-      'no result URL',
-      {
-        query: '原神 雷电将军 配队 攻略',
-        results: ['search commentary only'],
-        durationSeconds: 0.2,
-        searchCount: 1
-      }
-    ],
-    [
       'a mismatched nested tool-use ID',
       {
         query: '原神 雷电将军 配队 攻略',
@@ -183,20 +202,6 @@ describe('runAuditedAgentTurn', () => {
           {
             tool_use_id: 'search-shaped',
             content: [{ title: 'Guide', url: 'https://keqingmains.com/q/raiden' }]
-          }
-        ],
-        durationSeconds: 0.2,
-        searchCount: 1
-      }
-    ],
-    [
-      'an untrusted result URL',
-      {
-        query: '原神 雷电将军 配队 攻略',
-        results: [
-          {
-            tool_use_id: 'search-shaped',
-            content: [{ title: 'Guide', url: 'https://attacker.example/q/raiden' }]
           }
         ],
         durationSeconds: 0.2,
@@ -239,6 +244,47 @@ describe('runAuditedAgentTurn', () => {
     expect(result.webSearchEvidence.attempts[0]).toMatchObject({
       toolUseId: 'search-shaped',
       status: 'invalid',
+      urls: []
+    });
+  });
+
+  it.each([
+    [
+      'no result URL',
+      {
+        query: '原神 雷电将军 配队 攻略',
+        results: ['search commentary only'],
+        durationSeconds: 0.2,
+        searchCount: 1
+      }
+    ],
+    [
+      'only safe untrusted URLs',
+      {
+        query: '原神 雷电将军 配队 攻略',
+        results: [
+          {
+            tool_use_id: 'search-shaped',
+            content: [{ title: 'Guide', url: 'https://attacker.example/q/raiden' }]
+          }
+        ],
+        durationSeconds: 0.2,
+        searchCount: 1
+      }
+    ]
+  ])('resolves typed WebSearch output with %s to an empty trusted URL set', async (_label, toolUseResult) => {
+    const result = await runAuditedAgentTurn({
+      runner: sdkWebSearchRunner(toolUseResult),
+      prompt: '{}',
+      sdkOptions: sdkOptions(),
+      systemPrompt: 'test',
+      normalizeResearchUrl: trustedResearchUrl
+    });
+
+    expect(result.webSearchEvidence.attempts[0]).toEqual({
+      toolUseId: 'search-shaped',
+      query: '原神 雷电将军 配队 攻略',
+      status: 'resolved',
       urls: []
     });
   });
