@@ -44,20 +44,20 @@ export function AgentTraceDrawer({
         return;
       }
       if (event.key !== 'Tab') return;
-      const focusable = drawerRef.current?.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), summary, [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])'
-      );
-      if (!focusable || focusable.length === 0) {
+      const drawer = drawerRef.current;
+      const focusable = visibleFocusableElements(drawer);
+      if (!drawer || focusable.length === 0) {
         event.preventDefault();
-        drawerRef.current?.focus();
+        drawer?.focus();
         return;
       }
       const first = focusable[0]!;
       const last = focusable[focusable.length - 1]!;
-      if (event.shiftKey && document.activeElement === first) {
+      const activeElement = document.activeElement;
+      if (event.shiftKey && (activeElement === first || !drawer.contains(activeElement))) {
         event.preventDefault();
         last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
+      } else if (!event.shiftKey && (activeElement === last || !drawer.contains(activeElement))) {
         event.preventDefault();
         first.focus();
       }
@@ -196,7 +196,7 @@ function StageDetails({
 }) {
   const [copied, setCopied] = useState(false);
   const isEnglish = locale === 'en';
-  const raw = stage.rawOutput ?? stage.inputSummary ?? '';
+  const raw = stage.rawOutput;
 
   async function copyRaw() {
     if (!raw) return;
@@ -246,14 +246,29 @@ function StageDetails({
           <dd>{stage.failure ? `${stage.failure.code}: ${stage.failure.message}` : '—'}</dd>
         </div>
       </dl>
+      {stage.inputSummary && (
+        <div className="agent-trace-input-summary">
+          <strong>{isEnglish ? 'Input summary' : '输入摘要'}</strong>
+          <pre>{stage.inputSummary}</pre>
+        </div>
+      )}
       <div className="agent-trace-raw">
         <div>
-          <strong>{isEnglish ? 'Raw output' : '原文'}</strong>
-          <button type="button" disabled={!raw} onClick={() => void copyRaw()}>
-            {copied ? (isEnglish ? 'Copied' : '已复制') : isEnglish ? 'Copy' : '复制'}
-          </button>
+          <strong>{isEnglish ? 'Model raw output' : '模型原文'}</strong>
+          {raw && (
+            <button
+              type="button"
+              aria-label={isEnglish ? 'Copy model raw output' : '复制模型原文'}
+              onClick={() => void copyRaw()}
+            >
+              {copied ? (isEnglish ? 'Copied' : '已复制') : isEnglish ? 'Copy' : '复制'}
+            </button>
+          )}
         </div>
-        <pre>{raw || (isEnglish ? 'No raw text recorded.' : '未记录原文。')}</pre>
+        <pre>
+          {raw ||
+            (isEnglish ? 'No model raw output was recorded for this stage.' : '该阶段无模型原文。')}
+        </pre>
       </div>
       {(stage.truncated ||
         stage.rawMessagesSummary?.truncated ||
@@ -281,4 +296,28 @@ function formatTime(value: string, locale: PresentationLocale): string {
 
 function formatDuration(value: number): string {
   return value < 1000 ? `${Math.round(value)}ms` : `${(value / 1000).toFixed(2)}s`;
+}
+
+function visibleFocusableElements(root: HTMLElement | null): HTMLElement[] {
+  if (!root) return [];
+  return Array.from(
+    root.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), summary, [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )
+  ).filter((element) => {
+    if (element.hidden || element.closest('[hidden], [inert]')) return false;
+    const collapsedDetails = element.closest('details:not([open])');
+    if (
+      collapsedDetails &&
+      !(element.tagName === 'SUMMARY' && element.parentElement === collapsedDetails)
+    ) {
+      return false;
+    }
+    const style = window.getComputedStyle(element);
+    return (
+      style.display !== 'none' &&
+      style.visibility !== 'hidden' &&
+      element.getClientRects().length > 0
+    );
+  });
 }

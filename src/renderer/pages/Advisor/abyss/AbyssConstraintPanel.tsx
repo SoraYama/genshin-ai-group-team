@@ -10,7 +10,6 @@ import {
 interface AbyssConstraintPanelProps {
   locale: PresentationLocale;
   characters: CharacterProfile[];
-  search: string;
   preferences: PlayerPreferences;
   interventions: Record<string, CharacterInterventionState>;
   lockedCharacterIds: string[];
@@ -19,7 +18,6 @@ interface AbyssConstraintPanelProps {
   blocked: boolean;
   resultNeedsUpdate: boolean;
   canRecomputeHalf: boolean;
-  onSearch: (value: string) => void;
   onTogglePreference: (key: keyof PlayerPreferences) => void;
   onCycleCharacter: (id: string) => void;
   onGenerate: (half?: 'firstHalf' | 'secondHalf') => void;
@@ -29,7 +27,6 @@ interface AbyssConstraintPanelProps {
 export function AbyssConstraintPanel({
   locale,
   characters,
-  search,
   preferences,
   interventions,
   lockedCharacterIds,
@@ -38,7 +35,6 @@ export function AbyssConstraintPanel({
   blocked,
   resultNeedsUpdate,
   canRecomputeHalf,
-  onSearch,
   onTogglePreference,
   onCycleCharacter,
   onGenerate,
@@ -94,20 +90,6 @@ export function AbyssConstraintPanel({
             onClick={() => onTogglePreference('noBuildChange')}
           />
         </div>
-
-        <label className="abyss-roster-search">
-          <span className="gta-visually-hidden">
-            {isEnglish ? 'Search available characters' : '搜索可用角色'}
-          </span>
-          <input
-            type="search"
-            aria-label={isEnglish ? 'Search available characters' : '搜索可用角色'}
-            placeholder={isEnglish ? 'Filter roster' : '筛选角色'}
-            value={search}
-            onChange={(event) => onSearch(event.target.value)}
-          />
-          <span>{isEnglish ? `${characters.length} shown` : `显示 ${characters.length} 名`}</span>
-        </label>
 
         <div
           className="abyss-roster-grid"

@@ -118,7 +118,6 @@ export function AbyssWorkspace({
           <AbyssConstraintPanel
             locale={workbench.language}
             characters={workbench.characters}
-            search={workbench.search}
             preferences={workbench.preferences}
             interventions={workbench.interventions}
             lockedCharacterIds={workbench.lockedCharacterIds}
@@ -127,7 +126,6 @@ export function AbyssWorkspace({
             blocked={generationBlocked}
             resultNeedsUpdate={workbench.resultNeedsUpdate}
             canRecomputeHalf={workbench.result?.status === 'planned'}
-            onSearch={workbench.setSearch}
             onTogglePreference={workbench.togglePreference}
             onCycleCharacter={workbench.cycleCharacter}
             onGenerate={(half) => void workbench.generatePlan(half)}

@@ -47,7 +47,6 @@ export function useAbyssWorkbench({
   const [interventions, setInterventions] = useState<Record<string, CharacterInterventionState>>(
     {}
   );
-  const [search, setSearch] = useState('');
   const [result, setResult] = useState<AbyssAdvisorResult | null>(null);
   const [resultNeedsUpdate, setResultNeedsUpdate] = useState(false);
   const [activeStep, setActiveStep] = useState<AbyssAdvisorProgressStep | null>(null);
@@ -172,13 +171,11 @@ export function useAbyssWorkbench({
     [];
   const characters = useMemo(
     () =>
-      (profile?.characters ?? [])
-        .filter(({ name }) => name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))
-        .sort(
-          (left, right) =>
-            (right.level ?? 0) - (left.level ?? 0) || left.name.localeCompare(right.name)
-        ),
-    [profile, search]
+      [...(profile?.characters ?? [])].sort(
+        (left, right) =>
+          (right.level ?? 0) - (left.level ?? 0) || left.name.localeCompare(right.name)
+      ),
+    [profile]
   );
   const lockedCharacterIds = Object.entries(interventions)
     .filter(([, state]) => state === 'locked')
@@ -318,7 +315,6 @@ export function useAbyssWorkbench({
     preferences,
     interventions,
     characters,
-    search,
     result,
     resultNeedsUpdate,
     activeStep,
@@ -332,7 +328,6 @@ export function useAbyssWorkbench({
     trace,
     traceLoading,
     traceError,
-    setSearch,
     chooseFloor,
     chooseChamber,
     togglePreference,

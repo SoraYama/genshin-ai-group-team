@@ -96,19 +96,19 @@
     "maxDistance": 20
   },
   "abyss-input-and-result-1024x768": {
-    "hash": "607a60fa9af6b920a33e23c6d1ced154aaa8aaaa6d6a6d6a7c787b5d20e280fa",
+    "hash": "607a60fa9af6b920a23e33c631cec154aaa8aaaa6d6a6d6a6c787b5d00e280f2",
     "maxDistance": 20
   },
   "abyss-input-and-result-1280x800": {
-    "hash": "60fae0fa9122953e55ce11ccc1f6a1a9a2aacd266d2b7d687210504210e8c0f6",
+    "hash": "60fae0fa9122953e15ce44ccc1f6a1a9a2aacd266d2b7d687210504210e8c0f6",
     "maxDistance": 20
   },
   "abyss-input-and-result-1440x900": {
-    "hash": "40fe90faa060d59a11a85d48c9aaa001aaaa6d2f6d6a701032d600010001d0f6",
+    "hash": "40fe90faa060559a55a8ccc8c9aaa001aaaa6d2f6d6a701032d600010001d0f6",
     "maxDistance": 20
   },
   "abyss-input-and-result-1600x1000": {
-    "hash": "e0f8b0faa16cd5ce19eec482c5e6a000eaa24d3a7ce8729c208e0002000280f6",
+    "hash": "e0f8b0faa16c19cec4eec482c5e6a000eaa24d3a7ce8729c208e0002000280f6",
     "maxDistance": 20
   },
   "stygian-input-and-result-1024x768": {

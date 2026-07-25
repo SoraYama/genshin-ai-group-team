@@ -1087,9 +1087,10 @@ test('runs the abyss-specific development-sample flow with accessible interventi
   await expect(page.getByRole('button', { name: /Stygian Onslaught/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /Imaginarium Theater/ })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Spiral Abyss planner' })).toBeVisible();
-  await expect(page.getByRole('searchbox', { name: 'Search available characters' })).toBeVisible();
+  await expect(page.getByRole('searchbox', { name: 'Search available characters' })).toHaveCount(0);
+  await expect(page.getByText(/10 shown/u)).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Generate both teams' })).toBeVisible();
-  await expectNoChineseChrome(/选择挑战|深境螺旋战线|搜索可用角色|生成上下半方案|配队进度/u);
+  await expectNoChineseChrome(/选择挑战|深境螺旋战线|生成上下半方案|配队进度/u);
   await switchToChinese();
   await expect(page.getByRole('heading', { name: '深境螺旋战线' })).toBeVisible();
 
@@ -1144,10 +1145,9 @@ test('runs the abyss-specific development-sample flow with accessible interventi
       .evaluate((element) => element.ownerDocument.defaultView?.getComputedStyle(element).boxShadow)
   ).not.toBe('none');
 
-  const rosterSearch = page.getByRole('searchbox', { name: '搜索可用角色' });
-  await rosterSearch.fill('演练角色1');
+  await expect(page.getByRole('searchbox', { name: '搜索可用角色' })).toHaveCount(0);
+  await expect(page.getByText(/显示 \d+ 名/u)).toHaveCount(0);
   await expect(page.getByText('演练角色1', { exact: true })).toBeVisible();
-  await rosterSearch.fill('');
   const firstCharacter = page.getByRole('button', { name: /演练角色1，当前：未设置/ });
   await firstCharacter.focus();
   await page.keyboard.press('Enter');
@@ -1196,6 +1196,26 @@ test('runs the abyss-specific development-sample flow with accessible interventi
   await expect(traceDialog).toContainText('Token');
   await expect(traceDialog).toContainText('耗时');
   await expect(traceDialog).toContainText('错误');
+  const knowledgeStage = traceDialog
+    .locator('details')
+    .filter({ has: page.getByText('knowledge', { exact: true }) });
+  await expect(knowledgeStage).toContainText('输入摘要');
+  await expect(knowledgeStage).toContainText('candidates=9');
+  await expect(knowledgeStage).toContainText('模型原文');
+  await expect(knowledgeStage).toContainText('该阶段无模型原文');
+  await expect(knowledgeStage.getByRole('button', { name: '复制模型原文' })).toHaveCount(0);
+  const closeTraceButton = traceDialog.getByRole('button', { name: '关闭' });
+  await expect(closeTraceButton).toBeFocused();
+  const lastVisibleTraceControl = traceDialog.locator('summary').last();
+  await page.keyboard.press('Shift+Tab');
+  await expect(lastVisibleTraceControl).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(closeTraceButton).toBeFocused();
+  expect(
+    await page.evaluate(
+      `document.querySelector('[role="dialog"]')?.contains(document.activeElement) ?? false`
+    )
+  ).toBe(true);
   await page.keyboard.press('Escape');
   await expect(traceDialog).toBeHidden();
   await expect(traceTrigger).toBeFocused();
@@ -1203,6 +1223,20 @@ test('runs the abyss-specific development-sample flow with accessible interventi
 
   await switchToEnglish();
   await expect(page.getByRole('heading', { name: 'Spiral Abyss planner' })).toBeVisible();
+  await page.getByRole('button', { name: 'Model run record' }).click();
+  const englishTraceDialog = page.getByRole('dialog', { name: 'Model run record' });
+  const englishKnowledgeStage = englishTraceDialog
+    .locator('details')
+    .filter({ has: page.getByText('knowledge', { exact: true }) });
+  await expect(englishKnowledgeStage).toContainText('Input summary');
+  await expect(englishKnowledgeStage).toContainText('Model raw output');
+  await expect(englishKnowledgeStage).toContainText(
+    'No model raw output was recorded for this stage.'
+  );
+  await expect(
+    englishKnowledgeStage.getByRole('button', { name: 'Copy model raw output' })
+  ).toHaveCount(0);
+  await page.keyboard.press('Escape');
   await expect(
     page.getByRole('heading', { name: 'No character overlap between halves' })
   ).toBeVisible();
