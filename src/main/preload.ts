@@ -36,9 +36,15 @@ async function invoke<C extends IpcChannel>(
   const envelope = (await ipcRenderer.invoke(channel, payload)) as Envelope<IpcContract[C]['res']>;
 
   if (!envelope.ok) {
-    const error = new Error(envelope.error.message) as Error & { code?: string };
-    error.code = envelope.error.code;
-    throw error;
+    // Electron serializes Error instances across contextBridge using only
+    // their standard fields, which drops a custom `code` property. Rejecting
+    // with this plain record keeps the stable IPC code available to the
+    // renderer's localization layer.
+    throw {
+      name: 'IpcError',
+      code: envelope.error.code,
+      message: envelope.error.message
+    };
   }
 
   return envelope.data;

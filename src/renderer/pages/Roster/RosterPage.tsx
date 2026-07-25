@@ -131,12 +131,19 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
       ? undefined
       : verifiedProfile?.characters.find((character) => character.id === selectedCharacterId);
 
-  const restoreRosterFocus = useCallback((preferred?: HTMLElement | null) => {
+  const scheduleRosterFocus = useCallback((resolveTarget: () => HTMLElement | null) => {
     if (focusFrameRef.current !== null) cancelAnimationFrame(focusFrameRef.current);
     focusFrameRef.current = requestAnimationFrame(() => {
       focusFrameRef.current = requestAnimationFrame(() => {
         focusFrameRef.current = null;
         if (!mountedRef.current) return;
+        resolveTarget()?.focus();
+      });
+    });
+  }, []);
+  const restoreRosterFocus = useCallback(
+    (preferred?: HTMLElement | null) => {
+      scheduleRosterFocus(() => {
         const activeTab =
           document.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]') ??
           (activeUidRef.current
@@ -147,10 +154,11 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
           (searchInputRef.current?.isConnected ? searchInputRef.current : null) ??
           (rosterGridRef.current?.isConnected ? rosterGridRef.current : null) ??
           activeTab;
-        target?.focus();
+        return target;
       });
-    });
-  }, []);
+    },
+    [scheduleRosterFocus]
+  );
 
   useEffect(() => {
     if (selectedCharacterId === null) return;
@@ -164,19 +172,63 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
     restoreRosterFocus(trigger);
   }, [restoreRosterFocus, selectedCharacterId, verifiedProfile]);
 
-  async function handleSetActive(uid: string) {
-    if (uid === activeUidRef.current) return;
-    requestGenerationRef.current += 1;
-    setProfile(null);
-    setLastRefresh(null);
-    selectedTileRef.current = null;
-    setSelectedCharacterId(null);
-    await api.profile.setActive({ uid });
-    if (!mountedRef.current) return;
-    setQuery('');
-    setElementFilter('all');
-    setSortMode('default');
-    await onStateChange();
+  async function handleSetActive(uid: string): Promise<boolean> {
+    const previousUid = activeUidRef.current;
+    if (uid === previousUid) return true;
+    const generation = ++requestGenerationRef.current;
+    setStatus({ kind: 'loading', label: t('common.loading') });
+    try {
+      await api.profile.setActive({ uid });
+      if (!mountedRef.current) return false;
+      if (generation !== requestGenerationRef.current || activeUidRef.current !== previousUid) {
+        await restorePersistedActiveUid();
+        return false;
+      }
+      try {
+        await onStateChange();
+      } catch (error) {
+        if (previousUid) {
+          try {
+            await api.profile.setActive({ uid: previousUid });
+          } catch {
+            // Preserve the already rendered profile even if rollback cannot
+            // reach main; the next explicit retry reconciles both processes.
+          }
+        }
+        if (
+          mountedRef.current &&
+          generation === requestGenerationRef.current &&
+          activeUidRef.current === previousUid
+        ) {
+          setStatus({
+            kind: 'error',
+            message: localizeError(error, locale, t, 'roster.error.activate')
+          });
+        }
+        return false;
+      }
+      if (!mountedRef.current || generation !== requestGenerationRef.current) return false;
+      setQuery('');
+      setElementFilter('all');
+      setSortMode('default');
+      setLastRefresh(null);
+      selectedTileRef.current = null;
+      setSelectedCharacterId(null);
+      setStatus({ kind: 'idle' });
+      return true;
+    } catch (error) {
+      if (
+        mountedRef.current &&
+        generation === requestGenerationRef.current &&
+        activeUidRef.current === previousUid
+      ) {
+        setStatus({
+          kind: 'error',
+          message: localizeError(error, locale, t, 'roster.error.activate')
+        });
+      }
+      return false;
+    }
   }
 
   function handleAccountTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
@@ -190,9 +242,11 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
     event.preventDefault();
     const nextProfile = state.profiles[nextIndex];
     if (nextProfile) {
-      void handleSetActive(nextProfile.uid).then(() => {
-        requestAnimationFrame(() =>
-          document.getElementById(`profile-tab-${nextProfile.uid}`)?.focus()
+      void handleSetActive(nextProfile.uid).then((switched) => {
+        scheduleRosterFocus(() =>
+          document.getElementById(
+            `profile-tab-${switched ? nextProfile.uid : (activeUidRef.current ?? nextProfile.uid)}`
+          )
         );
       });
     }
@@ -290,7 +344,7 @@ export function RosterPage({ state, onStateChange, onGotoOnboarding }: RosterPag
   }
 
   async function handleDelete() {
-    if (!activeUid || verifiedProfile?.uid !== activeUid) return;
+    if (status.kind === 'loading' || !activeUid || verifiedProfile?.uid !== activeUid) return;
     await api.profile.delete({ uid: activeUid });
     if (!mountedRef.current) return;
     await onStateChange();

@@ -210,6 +210,7 @@ function migrateLegacyProfile(value: unknown): PersistedProfile {
 
 export class ProfileStore {
   private readonly store: Store<ProfileStoreSchema>;
+  private readonly mutationRevisionByUid = new Map<string, number>();
 
   constructor() {
     this.store = new Store<ProfileStoreSchema>({ name: 'profiles', defaults: DEFAULTS });
@@ -290,6 +291,27 @@ export class ProfileStore {
   }
 
   upsert(profile: PersistedProfile): void {
+    this.advanceMutationRevision(profile.uid);
+    this.writeProfile(profile);
+  }
+
+  captureMutationRevision(uid: string): number {
+    return this.mutationRevisionByUid.get(uid) ?? 0;
+  }
+
+  upsertIfCurrent(
+    profile: PersistedProfile,
+    expectedRevision: number,
+    options: { activate?: boolean } = {}
+  ): boolean {
+    if (this.captureMutationRevision(profile.uid) !== expectedRevision) return false;
+    this.advanceMutationRevision(profile.uid);
+    this.writeProfile(profile);
+    if (options.activate) this.store.set('activeUid', profile.uid);
+    return true;
+  }
+
+  private writeProfile(profile: PersistedProfile): void {
     const all = this.getAll();
     all[profile.uid] = profile;
     this.store.set('profilesByUid', all);
@@ -331,6 +353,7 @@ export class ProfileStore {
   }
 
   remove(uid: string): boolean {
+    this.advanceMutationRevision(uid);
     const all = this.getAll();
     if (!(uid in all)) return false;
     delete all[uid];
@@ -400,10 +423,16 @@ export class ProfileStore {
   }
 
   clearAll(): number {
-    const count = Object.keys(this.getAll()).length;
+    const uids = Object.keys(this.getAll());
+    for (const uid of uids) this.advanceMutationRevision(uid);
+    const count = uids.length;
     this.store.set('profilesByUid', {});
     this.store.delete('activeUid');
     return count;
+  }
+
+  private advanceMutationRevision(uid: string): void {
+    this.mutationRevisionByUid.set(uid, this.captureMutationRevision(uid) + 1);
   }
 
   private getAll(): Record<string, PersistedProfile> {

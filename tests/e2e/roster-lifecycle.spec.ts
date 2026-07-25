@@ -53,10 +53,16 @@ test.beforeEach(() => {
 });
 
 test.afterEach(async () => {
-  expect(rendererErrors).toEqual([]);
-  expect(rendererExternalRequests).toEqual([]);
-  await electronApp?.close();
-  if (userDataDir) await rm(userDataDir, { recursive: true, force: true });
+  try {
+    expect(rendererErrors).toEqual([]);
+    expect(rendererExternalRequests).toEqual([]);
+  } finally {
+    try {
+      await electronApp?.close();
+    } finally {
+      if (userDataDir) await rm(userDataDir, { recursive: true, force: true });
+    }
+  }
 });
 
 function makeCharacter(
@@ -111,6 +117,347 @@ function makeProfile(
     }
   };
 }
+
+async function persistProfiles(
+  profiles: readonly PersistedProfile[],
+  activeUid: string
+): Promise<void> {
+  const lifecycleUserData = userDataDir ?? (await prepareUserData());
+  await writeFile(
+    path.join(lifecycleUserData, 'profiles.json'),
+    JSON.stringify({
+      schemaVersion: 2,
+      activeUid,
+      profilesByUid: Object.fromEntries(profiles.map((profile) => [profile.uid, profile]))
+    })
+  );
+}
+
+test('keeps the current account usable when activation or state reload fails', async () => {
+  const uidA = '100000001';
+  const uidB = '100000002';
+  const profileA = makeProfile(uidA, '账号 A', 'A 保留角色', '2026-07-25T00:00:00.000Z');
+  const profileB = makeProfile(uidB, '账号 B', 'B 切换角色', '2026-07-25T00:01:00.000Z');
+  await persistProfiles([profileA, profileB], uidA);
+  const rosterPage = await launchApp();
+  await expect(rosterPage.getByText('A 保留角色', { exact: true })).toBeVisible();
+
+  await electronApp?.evaluate(
+    ({ ipcMain }, input) => {
+      const scope = globalThis as typeof globalThis & {
+        __gtaActivationFailure?: {
+          activeUid: string;
+          failNextState: boolean;
+          setActivePayloads: string[];
+        };
+      };
+      scope.__gtaActivationFailure = {
+        activeUid: input.uidA,
+        failNextState: false,
+        setActivePayloads: []
+      };
+      ipcMain.removeHandler('profile:set-active');
+      ipcMain.handle('profile:set-active', (_event, payload: { uid: string }) => {
+        const harness = scope.__gtaActivationFailure;
+        if (!harness) throw new Error('Missing activation failure harness');
+        harness.setActivePayloads.push(payload.uid);
+        if (payload.uid === input.uidB && harness.setActivePayloads.length === 1) {
+          return {
+            ok: false,
+            error: {
+              code: 'IPC_UPSTREAM_UNAVAILABLE',
+              message: 'simulated set-active failure'
+            }
+          };
+        }
+        harness.activeUid = payload.uid;
+        if (payload.uid === input.uidB && harness.setActivePayloads.length === 2) {
+          harness.failNextState = true;
+        }
+        return { ok: true, data: { ok: true } };
+      });
+      ipcMain.removeHandler('profile:state');
+      ipcMain.handle('profile:state', () => {
+        const harness = scope.__gtaActivationFailure;
+        if (!harness) throw new Error('Missing activation failure harness');
+        if (harness.failNextState) {
+          harness.failNextState = false;
+          return {
+            ok: false,
+            error: {
+              code: 'IPC_UPSTREAM_UNAVAILABLE',
+              message: 'simulated state reload failure'
+            }
+          };
+        }
+        return {
+          ok: true,
+          data: {
+            activeUid: harness.activeUid,
+            profiles: input.profiles.map((profile) => ({
+              uid: profile.uid,
+              nickname: profile.nickname,
+              level: profile.level,
+              source: profile.source,
+              fetchedAt: profile.fetchedAt,
+              characterCount: profile.characters.length,
+              coverage: profile.coverage
+            }))
+          }
+        };
+      });
+    },
+    { profiles: [profileA, profileB], uidA, uidB }
+  );
+
+  const tabA = rosterPage.getByRole('tab', { name: /账号 A/ });
+  const tabB = rosterPage.getByRole('tab', { name: /账号 B/ });
+  const localizedError = rosterPage.getByRole('alert');
+
+  await tabB.click();
+  await expect(localizedError).toHaveText('外部服务暂时不可用，请稍后重试。');
+  await expect(tabA).toHaveAttribute('aria-selected', 'true');
+  await expect(rosterPage.getByText('A 保留角色', { exact: true })).toBeVisible();
+
+  await tabB.click();
+  await expect(localizedError).toHaveText('外部服务暂时不可用，请稍后重试。');
+  await expect(tabA).toHaveAttribute('aria-selected', 'true');
+  await expect(rosterPage.getByText('A 保留角色', { exact: true })).toBeVisible();
+  await expect
+    .poll(() =>
+      electronApp?.evaluate(() => {
+        const scope = globalThis as typeof globalThis & {
+          __gtaActivationFailure?: { activeUid: string };
+        };
+        return scope.__gtaActivationFailure?.activeUid;
+      })
+    )
+    .toBe(uidA);
+
+  await tabB.click();
+  await expect(tabB).toHaveAttribute('aria-selected', 'true');
+  await expect(rosterPage.getByText('B 切换角色', { exact: true })).toBeVisible();
+});
+
+test('keeps deleted UIDs absent when pending refresh and import responses settle', async () => {
+  const uidA = '100000001';
+  const uidB = '100000002';
+  const profileA = makeProfile(uidA, '账号 A', 'A 待刷新角色', '2026-07-25T00:10:00.000Z');
+  const profileB = makeProfile(uidB, '账号 B', 'B 待导入角色', '2026-07-25T00:11:00.000Z');
+  await persistProfiles([profileA, profileB], uidA);
+  const rosterPage = await launchApp();
+  await expect(rosterPage.getByText('A 待刷新角色', { exact: true })).toBeVisible();
+
+  await electronApp?.evaluate(
+    ({ ipcMain }, input) => {
+      type PendingMutation = {
+        uid: string;
+        revision: number;
+        resolve: (value: unknown) => void;
+      };
+      const scope = globalThis as typeof globalThis & {
+        __gtaMutationLifecycle?: {
+          activeUid?: string;
+          pendingImport?: PendingMutation;
+          pendingRefresh?: PendingMutation;
+          profiles: Record<string, (typeof input.profiles)[number]>;
+          revisions: Record<string, number>;
+        };
+      };
+      const profiles = Object.fromEntries(
+        input.profiles.map((profile) => [profile.uid, profile])
+      ) as Record<string, (typeof input.profiles)[number]>;
+      scope.__gtaMutationLifecycle = {
+        activeUid: input.uidA,
+        profiles,
+        revisions: { [input.uidA]: 0, [input.uidB]: 0 }
+      };
+      const state = () => {
+        const harness = scope.__gtaMutationLifecycle;
+        if (!harness) throw new Error('Missing mutation lifecycle harness');
+        return {
+          activeUid: harness.activeUid,
+          profiles: Object.values(harness.profiles).map((profile) => ({
+            uid: profile.uid,
+            nickname: profile.nickname,
+            level: profile.level,
+            source: profile.source,
+            fetchedAt: profile.fetchedAt,
+            characterCount: profile.characters.length,
+            coverage: profile.coverage
+          }))
+        };
+      };
+      ipcMain.removeHandler('profile:state');
+      ipcMain.handle('profile:state', () => ({ ok: true, data: state() }));
+      ipcMain.removeHandler('profile:get');
+      ipcMain.handle('profile:get', (_event, payload: { uid: string }) => ({
+        ok: true,
+        data: scope.__gtaMutationLifecycle?.profiles[payload.uid] ?? null
+      }));
+      ipcMain.removeHandler('profile:refresh');
+      ipcMain.handle('profile:refresh', (_event, payload: { uid: string }) => {
+        const harness = scope.__gtaMutationLifecycle;
+        if (!harness) throw new Error('Missing mutation lifecycle harness');
+        return new Promise((resolve) => {
+          harness.pendingRefresh = {
+            uid: payload.uid,
+            revision: harness.revisions[payload.uid] ?? 0,
+            resolve
+          };
+        });
+      });
+      ipcMain.removeHandler('profile:import-from-session');
+      ipcMain.handle('profile:import-from-session', (_event, payload: { uid?: string }) => {
+        const harness = scope.__gtaMutationLifecycle;
+        if (!harness || !payload.uid) throw new Error('Missing import target');
+        return new Promise((resolve) => {
+          harness.pendingImport = {
+            uid: payload.uid as string,
+            revision: harness.revisions[payload.uid as string] ?? 0,
+            resolve
+          };
+        });
+      });
+      ipcMain.removeHandler('profile:delete');
+      ipcMain.handle('profile:delete', (_event, payload: { uid: string }) => {
+        const harness = scope.__gtaMutationLifecycle;
+        if (!harness) throw new Error('Missing mutation lifecycle harness');
+        harness.revisions[payload.uid] = (harness.revisions[payload.uid] ?? 0) + 1;
+        delete harness.profiles[payload.uid];
+        if (harness.activeUid === payload.uid) {
+          harness.activeUid = Object.keys(harness.profiles)[0];
+        }
+        return { ok: true, data: { ok: true } };
+      });
+    },
+    { profiles: [profileA, profileB], uidA, uidB }
+  );
+
+  const pendingMutation = (kind: 'pendingRefresh' | 'pendingImport') =>
+    electronApp?.evaluate((_electron, pendingKind) => {
+      const scope = globalThis as typeof globalThis & {
+        __gtaMutationLifecycle?: {
+          pendingImport?: { uid: string };
+          pendingRefresh?: { uid: string };
+        };
+      };
+      return scope.__gtaMutationLifecycle?.[pendingKind]?.uid;
+    }, kind);
+  const resolveMutation = (kind: 'pendingRefresh' | 'pendingImport', profile: PersistedProfile) =>
+    electronApp?.evaluate(
+      (_electron, input) => {
+        type PendingMutation = {
+          uid: string;
+          revision: number;
+          resolve: (value: unknown) => void;
+        };
+        const scope = globalThis as typeof globalThis & {
+          __gtaMutationLifecycle?: {
+            activeUid?: string;
+            pendingImport?: PendingMutation;
+            pendingRefresh?: PendingMutation;
+            profiles: Record<string, typeof input.profile>;
+            revisions: Record<string, number>;
+          };
+        };
+        const harness = scope.__gtaMutationLifecycle;
+        const pending = harness?.[input.kind];
+        if (!harness || !pending) throw new Error(`Missing ${input.kind}`);
+        harness[input.kind] = undefined;
+        if ((harness.revisions[pending.uid] ?? 0) !== pending.revision) {
+          pending.resolve({
+            ok: false,
+            error: {
+              code: 'IPC_SELECTION_CHANGED',
+              message: 'stale profile mutation'
+            }
+          });
+          return;
+        }
+        harness.revisions[pending.uid] = pending.revision + 1;
+        harness.profiles[pending.uid] = input.profile;
+        if (input.kind === 'pendingImport') harness.activeUid = pending.uid;
+        pending.resolve(
+          input.kind === 'pendingRefresh'
+            ? {
+                ok: true,
+                data: {
+                  profile: input.profile,
+                  summary: {
+                    enka: 'ok',
+                    enkaCharacterCount: input.profile.characters.length,
+                    miyoushe: 'no-cookie',
+                    miyousheCharacterCount: 0,
+                    totalCharacterCount: input.profile.characters.length
+                  }
+                }
+              }
+            : { ok: true, data: input.profile }
+        );
+      },
+      { kind, profile }
+    );
+
+  await rosterPage.getByRole('button', { name: '更新角色资料' }).click();
+  await expect.poll(() => pendingMutation('pendingRefresh')).toBe(uidA);
+  await rosterPage.getByRole('button', { name: '账号维护' }).click();
+  await expect(rosterPage.getByRole('menuitem', { name: '删除本机角色资料' })).toBeDisabled();
+  await rosterPage.evaluate((uid) => {
+    const renderer = globalThis as unknown as {
+      api: { profile: { delete: (input: { uid: string }) => Promise<unknown> } };
+    };
+    return renderer.api.profile.delete({ uid });
+  }, uidA);
+  await resolveMutation(
+    'pendingRefresh',
+    makeProfile(uidA, '账号 A', 'A 迟到刷新角色', '2026-07-25T00:12:00.000Z')
+  );
+  await expect(rosterPage.getByRole('alert')).toHaveText(
+    '本地数据在请求期间发生变化，本次结果未提交。请刷新后重试。'
+  );
+  await expect
+    .poll(() => rosterPage.evaluate('window.api.profile.state()'))
+    .toMatchObject({ activeUid: uidB, profiles: [{ uid: uidB }] });
+
+  const importPromise = rosterPage.evaluate(async (uid) => {
+    const renderer = globalThis as unknown as {
+      api: {
+        profile: {
+          importFromSession: (input: { sessionId: string; uid: string }) => Promise<unknown>;
+        };
+      };
+    };
+    try {
+      await renderer.api.profile.importFromSession({ sessionId: 'pending-session', uid });
+      return { ok: true as const };
+    } catch (error) {
+      return {
+        ok: false as const,
+        code:
+          typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : ''
+      };
+    }
+  }, uidB);
+  await expect.poll(() => pendingMutation('pendingImport')).toBe(uidB);
+  await rosterPage.evaluate((uid) => {
+    const renderer = globalThis as unknown as {
+      api: { profile: { delete: (input: { uid: string }) => Promise<unknown> } };
+    };
+    return renderer.api.profile.delete({ uid });
+  }, uidB);
+  await resolveMutation(
+    'pendingImport',
+    makeProfile(uidB, '账号 B', 'B 迟到导入角色', '2026-07-25T00:13:00.000Z')
+  );
+  await expect(importPromise).resolves.toEqual({
+    ok: false,
+    code: 'IPC_SELECTION_CHANGED'
+  });
+  await expect
+    .poll(() => rosterPage.evaluate('window.api.profile.state()'))
+    .toEqual({ activeUid: undefined, profiles: [] });
+});
 
 test('keeps roster content and delete target aligned with the latest active profile request', async () => {
   const rosterPage = await launchApp();

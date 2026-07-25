@@ -38,7 +38,7 @@ const zh = {
   'common.error.upstream': '外部服务暂时不可用，请稍后重试。',
   'common.error.internal': '应用内部请求失败，请重试。',
   'common.error.confirmationExpired': '确认已过期，未执行删除。请重新打开确认框后再试。',
-  'common.error.selectionChanged': '待删除内容在确认后发生变化，未执行删除。请刷新后重新确认。',
+  'common.error.selectionChanged': '本地数据在请求期间发生变化，本次结果未提交。请刷新后重试。',
   'common.error.historyIdentity':
     '部分旧记录无法安全识别，未执行删除。请保留这些记录，或刷新后重试。',
   'common.error.fileInspection':
@@ -330,6 +330,7 @@ const zh = {
   'roster.refresh.expired': '米游社登录态已过期，建议重新登录。',
   'roster.relogin': '重新登录米游社',
   'roster.error.load': '加载失败',
+  'roster.error.activate': '切换账号失败',
   'roster.action.refreshing': '正在刷新…',
   'roster.error.refresh': '刷新失败',
   'roster.action.waitLogin': '等待米游社浏览器登录…',
@@ -489,7 +490,7 @@ const en: Record<keyof typeof zh, string> = {
   'common.error.confirmationExpired':
     'The confirmation expired. Nothing was deleted. Open the confirmation again and retry.',
   'common.error.selectionChanged':
-    'The selected data changed after confirmation. Nothing was deleted. Refresh and confirm again.',
+    'Local data changed while the request was running. The result was not committed. Refresh and try again.',
   'common.error.historyIdentity':
     'Some older records cannot be identified safely. Nothing was deleted. Keep them or refresh and retry.',
   'common.error.fileInspection':
@@ -793,6 +794,7 @@ const en: Record<keyof typeof zh, string> = {
   'roster.refresh.expired': 'The MiHoYo session has expired. Sign in again.',
   'roster.relogin': 'Sign in to MiHoYo again',
   'roster.error.load': 'Loading failed',
+  'roster.error.activate': 'Failed to switch accounts',
   'roster.action.refreshing': 'Refreshing…',
   'roster.error.refresh': 'Refresh failed',
   'roster.action.waitLogin': 'Waiting for MiHoYo sign-in…',

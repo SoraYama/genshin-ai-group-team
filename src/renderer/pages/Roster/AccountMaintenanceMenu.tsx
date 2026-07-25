@@ -139,6 +139,7 @@ export function AccountMaintenanceMenu({
               role="menuitem"
               tabIndex={-1}
               className="is-danger"
+              disabled={busy}
               onClick={() => openDialog('delete')}
             >
               {t('roster.maintenance.delete')}
@@ -199,6 +200,7 @@ export function AccountMaintenanceMenu({
           <button
             type="button"
             className="gta-btn gta-btn--danger"
+            disabled={busy}
             onClick={() => {
               closeDialog();
               void onDelete();

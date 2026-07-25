@@ -439,6 +439,12 @@ export function registerProfileIpc({
       if (!partitionLifecycle.isCurrent(generation)) throw staleMiyousheRequestError();
     };
     const uid = parsed.data.uid;
+    const mutationRevision = store.captureMutationRevision(uid);
+    const assertProfileCurrent = () => {
+      if (store.captureMutationRevision(uid) !== mutationRevision) {
+        throw staleProfileMutationError();
+      }
+    };
     const existing = store.get(uid);
 
     let enkaCharacters: PersistedProfile['characters'] = [];
@@ -496,6 +502,7 @@ export function registerProfileIpc({
 
     const enkaFreshCount = enkaOk ? enkaCharacters.length : 0;
     if (!enkaOk && miyousheCharacters === undefined && existing) {
+      assertProfileCurrent();
       return {
         profile: existing,
         summary: {
@@ -541,7 +548,9 @@ export function registerProfileIpc({
       coverage: merged.coverage
     };
     assertCurrent();
-    store.upsert(profile);
+    if (!store.upsertIfCurrent(profile, mutationRevision)) {
+      throw staleProfileMutationError();
+    }
 
     const summary: RefreshSummary = {
       enka: enkaOk ? 'ok' : 'failed',
@@ -575,6 +584,13 @@ export function registerProfileIpc({
       throw new IpcError(IpcErrorCodes.ValidationFailed, formatIssues(parsed.error.issues));
     }
     const generation = partitionLifecycle.capture();
+    const profileMutation =
+      parsed.data.uid === undefined
+        ? undefined
+        : {
+            uid: parsed.data.uid,
+            revision: store.captureMutationRevision(parsed.data.uid)
+          };
     const imported = await partitionLifecycle.runAt(generation, () =>
       deviceFp.runWithPersistence('memory-only', async () => {
         const cookie = await ensureManualDeviceCookie(generation, parsed.data.cookie);
@@ -582,6 +598,7 @@ export function registerProfileIpc({
           cookie,
           uid: parsed.data.uid,
           generation,
+          profileMutation,
           persistence: 'memory-only'
         });
       })
@@ -597,6 +614,13 @@ export function registerProfileIpc({
     }
 
     const generation = partitionLifecycle.capture();
+    const profileMutation =
+      parsed.data.uid === undefined
+        ? undefined
+        : {
+            uid: parsed.data.uid,
+            revision: store.captureMutationRevision(parsed.data.uid)
+          };
     const cookie = loginSessions.consume(parsed.data.sessionId);
     if (!cookie) {
       throw expiredLoginSessionError();
@@ -608,6 +632,7 @@ export function registerProfileIpc({
           cookie,
           uid: parsed.data.uid,
           generation,
+          profileMutation,
           persistence: 'partition'
         })
       )
@@ -620,6 +645,7 @@ export function registerProfileIpc({
     cookie: string;
     uid?: string;
     generation: number;
+    profileMutation?: { uid: string; revision: number };
     persistence: DeviceFpPersistence;
   }): Promise<PersistedProfile> {
     const assertCurrent = () => {
@@ -647,6 +673,10 @@ export function registerProfileIpc({
       throw new IpcError(IpcErrorCodes.Internal, '无法选择 UID');
     }
 
+    const mutationRevision =
+      input.profileMutation?.uid === target.gameUid
+        ? input.profileMutation.revision
+        : store.captureMutationRevision(target.gameUid);
     const existing = store.get(target.gameUid);
 
     // Cache the verified Cookie under every UID this account owns before the
@@ -702,9 +732,9 @@ export function registerProfileIpc({
     };
 
     assertCurrent();
-    store.upsert(profile);
-    assertCurrent();
-    store.setActive(profile.uid);
+    if (!store.upsertIfCurrent(profile, mutationRevision, { activate: true })) {
+      throw staleProfileMutationError();
+    }
     return profile;
   }
 
@@ -737,6 +767,13 @@ function expiredLoginSessionError(): IpcError {
 
 function staleMiyousheRequestError(): IpcError {
   return new IpcError(IpcErrorCodes.Unauthorized, '米游社登录状态已变更，请重试');
+}
+
+function staleProfileMutationError(): IpcError {
+  return new IpcError(
+    IpcErrorCodes.SelectionChanged,
+    '本地档案在请求期间发生变化，此次结果未保存，请重试'
+  );
 }
 
 function staleMiyousheRequestResult(): { ok: false; reason: string } {

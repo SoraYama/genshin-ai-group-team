@@ -235,9 +235,12 @@ function setup(existing: PersistedProfile | undefined) {
     store: {
       get: vi.fn().mockReturnValue(existing),
       upsert: vi.fn(),
+      captureMutationRevision: vi.fn().mockReturnValue(0),
+      upsertIfCurrent: vi.fn().mockReturnValue(true),
       setCredentialSource: vi.fn().mockReturnValue(false),
       reconcilePartitionCredentialSources: vi.fn(),
       setActive: vi.fn(),
+      getActiveUid: vi.fn(),
       getStateView: vi.fn(),
       remove: vi.fn()
     }
@@ -269,10 +272,31 @@ function makeProfileStoreStateful(
   initialProfiles: readonly ProfileWithCredentialSource[] = []
 ): Map<string, ProfileWithCredentialSource> {
   const profiles = new Map(initialProfiles.map((profile) => [profile.uid, profile]));
+  const revisions = new Map<string, number>();
+  let activeUid = initialProfiles[0]?.uid;
+  const revisionFor = (uid: string) => revisions.get(uid) ?? 0;
+  const advanceRevision = (uid: string) => revisions.set(uid, revisionFor(uid) + 1);
   deps.store.get.mockImplementation((uid: string) => profiles.get(uid));
   deps.store.upsert.mockImplementation((profile: ProfileWithCredentialSource) => {
+    advanceRevision(profile.uid);
     profiles.set(profile.uid, profile);
+    activeUid ??= profile.uid;
   });
+  deps.store.captureMutationRevision.mockImplementation((uid: string) => revisionFor(uid));
+  deps.store.upsertIfCurrent.mockImplementation(
+    (
+      profile: ProfileWithCredentialSource,
+      expectedRevision: number,
+      options: { activate?: boolean } = {}
+    ) => {
+      if (revisionFor(profile.uid) !== expectedRevision) return false;
+      advanceRevision(profile.uid);
+      profiles.set(profile.uid, profile);
+      activeUid ??= profile.uid;
+      if (options.activate) activeUid = profile.uid;
+      return true;
+    }
+  );
   deps.store.setCredentialSource.mockImplementation(
     (uid: string, credentialSource: CredentialSourceForTest) => {
       const profile = profiles.get(uid);
@@ -296,6 +320,7 @@ function makeProfileStoreStateful(
     }
   );
   deps.store.getStateView.mockImplementation(() => ({
+    activeUid,
     profiles: [...profiles.values()].map((profile) => ({
       uid: profile.uid,
       nickname: profile.nickname,
@@ -306,6 +331,17 @@ function makeProfileStoreStateful(
       coverage: profile.coverage
     }))
   }));
+  deps.store.getActiveUid.mockImplementation(() => activeUid);
+  deps.store.setActive.mockImplementation((uid: string) => {
+    if (!profiles.has(uid)) throw new Error(`Profile not found: ${uid}`);
+    activeUid = uid;
+  });
+  deps.store.remove.mockImplementation((uid: string) => {
+    advanceRevision(uid);
+    if (!profiles.delete(uid)) return false;
+    if (activeUid === uid) activeUid = profiles.keys().next().value;
+    return true;
+  });
   return profiles;
 }
 
@@ -354,6 +390,12 @@ async function importFromSessionRequest(sessionId: string): Promise<PersistedPro
   const handler = handlers.get('profile:import-from-session');
   if (!handler) throw new Error('profile:import-from-session handler was not registered');
   return (await handler({ sessionId, uid: UID })) as PersistedProfile;
+}
+
+async function deleteProfile(uid = UID): Promise<unknown> {
+  const handler = handlers.get('profile:delete');
+  if (!handler) throw new Error('profile:delete handler was not registered');
+  return handler({ uid });
 }
 
 async function logoutRequest(): Promise<unknown> {
@@ -930,6 +972,7 @@ describe('miyoushe:login-via-browser device recovery', () => {
     expect(importError).toMatchObject({ code: 'IPC_UNAUTHORIZED' });
     expect(deps.rosterSessions.put).not.toHaveBeenCalled();
     expect(deps.store.upsert).not.toHaveBeenCalled();
+    expect(deps.store.upsertIfCurrent).not.toHaveBeenCalled();
     expect(deps.store.setActive).not.toHaveBeenCalled();
   });
 
@@ -990,6 +1033,7 @@ describe('miyoushe:login-via-browser device recovery', () => {
     expect(deps.rosterSessions.put).toHaveBeenCalledTimes(rosterPutsBeforeLogout);
     expect(deps.rosterSessions.clear).toHaveBeenCalledTimes(2);
     expect(deps.store.upsert).not.toHaveBeenCalled();
+    expect(deps.store.upsertIfCurrent).not.toHaveBeenCalled();
     expect(deps.store.setActive).not.toHaveBeenCalled();
   });
 });
@@ -1319,6 +1363,7 @@ describe('profile:import-from-cookie lifecycle', () => {
     expect(deps.rosterSessions.put).not.toHaveBeenCalled();
     expect(deps.miyousheGameRecord.fetchPlayerIndex).not.toHaveBeenCalled();
     expect(deps.store.upsert).not.toHaveBeenCalled();
+    expect(deps.store.upsertIfCurrent).not.toHaveBeenCalled();
     expect(deps.store.setActive).not.toHaveBeenCalled();
   });
 
@@ -1373,7 +1418,87 @@ describe('profile:import-from-cookie lifecycle', () => {
     expect(persistedDeviceCookie).not.toHaveBeenCalled();
     expect(deps.rosterSessions.put).toHaveBeenCalledTimes(rosterPutsBeforeLogout);
     expect(deps.store.upsert).not.toHaveBeenCalled();
+    expect(deps.store.upsertIfCurrent).not.toHaveBeenCalled();
     expect(deps.store.setActive).not.toHaveBeenCalled();
+  });
+});
+
+describe('profile mutation generations', () => {
+  function configureSuccessfulRoster(deps: ReturnType<typeof setup>): void {
+    deps.miyousheGameRecord.fetchPlayerIndex.mockResolvedValue({
+      ok: true,
+      data: { totalCharacters: 2 }
+    });
+    deps.miyousheGameRecord.fetchDetailedRoster.mockResolvedValue({
+      ok: true,
+      data: {
+        characters: [miyousheCharacter(1), miyousheCharacter(2)],
+        coverage: fullCoverageForTwo
+      }
+    });
+  }
+
+  it('does not let a refresh that started before delete recreate that UID', async () => {
+    const deleted = existingProfile();
+    const survivor = { ...existingProfile(), uid: SECOND_UID };
+    const deps = setup(deleted);
+    const profiles = makeProfileStoreStateful(deps, [deleted, survivor]);
+    deps.store.setActive(SECOND_UID);
+    const pendingEnka = deferred<{
+      uid: string;
+      ttlSeconds: number;
+      showcaseStatus: 'available';
+      characters: CharacterProfile[];
+    }>();
+    deps.enka.fetchProfile.mockReturnValue(pendingEnka.promise);
+
+    const refreshPromise = refresh(UID);
+    await vi.waitFor(() => expect(deps.enka.fetchProfile).toHaveBeenCalledWith(UID));
+    await deleteProfile(UID);
+    pendingEnka.resolve({
+      uid: UID,
+      ttlSeconds: 60,
+      showcaseStatus: 'available',
+      characters: [enkaCharacter(1)]
+    });
+
+    await expect(refreshPromise).rejects.toMatchObject({
+      code: 'IPC_SELECTION_CHANGED'
+    });
+    expect(profiles.has(UID)).toBe(false);
+    expect(deps.store.getActiveUid()).toBe(SECOND_UID);
+  });
+
+  it('keeps a deleted UID absent after an old session import but lets a new import recreate it', async () => {
+    const deleted = existingProfile();
+    const survivor = { ...existingProfile(), uid: SECOND_UID };
+    const deps = setup(deleted);
+    const profiles = makeProfileStoreStateful(deps, [deleted, survivor]);
+    deps.store.setActive(SECOND_UID);
+    const bind = {
+      ok: true as const,
+      roles: [{ gameUid: UID, region: 'cn_gf01', nickname: 'Traveler', level: 60 }]
+    };
+    const pendingBind = deferred<typeof bind>();
+    deps.miyoushe.fetchRoles.mockReturnValueOnce(pendingBind.promise).mockResolvedValue(bind);
+    configureSuccessfulRoster(deps);
+    const staleSessionId = deps.loginSessions.put(PARTITION_A_COOKIE);
+
+    const staleImport = importFromSessionRequest(staleSessionId);
+    await vi.waitFor(() => expect(deps.miyoushe.fetchRoles).toHaveBeenCalledOnce());
+    await deleteProfile(UID);
+    pendingBind.resolve(bind);
+
+    await expect(staleImport).rejects.toMatchObject({
+      code: 'IPC_SELECTION_CHANGED'
+    });
+    expect(profiles.has(UID)).toBe(false);
+    expect(deps.store.getActiveUid()).toBe(SECOND_UID);
+
+    const currentSessionId = deps.loginSessions.put(PARTITION_A_COOKIE);
+    await expect(importFromSessionRequest(currentSessionId)).resolves.toMatchObject({ uid: UID });
+    expect(profiles.has(UID)).toBe(true);
+    expect(deps.store.getActiveUid()).toBe(UID);
   });
 });
 
@@ -1457,7 +1582,7 @@ describe('profile:refresh roster integrity', () => {
     });
     expect(result.profile.characters).toHaveLength(1);
     expect(result.summary.miyoushe).toBe('no-cookie');
-    expect(deps.store.upsert).toHaveBeenCalledWith(result.profile);
+    expect(deps.store.upsertIfCurrent).toHaveBeenCalledWith(result.profile, 0);
     expectNoMiyousheNetwork(deps);
   });
 
@@ -1927,6 +2052,7 @@ describe('profile:refresh roster integrity', () => {
     expect(refreshError).toMatchObject({ code: 'IPC_UNAUTHORIZED' });
     expect(persistedDeviceCookie).not.toHaveBeenCalled();
     expect(deps.store.upsert).not.toHaveBeenCalled();
+    expect(deps.store.upsertIfCurrent).not.toHaveBeenCalled();
     expect(deps.store.setActive).not.toHaveBeenCalled();
   });
 

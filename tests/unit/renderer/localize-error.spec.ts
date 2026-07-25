@@ -13,12 +13,14 @@ const translations = {
     'en-US': 'The confirmation expired. Nothing was deleted. Open the confirmation again and retry.'
   },
   'common.error.selectionChanged': {
-    'zh-CN': '待删除内容在确认后发生变化，未执行删除。请刷新后重新确认。',
-    'en-US': 'The selected data changed after confirmation. Nothing was deleted. Refresh and confirm again.'
+    'zh-CN': '本地数据在请求期间发生变化，本次结果未提交。请刷新后重试。',
+    'en-US':
+      'Local data changed while the request was running. The result was not committed. Refresh and try again.'
   },
   'common.error.fileInspection': {
     'zh-CN': '部分本地挑战资料无法完整读取。为避免误删，暂时不能清理；请重新检查。',
-    'en-US': 'Some local challenge data could not be fully read. Cleanup is paused to avoid data loss. Check again.'
+    'en-US':
+      'Some local challenge data could not be fully read. Cleanup is paused to avoid data loss. Check again.'
   }
 } as const;
 

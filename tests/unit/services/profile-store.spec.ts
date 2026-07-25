@@ -215,6 +215,53 @@ describe('ProfileStore', () => {
     expect(store.getStateView().profiles).toHaveLength(0);
   });
 
+  it('rejects a guarded write captured before the profile was deleted', async () => {
+    const { ProfileStore } = await import('../../../src/main/services/profile-store.js');
+    const store = new ProfileStore();
+    const deleted = makeProfile('111111111');
+    const survivor = makeProfile('222222222');
+    store.upsert(deleted);
+    store.upsert(survivor);
+    store.setActive(survivor.uid);
+    const revision = store.captureMutationRevision(deleted.uid);
+
+    store.remove(deleted.uid);
+
+    expect(store.upsertIfCurrent({ ...deleted, nickname: 'Stale write' }, revision)).toBe(false);
+    expect(store.get(deleted.uid)).toBeUndefined();
+    expect(store.getActiveUid()).toBe(survivor.uid);
+  });
+
+  it('allows an explicit post-delete import to recreate and activate the profile', async () => {
+    const { ProfileStore } = await import('../../../src/main/services/profile-store.js');
+    const store = new ProfileStore();
+    const profile = makeProfile('111111111');
+    store.upsert(profile);
+    store.remove(profile.uid);
+    const revision = store.captureMutationRevision(profile.uid);
+
+    expect(
+      store.upsertIfCurrent({ ...profile, nickname: 'Reimported' }, revision, {
+        activate: true
+      })
+    ).toBe(true);
+    expect(store.get(profile.uid)?.nickname).toBe('Reimported');
+    expect(store.getActiveUid()).toBe(profile.uid);
+  });
+
+  it('invalidates guarded writes when all local profiles are cleared', async () => {
+    const { ProfileStore } = await import('../../../src/main/services/profile-store.js');
+    const store = new ProfileStore();
+    const profile = makeProfile('111111111');
+    store.upsert(profile);
+    const revision = store.captureMutationRevision(profile.uid);
+
+    store.clearAll();
+
+    expect(store.upsertIfCurrent(profile, revision)).toBe(false);
+    expect(store.getStateView().profiles).toEqual([]);
+  });
+
   it('throws when setting active to an unknown UID', async () => {
     const { ProfileStore } = await import('../../../src/main/services/profile-store.js');
     const store = new ProfileStore();
