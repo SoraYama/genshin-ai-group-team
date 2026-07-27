@@ -35,7 +35,10 @@ import { HistoryStore } from './services/history-store.js';
 import { IconProxyService, registerIconProxyScheme } from './services/icon-proxy.js';
 import { ScenarioStore } from './services/scenario-store.js';
 import { ScenarioRefresher } from './services/scenario-refresher.js';
-import { AgentSdkAdapter } from './services/agent-sdk-adapter.js';
+import {
+  AgentSdkAdapter,
+  supportsNativeWebSearch
+} from './services/agent-sdk-adapter.js';
 import { createAdvisorOrchestrator } from './services/advisor-orchestrator.js';
 import type { CharacterProfile } from '../shared/domain.js';
 import { registerConfigIpc } from './ipc/config.ipc.js';
@@ -66,6 +69,10 @@ import { DataManagementService } from './services/data-management-service.js';
 import { registerDataManagementIpc } from './ipc/data-management.ipc.js';
 import { GuideResearchCache } from './services/guide-research-cache.js';
 import { GuideResearchAgent } from './services/guide-research-agent.js';
+import {
+  ZhipuWebSearchClient,
+  supportsZhipuWebSearch
+} from './services/zhipu-web-search-client.js';
 import { AdvisorKnowledgeService } from './services/advisor-knowledge-service.js';
 import { KnowledgeCoverageGate } from './services/knowledge-coverage-gate.js';
 import { AgentRunTraceStore } from './services/agent-run-trace-store.js';
@@ -217,6 +224,14 @@ async function bootstrapServices(): Promise<void> {
             },
             sourceRegistry: strategyKnowledge,
             canonicalCharacterCatalog: strategyKnowledge.getCanonicalCharacterCatalog(),
+            ...(supportsZhipuWebSearch(config.getBaseUrl())
+              ? {
+                  directSearch: new ZhipuWebSearchClient({
+                    apiKey,
+                    domain: 'www.hoyolab.com'
+                  })
+                }
+              : {}),
             onUsageDelta: (usage) =>
               config.recordUsage(
                 usage.inputTokens,
@@ -241,6 +256,9 @@ async function bootstrapServices(): Promise<void> {
         }
       }
     },
+    researchAvailable: () =>
+      supportsNativeWebSearch(config.getBaseUrl()) ||
+      supportsZhipuWebSearch(config.getBaseUrl()),
     trace: abyssTrace,
     citationPolicy: {
       supportsCharacter: (citationId, characterId, archetypeId) =>

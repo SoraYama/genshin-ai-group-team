@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildAgentSdkOptions,
   createResearchToolGate,
+  supportsNativeWebSearch,
   resolvePackagedClaudeExecutable
 } from '../../../src/main/services/agent-sdk-adapter.js';
 
@@ -157,6 +158,22 @@ describe('buildAgentSdkOptions', () => {
       ANTHROPIC_BASE_URL: 'https://api.anthropic.com/'
     });
     expect(options.env).not.toHaveProperty('ANTHROPIC_AUTH_TOKEN');
+  });
+
+  it('disables extended thinking for GLM on the Zhipu Anthropic-compatible endpoint', () => {
+    const options = buildAgentSdkOptions({
+      apiKey: 'zhipu-test-key',
+      baseUrl: 'https://open.bigmodel.cn/api/anthropic',
+      model: 'glm-5.2',
+      systemPrompt: 'system',
+      cwd: '/tmp/genshin-advisor',
+      abortController: new AbortController()
+    });
+
+    expect(options.thinking).toEqual({ type: 'disabled' });
+    expect(options.maxThinkingTokens).toBe(0);
+    expect(supportsNativeWebSearch('https://open.bigmodel.cn/api/anthropic')).toBe(false);
+    expect(supportsNativeWebSearch('https://api.anthropic.com')).toBe(true);
   });
 
   it('resolves and pins the unpacked platform binary in a packaged app', async () => {

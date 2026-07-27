@@ -641,7 +641,7 @@ describe('V2 agent pipeline repair and grounding', () => {
   it('rebudgets the context for a near-limit Repair envelope and invokes the repair runner', async () => {
     const baseline = validAbyssPlan();
     const pipelineContext = envelopeBudgetContext();
-    const invalid = { padding: 'p'.repeat(25_000) };
+    const invalid = { ...baseline, padding: 'p'.repeat(25_000) };
     const issues = [{ code: 'PLAN_SCHEMA_INVALID', path: [], message: '结构无效' }];
     expect(
       Buffer.byteLength(
@@ -679,8 +679,12 @@ describe('V2 agent pipeline repair and grounding', () => {
     );
     const repairPayload = JSON.parse(runner.calls[1]!.prompt) as {
       context: V2PipelineContext;
+      previousPlan: { padding: string };
     };
-    expect(repairPayload.context.knowledge.trustedMatches[0]?.factStatements).toBeUndefined();
+    expect(repairPayload.context.profile.minimalIndex.map(({ id }) => String(id)).sort()).toEqual(
+      planIds(baseline).sort()
+    );
+    expect(Array.from(repairPayload.previousPlan.padding)).toHaveLength(32);
   });
 
   it('repairs an oversized incomplete JSON result using only a bounded raw preview', async () => {
@@ -740,6 +744,58 @@ describe('V2 agent pipeline repair and grounding', () => {
       truncated: true
     });
     expect(repairPayload.previousPlan.rawPreview.length).toBeLessThanOrEqual(2_048);
+  });
+
+  it('uses a prose-prefixed JSON object only as a structured repair candidate', async () => {
+    const baseline = validAbyssPlan();
+    const outputs: unknown[] = [
+      `以下是方案：\n${JSON.stringify(baseline)}`,
+      baseline,
+      { decision: 'accept', issues: [] },
+      rotationOutput(baseline),
+      explainOutput(baseline)
+    ];
+    const calls: Array<{ prompt: string; options: AgentSdkRunOptions }> = [];
+    const runner = {
+      async *run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown> {
+        calls.push({ prompt, options });
+        const output = outputs.shift();
+        yield {
+          type: 'result',
+          subtype: 'success',
+          result: typeof output === 'string' ? output : JSON.stringify(output),
+          usage: { input_tokens: 10, output_tokens: 5 },
+          total_cost_usd: 0.01
+        };
+      }
+    };
+
+    const result = await run(
+      runner as StageRunner,
+      baseline,
+      (text) => {
+        try {
+          return { ok: true, plan: JSON.parse(text) as RecommendationPlan };
+        } catch {
+          return {
+            ok: false,
+            issues: [{ code: 'PLAN_SCHEMA_INVALID', path: [], message: '必须是纯 JSON' }]
+          };
+        }
+      }
+    );
+
+    expect(result).toMatchObject({ ok: true, repairs: 1 });
+    const repairPayload = JSON.parse(calls[1]!.prompt) as {
+      previousPlan: Record<string, unknown>;
+    };
+    expect(repairPayload.previousPlan).toMatchObject({
+      mode: 'spiral-abyss',
+      firstHalfTeam: {
+        characterIds: baseline.firstHalfTeam.characterIds
+      }
+    });
+    expect(repairPayload.previousPlan['invalidJson']).toBeUndefined();
   });
 
   it('rebudgets the context for a near-limit strict-stage envelope before Critique', async () => {
@@ -877,11 +933,16 @@ describe('V2 agent pipeline repair and grounding', () => {
 
   it('fails closed before a Repair send when the complete repair prompt exceeds 48 KiB', async () => {
     const baseline = validAbyssPlan();
-    const oversizedInvalid = { padding: '界'.repeat(17_000) };
-    const runner = new StageRunner([oversizedInvalid, baseline]);
+    const runner = new StageRunner([baseline]);
     const result = await run(runner, baseline, () => ({
       ok: false,
-      issues: [{ code: 'PLAN_SCHEMA_INVALID', path: [], message: '结构无效' }]
+      issues: [
+        {
+          code: 'PLAN_SCHEMA_INVALID',
+          path: [],
+          message: `结构无效：${'界'.repeat(17_000)}`
+        }
+      ]
     }));
 
     expect(runner.calls).toHaveLength(1);
@@ -1063,6 +1124,109 @@ describe('V2 agent pipeline repair and grounding', () => {
     expect(result).toMatchObject({ ok: true, repairs: 1 });
     expect(calls).toHaveLength(6);
     expect(observedEvidenceCounts).toEqual([1, 1]);
+  });
+
+  it('merges audited Composer evidence with partial tool reads from a repair attempt', async () => {
+    const baseline = validAbyssPlan();
+    const outputs = [
+      baseline,
+      baseline,
+      { decision: 'accept', issues: [] },
+      rotationOutput(baseline),
+      explainOutput(baseline)
+    ];
+    const calls: Array<{ prompt: string; options: AgentSdkRunOptions }> = [];
+    const runner = {
+      async *run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown> {
+        calls.push({ prompt, options });
+        const tool =
+          calls.length === 1
+            ? {
+                id: 'profile-evidence',
+                name: 'mcp__genshin__read_profile_cache'
+              }
+            : calls.length === 2
+              ? {
+                  id: 'knowledge-evidence',
+                  name: 'mcp__genshin__query_team_knowledge'
+                }
+              : undefined;
+        if (tool) {
+          yield {
+            type: 'assistant',
+            message: {
+              content: [
+                {
+                  type: 'tool_use',
+                  id: tool.id,
+                  name: tool.name,
+                  input: { characterIds: ['1001'] }
+                }
+              ]
+            }
+          };
+          yield {
+            type: 'user',
+            message: {
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: tool.id,
+                  is_error: false,
+                  content: 'ok'
+                }
+              ]
+            }
+          };
+        }
+        yield {
+          type: 'result',
+          subtype: 'success',
+          result: JSON.stringify(outputs.shift()),
+          usage: { input_tokens: 10, output_tokens: 5 },
+          total_cost_usd: 0.01
+        };
+      }
+    };
+    const observedEvidenceCounts: number[] = [];
+
+    const result = await runV2AgentPipeline({
+      runner,
+      context: context(baseline),
+      sdkOptionsForStage: () => sdkOptions(),
+      composer: {
+        initialPrompt: '{}',
+        systemPrompt: 'composer:partial-repair-evidence',
+        repairPrompt: 'repair',
+        reuseToolEvidenceOnToolFreeRepair: true,
+        validate: (text, tools) => {
+          observedEvidenceCounts.push(tools.length);
+          const names = new Set(tools.filter(({ succeeded }) => succeeded).map(({ name }) => name));
+          return names.has('mcp__genshin__read_profile_cache') &&
+            names.has('mcp__genshin__query_team_knowledge')
+            ? { ok: true as const, plan: JSON.parse(text) as RecommendationPlan }
+            : {
+                ok: false as const,
+                issues: [
+                  {
+                    code: 'TOOL_REQUIREMENT_FAILED',
+                    path: ['tools'],
+                    message: 'Missing merged tool evidence.'
+                  }
+                ]
+              };
+        }
+      },
+      invalidIssue: (stage, message) => ({
+        code: 'AGENT_OUTPUT_INVALID',
+        path: [stage],
+        message
+      })
+    });
+
+    expect(result).toMatchObject({ ok: true, repairs: 1 });
+    expect(calls).toHaveLength(5);
+    expect(observedEvidenceCounts).toEqual([1, 2]);
   });
 
   it('keeps unresolved soft critique issues after one repair and continues to Rotation/Explain', async () => {
@@ -1366,6 +1530,130 @@ describe('V2 agent pipeline repair and grounding', () => {
     expect(result).toMatchObject({ ok: true });
   });
 
+  it('normalizes the GLM knowledge field alias before Explain schema validation', async () => {
+    const baseline = validAbyssPlan();
+    const pipelineContext = structuredClone(context(baseline));
+    const characterId = String(pipelineContext.profile.detailedProfiles[0]!.id);
+    pipelineContext.knowledge = trustedKnowledgePacket(characterId);
+    const explanation = explainOutput(baseline) as unknown as {
+      explanations: Array<Record<string, unknown>>;
+    };
+    explanation.explanations[0] = {
+      ...explanation.explanations[0],
+      reasonCodes: ['reaction-chain'],
+      factRefs: [{ kind: 'knowledge', field: characterId }]
+    };
+    const runner = new StageRunner([
+      baseline,
+      { decision: 'accept', issues: [] },
+      rotationOutput(baseline),
+      explanation
+    ]);
+
+    const result = await run(
+      runner,
+      baseline,
+      (text) => ({ ok: true, plan: JSON.parse(text) as RecommendationPlan }),
+      pipelineContext
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('Expected normalized GLM knowledge alias');
+    expect(result.explanation.explanations[0]).toMatchObject({
+      factRefs: [{ kind: 'knowledge', characterId }]
+    });
+  });
+
+  it('normalizes a GLM mechanic target object to its exact bounded context target', async () => {
+    const baseline = validAbyssPlan();
+    const pipelineContext = structuredClone(context(baseline));
+    const explanation = explainOutput(baseline) as unknown as {
+      explanations: Array<Record<string, unknown>>;
+    };
+    const directive = explanation.explanations[3]!;
+    const target = directive['target'] as {
+      kind: 'abyss-chamber';
+      floor: number;
+      chamber: number;
+      half: 'first' | 'second';
+    };
+    const mechanicTarget = `${target.floor} 层第 ${target.chamber} 间${
+      target.half === 'first' ? '上半' : '下半'
+    }`;
+    pipelineContext.mechanics = [
+      { target: mechanicTarget, facts: ['已确认机制'], unknowns: [] }
+    ];
+    explanation.explanations[3] = {
+      ...directive,
+      reasonCodes: ['mechanic-response'],
+      factRefs: [{ kind: 'mechanic', target, factIndex: 0 }]
+    };
+    const runner = new StageRunner([
+      baseline,
+      { decision: 'accept', issues: [] },
+      rotationOutput(baseline),
+      explanation
+    ]);
+
+    const result = await run(
+      runner,
+      baseline,
+      (text) => ({ ok: true, plan: JSON.parse(text) as RecommendationPlan }),
+      pipelineContext
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('Expected normalized GLM mechanic target');
+    expect(result.explanation.explanations[3]).toMatchObject({
+      factRefs: [{ kind: 'mechanic', target: mechanicTarget, factIndex: 0 }]
+    });
+  });
+
+  it('rejects a GLM mechanic target object that does not match its outer directive', async () => {
+    const baseline = validAbyssPlan();
+    const pipelineContext = structuredClone(context(baseline));
+    const explanation = explainOutput(baseline) as unknown as {
+      explanations: Array<Record<string, unknown>>;
+    };
+    const directive = explanation.explanations[3]!;
+    pipelineContext.mechanics = [
+      { target: '12 层第 1 间上半', facts: ['已确认机制'], unknowns: [] }
+    ];
+    explanation.explanations[3] = {
+      ...directive,
+      reasonCodes: ['mechanic-response'],
+      factRefs: [
+        {
+          kind: 'mechanic',
+          target: { kind: 'abyss-chamber', floor: 12, chamber: 1, half: 'first' },
+          factIndex: 0
+        }
+      ]
+    };
+    const runner = new StageRunner([
+      baseline,
+      { decision: 'accept', issues: [] },
+      rotationOutput(baseline),
+      explanation
+    ]);
+
+    const result = await run(
+      runner,
+      baseline,
+      (text) => ({ ok: true, plan: JSON.parse(text) as RecommendationPlan }),
+      pipelineContext
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      issues: [
+        expect.objectContaining({
+          message: 'Stage output failed schema validation at explanations.3.factRefs.0.target.'
+        })
+      ]
+    });
+  });
+
   it('rejects cross-character citation substitution for an actual knowledge fact reference', async () => {
     const baseline = validAbyssPlan();
     const pipelineContext = structuredClone(context(baseline));
@@ -1554,6 +1842,109 @@ describe('V2 agent pipeline repair and grounding', () => {
           message: expect.stringContaining('reason lacks a compatible fact reference')
         })
       ]
+    });
+  });
+
+  it('bounds a GLM uncertainty tone alias and fills only missing validated rotation targets', async () => {
+    const baseline = validAbyssPlan();
+    const runner = new StageRunner([
+      baseline,
+      { decision: 'accept', issues: [] },
+      {
+        rotations: [
+          {
+            target: { kind: 'abyss-team', half: 'first' },
+            tone: 'uncertainty',
+            reasonCodes: ['uncertainty'],
+            factRefs: [{ kind: 'plan', field: 'validated-target' }]
+          }
+        ]
+      },
+      explainOutput(baseline)
+    ]);
+
+    const result = await run(runner, baseline, (text) => ({
+      ok: true,
+      plan: JSON.parse(text) as RecommendationPlan
+    }));
+
+    expect(result).toMatchObject({
+      ok: true,
+      rotation: {
+        rotations: [
+          {
+            target: { kind: 'abyss-team', half: 'first' },
+            tone: 'cautious',
+            reasonCodes: ['uncertainty']
+          },
+          {
+            target: { kind: 'abyss-team', half: 'second' },
+            tone: 'cautious',
+            reasonCodes: ['uncertainty']
+          }
+        ]
+      }
+    });
+  });
+
+  it('bounds a GLM hard critique severity to the contract soft-risk level', async () => {
+    const baseline = validAbyssPlan();
+    const runner = new StageRunner([
+      baseline,
+      {
+        decision: 'accept',
+        issues: [
+          {
+            code: 'unknown-build-risk',
+            severity: 'hard',
+            target: { kind: 'abyss-team', half: 'first' },
+            message: '当前 build 未知，风险需要保留。'
+          }
+        ]
+      },
+      rotationOutput(baseline),
+      explainOutput(baseline)
+    ]);
+
+    const result = await run(runner, baseline, (text) => ({
+      ok: true,
+      plan: JSON.parse(text) as RecommendationPlan
+    }));
+
+    expect(result).toMatchObject({
+      ok: true,
+      critique: {
+        issues: [{ code: 'unknown-build-risk', severity: 'soft' }]
+      }
+    });
+  });
+
+  it('removes only ungrounded GLM rotation reasons when grounded reasons remain', async () => {
+    const baseline = validAbyssPlan();
+    const rotations = rotationOutput(baseline);
+    rotations.rotations[0]!.reasonCodes = [
+      'uncertainty',
+      'setup-order',
+      'energy-cycle',
+      'mechanic-response'
+    ];
+    const runner = new StageRunner([
+      baseline,
+      { decision: 'accept', issues: [] },
+      rotations,
+      explainOutput(baseline)
+    ]);
+
+    const result = await run(runner, baseline, (text) => ({
+      ok: true,
+      plan: JSON.parse(text) as RecommendationPlan
+    }));
+
+    expect(result).toMatchObject({ ok: true });
+    if (!result.ok) throw new Error('Expected grounded rotation normalization');
+    expect(result.rotation.rotations[0]).toMatchObject({
+      reasonCodes: ['uncertainty', 'setup-order'],
+      factRefs: [{ kind: 'plan', field: 'validated-target' }]
     });
   });
 });

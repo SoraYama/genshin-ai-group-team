@@ -82,6 +82,47 @@ describe('evaluateAdvisorGate', () => {
     expect(JSON.stringify(output)).not.toContain('characterIds');
   });
 
+  it('treats a completed composer repair as the authoritative compose stage', () => {
+    const input = successfulRun();
+    input.trace!.stages = [
+      ...input.trace!.stages.map((stage) =>
+        stage.stage === 'compose'
+          ? {
+              ...stage,
+              status: 'failed' as const,
+              rawOutput: '{"teams":',
+              failure: { code: 'AGENT_OUTPUT_INVALID' }
+            }
+          : stage
+      ),
+      {
+        stage: 'repair-1',
+        status: 'completed',
+        rawOutput: '{"teams":[]}',
+        usage: { inputTokens: 40, outputTokens: 10 }
+      }
+    ];
+
+    expect(evaluateAdvisorGate(input)).toMatchObject({
+      gate: 'advisor-saved',
+      status: 'passed',
+      source: 'smart-service'
+    });
+  });
+
+  it('rejects a failed compose stage when no repair completes', () => {
+    const input = successfulRun();
+    input.trace!.stages = input.trace!.stages.map((stage) =>
+      stage.stage === 'compose' ? { ...stage, status: 'failed' as const } : stage
+    );
+
+    expect(evaluateAdvisorGate(input)).toMatchObject({
+      gate: 'advisor-saved',
+      status: 'failed',
+      code: 'REQUIRED_STAGE_NOT_COMPLETED'
+    });
+  });
+
   it('rejects a zero-latency advisor run', () => {
     expect(evaluateAdvisorGate({ ...successfulRun(), latencyMs: 0 })).toEqual({
       gate: 'advisor-saved',

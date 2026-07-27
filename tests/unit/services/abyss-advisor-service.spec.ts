@@ -537,6 +537,7 @@ function service(options: {
   targetPackets?: Record<string, KnowledgeContextPacket>;
   buildPacket?: ReturnType<typeof vi.fn>;
   research?: { research: GuideResearchAgent['research'] };
+  researchAvailable?: () => boolean;
   trace?: AgentRunTraceStore;
   coverageTasks?: Array<{
     key: string;
@@ -601,6 +602,7 @@ function service(options: {
       )
     },
     research: options.research,
+    researchAvailable: options.researchAvailable,
     trace: options.trace,
     toolLog: options.toolLog,
     auditLog: options.auditLog
@@ -1025,6 +1027,51 @@ describe('AbyssAdvisorService', () => {
     });
     expect(trace.latest()?.usage.inputTokens).toBeGreaterThanOrEqual(5);
     expect(trace.latest()?.usage.outputTokens).toBeGreaterThanOrEqual(3);
+  });
+
+  it('records direct Zhipu search attempts without pretending they are model output', async () => {
+    const researchResult = successfulResearch() as GuideResearchAgentResult;
+    researchResult.searchExecuted = true;
+    researchResult.directSearchAudit = {
+      provider: 'zhipu-web-search',
+      attempts: [
+        {
+          query: '原神 雷电将军 配队攻略',
+          status: 'resolved',
+          urls: ['https://example.test/guide-gap']
+        }
+      ]
+    };
+    const trace = new AgentRunTraceStore();
+    const result = await service({
+      runner: new FixtureRunner([validAbyssPlan({ confidence: 'high' })], 'ephemeral-1008'),
+      apiKey: 'secret',
+      packet: packetWithGap(),
+      research: { research: vi.fn(async () => researchResult) },
+      coverageTasks: [
+        { key: 'anonymous-gap-task', reason: 'missing', scenarioTags: ['multi-wave'] }
+      ],
+      trace
+    }).recommend(abyssInput());
+
+    expect(result).toMatchObject({ status: 'planned', source: 'smart-service' });
+    const researchStage = trace.latest()?.stages.find(({ stage }) => stage === 'research');
+    expect(researchStage).toMatchObject({
+      status: 'completed',
+      tools: [{ name: 'ZhipuWebSearch', status: 'completed' }],
+      webSearchEvidence: {
+        attempts: [
+          {
+            toolUseId: 'zhipu-search-1',
+            query: '原神 雷电将军 配队攻略',
+            status: 'resolved',
+            urls: ['https://example.test/guide-gap']
+          }
+        ]
+      },
+      usage: { inputTokens: 0, outputTokens: 0 }
+    });
+    expect(researchStage).not.toHaveProperty('rawOutput');
   });
 
   it('records mixed cache success and live provider failure as a partial failed research stage', async () => {
@@ -1682,6 +1729,41 @@ describe('AbyssAdvisorService', () => {
     expect(JSON.stringify(trace.latest())).not.toMatch(/body|secret|private-query/i);
   });
 
+  it('skips unsupported native WebSearch without spending a provider turn', async () => {
+    const trace = new AgentRunTraceStore();
+    const research = { research: vi.fn() };
+    const result = await service({
+      runner: new FixtureRunner(
+        [
+          validAbyssPlan({
+            confidence: 'low',
+            assumptions: ['1008：知识缺口，按低置信度保守使用。']
+          })
+        ],
+        'unknown-1008'
+      ),
+      apiKey: 'secret',
+      packet: packetWithGap(),
+      research,
+      researchAvailable: () => false,
+      trace,
+      coverageTasks: [
+        { key: 'anonymous-gap-task', reason: 'missing', scenarioTags: ['multi-wave'] }
+      ]
+    }).recommend(abyssInput());
+
+    expect(result).toMatchObject({
+      status: 'planned',
+      source: 'smart-service',
+      knowledgeSummary: { searched: false, ephemeral: 0, unknown: 1 }
+    });
+    expect(research.research).not.toHaveBeenCalled();
+    expect(trace.latest()?.stages.find(({ stage }) => stage === 'research')).toMatchObject({
+      status: 'skipped',
+      inputSummary: 'Current provider does not support audited native WebSearch.'
+    });
+  });
+
   it('treats a completed search with no trusted result as a non-fatal unresolved gap', async () => {
     const trace = new AgentRunTraceStore();
     const result = await service({
@@ -1808,13 +1890,13 @@ describe('AbyssAdvisorService', () => {
     );
   });
 
-  it('runs two repairs then falls back to the local joint optimizer when all attempts fail', async () => {
+  it('runs one repair then falls back to the local joint optimizer when both attempts fail', async () => {
     const invalid = { ...validAbyssPlan(), chambers: [] };
     const runner = new FixtureRunner([invalid, invalid, invalid]);
     const appendAbyss = vi.fn();
     const result = await service({ runner, apiKey: 'secret', appendAbyss }).recommend(abyssInput());
 
-    expect(runner.calls).toBe(3);
+    expect(runner.calls).toBe(2);
     expect(result).toMatchObject({ status: 'planned', source: 'local-rules' });
     if (result.status !== 'planned') throw new Error('Expected local fallback');
     expect(result.narrative.sections.map(({ targetKey }) => targetKey)).toEqual(

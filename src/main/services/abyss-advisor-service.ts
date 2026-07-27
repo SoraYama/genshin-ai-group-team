@@ -94,6 +94,7 @@ export interface AbyssAdvisorServiceOptions {
       context: { signal: AbortSignal }
     ) => Promise<GuideResearchAgentResult>;
   };
+  researchAvailable?: () => boolean;
   trace?: AgentRunTraceWriter;
   citationPolicy?: AbyssKnowledgeCitationPolicy;
 }
@@ -330,7 +331,8 @@ export class AbyssAdvisorService {
       if (
         researchCoverage.required &&
         apiKey !== undefined &&
-        this.options.research !== undefined
+        this.options.research !== undefined &&
+        (this.options.researchAvailable?.() ?? true)
       ) {
         emit('researching-guides');
         trace.startStage('research', `tasks=${researchCoverage.tasks.length}`);
@@ -396,7 +398,11 @@ export class AbyssAdvisorService {
         trace.skipStage(
           'research',
           researchCoverage.required
-            ? 'Research provider unavailable.'
+            ? this.options.research !== undefined &&
+              apiKey !== undefined &&
+              this.options.researchAvailable?.() === false
+              ? 'Current provider does not support audited native WebSearch.'
+              : 'Research provider unavailable.'
             : 'Trusted coverage is complete.'
         );
       }
@@ -485,6 +491,7 @@ export class AbyssAdvisorService {
             scenario,
             characters: profile.characters,
             knowledge: this.options.knowledge,
+            profileContextValidated: true,
             pipelineContext,
             sdkOptions: baseSdkOptions,
             sdkOptionsForStage,
@@ -1487,6 +1494,7 @@ function researchTraceInput(
   result: GuideResearchAgentResult
 ): Omit<CompleteStageInput, 'stage' | 'citationIds'> {
   const audit = result.audit;
+  const direct = result.directSearchAudit;
   return {
     ...(audit === undefined
       ? {}
@@ -1504,6 +1512,33 @@ function researchTraceInput(
                   failure: {
                     code: 'SEARCH_UNAVAILABLE' as const,
                     message: 'Research tool call failed.',
+                    retryable: true
+                  }
+                })
+          }))
+        }),
+    ...(direct === undefined
+      ? {}
+      : {
+          webSearchEvidence: {
+            attempts: direct.attempts.map((attempt, index) => ({
+              toolUseId: `zhipu-search-${index + 1}`,
+              query: attempt.query,
+              status: attempt.status === 'resolved' ? ('resolved' as const) : ('error' as const),
+              urls: attempt.urls
+            })),
+            truncated: false
+          },
+          tools: direct.attempts.map((attempt) => ({
+            name: 'ZhipuWebSearch',
+            status: attempt.status === 'resolved' ? ('completed' as const) : ('failed' as const),
+            inputSummary: JSON.stringify({ query: attempt.query }),
+            ...(attempt.status === 'resolved'
+              ? {}
+              : {
+                  failure: {
+                    code: 'SEARCH_UNAVAILABLE' as const,
+                    message: 'Zhipu Web Search call failed.',
                     retryable: true
                   }
                 })

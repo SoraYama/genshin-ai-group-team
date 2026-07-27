@@ -465,6 +465,136 @@ describe('GuideResearchAgent', () => {
     });
   });
 
+  it('uses a direct audited Zhipu search fallback without invoking native WebSearch', async () => {
+    const runner: AuditedAgentRunner = { run: vi.fn() as never };
+    const researchCache = cache();
+    const directSearch = {
+      search: vi.fn(async () => [
+        {
+          title: '雷电将军配队攻略',
+          snippet: '雷电将军可围绕爆发窗口与队友形成稳定循环。',
+          url: 'https://www.hoyolab.com/article/12345678',
+          publishedAt: '2026-07-20'
+        }
+      ])
+    };
+    const agent = new GuideResearchAgent({
+      runner,
+      cache: researchCache,
+      sourceRegistry: {
+        getSourceRegistry: () => ({
+          sources: [
+            { id: 'hoyolab-www', host: 'www.hoyolab.com', trust: 'trusted-local' as const }
+          ]
+        })
+      },
+      sdkOptions: sdkOptions(),
+      canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
+      directSearch,
+      now: () => NOW
+    });
+
+    const result = await agent.research({
+      tasks: [task('guide-direct-search')],
+      knowledgeVersion: 'knowledge-v2'
+    });
+
+    expect(runner.run).not.toHaveBeenCalled();
+    expect(directSearch.search).toHaveBeenCalledOnce();
+    expect(directSearch.search).toHaveBeenCalledWith(
+      '原神 雷电将军 配队 攻略',
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
+    expect(result).toMatchObject({
+      entries: [
+        {
+          taskKey: 'guide-direct-search',
+          origin: 'research',
+          value: {
+            trust: 'ephemeral-web',
+            applicability: {
+              characterNames: ['雷电将军'],
+              scenarioTags: ['single-target'],
+              buildSignals: ['build-match-present']
+            },
+            citations: [
+              {
+                sourceId: 'hoyolab-www',
+                url: 'https://www.hoyolab.com/article/12345678',
+                trust: 'ephemeral-web'
+              }
+            ]
+          }
+        }
+      ],
+      gaps: [],
+      searchExecuted: true,
+      usage: { inputTokens: 0, outputTokens: 0, estimatedCostUsd: 0 },
+      directSearchAudit: {
+        provider: 'zhipu-web-search',
+        attempts: [
+          {
+            status: 'resolved',
+            urls: ['https://www.hoyolab.com/article/12345678']
+          }
+        ]
+      }
+    });
+    expect(researchCache.put).toHaveBeenCalledOnce();
+  });
+
+  it('accepts only the explicit search-only source allowlist for direct Zhipu results', async () => {
+    const runner: AuditedAgentRunner = { run: vi.fn() as never };
+    const researchCache = cache();
+    const directSearch = {
+      search: vi.fn(async () => [
+        {
+          title: '原神雷电将军配队攻略',
+          snippet: '雷电将军的队友、武器与圣遗物选择需要按循环需求调整。',
+          url: 'https://ol.3dmgame.com/gl/262965.html',
+          publishedAt: '2025-09-08'
+        },
+        {
+          title: '原神雷电将军阵容推荐',
+          snippet: '雷电将军热门阵容。',
+          url: 'https://www.9game.cn/yuanshen/9869348.html',
+          publishedAt: '2024-03-02'
+        }
+      ])
+    };
+    const agent = new GuideResearchAgent({
+      runner,
+      cache: researchCache,
+      sourceRegistry: sourceRegistry(),
+      sdkOptions: sdkOptions(),
+      canonicalCharacterCatalog: CANONICAL_CHARACTER_CATALOG,
+      directSearch,
+      now: () => NOW
+    });
+
+    const result = await agent.research({
+      tasks: [task('guide-direct-search-only-source')],
+      knowledgeVersion: 'knowledge-v2'
+    });
+
+    expect(result.entries[0]).toMatchObject({
+      origin: 'research',
+      value: {
+        trust: 'ephemeral-web',
+        citations: [
+          {
+            sourceId: 'search-only-3dm-genshin',
+            url: 'https://ol.3dmgame.com/gl/262965.html',
+            trust: 'ephemeral-web'
+          }
+        ]
+      }
+    });
+    expect(result.directSearchAudit?.attempts[0]?.urls).toEqual([
+      'https://ol.3dmgame.com/gl/262965.html'
+    ]);
+  });
+
   it('does not invoke the model when every task has a valid cache hit', async () => {
     const runner: AuditedAgentRunner = { run: vi.fn() as never };
     const researchCache = cache({ get: async () => cachedValue() });

@@ -142,6 +142,34 @@ export function fitV2PipelineContextToBudget(
   );
 }
 
+export function projectV2PipelineContextForPlan(
+  input: V2PipelineContext,
+  plan: RecommendationPlan
+): V2PipelineContext {
+  return projectV2PipelineContextForCharacterIds(input, planCharacterIds(plan));
+}
+
+export function projectV2PipelineContextForCharacterIds(
+  input: V2PipelineContext,
+  characterIds: readonly string[]
+): V2PipelineContext {
+  const context = structuredClone(v2PipelineContextSchema.parse(input));
+  const selectedCharacterIds = new Set(uniqueBoundedIds([...characterIds]));
+  context.profile.minimalIndex = context.profile.minimalIndex.filter(({ id }) =>
+    selectedCharacterIds.has(String(id))
+  );
+  compactProfileDetails(context.profile, selectedCharacterIds);
+  const knowledgePackets = [
+    context.knowledge,
+    ...(context.targetKnowledgeViews?.map(({ knowledge }) => knowledge) ?? [])
+  ];
+  knowledgePackets.forEach((knowledge) => {
+    compactUnselectedKnowledge(knowledge, selectedCharacterIds);
+    synchronizeCoverage(knowledge);
+  });
+  return v2PipelineContextSchema.parse(context);
+}
+
 function fitV2PipelineContextValueToBudget(
   input: V2PipelineContext,
   maxBytes: number

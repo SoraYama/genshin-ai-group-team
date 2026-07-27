@@ -299,6 +299,44 @@ describe('AbyssPlanAgent', () => {
     expect(runner.calls).toHaveLength(4);
   });
 
+  it('uses host-validated profile context without forcing GLM to repeat the profile read', async () => {
+    class NoProfileToolRunner extends FixtureRunner {
+      override async *run(
+        prompt: string,
+        options: AgentSdkRunOptions
+      ): AsyncIterable<unknown> {
+        for await (const message of super.run(prompt, options)) {
+          if (typeof message !== 'object' || message === null) {
+            yield message;
+            continue;
+          }
+          const current = structuredClone(message) as {
+            type?: string;
+            message?: { content?: Array<{ id?: string; tool_use_id?: string }> };
+          };
+          if (Array.isArray(current.message?.content)) {
+            current.message.content = current.message.content.filter(
+              ({ id, tool_use_id }) => id !== 'profile' && tool_use_id !== 'profile'
+            );
+          }
+          yield current;
+        }
+      }
+    }
+    const runner = new NoProfileToolRunner([validAbyssPlan()]);
+
+    const result = await new AbyssPlanAgent(runner).compose({
+      input: abyssInput(),
+      scenario: abyssScenario(),
+      characters: ABYSS_CHARACTERS,
+      profileContextValidated: true,
+      pipelineContext: pipelineContext(),
+      sdkOptions: sdkOptions()
+    });
+
+    expect(result).toMatchObject({ ok: true });
+  });
+
   it('keeps required tool evidence isolated from a different correlation', async () => {
     const runner = new FixtureRunner([
       validAbyssPlan(),
@@ -545,7 +583,102 @@ describe('AbyssPlanAgent', () => {
     ).toBe(true);
   });
 
-  it('returns the final structured issue list after exhausting two failed repairs', async () => {
+  it('repairs a GLM missing array opener only during the composer repair stage', async () => {
+    class GlmArrayTypoRunner extends FixtureRunner {
+      private composerCalls = 0;
+
+      override async *run(
+        prompt: string,
+        options: AgentSdkRunOptions
+      ): AsyncIterable<unknown> {
+        const isComposer = options.systemPrompt.includes('AbyssTeamComposer');
+        if (isComposer) this.composerCalls += 1;
+        for await (const message of super.run(prompt, options)) {
+          if (
+            !isComposer ||
+            this.composerCalls !== 2 ||
+            typeof message !== 'object' ||
+            message === null ||
+            (message as { type?: string }).type !== 'result'
+          ) {
+            yield message;
+            continue;
+          }
+          const current = structuredClone(message) as { result: string };
+          current.result = current.result.replace(
+            '"tactics":["第 1 间上半先处理机制目标。"]',
+            '"tactics":"第 1 间上半先处理机制目标。"]'
+          );
+          yield current;
+        }
+      }
+    }
+    const invalid = validAbyssPlan({
+      secondHalfTeam: {
+        ...validAbyssPlan().secondHalfTeam,
+        characterIds: ['1001', '1006', '1007', '1008']
+      }
+    });
+    const runner = new GlmArrayTypoRunner([invalid, validAbyssPlan()]);
+
+    const result = await new AbyssPlanAgent(runner).compose({
+      input: abyssInput(),
+      scenario: abyssScenario(),
+      characters: ABYSS_CHARACTERS,
+      pipelineContext: pipelineContext(),
+      sdkOptions: sdkOptions()
+    });
+
+    expect(result).toMatchObject({ ok: true, repaired: true });
+  });
+
+  it('accepts corrected knowledge evidence with fresh tool ids from a repair turn', async () => {
+    class FreshRepairToolIdsRunner extends FixtureRunner {
+      private composerCalls = 0;
+
+      override async *run(
+        prompt: string,
+        options: AgentSdkRunOptions
+      ): AsyncIterable<unknown> {
+        const isComposer = options.systemPrompt.includes('AbyssTeamComposer');
+        if (isComposer) this.composerCalls += 1;
+        const suffixIds = isComposer && this.composerCalls === 2;
+        for await (const message of super.run(prompt, options)) {
+          if (!suffixIds || typeof message !== 'object' || message === null) {
+            yield message;
+            continue;
+          }
+          const current = structuredClone(message) as {
+            message?: { content?: Array<{ id?: string; tool_use_id?: string }> };
+          };
+          current.message?.content?.forEach((item) => {
+            if (item.id) item.id = `${item.id}-repair`;
+            if (item.tool_use_id) item.tool_use_id = `${item.tool_use_id}-repair`;
+          });
+          yield current;
+        }
+      }
+    }
+    const invalid = validAbyssPlan({
+      secondHalfTeam: {
+        ...validAbyssPlan().secondHalfTeam,
+        characterIds: ['1001', '1006', '1007', '1008']
+      }
+    });
+    const runner = new FreshRepairToolIdsRunner([invalid, validAbyssPlan()]);
+
+    const result = await new AbyssPlanAgent(runner).compose({
+      input: abyssInput(),
+      scenario: abyssScenario(),
+      characters: ABYSS_CHARACTERS,
+      pipelineContext: pipelineContext(),
+      sdkOptions: sdkOptions()
+    });
+
+    expect(result).toMatchObject({ ok: true, repaired: true });
+  });
+
+  it('stops after one failed repair instead of spending on a third composer call', async () => {
     const invalid = { ...validAbyssPlan(), chambers: [] };
     const runner = new FixtureRunner([invalid, invalid, invalid]);
     const result = await new AbyssPlanAgent(runner).compose({
@@ -561,7 +694,7 @@ describe('AbyssPlanAgent', () => {
     expect(result.issues.map(({ code }) => code)).toEqual(
       expect.arrayContaining(['CHAMBER_COVERAGE_INVALID', 'PLAN_SCHEMA_INVALID'])
     );
-    expect(runner.calls).toHaveLength(3);
+    expect(runner.calls).toHaveLength(2);
   });
 
   it('tells the agent which half to recompute and rejects changes to the preserved half', async () => {
@@ -612,7 +745,7 @@ describe('AbyssPlanAgent', () => {
       ok: false,
       issues: [{ code: 'AGENT_OUTPUT_INVALID' }]
     });
-    expect(runner.calls).toBe(3);
+    expect(runner.calls).toBe(2);
   });
 
   it('fails closed when knowledge queries do not cover every final character and target half', async () => {
@@ -767,6 +900,40 @@ describe('AbyssPlanAgent', () => {
     });
   });
 
+  it('keeps an unverified optional build as unknown under noBuildChange', async () => {
+    const currentContext = pipelineContext();
+    const interpretation = currentContext.knowledge.buildInterpretations.find(
+      ({ characterId }) => characterId === '1008'
+    )!;
+    interpretation.currentBuildUsable = false;
+    interpretation.adjustment = 'optional';
+    interpretation.conflictingSignals = [];
+    const plan = validAbyssPlan();
+
+    const result = await new AbyssPlanAgent(
+      new FixtureRunner([plan], false)
+    ).compose({
+      input: abyssInput(),
+      scenario: abyssScenario(),
+      characters: ABYSS_CHARACTERS,
+      pipelineContext: currentContext,
+      sdkOptions: sdkOptions()
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      plan: {
+        confidence: 'low',
+        memberAssignments: expect.arrayContaining([
+          expect.objectContaining({
+            characterId: '1008',
+            buildStatus: 'unknown'
+          })
+        ])
+      }
+    });
+  });
+
   it('allows a selected knowledge gap only when the plan preserves low confidence and an explicit marker', async () => {
     const currentContext = pipelineContext();
     currentContext.knowledge.trustedMatches = currentContext.knowledge.trustedMatches.filter(
@@ -894,10 +1061,10 @@ describe('AbyssPlanAgent', () => {
     expect(accepted).toMatchObject({ ok: true });
   });
 
-  it('rejects a smart plan that omits the exact eight member assignments', async () => {
+  it('derives exact member assignments locally when the model omits them', async () => {
     const plan = validAbyssPlan();
     const result = await new AbyssPlanAgent(
-      new FixtureRunner([plan, plan, plan], false)
+      new FixtureRunner([plan], false)
     ).compose({
       input: abyssInput(),
       scenario: abyssScenario(),
@@ -907,15 +1074,21 @@ describe('AbyssPlanAgent', () => {
     });
 
     expect(result).toMatchObject({
-      ok: false,
-      issues: [
-        expect.objectContaining({
-          details: expect.objectContaining({
-            missing: expect.arrayContaining(['member-assignments:exactly-eight'])
+      ok: true,
+      plan: {
+        memberAssignments: expect.arrayContaining([
+          expect.objectContaining({
+            characterId: '1001',
+            archetypeId: 'role-1',
+            role: 'support',
+            buildStatus: 'current-build',
+            citationIds: ['citation-1001']
           })
-        })
-      ]
+        ])
+      }
     });
+    if (!result.ok) throw new Error('Expected locally grounded assignments');
+    expect(result.plan.memberAssignments).toHaveLength(8);
   });
 
   it.each([
@@ -1101,5 +1274,25 @@ describe('AbyssPlanAgent', () => {
     expect(runner.calls[3]?.options.systemPrompt).toContain('ExplainAgent v3');
     expect(runner.calls[3]?.options.systemPrompt).toContain('当前 build');
     expect(runner.calls[3]?.options.systemPrompt).toContain('来源');
+  });
+
+  it('projects strict review stages to the selected eight-character roster', async () => {
+    const runner = new FixtureRunner([validAbyssPlan()]);
+    const result = await new AbyssPlanAgent(runner).compose({
+      input: abyssInput(),
+      scenario: abyssScenario(),
+      characters: ABYSS_CHARACTERS,
+      pipelineContext: pipelineContext(),
+      sdkOptions: sdkOptions()
+    });
+
+    expect(result.ok).toBe(true);
+    const critiquePayload = JSON.parse(runner.calls[1]!.prompt) as {
+      context: { profile: { minimalIndex: Array<{ id: number }> } };
+    };
+    expect(critiquePayload.context.profile.minimalIndex.map(({ id }) => String(id))).toEqual(
+      expect.arrayContaining(validAbyssPlan().firstHalfTeam.characterIds)
+    );
+    expect(critiquePayload.context.profile.minimalIndex).toHaveLength(8);
   });
 });

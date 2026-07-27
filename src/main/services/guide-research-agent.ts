@@ -19,6 +19,7 @@ import {
   type GuideResearchCanonicalCharacterIdentity,
   type GuideResearchCanonicalElement,
   type GuideResearchGapCode,
+  type GuideResearchSourcesByHost,
   type GuideResearchSourceRegistryReader,
   type PendingResearchTask
 } from './guide-research-contract.js';
@@ -35,10 +36,15 @@ import {
 } from './guide-research-projection.js';
 import {
   canonicalGuideSource,
+  sourcesForDirectGuideSearch,
   trustedSourcesByCanonicalHost
 } from './guide-research-source-policy.js';
 import type { GuideResearchTask } from './knowledge-coverage-gate.js';
 import { privacySafeResearchText } from './research-privacy.js';
+import type {
+  GuideWebSearchClient,
+  GuideWebSearchResult
+} from './zhipu-web-search-client.js';
 
 export { GuideResearchAgentError } from './guide-research-contract.js';
 export type {
@@ -59,6 +65,7 @@ export interface GuideResearchAgentOptions {
   sourceRegistry: GuideResearchSourceRegistryReader;
   sdkOptions: AgentSdkRunOptions;
   canonicalCharacterCatalog: readonly GuideResearchCanonicalCharacterIdentity[];
+  directSearch?: GuideWebSearchClient;
   onUsageDelta?: (usage: AgentUsage) => void;
   now?: () => number;
 }
@@ -69,6 +76,7 @@ export class GuideResearchAgent {
   private readonly sourceRegistry: GuideResearchSourceRegistryReader;
   private readonly sdkOptions: AgentSdkRunOptions;
   private readonly canonicalCharacterCatalog: ReadonlyMap<string, GuideResearchCanonicalElement>;
+  private readonly directSearch: GuideWebSearchClient | undefined;
   private readonly onUsageDelta: ((usage: AgentUsage) => void) | undefined;
   private readonly now: () => number;
 
@@ -80,6 +88,7 @@ export class GuideResearchAgent {
     this.canonicalCharacterCatalog = canonicalCharacterCatalogSnapshot(
       options.canonicalCharacterCatalog
     );
+    this.directSearch = options.directSearch;
     this.onUsageDelta = options.onUsageDelta;
     this.now = options.now ?? Date.now;
   }
@@ -144,6 +153,16 @@ export class GuideResearchAgent {
         'RESEARCH_TASK_INVALID',
         'Guide research prompt projection failed privacy validation'
       );
+    }
+    if (this.directSearch !== undefined) {
+      return this.researchDirect({
+        tasks: parsed.tasks,
+        knowledgeVersion: parsed.knowledgeVersion,
+        cachedByKey,
+        runtimeMisses,
+        queries: buildDirectSearchQueries(runtimeMisses),
+        sourcesByHost: sourcesForDirectGuideSearch(sourcesByHost)
+      });
     }
 
     let rawOutput: string;
@@ -343,6 +362,88 @@ export class GuideResearchAgent {
     }
     return new Date(now).toISOString();
   }
+
+  private async researchDirect(input: {
+    tasks: GuideResearchTask[];
+    knowledgeVersion: string;
+    cachedByKey: ReadonlyMap<string, EphemeralGuideCacheValue>;
+    runtimeMisses: PendingResearchTask[];
+    queries: string[];
+    sourcesByHost: GuideResearchSourcesByHost;
+  }): Promise<GuideResearchAgentResult> {
+    const signal = this.sdkOptions.abortController.signal;
+    const outcomes = await Promise.all(
+      input.queries.map(async (query) => {
+        const boundedQuery = Array.from(query).slice(0, 70).join('').trim();
+        try {
+          const results = await this.directSearch!.search(boundedQuery, { signal });
+          return { query: boundedQuery, status: 'resolved' as const, results };
+        } catch {
+          return {
+            query: boundedQuery,
+            status: 'error' as const,
+            results: [] as GuideWebSearchResult[]
+          };
+        }
+      })
+    );
+    const allowedResults = uniqueDirectSearchResults(
+      outcomes.flatMap(({ results }) => results),
+      input.sourcesByHost
+    );
+    const researchedByKey = new Map<string, EphemeralGuideCacheValue>();
+    const gapsByKey = new Map<string, GuideResearchGapCode>();
+    const hadSearchError = outcomes.some(({ status }) => status === 'error');
+    const researchedAt = this.currentIsoTime();
+    for (const pending of input.runtimeMisses) {
+      const candidates = directResearchCandidates(pending, allowedResults);
+      if (candidates.length === 0) {
+        gapsByKey.set(
+          pending.task.key,
+          hadSearchError ? 'SEARCH_UNAVAILABLE' : 'SEARCH_NO_VALID_RESULTS'
+        );
+        continue;
+      }
+      const value = cacheValueForResearchCandidates(
+        pending.task,
+        candidates,
+        input.sourcesByHost,
+        researchedAt
+      );
+      if (value === undefined) {
+        gapsByKey.set(pending.task.key, 'SEARCH_NO_VALID_RESULTS');
+        continue;
+      }
+      try {
+        await this.cache.put({
+          task: pending.task,
+          knowledgeVersion: input.knowledgeVersion,
+          value
+        });
+        researchedByKey.set(pending.task.key, value);
+      } catch {
+        gapsByKey.set(pending.task.key, 'SEARCH_CACHE_UNAVAILABLE');
+      }
+    }
+    return {
+      ...combineGuideResearchResult(
+        input.tasks,
+        input.cachedByKey,
+        researchedByKey,
+        gapsByKey
+      ),
+      searchExecuted: true,
+      usage: EMPTY_RESEARCH_USAGE,
+      directSearchAudit: {
+        provider: 'zhipu-web-search',
+        attempts: outcomes.map(({ query, status, results }) => ({
+          query,
+          status,
+          urls: uniqueDirectSearchResults(results, input.sourcesByHost).map(({ url }) => url)
+        }))
+      }
+    };
+  }
 }
 
 const EMPTY_RESEARCH_USAGE: AgentUsage = {
@@ -350,6 +451,71 @@ const EMPTY_RESEARCH_USAGE: AgentUsage = {
   outputTokens: 0,
   estimatedCostUsd: 0
 };
+
+function buildDirectSearchQueries(tasks: readonly PendingResearchTask[]): string[] {
+  const characterQueries = tasks.flatMap(({ projected }) =>
+    projected.character === undefined
+      ? []
+      : [`原神 ${projected.character.name} 配队 攻略`]
+  );
+  return Array.from(new Set(characterQueries)).slice(0, 3);
+}
+
+function uniqueDirectSearchResults(
+  results: readonly GuideWebSearchResult[],
+  sourcesByHost: GuideResearchSourcesByHost
+): GuideWebSearchResult[] {
+  const byUrl = new Map<string, GuideWebSearchResult>();
+  for (const result of results) {
+    const source = canonicalGuideSource(result.url, sourcesByHost);
+    const title = privacySafeResearchText(result.title);
+    const snippet = privacySafeResearchText(result.snippet);
+    const publishedAt =
+      result.publishedAt === undefined
+        ? undefined
+        : privacySafeResearchText(result.publishedAt);
+    if (source === undefined || !title || !snippet || result.publishedAt !== undefined && !publishedAt) {
+      continue;
+    }
+    if (!byUrl.has(source.url)) {
+      byUrl.set(source.url, {
+        title: title.slice(0, 200),
+        snippet: snippet.slice(0, 700),
+        url: source.url,
+        ...(publishedAt ? { publishedAt: publishedAt.slice(0, 240) } : {})
+      });
+    }
+  }
+  return [...byUrl.values()];
+}
+
+function directResearchCandidates(
+  pending: PendingResearchTask,
+  results: readonly GuideWebSearchResult[]
+): ResearchCandidate[] {
+  const characterName = pending.projected.character?.name;
+  if (characterName === undefined) return [];
+  return results
+    .filter(({ title, snippet }) => `${title}\n${snippet}`.includes(characterName))
+    .slice(0, 2)
+    .map((result) => ({
+      taskRef: pending.projected.taskRef,
+      summary: result.snippet,
+      applicability: {
+        characterNames: [characterName],
+        scenarioTags: [...pending.projected.scenarioTags],
+        buildSignals: [...(pending.projected.character?.buildSignals ?? [])]
+      },
+      source: {
+        url: result.url,
+        title: result.title,
+        timelineClue: result.publishedAt
+          ? `页面发布时间：${result.publishedAt}`
+          : '搜索结果未提供页面发布时间'
+      },
+      conflicts: []
+    }));
+}
 
 function liveResearchResult(
   result: Pick<GuideResearchAgentResult, 'entries' | 'gaps'>,

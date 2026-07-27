@@ -72,6 +72,29 @@ function sourcesByCanonicalHost(registry: SourceRegistryResult): Map<string, { i
   return sources;
 }
 
+const DIRECT_SEARCH_ONLY_SOURCES = [
+  {
+    id: 'search-only-hoyolab-www',
+    host: 'www.hoyolab.com'
+  },
+  {
+    id: 'search-only-3dm-genshin',
+    host: 'ol.3dmgame.com'
+  }
+] as const;
+
+export function sourcesForDirectGuideSearch(
+  trustedSources: GuideResearchSourcesByHost
+): Map<string, { id: string }> {
+  const sources = new Map(trustedSources);
+  for (const source of DIRECT_SEARCH_ONLY_SOURCES) {
+    if (!sources.has(source.host)) {
+      sources.set(source.host, { id: source.id });
+    }
+  }
+  return sources;
+}
+
 export function canonicalGuideSource(
   value: string,
   sourcesByHost: GuideResearchSourcesByHost

@@ -64,6 +64,14 @@ export interface GuideResearchAgentResult {
   searchExecuted?: boolean;
   usage?: AgentUsage;
   audit?: AuditedAgentTurn;
+  directSearchAudit?: {
+    provider: 'zhipu-web-search';
+    attempts: Array<{
+      query: string;
+      status: 'resolved' | 'error';
+      urls: string[];
+    }>;
+  };
   failure?: {
     sdkCode: AgentTurnErrorCode;
     httpStatus?: number;

@@ -27,8 +27,24 @@ import type { CharacterKnowledgeReader } from '../../shared/character-knowledge.
 import { runV2AgentPipeline, type V2AgentStage } from './v2-agent-pipeline.js';
 import type { AgentFailure } from '../../shared/agent-run-trace.js';
 import type { AgentPipelineTraceSession } from './v2-agent-pipeline.js';
-import { abyssMemberAssignmentSchema } from '../../shared/scenario-v2.js';
-import { parseAgentJson } from './agent-json.js';
+import {
+  abyssMemberAssignmentSchema,
+  type AbyssMemberAssignment
+} from '../../shared/scenario-v2.js';
+import {
+  parseAgentJson,
+  parseAgentJsonWithKnownStringArrays,
+  parseStructurallyIncompleteAgentJson
+} from './agent-json.js';
+
+const ABYSS_STRING_ARRAY_FIELDS = [
+  'warnings',
+  'assumptions',
+  'rotationNotes',
+  'tactics',
+  'risks',
+  'substitutionNotes'
+] as const;
 
 export interface AbyssPlanAgentRunner {
   run(prompt: string, options: AgentSdkRunOptions): AsyncIterable<unknown>;
@@ -39,6 +55,7 @@ export interface AbyssPlanAgentInput {
   scenario: AbyssScenario;
   characters: CharacterProfile[];
   knowledge?: CharacterKnowledgeReader;
+  profileContextValidated?: boolean;
   pipelineContext: V2PipelineContext;
   sdkOptions: AgentSdkRunOptions;
   sdkOptionsForStage?: (stage: V2AgentStage) => AgentSdkRunOptions;
@@ -83,13 +100,15 @@ export class AbyssPlanAgent {
         : undefined,
       onStageStart: context.onStageStart,
       onUsageDelta: context.onUsageDelta,
+      maxComposerRepairs: 1,
       sdkOptionsForStage: context.sdkOptionsForStage ?? (() => context.sdkOptions),
       composer: {
         initialPrompt: buildComposePayload(context),
         systemPrompt: ABYSS_COMPOSER_PROMPT_V3,
         repairPrompt: ABYSS_REPAIR_PROMPT_V3,
         reuseToolEvidenceOnToolFreeRepair: true,
-        validate: (text, tools) => validateAgentOutput(text, context, tools)
+        validate: (text, tools, stage) =>
+          validateAgentOutput(text, context, tools, stage !== 'compose')
       },
       invalidIssue: (stage, message) => ({
         code: 'AGENT_OUTPUT_INVALID' as const,
@@ -142,10 +161,17 @@ function validateAgentOutput(
   context: Pick<
     AbyssPlanAgentInput,
     'input' | 'scenario' | 'characters' | 'knowledge' | 'pipelineContext' | 'citationPolicy'
+      | 'profileContextValidated'
   >,
-  tools: ToolAudit[]
+  tools: ToolAudit[],
+  allowStructuralRepair: boolean
 ): { ok: true; plan: AbyssPlanOutput } | { ok: false; issues: AbyssPlanIssue[] } {
-  const parsed = parseAgentJson(raw);
+  const parsed =
+    parseAgentJson(raw) ??
+    (allowStructuralRepair
+      ? parseStructurallyIncompleteAgentJson(raw) ??
+        parseAgentJsonWithKnownStringArrays(raw, ABYSS_STRING_ARRAY_FIELDS)
+      : undefined);
   if (parsed === undefined) {
     return {
       ok: false,
@@ -170,15 +196,155 @@ function validateAgentOutput(
       ]
     };
   }
-  const toolIssue = validateRequiredTools(context, tools, parsed);
+  const groundedPlan = deriveMissingMemberAssignments(parsed, context);
+  const toolIssue = validateRequiredTools(context, tools, groundedPlan);
   if (toolIssue) return { ok: false, issues: [toolIssue] };
-  return validateAbyssPlan({ ...context, plan: parsed });
+  return validateAbyssPlan({ ...context, plan: groundedPlan });
+}
+
+function deriveMissingMemberAssignments(
+  plan: Record<string, unknown>,
+  context: Pick<AbyssPlanAgentInput, 'input' | 'pipelineContext' | 'citationPolicy'>
+): Record<string, unknown> {
+  const current = plan['memberAssignments'];
+  if (Array.isArray(current) && current.length > 0) return plan;
+  const halves = [
+    ['first', recordTeamCharacterIds(plan, 'firstHalfTeam')],
+    ['second', recordTeamCharacterIds(plan, 'secondHalfTeam')]
+  ] as const;
+  const selectedIds = halves.flatMap(([, ids]) => ids);
+  if (selectedIds.length !== 8 || new Set(selectedIds).size !== 8) return plan;
+
+  const packet = context.pipelineContext.knowledge;
+  const citationsById = new Map(packet.citations.map((citation) => [citation.id, citation]));
+  const unknownCharacterIds: string[] = [];
+  const memberAssignments = halves.flatMap(([half, characterIds]) =>
+    characterIds.map((characterId): AbyssMemberAssignment => {
+      const interpretation = packet.buildInterpretations.find(
+        ({ characterId: candidate }) => candidate === characterId
+      );
+      const explicitGap =
+        interpretation === undefined ||
+        packet.unknowns.some(
+          ({ subjectId, kind }) =>
+            subjectId === characterId &&
+            ['missing', 'stale', 'conflict', 'build-unmatched'].includes(kind ?? 'missing')
+        );
+      if (explicitGap) {
+        unknownCharacterIds.push(characterId);
+        return {
+          characterId,
+          half,
+          archetypeId: interpretation?.archetypeId ?? null,
+          role: 'unclassified',
+          buildStatus: 'unknown',
+          citationIds: []
+        };
+      }
+
+      const requiresAdjustment =
+        interpretation.adjustment === 'required' ||
+        interpretation.conflictingSignals.length > 0;
+      if (!interpretation.currentBuildUsable && !requiresAdjustment) {
+        unknownCharacterIds.push(characterId);
+        return {
+          characterId,
+          half,
+          archetypeId: interpretation.archetypeId,
+          role: 'unclassified',
+          buildStatus: 'unknown',
+          citationIds: []
+        };
+      }
+      const trustedMatches = packet.trustedMatches.filter(
+        ({ characterId: candidate, archetypeId, role }) =>
+          candidate === characterId &&
+          archetypeId === interpretation.archetypeId &&
+          role !== undefined
+      );
+      for (const match of trustedMatches) {
+        const citationIds = match.citationIds
+          .filter((citationId) => {
+            const citation = citationsById.get(citationId);
+            return (
+              citation?.trust === 'trusted-local' &&
+              (context.citationPolicy === undefined ||
+                context.citationPolicy.supportsCharacter(
+                  citationId,
+                  characterId,
+                  interpretation.archetypeId
+                ))
+            );
+          })
+          .slice(0, 32);
+        if (citationIds.length > 0 && match.role !== undefined) {
+          return {
+            characterId,
+            half,
+            archetypeId: interpretation.archetypeId,
+            role: match.role,
+            buildStatus: requiresAdjustment ? 'requires-adjustment' : 'current-build',
+            citationIds
+          };
+        }
+      }
+
+      const ephemeralCitationIds = packet.ephemeralMatches
+        .filter(({ subjectId }) => subjectId === characterId)
+        .flatMap(({ citationIds }) => citationIds)
+        .filter((citationId) => citationsById.get(citationId)?.trust === 'ephemeral-web')
+        .filter((citationId, index, values) => values.indexOf(citationId) === index)
+        .slice(0, 32);
+      if (ephemeralCitationIds.length > 0) {
+        return {
+          characterId,
+          half,
+          archetypeId: interpretation.archetypeId,
+          role: 'unclassified',
+          buildStatus: requiresAdjustment ? 'requires-adjustment' : 'current-build',
+          citationIds: ephemeralCitationIds
+        };
+      }
+
+      unknownCharacterIds.push(characterId);
+      return {
+        characterId,
+        half,
+        archetypeId: interpretation.archetypeId,
+        role: 'unclassified',
+        buildStatus: 'unknown',
+        citationIds: []
+      };
+    })
+  );
+
+  const grounded = { ...plan, memberAssignments };
+  if (unknownCharacterIds.length === 0) return grounded;
+  const marker = `${unknownCharacterIds.join('、')}：本地知识缺口，按低置信度保守使用。`;
+  return {
+    ...grounded,
+    confidence: 'low',
+    warnings: appendUniqueText(plan['warnings'], marker),
+    assumptions: appendUniqueText(plan['assumptions'], marker)
+  };
+}
+
+function appendUniqueText(value: unknown, marker: string): string[] {
+  const current = Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    : [];
+  return current.includes(marker) ? current : [...current, marker];
 }
 
 function validateRequiredTools(
   context: Pick<
     AbyssPlanAgentInput,
-    'input' | 'scenario' | 'characters' | 'pipelineContext' | 'citationPolicy'
+    | 'input'
+    | 'scenario'
+    | 'characters'
+    | 'pipelineContext'
+    | 'citationPolicy'
+    | 'profileContextValidated'
   >,
   tools: ToolAudit[],
   plan: Record<string, unknown>
@@ -216,7 +382,11 @@ function validateRequiredTools(
           : []
       )
   );
-  if (plannedOwnedIds.length === 0 || plannedOwnedIds.some((id) => !detailedProfileIds.has(id))) {
+  if (
+    context.profileContextValidated !== true &&
+    (plannedOwnedIds.length === 0 ||
+      plannedOwnedIds.some((id) => !detailedProfileIds.has(id)))
+  ) {
     missing.push('read_profile_cache:selected-character-details');
   }
   if (duplicateToolIds) missing.push('tool-audit:duplicate-id');
@@ -251,16 +421,17 @@ function validateRequiredTools(
           input['chamber'] === chamber &&
           input['half'] === half
       );
+      const knowledgeCall = knowledgeCalls.at(-1);
       const queriedIds =
-        knowledgeCalls.length === 1 && Array.isArray(knowledgeCalls[0]!.input['characterIds'])
-          ? knowledgeCalls[0]!.input['characterIds'].filter(
+        knowledgeCall !== undefined && Array.isArray(knowledgeCall.input['characterIds'])
+          ? knowledgeCall.input['characterIds'].filter(
               (id): id is string => typeof id === 'string'
             )
           : [];
       const coveredIds = new Set(queriedIds);
       if (
         expectedIds.length !== 4 ||
-        knowledgeCalls.length !== 1 ||
+        knowledgeCall === undefined ||
         queriedIds.length !== expectedIds.length ||
         expectedIds.some((id) => !coveredIds.has(id)) ||
         coveredIds.size !== expectedIds.length
@@ -289,7 +460,11 @@ function buildComposePayload(context: AbyssPlanAgentInput): string {
     request: publicRequest(context),
     availableCharacterIds: context.characters.map(({ id }) => String(id)),
     toolPolicy: {
-      required: ['read_profile_cache', 'query_enemy_data', 'query_team_knowledge'],
+      profileContext: context.profileContextValidated === true ? 'host-validated' : 'tool-required',
+      required:
+        context.profileContextValidated === true
+          ? ['query_enemy_data', 'query_team_knowledge']
+          : ['read_profile_cache', 'query_enemy_data', 'query_team_knowledge'],
       unknownMeansUnknown: true
     }
   });
@@ -348,7 +523,16 @@ function validateMemberAssignments(
       ({ characterId: candidate }) => candidate === characterId
     );
     if (interpretation === undefined) {
-      missing.push(`member-assignment:${characterId}:build-interpretation-missing`);
+      if (
+        assignment.archetypeId !== null ||
+        assignment.role !== 'unclassified' ||
+        assignment.buildStatus !== 'unknown' ||
+        assignment.citationIds.length !== 0 ||
+        plan['confidence'] !== 'low' ||
+        !planContainsUnknownMarker(plan, characterId)
+      ) {
+        missing.push(`member-assignment:${characterId}:build-interpretation-missing`);
+      }
       continue;
     }
     if (assignment.archetypeId !== interpretation.archetypeId) {
@@ -373,9 +557,23 @@ function validateMemberAssignments(
       continue;
     }
     const requiresAdjustment =
-      !interpretation.currentBuildUsable ||
       interpretation.adjustment === 'required' ||
       interpretation.conflictingSignals.length > 0;
+    const unverifiedOptionalBuild =
+      !interpretation.currentBuildUsable && !requiresAdjustment;
+    if (unverifiedOptionalBuild) {
+      if (
+        assignment.role !== 'unclassified' ||
+        assignment.buildStatus !== 'unknown' ||
+        assignment.citationIds.length !== 0
+      ) {
+        missing.push(`member-assignment:${characterId}:unverified-build-must-be-unclassified`);
+      }
+      if (plan['confidence'] !== 'low' || !planContainsUnknownMarker(plan, characterId)) {
+        missing.push(`member-assignment:${characterId}:unknown-marker-missing`);
+      }
+      continue;
+    }
     if (requiresAdjustment && context.input.preferences.noBuildChange) {
       missing.push(`member-assignment:${characterId}:no-build-change-conflict`);
     }
@@ -462,16 +660,23 @@ function planContainsUnknownMarker(plan: Record<string, unknown>, characterId: s
 }
 
 function issueFailure(issues: AbyssPlanIssue[]): AgentFailure {
-  if (issues.some(({ path }) => path[0] === 'tools')) {
+  const toolIssue = issues.find(({ path }) => path[0] === 'tools');
+  if (toolIssue) {
+    const missing = toolIssue.details?.['missing'];
     return {
       code: 'TOOL_REQUIREMENT_FAILED',
       message: 'Required business tool evidence was incomplete.',
-      retryable: false
+      retryable: false,
+      ...(Array.isArray(missing) && missing.every((value) => typeof value === 'string')
+        ? { details: { missing: missing.join(', ') } }
+        : {})
     };
   }
   return {
     code: 'AGENT_OUTPUT_INVALID',
-    message: 'Agent output did not pass deterministic validation.',
+    message:
+      issues[0]?.message ??
+      'Agent output did not pass deterministic validation.',
     retryable: false
   };
 }

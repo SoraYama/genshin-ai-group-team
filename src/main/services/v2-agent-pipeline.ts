@@ -5,6 +5,7 @@ import {
   v2CritiqueOutputSchema,
   v2ExplainInputSchema,
   v2ExplainOutputSchema,
+  v2AgentTargetSchema,
   v2PipelineContextSchema,
   v2RotationInputSchema,
   v2RotationOutputSchema,
@@ -21,7 +22,12 @@ import {
   ROTATION_COACH_PROMPT_V3
 } from '../agents/rotation-coach/prompt.js';
 import type { RecommendationPlan } from '../../shared/scenario-v2.js';
-import type { AdvisorFactRef, AdvisorNarrativeReasonCode } from '../../shared/advisor-narrative.js';
+import {
+  advisorFactRefSchema,
+  advisorNarrativeReasonCodeSchema,
+  type AdvisorFactRef,
+  type AdvisorNarrativeReasonCode
+} from '../../shared/advisor-narrative.js';
 import type { AgentSdkRunOptions } from './agent-sdk-adapter.js';
 import {
   AgentTurnError,
@@ -39,8 +45,15 @@ import {
   stringifyAgentPayload,
   type AgentPayloadScope
 } from './agent-payload-budget.js';
-import { parseAgentJson } from './agent-json.js';
-import { fitV2PipelineContextToBudget } from './v2-agent-context.js';
+import {
+  parseAgentJson,
+  parseStructurallyIncompleteAgentJson
+} from './agent-json.js';
+import {
+  fitV2PipelineContextToBudget,
+  projectV2PipelineContextForCharacterIds,
+  projectV2PipelineContextForPlan
+} from './v2-agent-context.js';
 import type {
   AgentRunTraceLease,
   AgentRunTraceWriter,
@@ -84,13 +97,18 @@ export interface RunV2AgentPipelineOptions<P extends RecommendationPlan, I exten
   ) => boolean;
   onStageStart?: (stage: V2AgentStage) => void;
   onUsageDelta?: (usage: AgentUsage) => void;
+  maxComposerRepairs?: 1 | 2;
   sdkOptionsForStage: (stage: V2AgentStage) => AgentSdkRunOptions;
   composer: {
     initialPrompt: string;
     systemPrompt: string;
     repairPrompt: string;
     reuseToolEvidenceOnToolFreeRepair?: boolean;
-    validate: (text: string, tools: ToolAudit[]) => ValidationResult<P, I>;
+    validate: (
+      text: string,
+      tools: ToolAudit[],
+      stage: V2AgentStage
+    ) => ValidationResult<P, I>;
   };
   invalidIssue: (stage: V2AgentStage, message: string) => I;
 }
@@ -147,6 +165,7 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
   let previousPlan: unknown;
   let pendingIssues: PipelineIssue[] = [];
   let composerToolEvidence: ToolAudit[] = [];
+  const maxComposerRepairs = options.maxComposerRepairs ?? 2;
 
   while (true) {
     const stage: V2AgentStage = repairs === 0 ? 'compose' : repairs === 1 ? 'repair-1' : 'repair-2';
@@ -176,8 +195,8 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
               {
                 instruction: '只修复具体 issue，返回完整方案。',
                 issues: pendingIssues,
-                previousPlan,
-                context
+                previousPlan: compactRepairPreviousPlan(previousPlan),
+                context: repairContext(context, previousPlan)
               },
               'repair-prompt'
             );
@@ -234,7 +253,11 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
     }
     usage = addAgentUsage(usage, composerTurn.usage);
     if (composerTurn.toolsTruncated !== true && composerTurn.tools.length > 0) {
-      composerToolEvidence = composerTurn.tools;
+      composerToolEvidence =
+        stage !== 'compose' &&
+        options.composer.reuseToolEvidenceOnToolFreeRepair === true
+          ? mergeComposerToolEvidence(composerToolEvidence, composerTurn.tools)
+          : composerTurn.tools;
     }
     let validated: ValidationResult<P, I>;
     try {
@@ -251,11 +274,11 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
             }
           : options.composer.validate(
               composerTurn.text,
-              composerTurn.tools.length === 0 &&
-                stage !== 'compose' &&
+              stage !== 'compose' &&
                 options.composer.reuseToolEvidenceOnToolFreeRepair === true
                 ? composerToolEvidence
-                : composerTurn.tools
+                : composerTurn.tools,
+              stage
             );
     } catch (error) {
       const failure = agentFailure(
@@ -274,7 +297,7 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
         false
       );
       trace.failStage(stage, failure, composerTurn);
-      if (repairs >= 2) {
+      if (repairs >= maxComposerRepairs) {
         trace.fail(failure);
         return { ok: false, repairs, issues: validated.issues, usage };
       }
@@ -300,7 +323,7 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
       const issue = options.invalidIssue(stage, candidateViolation);
       const failure = agentFailure('VALIDATION_FAILED', candidateViolation, false);
       trace.failStage(stage, failure, composerTurn);
-      if (repairs >= 2) {
+      if (repairs >= maxComposerRepairs) {
         trace.fail(failure);
         return { ok: false, repairs, issues: [issue], usage };
       }
@@ -310,6 +333,7 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
       continue;
     }
     trace.completeStage(stage, composerTurn);
+    const strictContext = projectV2PipelineContextForPlan(context, validated.plan);
 
     notifyStageStart(options.onStageStart, 'critique');
     const critiqueOptions = startStageWithSdkOptions(
@@ -323,7 +347,7 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
       v2CritiqueInputSchema,
       {
         stage: 'critique',
-        context,
+        context: strictContext,
         plan: validated.plan
       },
       trace
@@ -336,14 +360,17 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
         usage
       };
     }
-    context = critiqueInput.context;
+    const critiqueContext = critiqueInput.context;
     const critiqueResult = await runStrictStage({
       runner: options.runner,
       sdkOptions: critiqueOptions,
       prompt: critiqueInput.input,
       systemPrompt:
-        context.mode === 'spiral-abyss' ? CRITIQUE_PROMPT_V3 : CRITIQUE_PROMPT_V2,
+        critiqueContext.mode === 'spiral-abyss'
+          ? CRITIQUE_PROMPT_V3
+          : CRITIQUE_PROMPT_V2,
       schema: v2CritiqueOutputSchema,
+      normalize: normalizeCritiqueStageOutput,
       correlationId: context.correlationId,
       onUsageDelta: options.onUsageDelta
     });
@@ -376,7 +403,8 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
     }
     trace.completeStage('critique', critiqueResult.turn);
     const critique =
-      critiqueResult.value.decision === 'repair' && (critiqueRepairs >= 1 || repairs >= 2)
+      critiqueResult.value.decision === 'repair' &&
+      (critiqueRepairs >= 1 || repairs >= maxComposerRepairs)
         ? { ...critiqueResult.value, decision: 'accept' as const }
         : critiqueResult.value;
     if (critique.decision === 'repair') {
@@ -403,7 +431,7 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
       v2RotationInputSchema,
       {
         stage: 'rotation',
-        context,
+        context: critiqueContext,
         plan: validated.plan,
         critique
       },
@@ -417,16 +445,24 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
         usage
       };
     }
-    context = rotationInput.context;
+    const rotationContext = rotationInput.context;
     const rotationResult = await runStrictStage({
       runner: options.runner,
       sdkOptions: rotationOptions,
       prompt: rotationInput.input,
       systemPrompt:
-        context.mode === 'spiral-abyss'
+        rotationContext.mode === 'spiral-abyss'
           ? ROTATION_COACH_PROMPT_V3
           : ROTATION_COACH_PROMPT_V2,
       schema: v2RotationOutputSchema,
+      normalize: (value) =>
+        normalizeNarrativeStageOutput(
+          value,
+          'rotations',
+          expectedStageTargets(validated.plan, 'rotation'),
+          rotationContext.mechanics,
+          true
+        ),
       correlationId: context.correlationId,
       onUsageDelta: options.onUsageDelta
     });
@@ -459,7 +495,7 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
     }
     const rotationFactError = firstGroundingError(
       rotationResult.value.rotations,
-      context,
+      rotationContext,
       options.supportsKnowledgeRef
     );
     if (rotationFactError) {
@@ -487,7 +523,7 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
       v2ExplainInputSchema,
       {
         stage: 'explain',
-        context,
+        context: rotationContext,
         plan: validated.plan,
         critique,
         rotation: rotationResult.value
@@ -502,14 +538,21 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
         usage
       };
     }
-    context = explainInput.context;
+    const explainContext = explainInput.context;
     const explainResult = await runStrictStage({
       runner: options.runner,
       sdkOptions: explainOptions,
       prompt: explainInput.input,
       systemPrompt:
-        context.mode === 'spiral-abyss' ? EXPLAIN_PROMPT_V3 : EXPLAIN_PROMPT_V2,
+        explainContext.mode === 'spiral-abyss' ? EXPLAIN_PROMPT_V3 : EXPLAIN_PROMPT_V2,
       schema: v2ExplainOutputSchema,
+      normalize: (value) =>
+        normalizeNarrativeStageOutput(
+          value,
+          'explanations',
+          expectedStageTargets(validated.plan, 'explain'),
+          explainContext.mechanics
+        ),
       correlationId: context.correlationId,
       onUsageDelta: options.onUsageDelta
     });
@@ -542,7 +585,7 @@ async function runV2AgentPipelineWithTrace<P extends RecommendationPlan, I exten
     }
     const explainFactError = firstGroundingError(
       explainResult.value.explanations,
-      context,
+      explainContext,
       options.supportsKnowledgeRef
     );
     if (explainFactError) {
@@ -579,6 +622,90 @@ function notifyStageStart(
   } catch {
     // Progress reporting is observational and must not change the checked pipeline result.
   }
+}
+
+function repairContext(
+  context: V2PipelineContext,
+  previousPlan: unknown
+): V2PipelineContext {
+  const characterIds = candidatePlanCharacterIds(previousPlan);
+  const projectionIds =
+    characterIds.length > 0
+      ? characterIds
+      : candidatePlanCharacterIds(context.candidate.feasibleBaseline);
+  return projectionIds.length === 0
+    ? context
+    : projectV2PipelineContextForCharacterIds(context, projectionIds);
+}
+
+function compactRepairPreviousPlan(value: unknown, parentKey = ''): unknown {
+  if (
+    value &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    (value as Record<string, unknown>)['invalidJson'] === true
+  ) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    if (
+      /(?:^|[A-Z_])ids?$/iu.test(parentKey) ||
+      ['mode', 'schemaVersion', 'scenarioId', 'dataVersion', 'confidence'].includes(parentKey)
+    ) {
+      return value;
+    }
+    return Array.from(value).slice(0, 32).join('');
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => compactRepairPreviousPlan(item, parentKey));
+  }
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [
+      key,
+      compactRepairPreviousPlan(item, key)
+    ])
+  );
+}
+
+function candidatePlanCharacterIds(value: unknown): string[] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+  const plan = value as Record<string, unknown>;
+  const ids: string[] = [];
+  const appendTeam = (team: unknown) => {
+    if (!team || typeof team !== 'object' || Array.isArray(team)) return;
+    const characterIds = (team as Record<string, unknown>)['characterIds'];
+    if (!Array.isArray(characterIds)) return;
+    ids.push(...characterIds.filter((id): id is string => typeof id === 'string'));
+  };
+  if (plan['mode'] === 'spiral-abyss') {
+    appendTeam(plan['firstHalfTeam']);
+    appendTeam(plan['secondHalfTeam']);
+  } else if (plan['mode'] === 'stygian-onslaught' && Array.isArray(plan['phases'])) {
+    for (const phase of plan['phases']) {
+      if (phase && typeof phase === 'object' && !Array.isArray(phase)) {
+        appendTeam((phase as Record<string, unknown>)['team']);
+      }
+    }
+  } else if (plan['mode'] === 'imaginarium-theater') {
+    const cast =
+      plan['cast'] && typeof plan['cast'] === 'object' && !Array.isArray(plan['cast'])
+        ? (plan['cast'] as Record<string, unknown>)
+        : {};
+    for (const key of [
+      'openingCharacterIds',
+      'selectedCharacterIds',
+      'trialCharacterIds',
+      'specialGuestCharacterIds',
+      'supportCharacterIds'
+    ]) {
+      const values = cast[key];
+      if (Array.isArray(values)) {
+        ids.push(...values.filter((id): id is string => typeof id === 'string'));
+      }
+    }
+  }
+  return [...new Set(ids)];
 }
 
 function firstGroundingError(
@@ -748,6 +875,7 @@ async function runStrictStage<T>(options: {
   prompt: unknown;
   systemPrompt: string;
   schema: z.ZodType<T>;
+  normalize?: (value: unknown) => unknown;
   correlationId: string;
   onUsageDelta?: (usage: AgentUsage) => void;
 }): Promise<
@@ -817,7 +945,7 @@ async function runStrictStage<T>(options: {
       turn
     };
   }
-  const result = options.schema.safeParse(parsed);
+  const result = options.schema.safeParse(options.normalize?.(parsed) ?? parsed);
   return result.success
     ? { ok: true, value: result.data, usage: turn.usage, turn }
     : {
@@ -831,6 +959,160 @@ async function runStrictStage<T>(options: {
         ),
         turn
       };
+}
+
+function normalizeNarrativeStageOutput(
+  value: unknown,
+  collectionKey: 'rotations' | 'explanations',
+  expectedTargets: V2AgentTarget[],
+  mechanics: V2PipelineContext['mechanics'],
+  removeUnsupportedReasons = false
+): unknown {
+  if (!isPlainRecord(value) || !Array.isArray(value[collectionKey])) return value;
+  let repairedToneAlias = false;
+  const normalized = value[collectionKey].map((item) => {
+    if (!isPlainRecord(item)) return item;
+    let current = item;
+    if (
+      item['tone'] === 'uncertainty' &&
+      Array.isArray(item['reasonCodes']) &&
+      item['reasonCodes'].length === 1 &&
+      item['reasonCodes'][0] === 'uncertainty'
+    ) {
+      repairedToneAlias = true;
+      current = { ...current, tone: 'cautious' };
+    }
+    if (Array.isArray(current['factRefs'])) {
+      current = {
+        ...current,
+        factRefs: current['factRefs'].map((ref) =>
+          normalizeGlmFactRef(ref, current['target'], mechanics)
+        )
+      };
+    }
+    if (
+      !removeUnsupportedReasons ||
+      !Array.isArray(current['reasonCodes']) ||
+      !Array.isArray(current['factRefs'])
+    ) {
+      return current;
+    }
+    const reasons = current['reasonCodes'].map((reason) =>
+      advisorNarrativeReasonCodeSchema.safeParse(reason)
+    );
+    const refs = current['factRefs'].map((ref) => advisorFactRefSchema.safeParse(ref));
+    if (
+      reasons.some((reason) => !reason.success) ||
+      refs.some((ref) => !ref.success)
+    ) {
+      return current;
+    }
+    const groundedReasons = reasons
+      .map((reason) => reason.data!)
+      .filter((reason) => refs.some((ref) => factSupportsReason(ref.data!, reason)));
+    return groundedReasons.length > 0 && groundedReasons.length < reasons.length
+      ? { ...current, reasonCodes: groundedReasons }
+      : current;
+  });
+  if (!repairedToneAlias) return { ...value, [collectionKey]: normalized };
+  const expectedKeys = new Set(expectedTargets.map((target) => JSON.stringify(target)));
+  const actualKeys = normalized.map((item) =>
+    isPlainRecord(item) && isPlainRecord(item['target'])
+      ? JSON.stringify(item['target'])
+      : undefined
+  );
+  if (
+    actualKeys.some((key) => key === undefined || !expectedKeys.has(key)) ||
+    new Set(actualKeys).size !== actualKeys.length
+  ) {
+    return { ...value, [collectionKey]: normalized };
+  }
+  const actualKeySet = new Set(actualKeys);
+  const fallbacks = expectedTargets
+    .filter((target) => !actualKeySet.has(JSON.stringify(target)))
+    .map((target) => ({
+      target,
+      tone: 'cautious',
+      reasonCodes: ['uncertainty'],
+      factRefs: [{ kind: 'plan', field: 'validated-target' }]
+    }));
+  return { ...value, [collectionKey]: [...normalized, ...fallbacks] };
+}
+
+function normalizeGlmFactRef(
+  value: unknown,
+  directiveTarget: unknown,
+  mechanics: V2PipelineContext['mechanics']
+): unknown {
+  const knowledgeRef = normalizeGlmKnowledgeFactRef(value);
+  return normalizeGlmMechanicTarget(knowledgeRef, directiveTarget, mechanics);
+}
+
+function normalizeGlmKnowledgeFactRef(value: unknown): unknown {
+  if (!isPlainRecord(value)) return value;
+  const keys = Object.keys(value).sort();
+  const field = value['field'];
+  return (
+    value['kind'] === 'knowledge' &&
+    keys.length === 2 &&
+    keys[0] === 'field' &&
+    keys[1] === 'kind' &&
+    typeof field === 'string' &&
+    /^[1-9]\d{0,127}$/u.test(field)
+  )
+    ? { kind: 'knowledge', characterId: field }
+    : value;
+}
+
+function normalizeGlmMechanicTarget(
+  value: unknown,
+  directiveTarget: unknown,
+  mechanics: V2PipelineContext['mechanics']
+): unknown {
+  if (!isPlainRecord(value)) return value;
+  const keys = Object.keys(value).sort();
+  if (
+    value['kind'] !== 'mechanic' ||
+    keys.length !== 3 ||
+    keys[0] !== 'factIndex' ||
+    keys[1] !== 'kind' ||
+    keys[2] !== 'target' ||
+    !isPlainRecord(value['target'])
+  ) {
+    return value;
+  }
+  const nestedTarget = v2AgentTargetSchema.safeParse(value['target']);
+  const outerTarget = v2AgentTargetSchema.safeParse(directiveTarget);
+  if (
+    !nestedTarget.success ||
+    !outerTarget.success ||
+    nestedTarget.data.kind !== 'abyss-chamber' ||
+    JSON.stringify(nestedTarget.data) !== JSON.stringify(outerTarget.data)
+  ) {
+    return value;
+  }
+  const target = `${nestedTarget.data.floor} 层第 ${nestedTarget.data.chamber} 间${
+    nestedTarget.data.half === 'first' ? '上半' : '下半'
+  }`;
+  return mechanics.some((mechanic) => mechanic.target === target)
+    ? { ...value, target }
+    : value;
+}
+
+function normalizeCritiqueStageOutput(value: unknown): unknown {
+  if (!isPlainRecord(value) || !Array.isArray(value['issues'])) return value;
+  return {
+    ...value,
+    issues: value['issues'].map((issue) =>
+      isPlainRecord(issue) && issue['severity'] === 'hard'
+        ? { ...issue, severity: 'soft' }
+        : issue
+    )
+  };
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function parseStrictStageInput<T>(
@@ -1256,6 +1538,14 @@ function isTraceSession(
   );
 }
 
+function mergeComposerToolEvidence(
+  previous: readonly ToolAudit[],
+  current: readonly ToolAudit[]
+): ToolAudit[] {
+  const currentIds = new Set(current.map(({ id }) => id));
+  return [...previous.filter(({ id }) => !currentIds.has(id)), ...current];
+}
+
 function traceStageTerminalInput(
   stage: V2AgentStage,
   turn: AuditedAgentTurn | undefined,
@@ -1374,6 +1664,14 @@ function agentFailure(
 function parseJsonOrRaw(raw: string): unknown {
   const parsed = parseAgentJson(raw);
   if (parsed !== undefined) return parsed;
+  const objectStart = raw.indexOf('{');
+  if (objectStart > 0) {
+    const repairCandidate = raw.slice(objectStart);
+    const recovered =
+      parseAgentJson(repairCandidate) ??
+      parseStructurallyIncompleteAgentJson(repairCandidate);
+    if (recovered !== undefined) return recovered;
+  }
   const rawPreview = raw.slice(0, 2_048);
   return {
     invalidJson: true,

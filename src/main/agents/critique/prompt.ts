@@ -33,4 +33,4 @@ target 只能逐字采用下列形状之一，且不得增加 characters、team�
 {"kind":"stygian-phase","phase":1}
 {"kind":"theater-act","act":1}
 {"kind":"theater-cast"}
-issues 最多 8 条，每条 message 不超过 160 个汉字，message 内不得出现半角双引号，引用请用《》；同一队的同类问题合并。任一被 packet 明确证实且存在可行修复的 build-role、反应触发权、站场时间、能量、免疫、破盾或生存冲突影响可行性时 decision=repair；单纯知识未知不是冲突，已在 warnings 明确披露且没有 packet 证实的可行修复时，应 accept 并以 uncertainty 风险保留。不要输出 Markdown。`;
+severity 字面量只能是 soft，不存在 hard 或其他级别。issues 最多 8 条，每条 message 不超过 160 个汉字，message 内不得出现半角双引号，引用请用《》；同一队的同类问题合并。任一被 packet 明确证实且存在可行修复的 build-role、反应触发权、站场时间、能量、免疫、破盾或生存冲突影响可行性时 decision=repair；单纯知识未知不是冲突，已在 warnings 明确披露且没有 packet 证实的可行修复时，应 accept 并以 uncertainty 风险保留。不要输出 Markdown。`;

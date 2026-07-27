@@ -241,6 +241,8 @@ export interface AgentSdkRunOptions {
   abortController: AbortController;
   maxTurns?: number;
   effort?: SdkOptions['effort'];
+  thinking?: SdkOptions['thinking'];
+  maxThinkingTokens?: number;
   outputFormat?: SdkOptions['outputFormat'];
   stderr?: (data: string) => void;
   pathToClaudeCodeExecutable?: string;
@@ -271,6 +273,34 @@ function providerCredentialEnv(
     // The provider request will report the invalid URL; keep compatibility auth semantics here.
   }
   return { ANTHROPIC_AUTH_TOKEN: apiKey };
+}
+
+function providerHostname(baseUrl: string): string | undefined {
+  try {
+    return new URL(baseUrl).hostname.toLowerCase();
+  } catch {
+    return undefined;
+  }
+}
+
+export function supportsNativeWebSearch(baseUrl: string): boolean {
+  return providerHostname(baseUrl) === 'api.anthropic.com';
+}
+
+function providerThinkingControls(
+  baseUrl: string,
+  model: string
+): Pick<SdkOptions, 'thinking' | 'maxThinkingTokens'> {
+  if (
+    providerHostname(baseUrl) === 'open.bigmodel.cn' &&
+    /^glm(?:-|$)/iu.test(model.trim())
+  ) {
+    return {
+      thinking: { type: 'disabled' },
+      maxThinkingTokens: 0
+    };
+  }
+  return {};
 }
 
 export function resolvePackagedClaudeExecutable(
@@ -318,6 +348,7 @@ export function buildAgentSdkOptions(input: AgentSdkRunOptions): SdkOptions {
     throw new Error('Native research tools cannot be combined with business MCP tools');
   }
   const isResearch = nativeToolPolicy !== undefined;
+  const providerThinking = providerThinkingControls(input.baseUrl, input.model);
   const allowedTools = isResearch ? ['WebSearch'] : allowedBusinessTools;
   const disallowedTools = isResearch
     ? DENIED_NATIVE_TOOLS.filter((tool) => tool !== 'WebSearch')
@@ -340,6 +371,16 @@ export function buildAgentSdkOptions(input: AgentSdkRunOptions): SdkOptions {
     },
     model: input.model,
     effort: input.effort ?? 'medium',
+    ...(input.thinking === undefined
+      ? providerThinking.thinking === undefined
+        ? {}
+        : { thinking: providerThinking.thinking }
+      : { thinking: input.thinking }),
+    ...(input.maxThinkingTokens === undefined
+      ? providerThinking.maxThinkingTokens === undefined
+        ? {}
+        : { maxThinkingTokens: providerThinking.maxThinkingTokens }
+      : { maxThinkingTokens: input.maxThinkingTokens }),
     ...(input.outputFormat === undefined ? {} : { outputFormat: input.outputFormat }),
     tools: isResearch ? ['WebSearch'] : [],
     allowedTools,

@@ -161,7 +161,14 @@ export function evaluateAdvisorGate(input: AdvisorGateEvaluationInput): AdvisorG
   for (const stageName of REQUIRED_ADVISOR_STAGES) {
     const stages = input.trace.stages.filter(({ stage: candidate }) => candidate === stageName);
     if (stages.length === 0) return failed('REQUIRED_STAGE_MISSING');
-    for (const stage of stages) {
+    const stagesToValidate =
+      stageName === 'compose' && stages.some(({ status }) => status !== 'completed')
+        ? latestCompletedComposerRepair(input.trace.stages)
+        : stages;
+    if (stagesToValidate.length === 0) {
+      return failed('REQUIRED_STAGE_NOT_COMPLETED', input.trace);
+    }
+    for (const stage of stagesToValidate) {
       if (stage.status !== 'completed') {
         return failed('REQUIRED_STAGE_NOT_COMPLETED', input.trace);
       }
@@ -220,6 +227,16 @@ export function evaluateAdvisorGate(input: AdvisorGateEvaluationInput): AdvisorG
     knowledgeSummary: { ...input.result.knowledgeSummary },
     latencyMs: input.latencyMs
   };
+}
+
+function latestCompletedComposerRepair(
+  stages: AdvisorGateTraceEvidence['stages']
+): AdvisorGateTraceEvidence['stages'] {
+  const repairs = stages.filter(
+    ({ stage }) => stage === 'repair-1' || stage === 'repair-2'
+  );
+  const latest = repairs.at(-1);
+  return latest?.status === 'completed' ? [latest] : [];
 }
 
 export function selectAuthoritativeOwnedCharacters<T extends CharacterOwnershipEvidence>(
@@ -338,7 +355,7 @@ async function runAdvisorSavedGate(): Promise<AdvisorGateOutput> {
     { app, safeStorage },
     { ConfigService },
     { ProfileStore },
-    { AgentSdkAdapter },
+    { AgentSdkAdapter, supportsNativeWebSearch },
     { AgentRunTraceStore },
     { AbyssAdvisorService },
     { AbyssScenarioService },
@@ -348,6 +365,7 @@ async function runAdvisorSavedGate(): Promise<AdvisorGateOutput> {
     { KnowledgeCoverageGate },
     { GuideResearchCache },
     { GuideResearchAgent },
+    { ZhipuWebSearchClient, supportsZhipuWebSearch },
     { createProductionScenarioPublicationSource }
   ] = await Promise.all([
     import('electron'),
@@ -363,6 +381,7 @@ async function runAdvisorSavedGate(): Promise<AdvisorGateOutput> {
     import('../services/knowledge-coverage-gate.js'),
     import('../services/guide-research-cache.js'),
     import('../services/guide-research-agent.js'),
+    import('../services/zhipu-web-search-client.js'),
     import('../scenario-publication/production-composition.js')
   ]);
   const [path, { fileURLToPath }] = await Promise.all([import('node:path'), import('node:url')]);
@@ -503,6 +522,14 @@ async function runAdvisorSavedGate(): Promise<AdvisorGateOutput> {
             },
             sourceRegistry: strategyKnowledge,
             canonicalCharacterCatalog: strategyKnowledge.getCanonicalCharacterCatalog(),
+            ...(supportsZhipuWebSearch(config.getBaseUrl())
+              ? {
+                  directSearch: new ZhipuWebSearchClient({
+                    apiKey,
+                    domain: 'www.hoyolab.com'
+                  })
+                }
+              : {}),
             onUsageDelta: (usage) =>
               config.recordUsage(usage.inputTokens, usage.outputTokens, usage.estimatedCostUsd),
             sdkOptions: {
@@ -524,6 +551,9 @@ async function runAdvisorSavedGate(): Promise<AdvisorGateOutput> {
         }
       }
     },
+    researchAvailable: () =>
+      supportsNativeWebSearch(config.getBaseUrl()) ||
+      supportsZhipuWebSearch(config.getBaseUrl()),
     trace,
     citationPolicy: {
       supportsCharacter: (citationId, characterId, archetypeId) =>
@@ -559,6 +589,16 @@ async function runAdvisorSavedGate(): Promise<AdvisorGateOutput> {
   });
   if (deadline.status === 'timed-out') {
     return evaluateAdvisorGate({ kind: 'unavailable', code: 'ADVISOR_TIMEOUT' });
+  }
+
+  const diagnosticTracePath = process.env['GTA_ADVISOR_GATE_TRACE_FILE']?.trim();
+  if (diagnosticTracePath) {
+    const { writeFile } = await import('node:fs/promises');
+    await writeFile(
+      diagnosticTracePath,
+      `${JSON.stringify(trace.latest(), null, 2)}\n`,
+      'utf8'
+    );
   }
 
   return evaluateAdvisorGate({

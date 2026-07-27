@@ -47,6 +47,7 @@
     "gate:provider-contract": "node tests/external/provider-gate.mjs",
     "gate:provider-saved": "npm run build:main && electron dist/main/provider-saved-gate.mjs",
     "gate:agent-saved": "npm run --silent build:main -- --silent && electron dist/main/agent-saved-gate.mjs",
+    "gate:zhipu-search-saved": "npm run --silent build:main -- --silent && electron dist/main/zhipu-search-saved-gate.mjs",
     "gate:advisor-saved": "npm run --silent build:main -- --silent && electron dist/main/advisor-saved-gate.mjs",
     "gate:local": "npm run lint && npm run typecheck && npm run test && npm run build && npm run test:saved-gates-empty-user-data && npm run test:renderer-budget",
     "gate:all": "npm run gate:local && npm run test:e2e:visual && npm run audit:all",

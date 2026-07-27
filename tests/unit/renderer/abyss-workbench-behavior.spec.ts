@@ -185,6 +185,15 @@ const trace: AgentRunTrace = {
         {
           name: 'mcp__genshin__query_team_knowledge',
           status: 'completed'
+        },
+        {
+          name: 'WebSearch',
+          status: 'failed',
+          failure: {
+            code: 'SEARCH_UNAVAILABLE',
+            message: 'Research tool call failed.',
+            retryable: true
+          }
         }
       ],
       citationIds: [],
@@ -230,6 +239,7 @@ describe('agent trace behavior', () => {
     expect(english).toContain('Team composition');
     expect(english).toContain('Failed');
     expect(english).toContain('Query team knowledge');
+    expect(english).toContain('Web search');
     expect(english).toContain('Completed');
     expect(english).toContain('Provider error');
     expect(english).not.toContain('PROVIDER_ERROR');
@@ -237,6 +247,7 @@ describe('agent trace behavior', () => {
     expect(chinese).toContain('队伍构成');
     expect(chinese).toContain('失败');
     expect(chinese).toContain('查询配队知识');
+    expect(chinese).toContain('联网搜索');
     expect(chinese).toContain('已完成');
     expect(chinese).toContain('模型服务错误');
     expect(chinese).not.toContain('业务工具');

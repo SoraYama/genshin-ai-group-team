@@ -32,6 +32,7 @@ export function createTsupOptions({ devWatch, writeReady }: CreateTsupOptionsInp
         'miyoushe-detail-gate': 'src/main/gates/miyoushe-detail-gate.ts',
         'provider-saved-gate': 'src/main/gates/provider-saved-gate.ts',
         'agent-saved-gate': 'src/main/gates/agent-saved-gate.ts',
+        'zhipu-search-saved-gate': 'src/main/gates/zhipu-search-saved-gate.ts',
         'advisor-saved-gate': 'src/main/gates/advisor-saved-gate.ts'
       },
       outDir: 'dist/main',
